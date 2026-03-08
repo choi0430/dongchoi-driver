@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dong Choi PTY — 관리자</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;900&family=Bebas+Neue&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f0f2f5;
+  --white: #ffffff;
+  --card: #ffffff;
+  --border: #e2e8f0;
+  --border2: #cbd5e1;
+  --navy: #0f172a;
+  --navy2: #1e293b;
+  --accent: #2563eb;
+  --accent-light: #eff6ff;
+  --green: #16a34a;
+  --green-light: #f0fdf4;
+  --red: #dc2626;
+  --red-light: #fef2f2;
+  --yellow: #d97706;
+  --yellow-light: #fffbeb;
+  --orange: #ea580c;
+  --orange-light: #fff7ed;
+  --muted: #64748b;
+  --muted2: #94a3b8;
+  --text: #0f172a;
+  --text2: #334155;
+  --sidebar-w: 220px;
+  --r: 12px;
+}
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Noto Sans KR', sans-serif; background:var(--bg); color:var(--text); font-size:14px; min-height:100vh; display:flex; }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  width:var(--sidebar-w); background:var(--navy); min-height:100vh;
+  display:flex; flex-direction:column; position:fixed; top:0; left:0; z-index:100;
+}
+.sidebar-logo {
+  padding:24px 20px 20px;
+  border-bottom:1px solid rgba(255,255,255,0.08);
+}
+.logo-top { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
+.logo-icon { font-size:22px; }
+.logo-name { font-family:'Bebas Neue', sans-serif; font-size:22px; color:#fff; letter-spacing:1px; line-height:1; }
+.logo-sub { font-size:11px; color:rgba(255,255,255,0.4); letter-spacing:2px; text-transform:uppercase; font-family:'JetBrains Mono', monospace; }
+
+.nav { padding:12px 0; flex:1; }
+.nav-section { padding:8px 16px 4px; font-size:10px; color:rgba(255,255,255,0.3); text-transform:uppercase; letter-spacing:2px; font-family:'JetBrains Mono', monospace; }
+.nav-item {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 20px; cursor:pointer; transition:all 0.15s;
+  border-left:3px solid transparent; color:rgba(255,255,255,0.55); font-size:13px; font-weight:500;
+}
+.nav-item:hover { background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.9); }
+.nav-item.active { background:rgba(37,99,235,0.2); border-left-color:var(--accent); color:#fff; }
+.nav-icon { font-size:16px; width:20px; text-align:center; }
+.nav-badge { margin-left:auto; background:var(--red); color:white; font-size:10px; font-weight:700; padding:1px 6px; border-radius:10px; font-family:'JetBrains Mono', monospace; }
+
+.sidebar-footer {
+  padding:16px 20px;
+  border-top:1px solid rgba(255,255,255,0.08);
+}
+.admin-info { display:flex; align-items:center; gap:10px; }
+.admin-avatar { width:34px; height:34px; background:linear-gradient(135deg,var(--accent),#7c3aed); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; color:white; }
+.admin-name { font-size:13px; color:rgba(255,255,255,0.85); font-weight:600; }
+.admin-role { font-size:11px; color:rgba(255,255,255,0.35); }
+
+/* ── MAIN ── */
+.main { margin-left:var(--sidebar-w); flex:1; min-height:100vh; }
+
+.topbar {
+  background:var(--white); border-bottom:1px solid var(--border);
+  padding:0 28px; height:60px; display:flex; align-items:center; justify-content:space-between;
+  position:sticky; top:0; z-index:50;
+}
+.page-title { font-size:18px; font-weight:700; }
+.page-sub { font-size:12px; color:var(--muted); margin-top:1px; }
+.topbar-right { display:flex; align-items:center; gap:12px; }
+.today-badge {
+  font-family:'JetBrains Mono', monospace; font-size:12px;
+  color:var(--muted); background:var(--bg); padding:5px 10px; border-radius:6px; border:1px solid var(--border);
+}
+.btn { padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; border:none; font-family:'Noto Sans KR', sans-serif; transition:all 0.15s; }
+.btn:active { transform:scale(0.97); }
+.btn-primary { background:var(--accent); color:white; }
+.btn-primary:hover { background:#1d4ed8; }
+.btn-outline { background:white; border:1px solid var(--border2); color:var(--text2); }
+.btn-outline:hover { background:var(--bg); }
+.btn-green { background:var(--green); color:white; }
+.btn-green:hover { background:#15803d; }
+.btn-red { background:var(--red); color:white; }
+.btn-sm { padding:6px 12px; font-size:12px; }
+
+/* ── CONTENT ── */
+.content { padding:24px 28px; }
+.page { display:none; }
+.page.active { display:block; }
+
+/* ── STAT CARDS ── */
+.stat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
+.stat-card {
+  background:var(--white); border-radius:var(--r); padding:20px;
+  border:1px solid var(--border); position:relative; overflow:hidden;
+}
+.stat-card::after { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:var(--accent); }
+.stat-card.green::after { background:var(--green); }
+.stat-card.red::after { background:var(--red); }
+.stat-card.yellow::after { background:var(--yellow); }
+.stat-label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; font-family:'JetBrains Mono', monospace; }
+.stat-val { font-family:'Bebas Neue', sans-serif; font-size:36px; line-height:1; letter-spacing:0.5px; }
+.stat-val.green { color:var(--green); }
+.stat-val.red { color:var(--red); }
+.stat-val.yellow { color:var(--yellow); }
+.stat-sub { font-size:12px; color:var(--muted); margin-top:4px; }
+
+/* ── SECTION ── */
+.section { margin-bottom:24px; }
+.section-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.section-title { font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px; }
+.section-title .icon { font-size:17px; }
+
+/* ── TABLE ── */
+.table-wrap { background:var(--white); border:1px solid var(--border); border-radius:var(--r); overflow:hidden; }
+table { width:100%; border-collapse:collapse; }
+th { background:#f8fafc; padding:10px 14px; text-align:left; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; font-family:'JetBrains Mono', monospace; border-bottom:1px solid var(--border); font-weight:600; }
+td { padding:12px 14px; border-bottom:1px solid var(--border); font-size:13px; vertical-align:middle; }
+tr:last-child td { border-bottom:none; }
+tr:hover td { background:#fafbfc; }
+
+/* ── BADGE ── */
+.badge { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:20px; font-size:11px; font-weight:700; font-family:'JetBrains Mono', monospace; white-space:nowrap; }
+.badge-green { background:var(--green-light); color:var(--green); border:1px solid #bbf7d0; }
+.badge-red { background:var(--red-light); color:var(--red); border:1px solid #fecaca; }
+.badge-yellow { background:var(--yellow-light); color:var(--yellow); border:1px solid #fde68a; }
+.badge-blue { background:var(--accent-light); color:var(--accent); border:1px solid #bfdbfe; }
+.badge-gray { background:#f1f5f9; color:var(--muted); border:1px solid var(--border2); }
+.badge-orange { background:var(--orange-light); color:var(--orange); border:1px solid #fed7aa; }
+
+/* ── AMOUNT ── */
+.amt { font-family:'JetBrains Mono', monospace; font-weight:600; }
+.amt-green { color:var(--green); }
+.amt-red { color:var(--red); }
+.amt-blue { color:var(--accent); }
+.amt-muted { color:var(--muted2); }
+
+/* ── PROGRESS BAR ── */
+.prog-wrap { display:flex; align-items:center; gap:8px; }
+.prog-bar { flex:1; height:6px; background:#e2e8f0; border-radius:3px; overflow:hidden; }
+.prog-fill { height:100%; border-radius:3px; background:var(--accent); transition:width 0.3s; }
+.prog-fill.green { background:var(--green); }
+.prog-fill.yellow { background:var(--yellow); }
+.prog-pct { font-size:11px; color:var(--muted); font-family:'JetBrains Mono', monospace; min-width:32px; text-align:right; }
+
+/* ── DRIVER WAGE CARD ── */
+.wage-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.wage-card {
+  background:var(--white); border:1px solid var(--border); border-radius:var(--r);
+  padding:16px 18px; transition:box-shadow 0.15s;
+}
+.wage-card:hover { box-shadow:0 4px 12px rgba(0,0,0,0.07); }
+.wage-driver { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.wage-avatar { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:white; flex-shrink:0; }
+.wage-name { font-size:14px; font-weight:700; }
+.wage-jobs { font-size:11px; color:var(--muted); }
+.wage-rows { display:flex; flex-direction:column; gap:5px; margin-bottom:12px; }
+.wage-row { display:flex; justify-content:space-between; align-items:center; }
+.wage-lbl { font-size:12px; color:var(--muted); }
+.wage-val { font-family:'JetBrains Mono', monospace; font-size:13px; font-weight:600; }
+.wage-balance-row { background:#f8fafc; border-radius:8px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.wage-balance-lbl { font-size:12px; font-weight:600; }
+.wage-balance-val { font-family:'JetBrains Mono', monospace; font-size:16px; font-weight:700; }
+
+/* ── VEHICLE CARD ── */
+.vehicle-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.vehicle-card {
+  background:var(--white); border:1px solid var(--border); border-radius:var(--r);
+  padding:18px; border-top:4px solid var(--border);
+}
+.vehicle-card.ok { border-top-color:var(--green); }
+.vehicle-card.warn { border-top-color:var(--yellow); }
+.vehicle-card.danger { border-top-color:var(--red); }
+.vc-head { display:flex; justify-content:space-between; align-items:start; margin-bottom:12px; }
+.vc-rego { font-family:'Bebas Neue', sans-serif; font-size:28px; letter-spacing:1px; }
+.vc-model { font-size:12px; color:var(--muted); margin-top:2px; }
+.vc-rows { display:flex; flex-direction:column; gap:6px; }
+.vc-row { display:flex; justify-content:space-between; align-items:center; }
+.vc-lbl { font-size:12px; color:var(--muted); }
+.vc-val { font-size:12px; font-weight:600; font-family:'JetBrains Mono', monospace; }
+.vc-val.red { color:var(--red); }
+.vc-val.yellow { color:var(--yellow); }
+.vc-val.green { color:var(--green); }
+
+/* ── ALERT LIST ── */
+.alert-list { display:flex; flex-direction:column; gap:8px; }
+.alert-item {
+  background:var(--white); border:1px solid var(--border); border-radius:10px;
+  padding:12px 16px; display:flex; align-items:center; gap:12px; border-left:4px solid var(--border);
+}
+.alert-item.urgent { border-left-color:var(--red); background:var(--red-light); }
+.alert-item.warn { border-left-color:var(--yellow); background:var(--yellow-light); }
+.alert-icon { font-size:20px; flex-shrink:0; }
+.alert-text .alert-title { font-size:13px; font-weight:600; }
+.alert-text .alert-sub { font-size:12px; color:var(--muted); margin-top:1px; }
+.alert-days { margin-left:auto; font-family:'JetBrains Mono', monospace; font-size:12px; font-weight:700; }
+
+/* ── INVOICE ── */
+.invoice-filters { display:flex; gap:10px; margin-bottom:16px; align-items:center; flex-wrap:wrap; }
+.inv-filter-select {
+  padding:8px 12px; border:1px solid var(--border2); border-radius:8px;
+  font-size:13px; background:white; outline:none; color:var(--text);
+  font-family:'Noto Sans KR', sans-serif; cursor:pointer;
+}
+.inv-filter-select:focus { border-color:var(--accent); }
+
+/* INVOICE PREVIEW */
+.inv-preview {
+  background:white; border:1px solid var(--border); border-radius:var(--r);
+  padding:32px; max-width:760px;
+}
+.inv-header { display:flex; justify-content:space-between; align-items:start; margin-bottom:28px; padding-bottom:20px; border-bottom:2px solid var(--navy); }
+.inv-company { }
+.inv-company-name { font-family:'Bebas Neue', sans-serif; font-size:28px; letter-spacing:1px; margin-bottom:4px; }
+.inv-company-detail { font-size:12px; color:var(--muted); line-height:1.6; }
+.inv-meta { text-align:right; }
+.inv-meta .inv-num { font-family:'Bebas Neue', sans-serif; font-size:28px; color:var(--accent); }
+.inv-meta-rows { font-size:12px; color:var(--muted); margin-top:4px; line-height:1.8; }
+
+.inv-to { margin-bottom:20px; }
+.inv-to-label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; font-family:'JetBrains Mono', monospace; }
+.inv-to-name { font-size:15px; font-weight:700; }
+
+.inv-table { width:100%; border-collapse:collapse; margin-bottom:20px; }
+.inv-table th { background:#f8fafc; padding:8px 12px; text-align:left; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; font-family:'JetBrains Mono', monospace; border-bottom:1px solid var(--border); }
+.inv-table td { padding:10px 12px; border-bottom:1px solid var(--border); font-size:13px; }
+.inv-table tr:last-child td { border-bottom:none; }
+
+.inv-totals { display:flex; justify-content:flex-end; }
+.inv-totals-box { width:260px; }
+.inv-total-row { display:flex; justify-content:space-between; padding:6px 0; font-size:13px; }
+.inv-total-row.big { border-top:2px solid var(--navy); margin-top:4px; padding-top:10px; font-size:15px; font-weight:700; }
+.inv-total-row .lbl { color:var(--muted); }
+.inv-total-row.big .lbl { color:var(--text); }
+.inv-total-row .val { font-family:'JetBrains Mono', monospace; font-weight:600; }
+
+/* ── MODAL ── */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:200; display:none; align-items:center; justify-content:center; }
+.modal-overlay.open { display:flex; }
+.modal { background:white; border-radius:16px; padding:28px; width:420px; max-width:95vw; }
+.modal-title { font-size:17px; font-weight:700; margin-bottom:18px; }
+.modal-field { margin-bottom:14px; }
+.modal-field label { font-size:12px; color:var(--muted); font-weight:500; display:block; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.5px; }
+.modal-field input, .modal-field select {
+  width:100%; padding:10px 12px; border:1px solid var(--border2); border-radius:8px;
+  font-size:14px; outline:none; font-family:'Noto Sans KR', sans-serif; color:var(--text);
+}
+.modal-field input:focus, .modal-field select:focus { border-color:var(--accent); }
+.modal-actions { display:flex; gap:8px; margin-top:4px; }
+.modal-actions .btn { flex:1; }
+
+/* ── TABS ── */
+.week-tabs { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+.week-tab { padding:6px 14px; border-radius:20px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid var(--border2); background:white; color:var(--muted); transition:all 0.15s; font-family:'JetBrains Mono', monospace; }
+.week-tab.active { background:var(--accent); color:white; border-color:var(--accent); }
+.week-tab:hover:not(.active) { border-color:var(--accent); color:var(--accent); }
+
+/* ── REPORT TABLE ── */
+.report-meta { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:4px; }
+
+/* ── TWO COL ── */
+.two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.three-col { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+
+/* ── EMPTY ── */
+.empty-state { padding:40px; text-align:center; color:var(--muted); }
+.empty-state .empty-icon { font-size:36px; margin-bottom:8px; }
+.empty-state .empty-text { font-size:14px; }
+
+@media print {
+  .sidebar, .topbar, .no-print { display:none !important; }
+  .main { margin-left:0; }
+  .inv-preview { box-shadow:none; border:none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══ SIDEBAR ══ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-top">
+      <span class="logo-icon">🚌</span>
+      <span class="logo-name">DONG CHOI</span>
+    </div>
+    <div class="logo-sub">Admin Panel</div>
+  </div>
+
+  <nav class="nav">
+    <div class="nav-section">메인</div>
+    <div class="nav-item active" onclick="goPage('dashboard')">
+      <span class="nav-icon">📊</span> 대시보드
+    </div>
+    <div class="nav-section">업무</div>
+    <div class="nav-item" onclick="goPage('wages')">
+      <span class="nav-icon">💰</span> 주급 관리
+      <span class="nav-badge" id="unpaid-badge">2</span>
+    </div>
+    <div class="nav-item" onclick="goPage('invoice')">
+      <span class="nav-icon">🧾</span> 인보이스
+    </div>
+    <div class="nav-item" onclick="goPage('reports')">
+      <span class="nav-icon">📋</span> 드라이버 리포트
+    </div>
+    <div class="nav-section">차량/인원</div>
+    <div class="nav-item" onclick="goPage('vehicles')">
+      <span class="nav-icon">🚍</span> 차량 관리
+      <span class="nav-badge" id="vehicle-badge">3</span>
+    </div>
+    <div class="nav-item" onclick="goPage('drivers')">
+      <span class="nav-icon">👤</span> 드라이버
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="admin-info">
+      <div class="admin-avatar">BC</div>
+      <div>
+        <div class="admin-name">Branden Choi</div>
+        <div class="admin-role">관리자</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ══ MAIN ══ -->
+<main class="main">
+  <div class="topbar">
+    <div>
+      <div class="page-title" id="page-title">대시보드</div>
+      <div class="page-sub" id="page-sub">Dong Choi PTY Ltd 운영 현황</div>
+    </div>
+    <div class="topbar-right">
+      <div class="today-badge" id="today-date"></div>
+      <a href="https://choi0430.github.io/dongchoi-driver/" target="_blank" class="btn btn-outline btn-sm">🚌 드라이버 앱 →</a>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ════ DASHBOARD ════ -->
+    <div class="page active" id="page-dashboard">
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">이번 주 매출 (TA)</div>
+          <div class="stat-val amt-blue">$4,181</div>
+          <div class="stat-sub">5건 처리 완료</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-label">드라이버 급여 (미지급)</div>
+          <div class="stat-val green">$3,485</div>
+          <div class="stat-sub">3명 미지급</div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-label">차량 알림</div>
+          <div class="stat-val red">3</div>
+          <div class="stat-sub">만료·예정 항목</div>
+        </div>
+        <div class="stat-card yellow">
+          <div class="stat-label">미수금 인보이스</div>
+          <div class="stat-val yellow">$1,897</div>
+          <div class="stat-sub">HANA TOUR 미수금</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <!-- 오늘 리포트 -->
+        <div class="section">
+          <div class="section-header">
+            <div class="section-title"><span class="icon">📋</span> 오늘의 리포트</div>
+            <button class="btn btn-outline btn-sm" onclick="goPage('reports')">전체 보기 →</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>드라이버</th><th>차량</th><th>여행사</th><th>관광지</th><th>TA</th><th>상태</th></tr></thead>
+              <tbody>
+                <tr><td><b>최동철</b></td><td class="amt">TV1071</td><td>TOUR ACE</td><td>BLUE MOUNTAINS</td><td class="amt amt-green">$800</td><td><span class="badge badge-green">✓ 완료</span></td></tr>
+                <tr><td><b>고한식</b></td><td class="amt">TV1072</td><td>HANA TOUR</td><td>CITY TOUR</td><td class="amt amt-green">$650</td><td><span class="badge badge-green">✓ 완료</span></td></tr>
+                <tr><td><b>박재민</b></td><td class="amt">XO37PS</td><td>WIN TOUR</td><td>HUNTER VALLEY</td><td class="amt amt-muted">—</td><td><span class="badge badge-yellow">⏳ 진행중</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 알림 -->
+        <div class="section">
+          <div class="section-header">
+            <div class="section-title"><span class="icon">🔔</span> 긴급 알림</div>
+            <button class="btn btn-outline btn-sm" onclick="goPage('vehicles')">차량 관리 →</button>
+          </div>
+          <div class="alert-list">
+            <div class="alert-item urgent">
+              <span class="alert-icon">🚨</span>
+              <div class="alert-text">
+                <div class="alert-title">TV1072 — HVIS 만료</div>
+                <div class="alert-sub">2026년 1월 10일 만료 · 즉시 예약 필요</div>
+              </div>
+              <span class="alert-days" style="color:var(--red)">D+57</span>
+            </div>
+            <div class="alert-item urgent">
+              <span class="alert-icon">⚠️</span>
+              <div class="alert-text">
+                <div class="alert-title">박재민 — Authority 만료</div>
+                <div class="alert-sub">2026년 2월 16일 만료</div>
+              </div>
+              <span class="alert-days" style="color:var(--red)">D+20</span>
+            </div>
+            <div class="alert-item warn">
+              <span class="alert-icon">📅</span>
+              <div class="alert-text">
+                <div class="alert-title">TV1071 — 레죠 갱신 예정</div>
+                <div class="alert-sub">2026년 4월 15일 만료 · 38일 남음</div>
+              </div>
+              <span class="alert-days" style="color:var(--yellow)">D-38</span>
+            </div>
+            <div class="alert-item warn">
+              <span class="alert-icon">🔧</span>
+              <div class="alert-text">
+                <div class="alert-title">TV1072 — 오일 교환 예정</div>
+                <div class="alert-sub">다음 서비스: 285,000km · 현재 282,316km</div>
+              </div>
+              <span class="alert-days" style="color:var(--yellow)">2,684km</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 주급 현황 요약 -->
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title"><span class="icon">💰</span> 이번 주 급여 현황 (02/03 ~ 08/03)</div>
+          <button class="btn btn-primary btn-sm" onclick="goPage('wages')">정산 처리 →</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>드라이버</th><th>건수</th><th>발생 급여</th><th>지급액</th><th>잔액</th><th>상태</th><th>액션</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><b>최동철</b></td><td>2</td>
+                <td class="amt amt-green">$1,975</td><td class="amt amt-muted">$0</td><td class="amt amt-red">$1,975</td>
+                <td><span class="badge badge-red">미지급</span></td>
+                <td><button class="btn btn-green btn-sm" onclick="openPayModal('최동철','$1,975')">💳 지급</button></td>
+              </tr>
+              <tr>
+                <td><b>고한식</b></td><td>1</td>
+                <td class="amt amt-green">$1,510</td><td class="amt">$1,000</td><td class="amt amt-yellow">$510</td>
+                <td><span class="badge badge-yellow">일부지급</span></td>
+                <td><button class="btn btn-green btn-sm" onclick="openPayModal('고한식','$510')">💳 지급</button></td>
+              </tr>
+              <tr>
+                <td><b>박재민</b></td><td>1</td>
+                <td class="amt amt-green">$950</td><td class="amt amt-muted">$0</td><td class="amt amt-red">$950</td>
+                <td><span class="badge badge-red">미지급</span></td>
+                <td><button class="btn btn-green btn-sm" onclick="openPayModal('박재민','$950')">💳 지급</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════ WAGES ════ -->
+    <div class="page" id="page-wages">
+
+      <div class="week-tabs" id="week-tabs">
+        <div class="week-tab active">02/03 ~ 08/03/26</div>
+        <div class="week-tab" onclick="this.closest('.week-tabs').querySelectorAll('.week-tab').forEach(t=>t.classList.remove('active'));this.classList.add('active')">23/02 ~ 01/03/26</div>
+        <div class="week-tab" onclick="this.closest('.week-tabs').querySelectorAll('.week-tab').forEach(t=>t.classList.remove('active'));this.classList.add('active')">16/02 ~ 22/02/26</div>
+        <div class="week-tab" onclick="this.closest('.week-tabs').querySelectorAll('.week-tab').forEach(t=>t.classList.remove('active'));this.classList.add('active')">09/02 ~ 15/02/26</div>
+      </div>
+
+      <div class="wage-grid" id="wage-cards">
+        <!-- Card 1 -->
+        <div class="wage-card">
+          <div class="wage-driver">
+            <div class="wage-avatar" style="background:linear-gradient(135deg,#2563eb,#7c3aed)">DC</div>
+            <div><div class="wage-name">최동철</div><div class="wage-jobs">2건 · TV1071</div></div>
+          </div>
+          <div class="wage-rows">
+            <div class="wage-row"><span class="wage-lbl">발생 급여</span><span class="wage-val amt-green">$1,975.00</span></div>
+            <div class="wage-row"><span class="wage-lbl">지급 완료</span><span class="wage-val amt-muted">$0.00</span></div>
+          </div>
+          <div class="prog-wrap" style="margin-bottom:10px">
+            <div class="prog-bar"><div class="prog-fill" style="width:0%"></div></div>
+            <span class="prog-pct">0%</span>
+          </div>
+          <div class="wage-balance-row">
+            <span class="wage-balance-lbl">미지급 잔액</span>
+            <span class="wage-balance-val amt-red">$1,975.00</span>
+          </div>
+          <button class="btn btn-green" style="width:100%" onclick="openPayModal('최동철','$1,975.00')">💳 급여 지급 처리</button>
+        </div>
+
+        <!-- Card 2 -->
+        <div class="wage-card">
+          <div class="wage-driver">
+            <div class="wage-avatar" style="background:linear-gradient(135deg,#059669,#0891b2)">HK</div>
+            <div><div class="wage-name">고한식</div><div class="wage-jobs">1건 · TV1072</div></div>
+          </div>
+          <div class="wage-rows">
+            <div class="wage-row"><span class="wage-lbl">발생 급여</span><span class="wage-val amt-green">$1,510.00</span></div>
+            <div class="wage-row"><span class="wage-lbl">지급 완료</span><span class="wage-val">$1,000.00</span></div>
+          </div>
+          <div class="prog-wrap" style="margin-bottom:10px">
+            <div class="prog-bar"><div class="prog-fill yellow" style="width:66%"></div></div>
+            <span class="prog-pct">66%</span>
+          </div>
+          <div class="wage-balance-row">
+            <span class="wage-balance-lbl">미지급 잔액</span>
+            <span class="wage-balance-val" style="color:var(--yellow)">$510.00</span>
+          </div>
+          <button class="btn btn-green" style="width:100%" onclick="openPayModal('고한식','$510.00')">💳 잔액 지급 처리</button>
+        </div>
+
+        <!-- Card 3 -->
+        <div class="wage-card">
+          <div class="wage-driver">
+            <div class="wage-avatar" style="background:linear-gradient(135deg,#ea580c,#dc2626)">JP</div>
+            <div><div class="wage-name">박재민</div><div class="wage-jobs">1건 · XO37PS</div></div>
+          </div>
+          <div class="wage-rows">
+            <div class="wage-row"><span class="wage-lbl">발생 급여</span><span class="wage-val amt-green">$950.00</span></div>
+            <div class="wage-row"><span class="wage-lbl">지급 완료</span><span class="wage-val amt-muted">$0.00</span></div>
+          </div>
+          <div class="prog-wrap" style="margin-bottom:10px">
+            <div class="prog-bar"><div class="prog-fill" style="width:0%"></div></div>
+            <span class="prog-pct">0%</span>
+          </div>
+          <div class="wage-balance-row">
+            <span class="wage-balance-lbl">미지급 잔액</span>
+            <span class="wage-balance-val amt-red">$950.00</span>
+          </div>
+          <button class="btn btn-green" style="width:100%" onclick="openPayModal('박재민','$950.00')">💳 급여 지급 처리</button>
+        </div>
+      </div>
+
+      <div class="section" style="margin-top:24px">
+        <div class="section-header">
+          <div class="section-title"><span class="icon">📑</span> 이번 주 일별 내역</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>날짜</th><th>드라이버</th><th>차량</th><th>여행사</th><th>관광지</th><th>시간</th><th>TA 청구</th><th>DR 급여</th><th>NET</th></tr></thead>
+            <tbody>
+              <tr><td>06/03</td><td><b>최동철</b></td><td class="amt">TV1071</td><td>TOUR ACE</td><td>BLUE MOUNTAINS</td><td class="amt">09:00~20:30</td><td class="amt amt-green">$880</td><td class="amt amt-blue">$280</td><td class="amt amt-green">$600</td></tr>
+              <tr><td>05/03</td><td><b>최동철</b></td><td class="amt">TV1071</td><td>TOUR ACE</td><td>CITY TOUR</td><td class="amt">09:30~21:00</td><td class="amt amt-green">$730</td><td class="amt amt-blue">$250</td><td class="amt amt-green">$480</td></tr>
+              <tr><td>06/03</td><td><b>고한식</b></td><td class="amt">TV1072</td><td>HANA TOUR</td><td>CANBERRA</td><td class="amt">07:00~22:00</td><td class="amt amt-green">$1,180</td><td class="amt amt-blue">$390</td><td class="amt amt-green">$790</td></tr>
+              <tr><td>07/03</td><td><b>박재민</b></td><td class="amt">XO37PS</td><td>WIN TOUR</td><td>HUNTER VALLEY</td><td class="amt">08:00~19:30</td><td class="amt amt-green">$950</td><td class="amt amt-blue">$300</td><td class="amt amt-green">$650</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════ INVOICE ════ -->
+    <div class="page" id="page-invoice">
+      <div class="two-col">
+        <div>
+          <div class="section">
+            <div class="section-title" style="margin-bottom:14px"><span class="icon">🧾</span> 인보이스 생성</div>
+            <div class="table-wrap" style="padding:20px">
+              <div class="modal-field">
+                <label>여행사 선택</label>
+                <select class="inv-filter-select" id="inv-agency" style="width:100%" onchange="updateInvoice()">
+                  <option>HANA TOUR</option><option>TOUR ACE</option><option>WIN TOUR</option>
+                  <option>JOY TOUR</option><option>LEE'S TRAVEL</option><option>SUNJIN TOUR</option>
+                </select>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+                <div class="modal-field">
+                  <label>시작일</label>
+                  <input type="date" id="inv-from" value="2026-03-01" onchange="updateInvoice()" />
+                </div>
+                <div class="modal-field">
+                  <label>종료일</label>
+                  <input type="date" id="inv-to" value="2026-03-08" onchange="updateInvoice()" />
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:14px">
+                <button class="btn btn-primary" style="flex:1" onclick="updateInvoice()">📄 미리보기 생성</button>
+                <button class="btn btn-outline" onclick="window.print()">🖨️ 인쇄/PDF</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title" style="margin-bottom:14px"><span class="icon">📚</span> 인보이스 내역</div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>번호</th><th>여행사</th><th>기간</th><th>금액</th><th>상태</th></tr></thead>
+                <tbody>
+                  <tr><td class="amt">INV-042</td><td>HANA TOUR</td><td>Jan 2026</td><td class="amt amt-red">$1,897</td><td><span class="badge badge-red">미수금</span></td></tr>
+                  <tr><td class="amt">INV-041</td><td>TOUR ACE</td><td>Dec 2025</td><td class="amt amt-green">$3,240</td><td><span class="badge badge-green">수금완료</span></td></tr>
+                  <tr><td class="amt">INV-040</td><td>WIN TOUR</td><td>Dec 2025</td><td class="amt amt-green">$1,580</td><td><span class="badge badge-green">수금완료</span></td></tr>
+                  <tr><td class="amt">INV-039</td><td>JOY TOUR</td><td>Nov 2025</td><td class="amt amt-green">$2,100</td><td><span class="badge badge-green">수금완료</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 인보이스 미리보기 -->
+        <div>
+          <div class="section-title" style="margin-bottom:14px"><span class="icon">👁️</span> 미리보기</div>
+          <div class="inv-preview" id="inv-preview">
+            <div class="inv-header">
+              <div class="inv-company">
+                <div class="inv-company-name">DONG CHOI PTY LTD</div>
+                <div class="inv-company-detail">
+                  ABN: XX XXX XXX XXX<br>
+                  Sydney, NSW, Australia<br>
+                  dongchoi@email.com.au
+                </div>
+              </div>
+              <div class="inv-meta">
+                <div class="inv-num" id="inv-num">INV-043</div>
+                <div class="inv-meta-rows">
+                  발행일: <span id="inv-issue-date">08/03/2026</span><br>
+                  기간: <span id="inv-period">01/03 ~ 08/03/2026</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="inv-to">
+              <div class="inv-to-label">청구 대상</div>
+              <div class="inv-to-name" id="inv-to-name">HANA TOUR</div>
+            </div>
+
+            <table class="inv-table" id="inv-items-table">
+              <thead><tr><th>날짜</th><th>관광지</th><th>차량</th><th>좌석</th><th>금액</th></tr></thead>
+              <tbody id="inv-items-body">
+                <tr><td>01/03</td><td>BLUE MOUNTAINS</td><td>TV1071</td><td>21S</td><td class="amt">$800.00</td></tr>
+                <tr><td>03/03</td><td>CITY TOUR</td><td>TV1072</td><td>21S</td><td class="amt">$650.00</td></tr>
+                <tr><td>05/03</td><td>CANBERRA</td><td>TV1071</td><td>25S</td><td class="amt">$1,100.00</td></tr>
+              </tbody>
+            </table>
+
+            <div class="inv-totals">
+              <div class="inv-totals-box">
+                <div class="inv-total-row"><span class="lbl">서비스 합계</span><span class="val" id="inv-subtotal">$2,550.00</span></div>
+                <div class="inv-total-row"><span class="lbl">GST (10%)</span><span class="val" id="inv-gst">$255.00</span></div>
+                <div class="inv-total-row big"><span class="lbl">총 청구액</span><span class="val amt-blue" id="inv-total">$2,805.00</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════ REPORTS ════ -->
+    <div class="page" id="page-reports">
+      <div class="invoice-filters">
+        <select class="inv-filter-select">
+          <option>모든 드라이버</option><option>최동철</option><option>고한식</option><option>박재민</option>
+        </select>
+        <select class="inv-filter-select">
+          <option>최근 7일</option><option>이번 달</option><option>지난 달</option>
+        </select>
+        <select class="inv-filter-select">
+          <option>모든 여행사</option><option>HANA TOUR</option><option>TOUR ACE</option><option>WIN TOUR</option>
+        </select>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>날짜</th><th>드라이버</th><th>차량</th><th>여행사</th><th>관광지</th><th>시간</th><th>KM</th><th>TA</th><th>DR</th><th>NET</th><th>Pre</th><th>After</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>07/03/26</td><td><b>박재민</b></td><td class="amt">XO37PS</td><td>WIN TOUR</td><td>HUNTER VALLEY</td>
+              <td class="amt">08:00~19:30</td><td class="amt">148km</td>
+              <td class="amt amt-green">$950</td><td class="amt amt-blue">$300</td><td class="amt amt-green">$650</td>
+              <td><span class="badge badge-green">✓</span></td><td><span class="badge badge-green">✓</span></td>
+            </tr>
+            <tr>
+              <td>06/03/26</td><td><b>최동철</b></td><td class="amt">TV1071</td><td>TOUR ACE</td><td>BLUE MOUNTAINS</td>
+              <td class="amt">09:00~20:30</td><td class="amt">232km</td>
+              <td class="amt amt-green">$880</td><td class="amt amt-blue">$280</td><td class="amt amt-green">$600</td>
+              <td><span class="badge badge-green">✓</span></td><td><span class="badge badge-green">✓</span></td>
+            </tr>
+            <tr>
+              <td>06/03/26</td><td><b>고한식</b></td><td class="amt">TV1072</td><td>HANA TOUR</td><td>CANBERRA</td>
+              <td class="amt">07:00~22:00</td><td class="amt">610km</td>
+              <td class="amt amt-green">$1,180</td><td class="amt amt-blue">$390</td><td class="amt amt-green">$790</td>
+              <td><span class="badge badge-green">✓</span></td><td><span class="badge badge-yellow">⏳</span></td>
+            </tr>
+            <tr>
+              <td>05/03/26</td><td><b>최동철</b></td><td class="amt">TV1071</td><td>TOUR ACE</td><td>CITY TOUR</td>
+              <td class="amt">09:30~21:00</td><td class="amt">103km</td>
+              <td class="amt amt-green">$730</td><td class="amt amt-blue">$250</td><td class="amt amt-green">$480</td>
+              <td><span class="badge badge-green">✓</span></td><td><span class="badge badge-green">✓</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ════ VEHICLES ════ -->
+    <div class="page" id="page-vehicles">
+      <div class="vehicle-grid" style="margin-bottom:24px">
+
+        <div class="vehicle-card ok">
+          <div class="vc-head">
+            <div><div class="vc-rego">TV1071</div><div class="vc-model">Toyota COAS00 · 2017 · 22석</div></div>
+            <span class="badge badge-green">정상</span>
+          </div>
+          <div class="vc-rows">
+            <div class="vc-row"><span class="vc-lbl">레죠 만료</span><span class="vc-val yellow">15 Apr 2026</span></div>
+            <div class="vc-row"><span class="vc-lbl">HVIS</span><span class="vc-val green">12 Aug 2026</span></div>
+            <div class="vc-row"><span class="vc-lbl">마지막 서비스</span><span class="vc-val">274,520 km</span></div>
+            <div class="vc-row"><span class="vc-lbl">현재 KM</span><span class="vc-val">282,316 km</span></div>
+          </div>
+        </div>
+
+        <div class="vehicle-card danger">
+          <div class="vc-head">
+            <div><div class="vc-rego">TV1072</div><div class="vc-model">Mitsubishi BE600 · 2015 · 25석</div></div>
+            <span class="badge badge-red">만료</span>
+          </div>
+          <div class="vc-rows">
+            <div class="vc-row"><span class="vc-lbl">레죠 만료</span><span class="vc-val yellow">22 Jun 2026</span></div>
+            <div class="vc-row"><span class="vc-lbl">HVIS 만료</span><span class="vc-val red">10 Jan 2026 ⚠️</span></div>
+            <div class="vc-row"><span class="vc-lbl">마지막 서비스</span><span class="vc-val">279,800 km</span></div>
+            <div class="vc-row"><span class="vc-lbl">현재 KM</span><span class="vc-val">285,103 km</span></div>
+          </div>
+        </div>
+
+        <div class="vehicle-card warn">
+          <div class="vc-head">
+            <div><div class="vc-rego">XO37PS</div><div class="vc-model">Mitsubishi ROSA · 2010 · 22석</div></div>
+            <span class="badge badge-yellow">주의</span>
+          </div>
+          <div class="vc-rows">
+            <div class="vc-row"><span class="vc-lbl">레죠 만료</span><span class="vc-val yellow">30 Mar 2026</span></div>
+            <div class="vc-row"><span class="vc-lbl">HVIS</span><span class="vc-val green">05 Nov 2026</span></div>
+            <div class="vc-row"><span class="vc-lbl">마지막 서비스</span><span class="vc-val">195,000 km</span></div>
+            <div class="vc-row"><span class="vc-lbl">현재 KM</span><span class="vc-val">201,482 km</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title"><span class="icon">🔧</span> 정비 기록</div>
+          <button class="btn btn-primary btn-sm" onclick="document.getElementById('modal-repair').classList.add('open')">+ 기록 추가</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>날짜</th><th>차량</th><th>정비 종류</th><th>KM</th><th>비용</th><th>다음 예정</th><th>메모</th></tr></thead>
+            <tbody>
+              <tr><td>28/02/26</td><td class="amt">TV1072</td><td>오일 교환</td><td class="amt">282,000</td><td class="amt amt-red">$180</td><td class="amt">285,000 km</td><td>Mobil 1 5W-30</td></tr>
+              <tr><td>15/02/26</td><td class="amt">TV1071</td><td>타이어 교체</td><td class="amt">279,800</td><td class="amt amt-red">$520</td><td class="amt">—</td><td>4개 전부 교체</td></tr>
+              <tr><td>10/01/26</td><td class="amt">XO37PS</td><td>브레이크 패드</td><td class="amt">198,500</td><td class="amt amt-red">$380</td><td class="amt">—</td><td>전후 교체</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════ DRIVERS ════ -->
+    <div class="page" id="page-drivers">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>이름</th><th>면허 등급</th><th>면허 만료</th><th>Authority 만료</th><th>전화</th><th>상태</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><b>최동철</b> <span style="color:var(--muted);font-size:11px">Dong Cheol Choi</span></td>
+              <td><span class="badge badge-blue">HR</span></td>
+              <td class="amt">15 Aug 2028</td><td class="amt green" style="color:var(--green)">22 Mar 2027</td>
+              <td class="amt">0400 000 001</td><td><span class="badge badge-green">정상</span></td>
+            </tr>
+            <tr>
+              <td><b>고한식</b> <span style="color:var(--muted);font-size:11px">Han Sik KO</span></td>
+              <td><span class="badge badge-blue">HR</span></td>
+              <td class="amt">20 Mar 2027</td><td class="amt" style="color:var(--yellow)">10 Apr 2026</td>
+              <td class="amt">0400 000 002</td><td><span class="badge badge-yellow">주의</span></td>
+            </tr>
+            <tr>
+              <td><b>박재민</b> <span style="color:var(--muted);font-size:11px">Jae Min PARK</span></td>
+              <td><span class="badge badge-blue">HR</span></td>
+              <td class="amt">12 Nov 2026</td><td class="amt" style="color:var(--red)">16 Feb 2026 ⚠️</td>
+              <td class="amt">0400 000 003</td><td><span class="badge badge-red">만료</span></td>
+            </tr>
+            <tr>
+              <td><b>유성훈</b> <span style="color:var(--muted);font-size:11px">Sung Hun YOO</span></td>
+              <td><span class="badge badge-blue">HR</span></td>
+              <td class="amt">08 Jun 2027</td><td class="amt" style="color:var(--green)">15 Jan 2027</td>
+              <td class="amt">0400 000 004</td><td><span class="badge badge-green">정상</span></td>
+            </tr>
+            <tr>
+              <td><b>유정훈</b> <span style="color:var(--muted);font-size:11px">Jeonghoon YOO</span></td>
+              <td><span class="badge badge-blue">MR</span></td>
+              <td class="amt">30 Sep 2026</td><td class="amt" style="color:var(--green)">30 Sep 2026</td>
+              <td class="amt">0400 000 005</td><td><span class="badge badge-green">정상</span></td>
+            </tr>
+            <tr>
+              <td><b>박진원</b> <span style="color:var(--muted);font-size:11px">Jin Weon Park</span></td>
+              <td><span class="badge badge-blue">HR</span></td>
+              <td class="amt">14 Dec 2027</td><td class="amt" style="color:var(--green)">14 Dec 2026</td>
+              <td class="amt">0400 000 006</td><td><span class="badge badge-green">정상</span></td>
+            </tr>
+            <tr>
+              <td><b>이우석</b> <span style="color:var(--muted);font-size:11px">Woo Suk LEE</span></td>
+              <td><span class="badge badge-blue">HR</span></td>
+              <td class="amt">02 Feb 2028</td><td class="amt" style="color:var(--green)">02 Feb 2027</td>
+              <td class="amt">0400 000 007</td><td><span class="badge badge-green">정상</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ══ MODALS ══ -->
+
+<!-- 지급 처리 모달 -->
+<div class="modal-overlay" id="modal-pay">
+  <div class="modal">
+    <div class="modal-title">💳 급여 지급 처리</div>
+    <div class="modal-field">
+      <label>드라이버</label>
+      <input type="text" id="pay-driver" readonly style="background:#f8fafc" />
+    </div>
+    <div class="modal-field">
+      <label>지급 금액</label>
+      <input type="text" id="pay-amount" placeholder="$0.00" />
+    </div>
+    <div class="modal-field">
+      <label>지급 방법</label>
+      <select id="pay-method">
+        <option>Bank Transfer</option><option>Cash</option><option>Cheque</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>메모 (선택)</label>
+      <input type="text" id="pay-note" placeholder="예) 이번 주 급여" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="document.getElementById('modal-pay').classList.remove('open')">취소</button>
+      <button class="btn btn-green" onclick="confirmPay()">✓ 지급 완료 처리</button>
+    </div>
+  </div>
+</div>
+
+<!-- 정비 기록 모달 -->
+<div class="modal-overlay" id="modal-repair">
+  <div class="modal">
+    <div class="modal-title">🔧 정비 기록 추가</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="modal-field">
+        <label>차량</label>
+        <select><option>TV1071</option><option>TV1072</option><option>XO37PS</option></select>
+      </div>
+      <div class="modal-field">
+        <label>날짜</label>
+        <input type="date" />
+      </div>
+      <div class="modal-field">
+        <label>정비 종류</label>
+        <select><option>오일 교환</option><option>타이어 교체</option><option>브레이크</option><option>HVIS 점검</option><option>레죠 갱신</option><option>기타</option></select>
+      </div>
+      <div class="modal-field">
+        <label>비용 ($)</label>
+        <input type="number" placeholder="0" />
+      </div>
+      <div class="modal-field">
+        <label>현재 KM</label>
+        <input type="number" placeholder="0" />
+      </div>
+      <div class="modal-field">
+        <label>다음 서비스 KM</label>
+        <input type="number" placeholder="0" />
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>메모</label>
+      <input type="text" placeholder="정비 내용 상세..." />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="document.getElementById('modal-repair').classList.remove('open')">취소</button>
+      <button class="btn btn-primary" onclick="document.getElementById('modal-repair').classList.remove('open');showToast('정비 기록이 저장됐어요 ✓')">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" style="position:fixed;bottom:24px;right:24px;background:#0f172a;color:white;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:opacity 0.25s;pointer-events:none;z-index:999;"></div>
+
+<script>
+// ── PAGE NAV ──
+const pageMeta = {
+  dashboard: ['대시보드', 'Dong Choi PTY Ltd 운영 현황'],
+  wages:     ['주급 관리', '드라이버별 급여 계산 및 지급'],
+  invoice:   ['인보이스', '여행사 청구서 생성'],
+  reports:   ['드라이버 리포트', '제출된 일일 리포트 확인'],
+  vehicles:  ['차량 관리', '차량 상태 · 정비 · 알림'],
+  drivers:   ['드라이버 관리', '면허 · Authority 현황'],
+};
+
+function goPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  document.querySelector(`.nav-item[onclick*="${id}"]`).classList.add('active');
+  document.getElementById('page-title').textContent = pageMeta[id][0];
+  document.getElementById('page-sub').textContent = pageMeta[id][1];
+  window.scrollTo(0, 0);
+}
+
+// ── DATE ──
+window.addEventListener('DOMContentLoaded', () => {
+  const d = new Date();
+  document.getElementById('today-date').textContent =
+    d.toLocaleDateString('ko-KR', {year:'numeric', month:'long', day:'numeric', weekday:'short'});
+});
+
+// ── PAY MODAL ──
+function openPayModal(driver, amount) {
+  document.getElementById('pay-driver').value = driver;
+  document.getElementById('pay-amount').value = amount;
+  document.getElementById('modal-pay').classList.add('open');
+}
+function confirmPay() {
+  const driver = document.getElementById('pay-driver').value;
+  const amount = document.getElementById('pay-amount').value;
+  document.getElementById('modal-pay').classList.remove('open');
+  showToast(`${driver} 급여 ${amount} 지급 완료 처리됐어요 ✓`);
+}
+
+// ── INVOICE ──
+function updateInvoice() {
+  const agency = document.getElementById('inv-agency').value;
+  document.getElementById('inv-to-name').textContent = agency;
+  const from = document.getElementById('inv-from').value;
+  const to = document.getElementById('inv-to').value;
+  if (from && to) {
+    const f = new Date(from).toLocaleDateString('en-AU', {day:'2-digit', month:'2-digit'});
+    const t = new Date(to).toLocaleDateString('en-AU', {day:'2-digit', month:'2-digit', year:'numeric'});
+    document.getElementById('inv-period').textContent = f + ' ~ ' + t;
+  }
+  showToast(`${agency} 인보이스 미리보기 업데이트됐어요`);
+}
+
+// ── TOAST ──
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.style.opacity = '0', 3000);
+}
+
+// ── CLOSE MODAL ON OVERLAY CLICK ──
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) overlay.classList.remove('open');
+  });
+});
+</script>
+</body>
+</html>
