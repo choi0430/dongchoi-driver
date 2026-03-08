@@ -94,6 +94,8 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 .check-dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--dim);flex-shrink:0;transition:all 0.15s;}
 .check-item.pass .check-dot{background:var(--green);border-color:var(--green);}
 .check-item.fail .check-dot{background:var(--red);border-color:var(--red);}
+.check-name{font-size:12.5px;font-weight:600;color:var(--text);}
+.check-sub-kr{font-size:10.5px;color:var(--muted);margin-top:1px;}
 .check-name{font-size:12px;font-weight:500;line-height:1.3;}
 
 /* STEP INDICATOR */
@@ -193,7 +195,21 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 .toast.error{background:var(--red);}
 
 /* SIGNATURE */
-#sig-canvas{width:100%;height:100px;background:var(--surface2);border:1.5px dashed var(--border);border-radius:10px;display:block;touch-action:none;}
+.sig-canvas{width:100%;height:110px;background:var(--surface2);border:1.5px dashed var(--border);border-radius:10px;display:block;touch-action:none;}
+#sig-canvas{width:100%;height:110px;background:var(--surface2);border:1.5px dashed var(--border);border-radius:10px;display:block;touch-action:none;}
+.decl-box{background:#fffbeb;border:1.5px solid #fbbf24;border-radius:12px;padding:14px 16px;margin-bottom:14px;}
+.decl-title{font-size:11px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-family:'DM Mono',monospace;}
+.decl-text{font-size:12.5px;color:#1c1917;line-height:1.65;margin-bottom:10px;}
+.decl-text-kr{font-size:12px;color:#57534e;line-height:1.6;margin-bottom:12px;font-style:italic;}
+.decl-check{display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;}
+.decl-check input[type=checkbox]{width:18px;height:18px;min-width:18px;margin-top:2px;accent-color:var(--accent);}
+.decl-check label{font-size:13px;color:#111;line-height:1.5;cursor:pointer;}
+.check-confirm-item{display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:8px;}
+.check-confirm-item.pass{border-color:#6ee7b7;background:#f0fdf4;}
+.check-confirm-item.fail{border-color:#fca5a5;background:#fff5f5;}
+.check-confirm-item input[type=checkbox]{width:20px;height:20px;min-width:20px;margin-top:1px;accent-color:#0e9f6e;cursor:pointer;}
+.check-confirm-label{font-size:13px;font-weight:600;color:#111;line-height:1.4;}
+.check-confirm-sub{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4;}
 
 /* SALARY ROWS */
 .salary-week{background:white;border-radius:12px;margin:0 12px 8px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,0.04);}
@@ -392,10 +408,33 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           <div class="form-group"><label class="form-label">연료 레벨</label><select class="form-select" id="pre-fuel"><option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option></select></div>
         </div>
         <div class="divider"></div>
-        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:'DM Mono',monospace;">차량 점검 항목</div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:'DM Mono',monospace;">Vehicle Inspection 차량 점검 항목</div>
         <div class="check-grid" id="pre-checks"></div>
-        <div class="form-group" style="margin-top:14px;"><label class="form-label">차량 손상 / 특이사항</label><textarea class="form-textarea" id="pre-remarks" placeholder="손상 부위, 특이사항 메모..."></textarea></div>
-        <div style="margin-top:4px;"><button class="btn btn-primary" onclick="completePre()">Pre Departure 완료 →</button></div>
+        <div class="form-group" style="margin-top:14px;"><label class="form-label">차량 손상 / 특이사항 <span style="font-size:11px;color:var(--muted);">Vehicle Damage / Remarks</span></label><textarea class="form-textarea" id="pre-remarks" placeholder="손상 부위, 특이사항 메모..."></textarea></div>
+
+        <div class="divider"></div>
+
+        <!-- SAFETY DECLARATION -->
+        <div class="decl-box">
+          <div class="decl-title">⚖️ Safety Declaration 안전 서약</div>
+          <div class="decl-text">I, <b id="decl-driver-name">[Driver]</b>, declare that I am free of any prohibited substances including drugs &amp; alcohol in the last 7 hours from the beginning of the shift.<br>I declare that I have a current driver's licence and bus driver authority card from TfNSW.</div>
+          <div class="decl-text-kr">본인은 운행 시작 7시간 전부터 마약 및 알코올을 포함한 어떠한 금지 약물도 복용하지 않았음을 서약합니다.<br>본인은 유효한 운전 면허증 및 TfNSW 버스 드라이버 자격증을 보유하고 있음을 서약합니다.</div>
+          <div class="decl-check">
+            <input type="checkbox" id="pre-decl-check" onchange="onPreDeclChange()">
+            <label for="pre-decl-check">I confirm and agree to the above declaration.<br><span style="font-size:11.5px;color:var(--muted);">위 서약 내용을 확인하고 동의합니다.</span></label>
+          </div>
+        </div>
+
+        <!-- PRE SIGNATURE -->
+        <div class="form-group" id="pre-sig-section" style="display:none;">
+          <label class="form-label">Driver Signature <span style="font-size:11px;color:var(--muted);">드라이버 서명</span><span class="req">*</span></label>
+          <canvas class="sig-canvas" id="pre-sig-canvas"></canvas>
+          <button class="btn btn-secondary btn-sm" style="margin-top:6px;" onclick="clearSigById('pre-sig-canvas')">↺ Clear 초기화</button>
+        </div>
+
+        <div style="margin-top:12px;">
+          <button class="btn btn-primary" style="width:100%;" onclick="completePre()">Pre Departure 완료 Complete →</button>
+        </div>
       </div>
     </div>
   </div>
@@ -537,25 +576,69 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 
         <!-- SUMMARY -->
         <div id="shift-summary" style="background:var(--surface2);border-radius:12px;padding:14px;margin-bottom:14px;border:1.5px solid var(--border);">
-          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:'DM Mono',monospace;">이번 운행 요약</div>
+          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:'DM Mono',monospace;">Shift Summary 이번 운행 요약</div>
           <div id="shift-summary-content" style="font-size:13px;color:var(--muted);">Daily Report가 없습니다.</div>
         </div>
 
         <div class="divider"></div>
-        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:'DM Mono',monospace;">사후 점검 항목</div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:'DM Mono',monospace;">Post-Shift Vehicle Check 사후 차량 점검</div>
         <div class="check-grid" id="end-checks"></div>
 
-        <div class="form-group" style="margin-top:14px;"><label class="form-label">손상 / 사고 신고</label><textarea class="form-textarea" id="end-damage" placeholder="손상 부위 상세 기록..."></textarea></div>
+        <div class="form-group" style="margin-top:14px;">
+          <label class="form-label">Vehicle Damage / Incident Report <span style="font-size:11px;color:var(--muted);">손상 / 사고 신고</span></label>
+          <textarea class="form-textarea" id="end-damage" placeholder="Describe any damage or incidents... 손상 부위 상세 기록..."></textarea>
+        </div>
 
-        <div class="form-group">
-          <label class="form-label">드라이버 서명<span class="req">*</span></label>
-          <canvas id="sig-canvas"></canvas>
-          <button class="btn btn-secondary btn-sm" style="margin-top:6px;" onclick="clearSig()">초기화</button>
+        <div class="divider"></div>
+
+        <!-- PASSENGER CHECK -->
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:'DM Mono',monospace;">🚌 End of Shift Checklist 종료 확인</div>
+
+        <div class="check-confirm-item" id="eos-pax-item">
+          <input type="checkbox" id="eos-pax-check" onchange="onEosCheckChange('eos-pax-item','eos-pax-check')">
+          <div>
+            <div class="check-confirm-label">Passenger Check — No passengers left on board</div>
+            <div class="check-confirm-sub">승객 확인 — 차량 내 남은 승객이 없음을 확인했습니다</div>
+          </div>
+        </div>
+
+        <div class="check-confirm-item" id="eos-lost-item">
+          <input type="checkbox" id="eos-lost-check" onchange="onEosCheckChange('eos-lost-item','eos-lost-check')">
+          <div>
+            <div class="check-confirm-label">Lost Property Check — Vehicle checked for left items</div>
+            <div class="check-confirm-sub">분실물 확인 — 차량 내 분실물 여부를 확인했습니다</div>
+          </div>
+        </div>
+
+        <div class="check-confirm-item" id="eos-fuel-item">
+          <input type="checkbox" id="eos-fuel-chk" onchange="onEosCheckChange('eos-fuel-item','eos-fuel-chk')">
+          <div>
+            <div class="check-confirm-label">Vehicle Secured &amp; Parked Safely</div>
+            <div class="check-confirm-sub">차량이 안전하게 주차 및 잠금 처리되었습니다</div>
+          </div>
+        </div>
+
+        <!-- END OF SHIFT DECLARATION -->
+        <div class="decl-box" style="margin-top:14px;">
+          <div class="decl-title">📋 End of Shift Declaration 종료 서약</div>
+          <div class="decl-text">I, <b id="eos-decl-driver-name">[Driver]</b>, confirm that all post-shift checks have been completed, all passengers have disembarked, and no lost property has been left unattended.</div>
+          <div class="decl-text-kr">본인은 모든 사후 점검을 완료하였으며, 모든 승객이 하차하였고, 분실물에 대한 확인을 완료하였음을 서약합니다.</div>
+          <div class="decl-check">
+            <input type="checkbox" id="eos-decl-check" onchange="onEosDeclChange()">
+            <label for="eos-decl-check">I confirm and agree to the above declaration.<br><span style="font-size:11.5px;color:var(--muted);">위 내용을 확인하고 동의합니다.</span></label>
+          </div>
+        </div>
+
+        <!-- END SIGNATURE -->
+        <div class="form-group" id="eos-sig-section" style="display:none;">
+          <label class="form-label">Driver Signature <span style="font-size:11px;color:var(--muted);">드라이버 서명</span><span class="req">*</span></label>
+          <canvas class="sig-canvas" id="sig-canvas"></canvas>
+          <button class="btn btn-secondary btn-sm" style="margin-top:6px;" onclick="clearSigById('sig-canvas')">↺ Clear 초기화</button>
         </div>
 
         <div style="display:flex;gap:8px;margin-top:14px;">
-          <button class="btn btn-secondary" style="flex:1;" onclick="goStep(2)">← 이전</button>
-          <button class="btn btn-danger" style="flex:2;" onclick="submitEndShift()">🏁 End of Shift 완료</button>
+          <button class="btn btn-secondary" style="flex:1;" onclick="goStep(2)">← Back 이전</button>
+          <button class="btn btn-danger" style="flex:2;" onclick="submitEndShift()">🏁 End of Shift Complete 완료</button>
         </div>
       </div>
     </div>
@@ -753,7 +836,26 @@ function sddAddNew(key, value) {
 // ═══════════════════════════════════════
 // DATA
 // ═══════════════════════════════════════
-const CHECKS = ['엔진 오일','파워 스티어링','배터리','냉각수','라이트/신호등','타이어 트레드','타이어 압력','와이퍼','냉방/난방','마이크','소화기','여분 타이어','시트/커튼','유리 청결','클러치 오일','연료 레벨','외부 청결','내부 청결'];
+const CHECKS = [
+  {en:'Engine Oil', kr:'엔진 오일'},
+  {en:'Power Steering', kr:'파워 스티어링'},
+  {en:'Battery', kr:'배터리'},
+  {en:'Coolant', kr:'냉각수'},
+  {en:'Lights / Indicators', kr:'라이트/신호등'},
+  {en:'Tyre Tread', kr:'타이어 트레드'},
+  {en:'Tyre Pressure', kr:'타이어 압력'},
+  {en:'Wiper Blade', kr:'와이퍼'},
+  {en:'Cooling / Ventilation', kr:'냉방/난방'},
+  {en:'Microphone', kr:'마이크'},
+  {en:'Fire Extinguisher', kr:'소화기'},
+  {en:'Spare Tyre & Jack', kr:'여분 타이어'},
+  {en:'Seat / Curtain', kr:'시트/커튼'},
+  {en:'Window Cleaned', kr:'유리 청결'},
+  {en:'Clutch Fluid', kr:'클러치 오일'},
+  {en:'Fuel Level', kr:'연료 레벨'},
+  {en:'Clean Outside', kr:'외부 청결'},
+  {en:'Clean Inside', kr:'내부 청결'},
+];
 
 const CONTACTS = [
   {type:'driver',name:'최동철 (Dong Cheol Choi)',initials:'DC',phone:'0412 345 678',note:'HR · TV1071/TV1072',color:'#1a56db'},
@@ -895,6 +997,8 @@ function doLogin() {
   // 로그인 화면 숨기고 앱 표시
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
+  // 서약서에 드라이버 이름 주입
+  injectDeclName(name);
 }
 
 function showLoginError(msg) {
@@ -961,9 +1065,10 @@ renderSalary();
 
 function initChecks(){
   ['pre-checks','end-checks'].forEach(id=>{
-    document.getElementById(id).innerHTML = CHECKS.map((c,i)=>
-      `<div class="check-item pass" onclick="toggleCheck(this)"><div class="check-dot"></div><div class="check-name">${c}</div></div>`
-    ).join('');
+    document.getElementById(id).innerHTML = CHECKS.map((c,i)=>{
+      const label = typeof c === 'object' ? `<div class="check-name">${c.en}</div><div class="check-sub-kr">${c.kr}</div>` : `<div class="check-name">${c}</div>`;
+      return `<div class="check-item pass" onclick="toggleCheck(this)"><div class="check-dot"></div><div>${label}</div></div>`;
+    }).join('');
   });
 }
 
@@ -1034,7 +1139,12 @@ function renderShiftSection(){
 function completePre(){
   const rego = document.getElementById('pre-rego').value;
   const km = document.getElementById('pre-km').value;
-  if(!rego||!km){showToast('차량과 KM을 입력하세요','error');return;}
+  if(!rego||!km){showToast('차량(Rego)과 출발 KM을 입력하세요. Please enter Rego & KM.','error');return;}
+  // Safety Declaration 확인
+  const declChecked = document.getElementById('pre-decl-check').checked;
+  if(!declChecked){showToast('⚖️ Safety Declaration을 먼저 확인하세요. Please confirm the Safety Declaration.','error');return;}
+  // 서명 확인
+  if(isSigEmpty('pre-sig-canvas')){showToast('✏️ 드라이버 서명을 해주세요. Driver signature required.','error');return;}
   const id = 'shift_'+Date.now();
   const shift = {
     id, rego,
@@ -1046,10 +1156,12 @@ function completePre(){
     dailyReports: [],
     preChecks: getCheckResults('pre-checks'),
     remarks: document.getElementById('pre-remarks').value,
+    safetyDeclaration: true,
+    preSignature: getSigDataUrl('pre-sig-canvas'),
   };
   activeShifts.push(shift);
   editingShiftId = id;
-  showToast(`✅ ${rego} Pre Departure 완료`,'success');
+  showToast(`✅ ${rego} Pre Departure 완료 Complete`,'success');
   renderShiftSection();
   goStep(2);
   updateStep2UI();
@@ -1138,7 +1250,15 @@ const SHEET_URL = 'https://script.google.com/macros/s/AKfycbwAQyO0Iwnw4ZEyqf_yhG
 
 function submitEndShift(){
   const km = document.getElementById('end-km').value;
-  if(!km){showToast('종료 KM을 입력하세요','error');return;}
+  if(!km){showToast('종료 KM을 입력하세요. End KM required.','error');return;}
+  // Passenger & lost property check
+  if(!document.getElementById('eos-pax-check').checked){showToast('🚌 승객 탑승 여부를 확인하세요. Passenger check required.','error');return;}
+  if(!document.getElementById('eos-lost-check').checked){showToast('🔍 분실물 확인을 완료하세요. Lost property check required.','error');return;}
+  if(!document.getElementById('eos-fuel-chk').checked){showToast('🅿️ 차량 주차 및 잠금을 확인하세요. Vehicle secured check required.','error');return;}
+  // Declaration check
+  if(!document.getElementById('eos-decl-check').checked){showToast('📋 End of Shift 서약을 확인하세요. Please confirm the declaration.','error');return;}
+  // Signature check
+  if(isSigEmpty('sig-canvas')){showToast('✏️ 드라이버 서명을 해주세요. Driver signature required.','error');return;}
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(!shift){return;}
   shift.endKm = parseInt(km);
@@ -1146,6 +1266,11 @@ function submitEndShift(){
   shift.endFuel = document.getElementById('end-fuel').value;
   shift.endChecks = getCheckResults('end-checks');
   shift.damage = document.getElementById('end-damage').value;
+  shift.passengerCheck = document.getElementById('eos-pax-check').checked;
+  shift.lostPropertyCheck = document.getElementById('eos-lost-check').checked;
+  shift.vehicleSecuredCheck = document.getElementById('eos-fuel-chk').checked;
+  shift.eosDeclaration = true;
+  shift.eosSignature = getSigDataUrl('sig-canvas');
   shift.status = 'completed';
 
   // ── Google Sheets 전송 ──
@@ -1411,23 +1536,84 @@ function renderSalary(){
 // ═══════════════════════════════════════
 function toggleCheck(el){el.classList.toggle('pass');el.classList.toggle('fail');}
 function getCheckResults(gridId){
-  return Array.from(document.querySelectorAll('#'+gridId+' .check-item')).map(el=>({name:el.querySelector('.check-name').textContent,pass:el.classList.contains('pass')}));
+  return Array.from(document.querySelectorAll('#'+gridId+' .check-item')).map(el=>({name:el.querySelector('.check-name').textContent,kr:el.querySelector('.check-sub-kr')?.textContent||'',pass:el.classList.contains('pass')}));
 }
 
-// Signature
-const sigCanvas=document.getElementById('sig-canvas');
-if(sigCanvas){
-  const ctx=sigCanvas.getContext('2d'); let drawing=false;
-  function pos(e){const r=sigCanvas.getBoundingClientRect(),t=e.touches?e.touches[0]:e;return{x:(t.clientX-r.left)*(sigCanvas.width/r.width),y:(t.clientY-r.top)*(sigCanvas.height/r.height)};}
-  sigCanvas.addEventListener('mousedown',e=>{drawing=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);});
-  sigCanvas.addEventListener('mousemove',e=>{if(!drawing)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.strokeStyle='#111827';ctx.lineWidth=2;ctx.lineCap='round';ctx.stroke();});
-  sigCanvas.addEventListener('mouseup',()=>drawing=false);
-  sigCanvas.addEventListener('touchstart',e=>{e.preventDefault();drawing=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);},{passive:false});
-  sigCanvas.addEventListener('touchmove',e=>{e.preventDefault();if(!drawing)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.strokeStyle='#111827';ctx.lineWidth=2;ctx.lineCap='round';ctx.stroke();},{passive:false});
-  sigCanvas.addEventListener('touchend',()=>drawing=false);
-  setTimeout(()=>{sigCanvas.width=sigCanvas.offsetWidth*window.devicePixelRatio;sigCanvas.height=sigCanvas.offsetHeight*window.devicePixelRatio;ctx.scale(window.devicePixelRatio,window.devicePixelRatio);},100);
+// ─── Signature System ───────────────────────────────
+const _sigStates = {};
+
+function initSigCanvas(canvasId) {
+  const c = document.getElementById(canvasId);
+  if (!c || _sigStates[canvasId]) return;
+  _sigStates[canvasId] = { drawing: false };
+  const ctx = c.getContext('2d');
+  function pos(e) {
+    const r = c.getBoundingClientRect(), t = e.touches ? e.touches[0] : e;
+    return { x: (t.clientX - r.left) * (c.width / r.width), y: (t.clientY - r.top) * (c.height / r.height) };
+  }
+  c.addEventListener('mousedown', e => { _sigStates[canvasId].drawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+  c.addEventListener('mousemove', e => { if (!_sigStates[canvasId].drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.strokeStyle = '#111827'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke(); });
+  c.addEventListener('mouseup', () => _sigStates[canvasId].drawing = false);
+  c.addEventListener('touchstart', e => { e.preventDefault(); _sigStates[canvasId].drawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }, { passive: false });
+  c.addEventListener('touchmove', e => { e.preventDefault(); if (!_sigStates[canvasId].drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.strokeStyle = '#111827'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke(); }, { passive: false });
+  c.addEventListener('touchend', () => _sigStates[canvasId].drawing = false);
+  setTimeout(() => { c.width = c.offsetWidth * window.devicePixelRatio; c.height = c.offsetHeight * window.devicePixelRatio; ctx.scale(window.devicePixelRatio, window.devicePixelRatio); }, 150);
 }
-function clearSig(){const c=document.getElementById('sig-canvas');const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);}
+
+function clearSigById(canvasId) {
+  const c = document.getElementById(canvasId);
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+}
+
+function isSigEmpty(canvasId) {
+  const c = document.getElementById(canvasId);
+  if (!c) return true;
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  return !d.some(v => v !== 0);
+}
+
+function getSigDataUrl(canvasId) {
+  const c = document.getElementById(canvasId);
+  return c ? c.toDataURL('image/png') : '';
+}
+
+// Legacy compat
+const sigCanvas = document.getElementById('sig-canvas');
+function clearSig() { clearSigById('sig-canvas'); }
+
+// ─── Pre Departure Declaration ───────────────────
+function onPreDeclChange() {
+  const checked = document.getElementById('pre-decl-check').checked;
+  const sec = document.getElementById('pre-sig-section');
+  sec.style.display = checked ? 'block' : 'none';
+  if (checked) { setTimeout(() => initSigCanvas('pre-sig-canvas'), 100); }
+}
+
+// ─── End of Shift Checklist ───────────────────────
+function onEosCheckChange(itemId, checkId) {
+  const item = document.getElementById(itemId);
+  const checked = document.getElementById(checkId).checked;
+  item.classList.toggle('pass', checked);
+  item.classList.toggle('fail', !checked);
+  if (checked) item.classList.remove('fail');
+}
+
+function onEosDeclChange() {
+  const checked = document.getElementById('eos-decl-check').checked;
+  const sec = document.getElementById('eos-sig-section');
+  sec.style.display = checked ? 'block' : 'none';
+  if (checked) { setTimeout(() => initSigCanvas('sig-canvas'), 100); }
+}
+
+// ─── Patch: inject driver name into declarations ───
+function injectDeclName(name) {
+  const n1 = document.getElementById('decl-driver-name');
+  const n2 = document.getElementById('eos-decl-driver-name');
+  if (n1) n1.textContent = name;
+  if (n2) n2.textContent = name;
+}
 
 function showToast(msg,type=''){
   const t=document.getElementById('toast');
