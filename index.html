@@ -240,10 +240,10 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 
     <div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:10px;font-weight:600;">PIN 번호</div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px;width:100%;box-sizing:border-box;" id="pin-dots">
-      <input type="password" maxlength="1" id="pin-0" inputmode="numeric" pattern="[0-9]" style="width:100%;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;box-sizing:border-box;" oninput="pinNext(this,0)" />
-      <input type="password" maxlength="1" id="pin-1" inputmode="numeric" pattern="[0-9]" style="width:100%;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;box-sizing:border-box;" oninput="pinNext(this,1)" />
-      <input type="password" maxlength="1" id="pin-2" inputmode="numeric" pattern="[0-9]" style="width:100%;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;box-sizing:border-box;" oninput="pinNext(this,2)" />
-      <input type="password" maxlength="1" id="pin-3" inputmode="numeric" pattern="[0-9]" style="width:100%;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;box-sizing:border-box;" oninput="pinNext(this,3)" />
+      <input type="password" maxlength="1" id="pin-0" inputmode="numeric" pattern="[0-9]" style="width:100%;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;box-sizing:border-box;" oninput="pinNext(this,0)" onkeydown="pinKeydown(this,0,event)" />
+      <input type="password" maxlength="1" id="pin-1" inputmode="numeric" pattern="[0-9]" style="width:100%;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;box-sizing:border-box;" oninput="pinNext(this,1)" onkeydown="pinKeydown(this,1,event)" />
+      <input type="password" maxlength="1" id="pin-2" inputmode="numeric" pattern="[0-9]" style="width:100%;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;box-sizing:border-box;" oninput="pinNext(this,2)" onkeydown="pinKeydown(this,2,event)" />
+      <input type="password" maxlength="1" id="pin-3" inputmode="numeric" pattern="[0-9]" style="width:100%;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;box-sizing:border-box;" oninput="pinNext(this,3)" onkeydown="pinKeydown(this,3,event)" />
     </div>
 
     <div id="login-error" style="color:#f87171;font-size:12px;text-align:center;margin-bottom:10px;display:none;">❌ PIN 번호가 틀렸습니다</div>
@@ -726,9 +726,22 @@ let contactFilter = 'all';
 let currentDriver = null;
 
 function pinNext(el, idx) {
-  el.value = el.value.replace(/[^0-9]/g,'');
-  if(el.value && idx < 3) document.getElementById('pin-'+(idx+1)).focus();
-  if(idx === 3 && el.value) doLogin();
+  el.value = el.value.replace(/[^0-9]/g,'').slice(0,1);
+  if(el.value.length === 1) {
+    if(idx < 3) {
+      const next = document.getElementById('pin-'+(idx+1));
+      if(next) { next.focus(); next.select(); }
+    } else {
+      doLogin();
+    }
+  }
+}
+
+function pinKeydown(el, idx, e) {
+  if(e.key === 'Backspace' && el.value === '' && idx > 0) {
+    const prev = document.getElementById('pin-'+(idx-1));
+    if(prev) { prev.value = ''; prev.focus(); }
+  }
 }
 
 function getDriverPin(name) {
