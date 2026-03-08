@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DC Fleet — Driver</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Barlow+Condensed:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f0f2f5;--surface:#ffffff;--surface2:#f8f9fb;--border:#e4e8ef;
+  --accent:#1a56db;--accent-light:#eff4ff;--green:#0e9f6e;--green-light:#f0fdf4;
+  --red:#e02424;--red-light:#fff5f5;--orange:#ff6b35;--orange-light:#fff7f0;
+  --yellow:#d97706;--yellow-light:#fffbeb;
+  --text:#111827;--muted:#6b7280;--dim:#9ca3af;
+  --radius:14px;--sb:env(safe-area-inset-bottom,0px);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto Sans KR',sans-serif;font-size:14px;overflow:hidden;}
+#app{display:flex;flex-direction:column;height:100vh;height:100dvh;}
+#screen{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding-bottom:calc(72px + var(--sb));}
+.page{display:none;padding:0;}
+.page.active{display:block;}
+
+/* TOP BAR */
+.topbar{background:var(--accent);padding:14px 16px calc(14px);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+.topbar-logo{font-family:'Barlow Condensed';font-size:22px;font-weight:800;color:white;letter-spacing:0.5px;}
+.topbar-right{display:flex;align-items:center;gap:8px;}
+.user-pill{background:rgba(255,255,255,0.2);color:white;border-radius:20px;padding:5px 12px;font-size:12px;font-weight:700;}
+.notif-btn{width:34px;height:34px;background:rgba(255,255,255,0.15);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;position:relative;}
+.notif-dot{position:absolute;top:5px;right:5px;width:7px;height:7px;background:#ff6b35;border-radius:50%;border:1.5px solid var(--accent);}
+
+/* BOTTOM NAV */
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--border);display:flex;padding-bottom:calc(6px + var(--sb));z-index:100;box-shadow:0 -4px 20px rgba(0,0,0,0.06);}
+.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0 4px;cursor:pointer;color:var(--dim);font-size:10px;font-weight:600;}
+.nav-item.active{color:var(--accent);}
+.nav-icon{font-size:20px;}
+
+/* SECTION HEADER */
+.sec-head{padding:20px 16px 10px;display:flex;align-items:center;justify-content:space-between;}
+.sec-title{font-family:'Barlow Condensed';font-size:22px;font-weight:700;color:var(--text);}
+.sec-sub{font-size:12px;color:var(--muted);margin-top:1px;}
+
+/* CARDS */
+.card{background:white;border-radius:var(--radius);margin:0 12px 10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);}
+.card-head{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
+.card-title{font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;}
+.card-body{padding:16px;}
+
+/* NOTICE CARD */
+.notice-item{margin:0 12px 8px;background:white;border-radius:12px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);border-left:4px solid var(--accent);}
+.notice-item.urgent{border-color:var(--red);}
+.notice-item.info{border-color:var(--green);}
+.notice-date{font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;margin-bottom:4px;}
+.notice-title{font-weight:700;font-size:14px;margin-bottom:4px;}
+.notice-body{font-size:13px;color:var(--muted);line-height:1.5;}
+.notice-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;font-family:'DM Mono',monospace;margin-bottom:6px;}
+.badge-urgent{background:#fff5f5;color:var(--red);}
+.badge-info{background:#f0fdf4;color:var(--green);}
+.badge-general{background:#eff4ff;color:var(--accent);}
+
+/* SHIFT STATUS CARD */
+.shift-status{margin:12px;background:linear-gradient(135deg,#1a56db,#1e429f);border-radius:16px;padding:20px;color:white;position:relative;overflow:hidden;}
+.shift-status::before{content:'';position:absolute;top:-30px;right:-30px;width:120px;height:120px;background:rgba(255,255,255,0.06);border-radius:50%;}
+.shift-label{font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:1.5px;font-family:'DM Mono',monospace;margin-bottom:4px;}
+.shift-rego{font-family:'Barlow Condensed';font-size:38px;font-weight:800;letter-spacing:1px;line-height:1;}
+.shift-detail{font-size:12px;opacity:0.8;margin-top:6px;}
+.shift-actions{display:flex;gap:8px;margin-top:16px;}
+.shift-btn{flex:1;padding:10px;border-radius:10px;border:none;font-weight:700;font-size:13px;cursor:pointer;font-family:'Noto Sans KR',sans-serif;}
+.shift-btn-primary{background:white;color:var(--accent);}
+.shift-btn-secondary{background:rgba(255,255,255,0.15);color:white;}
+.shift-btn-danger{background:rgba(248,81,73,0.9);color:white;}
+.shift-no-active{background:white;margin:12px;border-radius:16px;padding:24px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
+.shift-no-icon{font-size:40px;margin-bottom:10px;}
+.shift-no-text{font-size:14px;color:var(--muted);margin-bottom:16px;}
+
+/* FORM */
+.form-group{margin-bottom:14px;}
+.form-label{font-size:12px;color:var(--muted);margin-bottom:6px;display:block;font-weight:600;}
+.req{color:var(--red);}
+.form-input,.form-select,.form-textarea{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;color:var(--text);font-size:15px;padding:12px 14px;font-family:'Noto Sans KR',sans-serif;outline:none;-webkit-appearance:none;appearance:none;transition:border-color 0.15s;}
+.form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--accent);background:white;}
+.form-textarea{resize:none;min-height:80px;line-height:1.5;}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.form-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
+
+/* CHECK GRID */
+.check-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.check-item{background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:11px 12px;display:flex;align-items:center;gap:8px;cursor:pointer;transition:all 0.15s;user-select:none;}
+.check-item.pass{border-color:var(--green);background:var(--green-light);}
+.check-item.fail{border-color:var(--red);background:var(--red-light);}
+.check-dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--dim);flex-shrink:0;transition:all 0.15s;}
+.check-item.pass .check-dot{background:var(--green);border-color:var(--green);}
+.check-item.fail .check-dot{background:var(--red);border-color:var(--red);}
+.check-name{font-size:12px;font-weight:500;line-height:1.3;}
+
+/* STEP INDICATOR */
+.steps{display:flex;padding:0 12px;gap:4px;margin-bottom:4px;}
+.step-pill{flex:1;padding:8px 4px;border-radius:8px;text-align:center;font-size:11px;font-weight:700;color:var(--dim);cursor:pointer;transition:all 0.2s;border:1.5px solid var(--border);background:white;}
+.step-pill.active{background:var(--accent);color:white;border-color:var(--accent);}
+.step-pill.done{background:var(--green-light);color:var(--green);border-color:var(--green);}
+
+/* BUTTONS */
+.btn{display:block;width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;text-align:center;cursor:pointer;border:none;font-family:'Noto Sans KR',sans-serif;transition:all 0.15s;}
+.btn:active{transform:scale(0.98);opacity:0.9;}
+.btn-primary{background:var(--accent);color:white;}
+.btn-green{background:var(--green);color:white;}
+.btn-danger{background:var(--red);color:white;}
+.btn-secondary{background:var(--surface2);color:var(--text);border:1.5px solid var(--border);}
+.btn-sm{padding:8px 14px;width:auto;font-size:12px;display:inline-block;border-radius:8px;}
+.btn-row{display:flex;gap:8px;padding:0 12px 16px;}
+
+/* NUM INPUT */
+.num-row{display:flex;align-items:center;gap:6px;}
+.num-prefix{color:var(--muted);font-size:13px;flex-shrink:0;font-weight:600;}
+.num-input{flex:1;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;color:var(--text);font-size:15px;padding:12px 14px;font-family:'DM Mono',monospace;outline:none;}
+.num-input:focus{border-color:var(--accent);background:white;}
+
+/* TOTAL BOX */
+.total-box{background:var(--surface2);border-radius:12px;padding:14px;margin-bottom:14px;border:1.5px solid var(--border);}
+.total-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;}
+.total-row+.total-row{border-top:1px solid var(--border);margin-top:6px;padding-top:10px;}
+.total-label{font-size:13px;color:var(--muted);}
+.total-val{font-family:'DM Mono',monospace;font-weight:700;font-size:15px;}
+.green{color:var(--green);}
+.red{color:var(--red);}
+.accent{color:var(--accent);}
+.muted{color:var(--muted);}
+
+/* CONTACT CARDS */
+.contact-section{padding:0 12px;margin-bottom:8px;}
+.contact-label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;padding:12px 0 6px;font-family:'DM Mono',monospace;}
+.contact-item{background:white;border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;margin-bottom:6px;box-shadow:0 1px 2px rgba(0,0,0,0.04);}
+.contact-avatar{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0;}
+.contact-avatar.driver{background:var(--accent-light);color:var(--accent);}
+.contact-avatar.guide{background:var(--green-light);color:var(--green);}
+.contact-name{font-weight:700;font-size:14px;margin-bottom:2px;}
+.contact-sub{font-size:12px;color:var(--muted);}
+.contact-actions{margin-left:auto;display:flex;gap:6px;}
+.contact-btn{width:36px;height:36px;border-radius:8px;border:none;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;}
+.contact-btn-call{background:var(--green-light);color:var(--green);}
+.contact-btn-msg{background:var(--accent-light);color:var(--accent);}
+
+/* ATTRACTION MAP */
+.attraction-item{background:white;border-radius:12px;margin:0 12px 8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
+.attraction-header{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;}
+.attraction-name{font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px;}
+.attraction-body{display:none;padding:0 16px 14px;}
+.attraction-body.open{display:block;}
+.poi-item{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
+.poi-item:last-child{border-bottom:none;}
+.poi-icon{font-size:18px;flex-shrink:0;width:28px;text-align:center;}
+.poi-name{font-weight:600;font-size:13px;margin-bottom:2px;}
+.poi-detail{font-size:12px;color:var(--muted);}
+.poi-map-btn{margin-left:auto;padding:5px 10px;background:var(--accent-light);color:var(--accent);border:none;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;}
+.poi-info{background:var(--accent-light);border-radius:10px;padding:10px 12px;margin-top:8px;font-size:12px;color:var(--accent);line-height:1.5;}
+
+/* DAILY REPORT LIST */
+.report-item{background:white;border-radius:12px;margin:0 12px 8px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,0.04);}
+.report-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+.report-date{font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);}
+.report-amount{font-family:'Barlow Condensed';font-size:22px;font-weight:700;color:var(--green);}
+.report-detail{display:flex;flex-wrap:wrap;gap:6px;}
+.report-tag{padding:3px 8px;background:var(--surface2);border-radius:6px;font-size:11px;color:var(--muted);}
+
+/* PILL */
+.pill{display:inline-flex;align-items:center;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:700;font-family:'DM Mono',monospace;}
+.pill-green{background:var(--green-light);color:var(--green);}
+.pill-red{background:var(--red-light);color:var(--red);}
+.pill-yellow{background:var(--yellow-light);color:var(--yellow);}
+.pill-blue{background:var(--accent-light);color:var(--accent);}
+.pill-gray{background:#f3f4f6;color:var(--muted);}
+.pill-orange{background:var(--orange-light);color:var(--orange);}
+
+/* DIVIDER */
+.divider{height:1px;background:var(--border);margin:14px 0;}
+.section-divider{height:8px;background:var(--bg);}
+
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;display:none;align-items:flex-end;}
+.modal-overlay.open{display:flex;}
+.modal-sheet{background:white;border-radius:20px 20px 0 0;width:100%;padding:20px 16px calc(20px + var(--sb));max-height:90vh;overflow-y:auto;animation:slideUp 0.25s ease;}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.modal-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px;}
+.modal-title{font-weight:700;font-size:17px;margin-bottom:16px;}
+
+/* TOAST */
+.toast{position:fixed;top:80px;left:50%;transform:translateX(-50%) translateY(-10px);background:var(--text);border-radius:10px;padding:10px 18px;font-size:13px;font-weight:500;color:white;z-index:300;opacity:0;transition:all 0.3s;white-space:nowrap;pointer-events:none;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.toast.success{background:var(--green);}
+.toast.error{background:var(--red);}
+
+/* SIGNATURE */
+#sig-canvas{width:100%;height:100px;background:var(--surface2);border:1.5px dashed var(--border);border-radius:10px;display:block;touch-action:none;}
+
+/* SALARY ROWS */
+.salary-week{background:white;border-radius:12px;margin:0 12px 8px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,0.04);}
+.salary-week-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.salary-week-label{font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);}
+.salary-amounts{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;}
+.salary-amt{text-align:center;}
+.salary-amt-label{font-size:10px;color:var(--muted);margin-bottom:2px;}
+.salary-amt-val{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;}
+
+/* MISC */
+.px16{padding:0 16px;}
+.mb14{margin-bottom:14px;}
+.flex-between{display:flex;justify-content:space-between;align-items:center;}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div>
+    <div class="topbar-logo">🚌 DC FLEET</div>
+  </div>
+  <div class="topbar-right">
+    <div class="notif-btn" onclick="showPage('notices')">🔔<div class="notif-dot" id="notif-dot"></div></div>
+    <div class="user-pill" id="driver-name-pill">최동철</div>
+  </div>
+</div>
+
+<div id="screen">
+
+<!-- ══════ HOME ══════ -->
+<div class="page active" id="page-home">
+
+  <!-- NOTICE BANNER -->
+  <div id="home-notice-banner" style="margin:12px 12px 0;background:linear-gradient(135deg,#fff7ed,#fff);border:1.5px solid #fed7aa;border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;">
+    <span style="font-size:18px;">📢</span>
+    <div>
+      <div style="font-weight:700;font-size:13px;color:#92400e;">공지: 차량 점검 일정</div>
+      <div style="font-size:12px;color:#b45309;margin-top:2px;">TV1072 HVIS 만료 — 즉시 예약 필요</div>
+    </div>
+  </div>
+
+  <!-- ACTIVE SHIFT -->
+  <div id="home-shift-section" style="margin-top:10px;"></div>
+
+  <!-- TODAY'S REPORTS -->
+  <div class="sec-head">
+    <div>
+      <div class="sec-title">오늘의 리포트</div>
+      <div class="sec-sub" id="today-label"></div>
+    </div>
+    <span class="pill pill-blue" id="today-report-count">0건</span>
+  </div>
+  <div id="today-reports-list"></div>
+
+  <!-- QUICK NAV -->
+  <div style="padding:0 12px 8px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div onclick="showPage('contacts')" style="background:white;border-radius:12px;padding:14px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.04);cursor:pointer;">
+        <div style="font-size:28px;margin-bottom:6px;">📞</div>
+        <div style="font-weight:700;font-size:13px;">연락처</div>
+        <div style="font-size:11px;color:var(--muted);">드라이버 · 가이드</div>
+      </div>
+      <div onclick="showPage('attractions')" style="background:white;border-radius:12px;padding:14px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.04);cursor:pointer;">
+        <div style="font-size:28px;margin-bottom:6px;">📍</div>
+        <div style="font-weight:700;font-size:13px;">관광지 안내</div>
+        <div style="font-size:11px;color:var(--muted);">픽업 포인트 · 정보</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SALARY SUMMARY -->
+  <div class="sec-head">
+    <div><div class="sec-title">급여 현황</div></div>
+    <span class="pill pill-orange" id="salary-balance">미지급 $14,081</span>
+  </div>
+  <div id="salary-list"></div>
+
+</div>
+
+<!-- ══════ REPORT (3 steps) ══════ -->
+<div class="page" id="page-report">
+  <div class="sec-head"><div><div class="sec-title" id="report-page-title">리포트</div></div></div>
+
+  <div class="steps" id="step-indicators">
+    <div class="step-pill active" id="sp1" onclick="goStep(1)">1. Pre Departure</div>
+    <div class="step-pill" id="sp2" onclick="goStep(2)">2. Daily Report</div>
+    <div class="step-pill" id="sp3" onclick="goStep(3)">3. End of Shift</div>
+  </div>
+
+  <!-- STEP 1 -->
+  <div id="step-1">
+    <div class="card">
+      <div class="card-head"><span class="card-title">🔑 Pre Departure</span><span class="pill pill-blue">출발 전</span></div>
+      <div class="card-body">
+        <div class="form-row mb14">
+          <div class="form-group"><label class="form-label">날짜<span class="req">*</span></label><input type="date" class="form-input" id="pre-date"></div>
+          <div class="form-group"><label class="form-label">출발 시간</label><input type="time" class="form-input" id="pre-time"></div>
+        </div>
+        <div class="form-row mb14">
+          <div class="form-group">
+            <label class="form-label">차량 (Rego)<span class="req">*</span></label>
+            <select class="form-select" id="pre-rego">
+              <option value="">선택</option>
+              <option>TV1071</option><option>TV1072</option><option>XO37PS</option>
+              <option>XN12OP</option><option>TV9951</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">인승</label>
+            <select class="form-select" id="pre-seats"><option>21S</option><option>25S</option><option>40S</option><option>50S</option></select>
+          </div>
+        </div>
+        <div class="form-row mb14">
+          <div class="form-group"><label class="form-label">출발 KM<span class="req">*</span></label><input type="number" class="form-input" id="pre-km" placeholder="예) 274198"></div>
+          <div class="form-group"><label class="form-label">연료 레벨</label><select class="form-select" id="pre-fuel"><option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option></select></div>
+        </div>
+        <div class="divider"></div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:'DM Mono',monospace;">차량 점검 항목</div>
+        <div class="check-grid" id="pre-checks"></div>
+        <div class="form-group" style="margin-top:14px;"><label class="form-label">차량 손상 / 특이사항</label><textarea class="form-textarea" id="pre-remarks" placeholder="손상 부위, 특이사항 메모..."></textarea></div>
+        <div style="margin-top:4px;"><button class="btn btn-primary" onclick="completePre()">Pre Departure 완료 →</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div id="step-2" style="display:none;">
+    <!-- active shift info -->
+    <div id="step2-shift-info" style="margin:0 12px 10px;background:var(--accent-light);border-radius:12px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;">
+      <div><div style="font-size:11px;color:var(--accent);font-weight:700;font-family:'DM Mono',monospace;">현재 운행 차량</div><div style="font-family:'Barlow Condensed';font-size:24px;font-weight:800;color:var(--accent);" id="step2-rego-display">TV1072</div></div>
+      <span class="pill pill-blue">Daily Report 추가</span>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span class="card-title">📋 Daily Report</span></div>
+      <div class="card-body">
+        <div class="form-row mb14">
+          <div class="form-group">
+            <label class="form-label">여행사<span class="req">*</span></label>
+            <select class="form-select" id="dr-agency">
+              <option value="">선택</option>
+              <option>HANA TOUR</option><option>JOY TOUR</option><option>TOUR ACE</option>
+              <option>WIN TOUR</option><option>LEE'S TRAVEL</option><option>SUNJIN TOUR</option>
+              <option>NOVA</option><option>BRIGHTON</option><option>개인</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">날짜</label>
+            <input type="date" class="form-input" id="dr-date">
+          </div>
+        </div>
+        <div class="form-group mb14">
+          <label class="form-label">관광지<span class="req">*</span></label>
+          <select class="form-select" id="dr-attraction" onchange="autoRate()">
+            <option value="">선택</option>
+            <option>AIRPORT TRANSFER</option><option>BLUE MOUNTAINS</option><option>CITY TOUR</option>
+            <option>CITY TOUR / HALF</option><option>CANBERRA</option><option>CENTRAL COAST</option>
+            <option>HUNTER VALLEY</option><option>JERVIS BAY</option><option>PORT STEPHENS</option>
+            <option>NEWCASTLE</option><option>WOLLONGONG</option><option>DINNER TRANSFER</option>
+            <option>HOTEL TRANSFER</option><option>CHARTER</option>
+          </select>
+        </div>
+        <div class="form-row mb14">
+          <div class="form-group"><label class="form-label">픽업 장소</label><input type="text" class="form-input" id="dr-pickup" placeholder="출발지"></div>
+          <div class="form-group"><label class="form-label">드롭 장소</label><input type="text" class="form-input" id="dr-dropoff" placeholder="도착지"></div>
+        </div>
+        <div class="form-row mb14">
+          <div class="form-group"><label class="form-label">시작 KM</label><input type="number" class="num-input" id="dr-km-start" placeholder="0" style="border-radius:10px;padding:12px 14px;"></div>
+          <div class="form-group"><label class="form-label">종료 KM</label><input type="number" class="num-input" id="dr-km-end" placeholder="0" style="border-radius:10px;padding:12px 14px;"></div>
+        </div>
+        <div class="form-row mb14">
+          <div class="form-group"><label class="form-label">시작 시간</label><input type="time" class="form-input" id="dr-start"></div>
+          <div class="form-group"><label class="form-label">종료 시간</label><input type="time" class="form-input" id="dr-end" onchange="calcOT()"></div>
+        </div>
+        <div class="form-group mb14"><label class="form-label">가이드</label><input type="text" class="form-input" id="dr-guide" placeholder="가이드 이름"></div>
+        <div class="form-group mb14"><label class="form-label">투어 코드</label><input type="text" class="form-input" id="dr-tourcode" placeholder="예) BM-001"></div>
+
+        <div class="divider"></div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;font-family:'DM Mono',monospace;">요금 항목</div>
+
+        <div class="form-row mb14">
+          <div class="form-group"><label class="form-label">서비스 요금</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-svc" placeholder="0" oninput="calcTotal()"></div></div>
+          <div class="form-group"><label class="form-label">OT 요금</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-ot" placeholder="0" oninput="calcTotal()"></div></div>
+        </div>
+        <div class="form-row-3 mb14">
+          <div class="form-group"><label class="form-label">트레일러</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-trailer" placeholder="0" oninput="calcTotal()"></div></div>
+          <div class="form-group"><label class="form-label">호텔</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-hotel" placeholder="0" oninput="calcTotal()"></div></div>
+          <div class="form-group"><label class="form-label">거리</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-dist" placeholder="0" oninput="calcTotal()"></div></div>
+        </div>
+        <div class="form-row-3 mb14">
+          <div class="form-group"><label class="form-label">조기출발</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-early" placeholder="0" oninput="calcTotal()"></div></div>
+          <div class="form-group"><label class="form-label">야간투어</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-night" placeholder="0" oninput="calcTotal()"></div></div>
+          <div class="form-group"><label class="form-label">팁</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-tip" placeholder="0" oninput="calcTotal()"></div></div>
+        </div>
+        <div class="form-row mb14">
+          <div class="form-group"><label class="form-label">톨비</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-toll" placeholder="0" oninput="calcTotal()"></div></div>
+          <div class="form-group"><label class="form-label">연료비</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-fuel" placeholder="0" oninput="calcTotal()"></div></div>
+        </div>
+        <div class="form-row-3 mb14">
+          <div class="form-group"><label class="form-label">세차($15)</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-wash" placeholder="0" oninput="calcTotal()"></div></div>
+          <div class="form-group"><label class="form-label">식비</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-meal" placeholder="0" oninput="calcTotal()"></div></div>
+          <div class="form-group"><label class="form-label">기타</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-etc" placeholder="0" oninput="calcTotal()"></div></div>
+        </div>
+        <div class="form-group mb14"><label class="form-label">톨 경로</label><textarea class="form-textarea" id="f-toll-detail" placeholder="M2, M7..." style="min-height:56px;"></textarea></div>
+
+        <div class="total-box">
+          <div class="total-row"><span class="total-label">서비스 합계</span><span class="total-val green" id="t-ta">$0</span></div>
+          <div class="total-row"><span class="total-label">드라이버 지급</span><span class="total-val accent" id="t-dr">$0</span></div>
+        </div>
+
+        <div class="form-group"><label class="form-label">비고</label><textarea class="form-textarea" id="dr-remarks" placeholder="기타 사항..."></textarea></div>
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <button class="btn btn-secondary" style="flex:1;" onclick="goStep(1)">← 이전</button>
+          <button class="btn btn-green" style="flex:2;" onclick="submitDailyReport()">✓ Daily Report 저장</button>
+        </div>
+        <div style="margin-top:8px;"><button class="btn btn-primary" onclick="goStep(3)">End of Shift 진행 →</button></div>
+      </div>
+    </div>
+
+    <!-- SAVED REPORTS for today -->
+    <div id="step2-saved-reports"></div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div id="step-3" style="display:none;">
+    <div id="step3-shift-info" style="margin:0 12px 10px;background:#fff0f0;border-radius:12px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border:1.5px solid #fecaca;">
+      <div><div style="font-size:11px;color:var(--red);font-weight:700;font-family:'DM Mono',monospace;">운행 종료</div><div style="font-family:'Barlow Condensed';font-size:24px;font-weight:800;color:var(--red);" id="step3-rego-display">TV1072</div></div>
+      <span class="pill pill-red">End of Shift</span>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span class="card-title">🏁 End of Shift</span></div>
+      <div class="card-body">
+        <div class="form-row mb14">
+          <div class="form-group"><label class="form-label">종료 시간</label><input type="time" class="form-input" id="end-time"></div>
+          <div class="form-group"><label class="form-label">종료 KM<span class="req">*</span></label><input type="number" class="form-input" id="end-km" placeholder="0"></div>
+        </div>
+        <div class="form-group mb14"><label class="form-label">연료 레벨 (반납 시)</label><select class="form-select" id="end-fuel"><option>Full</option><option>3/4</option><option>1/2</option><option>1/4</option></select></div>
+
+        <!-- SUMMARY -->
+        <div id="shift-summary" style="background:var(--surface2);border-radius:12px;padding:14px;margin-bottom:14px;border:1.5px solid var(--border);">
+          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:'DM Mono',monospace;">이번 운행 요약</div>
+          <div id="shift-summary-content" style="font-size:13px;color:var(--muted);">Daily Report가 없습니다.</div>
+        </div>
+
+        <div class="divider"></div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-family:'DM Mono',monospace;">사후 점검 항목</div>
+        <div class="check-grid" id="end-checks"></div>
+
+        <div class="form-group" style="margin-top:14px;"><label class="form-label">손상 / 사고 신고</label><textarea class="form-textarea" id="end-damage" placeholder="손상 부위 상세 기록..."></textarea></div>
+
+        <div class="form-group">
+          <label class="form-label">드라이버 서명<span class="req">*</span></label>
+          <canvas id="sig-canvas"></canvas>
+          <button class="btn btn-secondary btn-sm" style="margin-top:6px;" onclick="clearSig()">초기화</button>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:14px;">
+          <button class="btn btn-secondary" style="flex:1;" onclick="goStep(2)">← 이전</button>
+          <button class="btn btn-danger" style="flex:2;" onclick="submitEndShift()">🏁 End of Shift 완료</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ CONTACTS ══════ -->
+<div class="page" id="page-contacts">
+  <div class="sec-head"><div><div class="sec-title">연락처</div><div class="sec-sub">드라이버 · 가이드</div></div></div>
+  <div style="padding:0 12px 12px;display:flex;gap:8px;">
+    <button class="btn btn-primary btn-sm" onclick="filterContacts('all')" id="cf-all">전체</button>
+    <button class="btn btn-secondary btn-sm" onclick="filterContacts('driver')" id="cf-driver">드라이버</button>
+    <button class="btn btn-secondary btn-sm" onclick="filterContacts('guide')" id="cf-guide">가이드</button>
+  </div>
+  <div style="padding:0 12px 12px;"><input type="text" class="form-input" id="contact-search" placeholder="🔍 이름 검색..." oninput="searchContacts()"></div>
+  <div id="contact-list"></div>
+</div>
+
+<!-- ══════ ATTRACTIONS ══════ -->
+<div class="page" id="page-attractions">
+  <div class="sec-head"><div><div class="sec-title">관광지 안내</div><div class="sec-sub">픽업 포인트 · 안내사항</div></div></div>
+  <div id="attraction-list"></div>
+</div>
+
+<!-- ══════ NOTICES ══════ -->
+<div class="page" id="page-notices">
+  <div class="sec-head"><div><div class="sec-title">공지사항</div><div class="sec-sub">Notice Board</div></div></div>
+  <div id="notice-list"></div>
+</div>
+
+<!-- ══════ MY INFO ══════ -->
+<div class="page" id="page-me">
+  <div class="sec-head"><div><div class="sec-title">내 정보</div></div></div>
+  <div class="card" style="margin:0 12px 10px;">
+    <div class="card-body">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
+        <div style="width:56px;height:56px;background:var(--accent-light);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:var(--accent);">DC</div>
+        <div>
+          <div style="font-weight:700;font-size:17px;">최동철 (Dong Cheol Choi)</div>
+          <div style="font-size:12px;color:var(--muted);">드라이버 · HR 면허</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="background:var(--surface2);border-radius:10px;padding:12px;">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-family:'DM Mono',monospace;margin-bottom:4px;">면허 만료</div>
+          <div style="font-weight:700;color:var(--green);">04 Jun 2026</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:10px;padding:12px;">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-family:'DM Mono',monospace;margin-bottom:4px;">Authority 만료</div>
+          <div style="font-weight:700;color:var(--green);">20 Dec 2028</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-head"><div><div class="sec-title">급여 상세</div></div><span class="pill pill-orange">미지급 $14,081</span></div>
+  <div id="me-salary-detail"></div>
+
+  <div style="padding:0 12px 16px;">
+    <button class="btn btn-secondary" onclick="switchToAdmin()">🔐 관리자 화면으로 전환</button>
+  </div>
+</div>
+
+</div><!-- /screen -->
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav">
+  <div class="nav-item active" onclick="showPage('home')" id="nav-home"><div class="nav-icon">🏠</div>홈</div>
+  <div class="nav-item" onclick="startReport()" id="nav-report"><div class="nav-icon">📋</div>리포트</div>
+  <div class="nav-item" onclick="showPage('contacts')" id="nav-contacts"><div class="nav-icon">📞</div>연락처</div>
+  <div class="nav-item" onclick="showPage('attractions')" id="nav-attractions"><div class="nav-icon">📍</div>관광지</div>
+  <div class="nav-item" onclick="showPage('me')" id="nav-me"><div class="nav-icon">👤</div>내 정보</div>
+</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- VEHICLE CHANGE MODAL -->
+<div class="modal-overlay" id="modal-vehicle-change">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">🔄 차량 교체 - 새 Pre Departure</div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">다른 차량으로 이동 시 새 Pre Departure를 시작하세요. 기존 차량은 End of Shift를 먼저 완료해야 합니다.</p>
+    <button class="btn btn-primary" onclick="closeModal('modal-vehicle-change');goStep(1);">새 Pre Departure 시작</button>
+    <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="closeModal('modal-vehicle-change')">취소</button></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════
+// DATA
+// ═══════════════════════════════════════
+const CHECKS = ['엔진 오일','파워 스티어링','배터리','냉각수','라이트/신호등','타이어 트레드','타이어 압력','와이퍼','냉방/난방','마이크','소화기','여분 타이어','시트/커튼','유리 청결','클러치 오일','연료 레벨','외부 청결','내부 청결'];
+
+const CONTACTS = [
+  {type:'driver',name:'최동철 (Dong Cheol Choi)',initials:'DC',phone:'0412 345 678',note:'HR · TV1071/TV1072',color:'#1a56db'},
+  {type:'driver',name:'고한식 (Han Sik KO)',initials:'HK',phone:'0423 456 789',note:'HR · TV9951',color:'#1a56db'},
+  {type:'driver',name:'박재민 (Jae Min PARK)',initials:'JP',phone:'0434 567 890',note:'HR · Authority 만료!',color:'#e02424'},
+  {type:'driver',name:'유성훈 (Sung Hun YOO)',initials:'SY',phone:'0445 678 901',note:'LR · TV1072',color:'#d97706'},
+  {type:'driver',name:'유정훈 (Jeonghoon YOO)',initials:'JY',phone:'0456 789 012',note:'HR',color:'#1a56db'},
+  {type:'driver',name:'박진원 (Jin Weon Park)',initials:'JW',phone:'0467 890 123',note:'HR',color:'#1a56db'},
+  {type:'guide',name:'김형석',initials:'KH',phone:'0411 111 222',note:'HANA TOUR 전담 · Blue Mtns',color:'#0e9f6e'},
+  {type:'guide',name:'이지수',initials:'LJ',phone:'0422 222 333',note:'JOY TOUR · City Tour',color:'#0e9f6e'},
+  {type:'guide',name:'박민준',initials:'PM',phone:'0433 333 444',note:'TOUR ACE · Hunter Valley',color:'#0e9f6e'},
+  {type:'guide',name:'최수진',initials:'CS',phone:'0444 444 555',note:'WIN TOUR · Canberra',color:'#0e9f6e'},
+  {type:'guide',name:'정우성',initials:'JW',phone:'0455 555 666',note:'프리랜서',color:'#0e9f6e'},
+];
+
+const ATTRACTIONS = [
+  {name:'Blue Mountains',emoji:'⛰️',pois:[
+    {icon:'🅿️',name:'Scenic World 주차장',detail:'Violet St, Katoomba NSW 2780',map:'https://maps.google.com/?q=Scenic+World+Katoomba'},
+    {icon:'🚌',name:'Echo Point 버스 정차',detail:'Echo Point Rd, Katoomba — 관광 버스 전용 구역',map:'https://maps.google.com/?q=Echo+Point+Katoomba'},
+    {icon:'🏨',name:'Leura 호텔 드롭',detail:'Leura Mall, Leura NSW 2780',map:'https://maps.google.com/?q=Leura+Mall'},
+    {icon:'🍽️',name:'Paragon Café (가이드 식사)',detail:'65 Katoomba St, Katoomba',map:'https://maps.google.com/?q=Paragon+Cafe+Katoomba'},
+  ],info:'⏱ 편도 약 1.5시간 (M4 경유). 겨울 안개 주의. 케이블카 대기 줄 확인 필요. Scenic World 주차 무료 (버스).'},
+  {name:'City Tour',emoji:'🌆',pois:[
+    {icon:'🅿️',name:'Darling Harbour 버스 파킹',detail:'Pyrmont Bridge Rd 버스 정차 구역',map:'https://maps.google.com/?q=Darling+Harbour+Sydney'},
+    {icon:'🚌',name:'Opera House 드롭',detail:'Bennelong Point — Circular Quay 버스 정차',map:'https://maps.google.com/?q=Sydney+Opera+House'},
+    {icon:'🌉',name:'Harbour Bridge 전망대',detail:'Milsons Point 역 근처 주차',map:'https://maps.google.com/?q=Sydney+Harbour+Bridge'},
+    {icon:'🛍️',name:'Queen Victoria Building',detail:'455 George St, Sydney',map:'https://maps.google.com/?q=Queen+Victoria+Building+Sydney'},
+  ],info:'🚦 시내 버스 전용 구역 엄수. Circular Quay 픽업 시 2B 정류장. 주말 Darling Harbour 혼잡 주의.'},
+  {name:'Hunter Valley',emoji:'🍷',pois:[
+    {icon:'🅿️',name:'Lovedale 와이너리 주차',detail:'Lovedale Rd, Lovedale NSW 2325',map:'https://maps.google.com/?q=Lovedale+Winery'},
+    {icon:'🍷',name:'Audrey Wilkinson (필수 방문)',detail:'750 De Beyers Rd, Pokolbin',map:'https://maps.google.com/?q=Audrey+Wilkinson+Winery'},
+    {icon:'🧀',name:'Hunter Valley Smelly Cheese',detail:'2144 Broke Rd, Pokolbin',map:'https://maps.google.com/?q=Hunter+Valley+Cheese+Factory'},
+    {icon:'🌹',name:'Hunter Valley Gardens',detail:'2090 Broke Rd, Pokolbin — 버스 전용 입구',map:'https://maps.google.com/?q=Hunter+Valley+Gardens'},
+  ],info:'🕐 편도 약 2시간 (Pacific Motorway). 와이너리 폐장 시간 17:00 주의. 음주 승객 탑승 후 소란 시 즉시 관리자 연락.'},
+  {name:'Canberra',emoji:'🏛️',pois:[
+    {icon:'🅿️',name:'Parliament House 버스 주차',detail:'Parliament Dr, Capital Hill ACT',map:'https://maps.google.com/?q=Parliament+House+Canberra'},
+    {icon:'🏛️',name:'National Museum of Australia',detail:'Lawson Cres, Acton ACT 2601',map:'https://maps.google.com/?q=National+Museum+Australia'},
+    {icon:'🌊',name:'Lake Burley Griffin 픽업',detail:'Aspen Island 근처 버스 정차',map:'https://maps.google.com/?q=Lake+Burley+Griffin'},
+  ],info:'🛣️ 왕복 약 6시간. 편도 약 3시간 (Hume Hwy). 휴게소: Goulburn (1시간 30분 지점). 연료 꼭 확인.'},
+  {name:'Airport Transfer',emoji:'✈️',pois:[
+    {icon:'🛬',name:'T1 국제선 도착홀',detail:'T1 International, Bus pickup Zone 11',map:'https://maps.google.com/?q=Sydney+Airport+T1'},
+    {icon:'🛫',name:'T2/T3 국내선',detail:'Domestic Terminal — Zone 7',map:'https://maps.google.com/?q=Sydney+Airport+T2'},
+  ],info:'⚠️ 공항 대기 최대 10분. 승객 미출현 시 즉시 여행사 연락. 주차 금지구역 정차 금지.'},
+];
+
+const NOTICES = [
+  {type:'urgent',date:'07 Mar 2026',title:'TV1072 HVIS 점검 즉시 예약',body:'TV1072 차량의 HVIS 점검이 10 Jan 2026에 만료되었습니다. 이 차량 운행 전 관리자에게 반드시 확인하세요.'},
+  {type:'general',date:'05 Mar 2026',title:'3월 급여 지급 일정',body:'3월 급여는 15일(일요일)에 지급됩니다. 리포트 미제출 건은 급여에서 제외되니 반드시 당일 제출해주세요.'},
+  {type:'info',date:'01 Mar 2026',title:'HANA TOUR 픽업 장소 변경',body:'HANA TOUR Blue Mountains 투어의 픽업 장소가 Mantra Parramatta → Novotel Parramatta로 변경되었습니다. (3월 1일부터 적용)'},
+  {type:'general',date:'24 Feb 2026',title:'세차 정책 안내',body:'세차 비용은 $15입니다. Daily Report에 WASH 항목에 기재 시 정산됩니다. 세차 후 영수증을 관리자에게 제출해주세요.'},
+];
+
+const SALARY_DATA = [
+  {week:'02/03/26–08/03/26',total:920,paid:0,balance:920},
+  {week:'23/02/26–01/03/26',total:730,paid:0,balance:730},
+  {week:'16/02/26–22/02/26',total:963,paid:0,balance:963},
+  {week:'09/02/26–15/02/26',total:630,paid:0,balance:630},
+  {week:'02/02/26–08/02/26',total:370,paid:0,balance:370},
+  {week:'26/01/26–01/02/26',total:0,paid:0,balance:0},
+  {week:'19/01/26–25/01/26',total:210,paid:0,balance:210},
+];
+
+const RATES = {
+  'AIRPORT TRANSFER':{ta:270,dr:90},
+  'BLUE MOUNTAINS':{ta:800,dr:250},
+  'CITY TOUR':{ta:650,dr:250},
+  'CITY TOUR / HALF':{ta:450,dr:180},
+  'CANBERRA':{ta:1100,dr:350},
+  'HUNTER VALLEY':{ta:950,dr:300},
+  'CENTRAL COAST':{ta:750,dr:250},
+  'JERVIS BAY':{ta:900,dr:280},
+  'PORT STEPHENS':{ta:850,dr:270},
+  'NEWCASTLE':{ta:700,dr:240},
+  'WOLLONGONG':{ta:600,dr:220},
+  'DINNER TRANSFER':{ta:400,dr:150},
+  'HOTEL TRANSFER':{ta:350,dr:130},
+  'CHARTER':{ta:600,dr:200},
+};
+
+// ═══════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════
+let activeShifts = []; // {id, rego, seats, startKm, startTime, fuel, date, dailyReports:[]}
+let todayReports = [];
+let currentStep = 1;
+let editingShiftId = null;
+let contactFilter = 'all';
+
+// ═══════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════
+document.getElementById('today-label').textContent = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
+document.getElementById('pre-date').value = new Date().toISOString().split('T')[0];
+document.getElementById('dr-date').value = new Date().toISOString().split('T')[0];
+
+initChecks();
+renderShiftSection();
+renderTodayReports();
+renderContacts();
+renderAttractions();
+renderNotices();
+renderSalary();
+
+function initChecks(){
+  ['pre-checks','end-checks'].forEach(id=>{
+    document.getElementById(id).innerHTML = CHECKS.map((c,i)=>
+      `<div class="check-item pass" onclick="toggleCheck(this)"><div class="check-dot"></div><div class="check-name">${c}</div></div>`
+    ).join('');
+  });
+}
+
+// ═══════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════
+function showPage(id){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  const nav = document.getElementById('nav-'+id);
+  if(nav) nav.classList.add('active');
+  document.getElementById('screen').scrollTo(0,0);
+}
+
+function startReport(){
+  showPage('report');
+  if(activeShifts.length===0){
+    goStep(1);
+  } else {
+    goStep(2);
+    updateStep2UI();
+  }
+}
+
+function goStep(n){
+  for(let i=1;i<=3;i++){
+    document.getElementById('step-'+i).style.display = i===n?'block':'none';
+    const sp = document.getElementById('sp'+i);
+    sp.classList.remove('active','done');
+    if(i===n) sp.classList.add('active');
+    else if(i<n) sp.classList.add('done');
+  }
+  currentStep = n;
+  document.getElementById('screen').scrollTo(0,0);
+  if(n===2) renderStep2SavedReports();
+  if(n===3) renderShiftSummary();
+}
+
+// ═══════════════════════════════════════
+// SHIFT MANAGEMENT
+// ═══════════════════════════════════════
+function renderShiftSection(){
+  const el = document.getElementById('home-shift-section');
+  if(activeShifts.length===0){
+    el.innerHTML = `
+      <div class="shift-no-active">
+        <div class="shift-no-icon">🔑</div>
+        <div class="shift-no-text">오늘 운행 중인 차량이 없습니다</div>
+        <button class="btn btn-primary" onclick="startReport()">Pre Departure 시작</button>
+      </div>`;
+  } else {
+    el.innerHTML = activeShifts.map(s=>`
+      <div class="shift-status" style="margin-top:10px;">
+        <div class="shift-label">운행 중 · ${s.date}</div>
+        <div class="shift-rego">${s.rego}</div>
+        <div class="shift-detail">${s.seats} · 출발 ${s.startTime} · ${s.startKm.toLocaleString()} km · Daily Report ${s.dailyReports.length}건</div>
+        <div class="shift-actions">
+          <button class="shift-btn shift-btn-secondary" onclick="addDailyReport('${s.id}')">+ Daily Report</button>
+          <button class="shift-btn shift-btn-danger" onclick="startEndShift('${s.id}')">🏁 End of Shift</button>
+        </div>
+      </div>`).join('');
+    // also show add new shift button if needed
+    el.innerHTML += `<div style="padding:8px 12px 0;"><button class="btn btn-secondary" onclick="startReport()">+ 다른 차량 Pre Departure</button></div>`;
+  }
+}
+
+function completePre(){
+  const rego = document.getElementById('pre-rego').value;
+  const km = document.getElementById('pre-km').value;
+  if(!rego||!km){showToast('차량과 KM을 입력하세요','error');return;}
+  const id = 'shift_'+Date.now();
+  const shift = {
+    id, rego,
+    seats: document.getElementById('pre-seats').value,
+    startKm: parseInt(km),
+    startTime: document.getElementById('pre-time').value||'--:--',
+    fuel: document.getElementById('pre-fuel').value,
+    date: document.getElementById('pre-date').value,
+    dailyReports: [],
+    preChecks: getCheckResults('pre-checks'),
+    remarks: document.getElementById('pre-remarks').value,
+  };
+  activeShifts.push(shift);
+  editingShiftId = id;
+  showToast(`✅ ${rego} Pre Departure 완료`,'success');
+  renderShiftSection();
+  goStep(2);
+  updateStep2UI();
+}
+
+function addDailyReport(shiftId){
+  editingShiftId = shiftId;
+  showPage('report');
+  goStep(2);
+  updateStep2UI();
+}
+
+function startEndShift(shiftId){
+  editingShiftId = shiftId;
+  showPage('report');
+  goStep(3);
+  renderShiftSummary();
+}
+
+function updateStep2UI(){
+  const shift = activeShifts.find(s=>s.id===editingShiftId);
+  if(!shift) return;
+  document.getElementById('step2-rego-display').textContent = shift.rego;
+  document.getElementById('step3-rego-display').textContent = shift.rego;
+}
+
+function submitDailyReport(){
+  const agency = document.getElementById('dr-agency').value;
+  const att = document.getElementById('dr-attraction').value;
+  if(!agency||!att){showToast('여행사와 관광지를 선택하세요','error');return;}
+  const shift = activeShifts.find(s=>s.id===editingShiftId);
+  if(!shift){showToast('운행 중인 차량이 없습니다','error');return;}
+  const total = parseFloat(document.getElementById('t-ta').textContent.replace('$',''))||0;
+  const report = {
+    id: 'dr_'+Date.now(),
+    date: document.getElementById('dr-date').value,
+    agency, attraction:att,
+    pickup: document.getElementById('dr-pickup').value,
+    dropoff: document.getElementById('dr-dropoff').value,
+    kmStart: document.getElementById('dr-km-start').value,
+    kmEnd: document.getElementById('dr-km-end').value,
+    timeStart: document.getElementById('dr-start').value,
+    timeEnd: document.getElementById('dr-end').value,
+    guide: document.getElementById('dr-guide').value,
+    tourcode: document.getElementById('dr-tourcode').value,
+    total, dr: parseFloat(document.getElementById('t-dr').textContent.replace('$',''))||0,
+    remarks: document.getElementById('dr-remarks').value,
+  };
+  shift.dailyReports.push(report);
+  todayReports.push({...report, rego: shift.rego});
+  showToast(`✅ Daily Report 저장됨 ($${total})`,'success');
+  renderTodayReports();
+  renderStep2SavedReports();
+  // reset form
+  ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['f-svc','f-ot','f-trailer','f-hotel','f-dist','f-early','f-night','f-tip','f-toll','f-fuel','f-wash','f-meal','f-etc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('t-ta').textContent='$0';
+  document.getElementById('t-dr').textContent='$0';
+}
+
+function submitEndShift(){
+  const km = document.getElementById('end-km').value;
+  if(!km){showToast('종료 KM을 입력하세요','error');return;}
+  const shift = activeShifts.find(s=>s.id===editingShiftId);
+  if(!shift){return;}
+  shift.endKm = parseInt(km);
+  shift.endTime = document.getElementById('end-time').value;
+  shift.endFuel = document.getElementById('end-fuel').value;
+  shift.endChecks = getCheckResults('end-checks');
+  shift.damage = document.getElementById('end-damage').value;
+  shift.status = 'completed';
+  activeShifts = activeShifts.filter(s=>s.id!==editingShiftId);
+  showToast(`🏁 ${shift.rego} End of Shift 완료`,'success');
+  renderShiftSection();
+  renderTodayReports();
+  showPage('home');
+}
+
+function renderStep2SavedReports(){
+  const shift = activeShifts.find(s=>s.id===editingShiftId);
+  const el = document.getElementById('step2-saved-reports');
+  if(!shift||shift.dailyReports.length===0){el.innerHTML='';return;}
+  el.innerHTML = `
+    <div style="padding:0 12px 4px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-family:'DM Mono',monospace;">이번 운행 리포트 (${shift.dailyReports.length}건)</div>
+    ${shift.dailyReports.map(r=>`
+      <div class="report-item">
+        <div class="report-header">
+          <div><div style="font-weight:700;">${r.agency}</div><div style="font-size:12px;color:var(--muted);">${r.attraction}</div></div>
+          <div class="report-amount">$${r.total}</div>
+        </div>
+        <div class="report-detail">
+          ${r.timeStart?`<span class="report-tag">⏱ ${r.timeStart}–${r.timeEnd}</span>`:''}
+          ${r.guide?`<span class="report-tag">👤 ${r.guide}</span>`:''}
+        </div>
+      </div>`).join('')}`;
+}
+
+function renderShiftSummary(){
+  const shift = activeShifts.find(s=>s.id===editingShiftId);
+  const el = document.getElementById('shift-summary-content');
+  if(!shift||shift.dailyReports.length===0){
+    el.textContent='이번 운행에 Daily Report가 없습니다.';return;
+  }
+  const totalAmt = shift.dailyReports.reduce((a,r)=>a+r.total,0);
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+      <span>Daily Reports</span><span style="font-weight:700;">${shift.dailyReports.length}건</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+      <span>총 서비스 요금</span><span style="font-weight:700;color:var(--green);">$${totalAmt}</span>
+    </div>
+    ${shift.dailyReports.map(r=>`<div style="padding:4px 0;font-size:12px;color:var(--muted);">• ${r.agency} · ${r.attraction} · $${r.total}</div>`).join('')}`;
+}
+
+function renderTodayReports(){
+  const el = document.getElementById('today-reports-list');
+  document.getElementById('today-report-count').textContent = todayReports.length+'건';
+  if(todayReports.length===0){
+    el.innerHTML=`<div style="padding:0 12px 12px;text-align:center;color:var(--muted);font-size:13px;padding:20px;">오늘 제출된 리포트가 없습니다</div>`;
+    return;
+  }
+  el.innerHTML = todayReports.map(r=>`
+    <div class="report-item">
+      <div class="report-header">
+        <div>
+          <div style="font-weight:700;">${r.agency}</div>
+          <div style="font-size:12px;color:var(--muted);">${r.attraction} · ${r.rego}</div>
+        </div>
+        <div class="report-amount">$${r.total}</div>
+      </div>
+      <div class="report-detail">
+        ${r.timeStart?`<span class="report-tag">⏱ ${r.timeStart}–${r.timeEnd}</span>`:''}
+        ${r.guide?`<span class="report-tag">👤 ${r.guide}</span>`:''}
+        ${r.tourcode?`<span class="report-tag">🏷 ${r.tourcode}</span>`:''}
+      </div>
+    </div>`).join('');
+}
+
+// ═══════════════════════════════════════
+// RATE / CALC
+// ═══════════════════════════════════════
+function autoRate(){
+  const att = document.getElementById('dr-attraction').value;
+  if(!att||!RATES[att]) return;
+  const r = RATES[att];
+  document.getElementById('f-svc').value = r.ta||0;
+  calcTotal();
+  showToast(`${att} 요금 자동 입력: $${r.ta}`,'success');
+}
+
+function calcOT(){
+  const st=document.getElementById('dr-start').value, et=document.getElementById('dr-end').value;
+  if(!st||!et) return;
+  const [sh,sm]=st.split(':').map(Number),[eh,em]=et.split(':').map(Number);
+  let hrs=((eh*60+em)-(sh*60+sm))/60; if(hrs<0)hrs+=24;
+  const att=document.getElementById('dr-attraction').value;
+  const base=att&&att.includes('HALF')||att&&att.includes('TRANSFER')?5:att&&att.includes('CITY')?8:10;
+  const ot=Math.max(0,hrs-base);
+  if(ot>0){document.getElementById('f-ot').value=Math.round(ot*80);calcTotal();showToast(`OT ${ot.toFixed(1)}h 자동 계산`,'success');}
+}
+
+function calcTotal(){
+  const ids=['f-svc','f-ot','f-trailer','f-hotel','f-dist','f-early','f-night','f-tip','f-toll','f-fuel','f-wash','f-meal','f-etc'];
+  let ta=0; ids.forEach(id=>{ta+=parseFloat(document.getElementById(id)?.value||0);});
+  const att=document.getElementById('dr-attraction')?.value;
+  const dr=att&&RATES[att]?RATES[att].dr+(parseFloat(document.getElementById('f-ot')?.value||0)*0.5):0;
+  document.getElementById('t-ta').textContent='$'+ta.toFixed(0);
+  document.getElementById('t-dr').textContent='$'+dr.toFixed(0);
+}
+
+// ═══════════════════════════════════════
+// CONTACTS
+// ═══════════════════════════════════════
+function renderContacts(filter,search){
+  filter=filter||contactFilter; search=search||'';
+  const el=document.getElementById('contact-list');
+  let list=CONTACTS.filter(c=>(filter==='all'||c.type===filter)&&(c.name.toLowerCase().includes(search.toLowerCase())||c.phone.includes(search)));
+  const drivers=list.filter(c=>c.type==='driver');
+  const guides=list.filter(c=>c.type==='guide');
+  let html='';
+  if(drivers.length>0&&(filter==='all'||filter==='driver')){
+    html+=`<div class="contact-section"><div class="contact-label">드라이버 (${drivers.length})</div>${drivers.map(renderContactItem).join('')}</div>`;
+  }
+  if(guides.length>0&&(filter==='all'||filter==='guide')){
+    html+=`<div class="contact-section"><div class="contact-label">가이드 (${guides.length})</div>${guides.map(renderContactItem).join('')}</div>`;
+  }
+  el.innerHTML=html||`<div style="padding:40px;text-align:center;color:var(--muted);">검색 결과 없음</div>`;
+}
+
+function renderContactItem(c){
+  const warn=c.note.includes('만료');
+  return `<div class="contact-item">
+    <div class="contact-avatar ${c.type}" style="background:${c.type==='driver'?'#eff4ff':'#f0fdf4'};color:${c.color};">${c.initials}</div>
+    <div style="flex:1;min-width:0;">
+      <div class="contact-name">${c.name}</div>
+      <div class="contact-sub" style="${warn?'color:var(--red);font-weight:600;':''}">${c.note}</div>
+    </div>
+    <div class="contact-actions">
+      <button class="contact-btn contact-btn-call" onclick="callContact('${c.phone}')">📞</button>
+      <button class="contact-btn contact-btn-msg" onclick="smsContact('${c.phone}')">💬</button>
+    </div>
+  </div>`;
+}
+
+function filterContacts(type){
+  contactFilter=type;
+  ['all','driver','guide'].forEach(t=>{
+    const btn=document.getElementById('cf-'+t);
+    if(btn){btn.className=t===type?'btn btn-primary btn-sm':'btn btn-secondary btn-sm';}
+  });
+  renderContacts(type,document.getElementById('contact-search').value);
+}
+
+function searchContacts(){renderContacts(contactFilter,document.getElementById('contact-search').value);}
+function callContact(phone){showToast('📞 '+phone,'success');}
+function smsContact(phone){showToast('💬 '+phone);}
+
+// ═══════════════════════════════════════
+// ATTRACTIONS
+// ═══════════════════════════════════════
+function renderAttractions(){
+  const el=document.getElementById('attraction-list');
+  el.innerHTML=ATTRACTIONS.map((a,i)=>`
+    <div class="attraction-item">
+      <div class="attraction-header" onclick="toggleAttraction(${i})">
+        <div class="attraction-name">${a.emoji} ${a.name}</div>
+        <span id="att-arrow-${i}" style="font-size:18px;transition:transform 0.2s;">▸</span>
+      </div>
+      <div class="attraction-body" id="att-body-${i}">
+        ${a.info?`<div class="poi-info">${a.info}</div>`:''}
+        <div style="margin-top:10px;">
+          ${a.pois.map(p=>`
+            <div class="poi-item">
+              <div class="poi-icon">${p.icon}</div>
+              <div style="flex:1;min-width:0;">
+                <div class="poi-name">${p.name}</div>
+                <div class="poi-detail">${p.detail}</div>
+              </div>
+              <button class="poi-map-btn" onclick="openMap('${p.map}')">지도 →</button>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function toggleAttraction(i){
+  const body=document.getElementById('att-body-'+i);
+  const arrow=document.getElementById('att-arrow-'+i);
+  const open=body.classList.toggle('open');
+  arrow.style.transform=open?'rotate(90deg)':'rotate(0)';
+}
+
+function openMap(url){window.open(url,'_blank');}
+
+// ═══════════════════════════════════════
+// NOTICES
+// ═══════════════════════════════════════
+function renderNotices(){
+  const el=document.getElementById('notice-list');
+  el.innerHTML=NOTICES.map(n=>`
+    <div class="notice-item ${n.type}">
+      <div class="notice-badge badge-${n.type==='urgent'?'urgent':n.type==='info'?'info':'general'}">${n.type==='urgent'?'긴급':n.type==='info'?'안내':'공지'}</div>
+      <div class="notice-date">${n.date}</div>
+      <div class="notice-title">${n.title}</div>
+      <div class="notice-body">${n.body}</div>
+    </div>`).join('');
+  const hasUrgent=NOTICES.some(n=>n.type==='urgent');
+  document.getElementById('notif-dot').style.display=hasUrgent?'block':'none';
+}
+
+// ═══════════════════════════════════════
+// SALARY
+// ═══════════════════════════════════════
+function renderSalary(){
+  const el=document.getElementById('salary-list');
+  const meEl=document.getElementById('me-salary-detail');
+  const html=SALARY_DATA.slice(0,4).map(s=>`
+    <div class="salary-week">
+      <div class="salary-week-head">
+        <span class="salary-week-label">${s.week}</span>
+        <span class="pill ${s.balance>0?'pill-orange':'pill-green'}">${s.balance>0?'미지급':'완료'}</span>
+      </div>
+      <div class="salary-amounts">
+        <div class="salary-amt"><div class="salary-amt-label">발생</div><div class="salary-amt-val green">$${s.total}</div></div>
+        <div class="salary-amt"><div class="salary-amt-label">지급</div><div class="salary-amt-val accent">$${s.paid}</div></div>
+        <div class="salary-amt"><div class="salary-amt-label">잔액</div><div class="salary-amt-val ${s.balance>0?'':''}" style="color:${s.balance>0?'var(--orange)':'var(--muted)'};">$${s.balance}</div></div>
+      </div>
+    </div>`).join('');
+  if(el) el.innerHTML=html;
+  if(meEl) meEl.innerHTML=SALARY_DATA.map(s=>`
+    <div class="salary-week" style="margin:0 12px 8px;">
+      <div class="salary-week-head">
+        <span class="salary-week-label">${s.week}</span>
+        <span class="pill ${s.balance>0?'pill-orange':'pill-green'}">${s.balance>0?'미지급':'완료'}</span>
+      </div>
+      <div class="salary-amounts">
+        <div class="salary-amt"><div class="salary-amt-label">발생</div><div class="salary-amt-val green">$${s.total}</div></div>
+        <div class="salary-amt"><div class="salary-amt-label">지급</div><div class="salary-amt-val accent">$${s.paid}</div></div>
+        <div class="salary-amt"><div class="salary-amt-label">잔액</div><div class="salary-amt-val" style="color:${s.balance>0?'var(--orange)':'var(--muted)'};">$${s.balance}</div></div>
+      </div>
+    </div>`).join('');
+}
+
+// ═══════════════════════════════════════
+// MISC
+// ═══════════════════════════════════════
+function toggleCheck(el){el.classList.toggle('pass');el.classList.toggle('fail');}
+function getCheckResults(gridId){
+  return Array.from(document.querySelectorAll('#'+gridId+' .check-item')).map(el=>({name:el.querySelector('.check-name').textContent,pass:el.classList.contains('pass')}));
+}
+
+// Signature
+const sigCanvas=document.getElementById('sig-canvas');
+if(sigCanvas){
+  const ctx=sigCanvas.getContext('2d'); let drawing=false;
+  function pos(e){const r=sigCanvas.getBoundingClientRect(),t=e.touches?e.touches[0]:e;return{x:(t.clientX-r.left)*(sigCanvas.width/r.width),y:(t.clientY-r.top)*(sigCanvas.height/r.height)};}
+  sigCanvas.addEventListener('mousedown',e=>{drawing=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);});
+  sigCanvas.addEventListener('mousemove',e=>{if(!drawing)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.strokeStyle='#111827';ctx.lineWidth=2;ctx.lineCap='round';ctx.stroke();});
+  sigCanvas.addEventListener('mouseup',()=>drawing=false);
+  sigCanvas.addEventListener('touchstart',e=>{e.preventDefault();drawing=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);},{passive:false});
+  sigCanvas.addEventListener('touchmove',e=>{e.preventDefault();if(!drawing)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.strokeStyle='#111827';ctx.lineWidth=2;ctx.lineCap='round';ctx.stroke();},{passive:false});
+  sigCanvas.addEventListener('touchend',()=>drawing=false);
+  setTimeout(()=>{sigCanvas.width=sigCanvas.offsetWidth*window.devicePixelRatio;sigCanvas.height=sigCanvas.offsetHeight*window.devicePixelRatio;ctx.scale(window.devicePixelRatio,window.devicePixelRatio);},100);
+}
+function clearSig(){const c=document.getElementById('sig-canvas');const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);}
+
+function showToast(msg,type=''){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className='toast show '+(type||'');
+  setTimeout(()=>t.classList.remove('show'),2500);
+}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+function switchToAdmin(){showToast('관리자 앱으로 전환 중...');setTimeout(()=>window.location.href='admin.html',1000);}
+</script>
+</body>
+</html>
