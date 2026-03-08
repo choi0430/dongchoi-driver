@@ -208,7 +208,56 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
 </style>
 </head>
 <body>
-<div id="app">
+<!-- ══════ LOGIN SCREEN ══════ -->
+<div id="login-screen" style="
+  position:fixed;inset:0;background:linear-gradient(160deg,#0f172a 0%,#1e3a5f 100%);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  z-index:9999;padding:32px 24px;
+">
+  <div style="text-align:center;margin-bottom:36px;">
+    <div style="font-size:52px;margin-bottom:12px;">🚌</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:32px;font-weight:800;color:white;letter-spacing:2px;">DC FLEET</div>
+    <div style="font-size:13px;color:rgba(255,255,255,0.45);margin-top:4px;letter-spacing:1px;">DONG CHOI PTY LTD</div>
+  </div>
+
+  <div style="width:100%;max-width:320px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:24px;">
+    <div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:10px;font-weight:600;">드라이버 선택</div>
+    <select id="login-driver-select" style="
+      width:100%;padding:13px 14px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);
+      background:rgba(255,255,255,0.08);color:white;font-size:15px;font-weight:600;
+      font-family:'Noto Sans KR',sans-serif;outline:none;margin-bottom:16px;
+      appearance:none;-webkit-appearance:none;cursor:pointer;
+    ">
+      <option value="" style="background:#1e293b">— 선택하세요 —</option>
+      <option value="최동철|DC|1234" style="background:#1e293b">최동철 (Dong Cheol Choi)</option>
+      <option value="고한식|HK|2345" style="background:#1e293b">고한식 (Han Sik KO)</option>
+      <option value="박재민|JP|3456" style="background:#1e293b">박재민 (Jae Min PARK)</option>
+      <option value="유성훈|SY|4567" style="background:#1e293b">유성훈 (Sung Hun YOO)</option>
+      <option value="유정훈|JY|5678" style="background:#1e293b">유정훈 (Jeonghoon YOO)</option>
+      <option value="박진원|JW|6789" style="background:#1e293b">박진원 (Jin Weon Park)</option>
+      <option value="이우석|WL|7890" style="background:#1e293b">이우석 (Woo Suk LEE)</option>
+    </select>
+
+    <div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:10px;font-weight:600;">PIN 번호</div>
+    <div style="display:flex;gap:10px;margin-bottom:20px;" id="pin-dots">
+      <input type="password" maxlength="1" id="pin-0" inputmode="numeric" pattern="[0-9]" style="flex:1;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;" oninput="pinNext(this,0)" />
+      <input type="password" maxlength="1" id="pin-1" inputmode="numeric" pattern="[0-9]" style="flex:1;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;" oninput="pinNext(this,1)" />
+      <input type="password" maxlength="1" id="pin-2" inputmode="numeric" pattern="[0-9]" style="flex:1;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;" oninput="pinNext(this,2)" />
+      <input type="password" maxlength="1" id="pin-3" inputmode="numeric" pattern="[0-9]" style="flex:1;height:54px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:white;font-size:22px;font-weight:700;text-align:center;font-family:'DM Mono',monospace;outline:none;" oninput="pinNext(this,3)" />
+    </div>
+
+    <div id="login-error" style="color:#f87171;font-size:12px;text-align:center;margin-bottom:10px;display:none;">❌ PIN 번호가 틀렸습니다</div>
+
+    <button onclick="doLogin()" style="
+      width:100%;padding:15px;border-radius:12px;border:none;
+      background:linear-gradient(135deg,#2563eb,#1d4ed8);color:white;
+      font-size:16px;font-weight:700;font-family:'Noto Sans KR',sans-serif;
+      cursor:pointer;letter-spacing:0.5px;
+    ">🔐 로그인</button>
+  </div>
+</div>
+
+<div id="app" style="display:none;">
 
 <!-- TOP BAR -->
 <div class="topbar">
@@ -217,7 +266,19 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   </div>
   <div class="topbar-right">
     <div class="notif-btn" onclick="showPage('notices')">🔔<div class="notif-dot" id="notif-dot"></div></div>
-    <div class="user-pill" id="driver-name-pill">최동철</div>
+    <div class="user-pill" id="driver-name-pill" onclick="toggleLogoutMenu()" style="cursor:pointer;user-select:none;">최동철 ▾</div>
+  </div>
+</div>
+
+<!-- LOGOUT DROPDOWN -->
+<div id="logout-menu" style="
+  display:none;position:fixed;top:52px;right:12px;z-index:500;
+  background:white;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.15);
+  border:1px solid #e2e8f0;overflow:hidden;min-width:160px;
+">
+  <div id="logout-menu-name" style="padding:12px 16px;font-size:13px;font-weight:700;color:#0f172a;border-bottom:1px solid #f1f5f9;"></div>
+  <div onclick="doLogout()" style="padding:12px 16px;font-size:14px;color:#dc2626;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background='white'">
+    🚪 로그아웃
   </div>
 </div>
 
@@ -527,7 +588,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Noto S
   <div class="nav-item" onclick="showPage('attractions')" id="nav-attractions"><div class="nav-icon">📍</div>관광지</div>
   <div class="nav-item" onclick="showPage('me')" id="nav-me"><div class="nav-icon">👤</div>내 정보</div>
 </div>
-</div>
+</div><!-- /app -->
 
 <div class="toast" id="toast"></div>
 
@@ -634,6 +695,85 @@ let todayReports = [];
 let currentStep = 1;
 let editingShiftId = null;
 let contactFilter = 'all';
+
+// ═══════════════════════════════════════
+// LOGIN / LOGOUT
+// ═══════════════════════════════════════
+let currentDriver = null;
+
+function pinNext(el, idx) {
+  el.value = el.value.replace(/[^0-9]/g,'');
+  if(el.value && idx < 3) document.getElementById('pin-'+(idx+1)).focus();
+  if(idx === 3 && el.value) doLogin();
+}
+
+function doLogin() {
+  const sel = document.getElementById('login-driver-select').value;
+  if(!sel){ showLoginError('드라이버를 선택하세요'); return; }
+  const [name, initials, correctPin] = sel.split('|');
+  const pin = [0,1,2,3].map(i => document.getElementById('pin-'+i).value).join('');
+  if(pin.length < 4){ showLoginError('PIN 4자리를 입력하세요'); return; }
+  if(pin !== correctPin){ showLoginError('PIN 번호가 틀렸습니다'); return; }
+
+  currentDriver = { name, initials };
+
+  // 드라이버 이름 표시
+  document.getElementById('driver-name-pill').textContent = name + ' ▾';
+  document.getElementById('logout-menu-name').textContent = '👤 ' + name;
+
+  // 내 정보 페이지 업데이트
+  const meAvatar = document.querySelector('#page-me [style*="56px"]');
+  if(meAvatar) meAvatar.textContent = initials;
+  const meName = document.querySelector('#page-me [style*="font-size:17px"]');
+  if(meName) meName.textContent = name;
+
+  // 로그인 화면 숨기고 앱 표시
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+}
+
+function showLoginError(msg) {
+  const el = document.getElementById('login-error');
+  el.textContent = '❌ ' + msg;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 2500);
+  // PIN 초기화
+  [0,1,2,3].forEach(i => { document.getElementById('pin-'+i).value = ''; });
+  document.getElementById('pin-0').focus();
+}
+
+function doLogout() {
+  currentDriver = null;
+  // 상태 초기화
+  activeShifts = [];
+  todayReports = [];
+  editingShiftId = null;
+  // PIN/선택 초기화
+  document.getElementById('login-driver-select').value = '';
+  [0,1,2,3].forEach(i => { document.getElementById('pin-'+i).value = ''; });
+  document.getElementById('logout-menu').style.display = 'none';
+  // 홈으로 리셋
+  showPage('home');
+  renderShiftSection();
+  renderTodayReports();
+  // 로그인 화면 복귀
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
+function toggleLogoutMenu() {
+  const m = document.getElementById('logout-menu');
+  m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}
+
+// 외부 클릭시 메뉴 닫기
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('logout-menu');
+  const pill = document.getElementById('driver-name-pill');
+  if(menu && pill && !menu.contains(e.target) && !pill.contains(e.target)) {
+    menu.style.display = 'none';
+  }
+});
 
 // ═══════════════════════════════════════
 // INIT
