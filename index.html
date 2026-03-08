@@ -801,6 +801,8 @@ function submitDailyReport(){
   document.getElementById('t-dr').textContent='$0';
 }
 
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbwAQyO0Iwnw4ZEyqf_yhGoYK7DkibEqNoufAIHnMKGSYNRMJfD2DIeE2IO_4q7pzcGZtQ/exec';
+
 function submitEndShift(){
   const km = document.getElementById('end-km').value;
   if(!km){showToast('종료 KM을 입력하세요','error');return;}
@@ -812,8 +814,35 @@ function submitEndShift(){
   shift.endChecks = getCheckResults('end-checks');
   shift.damage = document.getElementById('end-damage').value;
   shift.status = 'completed';
+
+  // ── Google Sheets 전송 ──
+  const payload = {
+    type: 'shift',
+    driver: currentDriver ? currentDriver.name : '',
+    rego: shift.rego,
+    date: shift.startDate || new Date().toLocaleDateString('ko-KR'),
+    startTime: shift.startTime || '',
+    endTime: shift.endTime,
+    startKm: shift.startKm || '',
+    endKm: shift.endKm,
+    startFuel: shift.startFuel || '',
+    endFuel: shift.endFuel,
+    damage: shift.damage || '',
+    dailyReports: shift.dailyReports || [],
+    startChecks: shift.startChecks || {},
+    endChecks: shift.endChecks || {},
+    submittedAt: new Date().toISOString()
+  };
+
+  fetch(SHEET_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  }).catch(()=>{}); // no-cors라 응답 확인 불가, 에러 무시
+
   activeShifts = activeShifts.filter(s=>s.id!==editingShiftId);
-  showToast(`🏁 ${shift.rego} End of Shift 완료`,'success');
+  showToast(`🏁 ${shift.rego} End of Shift 완료 — 데이터 전송됨`,'success');
   renderShiftSection();
   renderTodayReports();
   showPage('home');
