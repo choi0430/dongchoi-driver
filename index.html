@@ -1706,8 +1706,8 @@ function startReport(){
 }
 
 function goStep(n){
-  if(n===1) setTimeout(()=>busMount('pre','bus-pre-mount'),100);
-  if(n===3) setTimeout(()=>busMount('end','bus-end-mount'),100);
+  if(n===1) setTimeout(()=>busMount('pre','bus-pre-mount'), 200);
+  if(n===3) setTimeout(()=>busMount('end','bus-end-mount'), 200);
   for(let i=1;i<=3;i++){
     document.getElementById('step-'+i).style.display = i===n?'block':'none';
     const sp = document.getElementById('sp'+i);
@@ -2380,24 +2380,24 @@ const _sigStates = {};
 
 function initSigCanvas(canvasId) {
   const c = document.getElementById(canvasId);
-  if (!c || _sigStates[canvasId]) return;
+  if (!c) return;
+  // 이미 초기화됐어도 크기가 0이면 재초기화 허용
+  if (_sigStates[canvasId] && c.width > 0) return;
   _sigStates[canvasId] = { drawing: false };
   const ctx = c.getContext('2d');
 
   function resize() {
     const dpr = window.devicePixelRatio || 1;
     const r   = c.getBoundingClientRect();
-    // 기존 그림 저장
-    const img = c.toDataURL();
+    if (r.width === 0) return; // 아직 display:none 상태면 건너뜀
     c.width  = Math.round(r.width  * dpr);
     c.height = Math.round(r.height * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // 기존 transform 초기화
     ctx.scale(dpr, dpr);
     ctx.strokeStyle = '#111827';
     ctx.lineWidth   = 2.5;
     ctx.lineCap     = 'round';
     ctx.lineJoin    = 'round';
-    // 그림 복원
-    const i = new Image(); i.onload = () => ctx.drawImage(i, 0, 0, r.width, r.height); i.src = img;
   }
   resize();
   window.addEventListener('resize', resize);
@@ -2462,7 +2462,10 @@ function onPreDeclChange() {
   const checked = document.getElementById('pre-decl-check').checked;
   const sec = document.getElementById('pre-sig-section');
   sec.style.display = checked ? 'block' : 'none';
-  if (checked) { setTimeout(() => initSigCanvas('pre-sig-canvas'), 100); }
+  if (checked) {
+    delete _sigStates['pre-sig-canvas']; // 강제 재초기화
+    requestAnimationFrame(() => requestAnimationFrame(() => initSigCanvas('pre-sig-canvas')));
+  }
 }
 
 // ─── End of Shift Checklist ───────────────────────
@@ -2478,7 +2481,10 @@ function onEosDeclChange() {
   const checked = document.getElementById('eos-decl-check').checked;
   const sec = document.getElementById('eos-sig-section');
   sec.style.display = checked ? 'block' : 'none';
-  if (checked) { setTimeout(() => initSigCanvas('sig-canvas'), 100); }
+  if (checked) {
+    delete _sigStates['sig-canvas']; // 강제 재초기화
+    requestAnimationFrame(() => requestAnimationFrame(() => initSigCanvas('sig-canvas')));
+  }
 }
 
 // ─── Patch: inject driver name into declarations ───
@@ -2517,10 +2523,10 @@ function busDiagramHTML(prefix) {
       <div class="bus-tab" onclick="busSwitchView('${prefix}','left')">LEFT</div>
       <div class="bus-tab" onclick="busSwitchView('${prefix}','right')">RIGHT</div>
     </div>
-    <div class="bus-view active" id="bus-${prefix}-front" onclick="busAddMarker(event,'${prefix}','front')"><img src="${BUS_IMGS.front}" draggable="false" style="pointer-events:none;"></div>
-    <div class="bus-view" id="bus-${prefix}-back"  onclick="busAddMarker(event,'${prefix}','back')"><img src="${BUS_IMGS.back}"  draggable="false" style="pointer-events:none;"></div>
-    <div class="bus-view" id="bus-${prefix}-left"  onclick="busAddMarker(event,'${prefix}','left')"><img src="${BUS_IMGS.left}"  draggable="false" style="pointer-events:none;"></div>
-    <div class="bus-view" id="bus-${prefix}-right" onclick="busAddMarker(event,'${prefix}','right')"><img src="${BUS_IMGS.right}" draggable="false" style="pointer-events:none;"></div>
+    <div class="bus-view active" id="bus-${prefix}-front"><img src="${BUS_IMGS.front}" draggable="false" style="pointer-events:none;"></div>
+    <div class="bus-view" id="bus-${prefix}-back"><img src="${BUS_IMGS.back}"   draggable="false" style="pointer-events:none;"></div>
+    <div class="bus-view" id="bus-${prefix}-left"><img src="${BUS_IMGS.left}"   draggable="false" style="pointer-events:none;"></div>
+    <div class="bus-view" id="bus-${prefix}-right"><img src="${BUS_IMGS.right}" draggable="false" style="pointer-events:none;"></div>
     <div class="bus-hint">🔴 손상 위치를 탭하여 마킹하세요</div>
     <div class="dmk-list" id="bus-${prefix}-list"></div>
   </div>`;
@@ -2589,22 +2595,35 @@ function busGetSummary(prefix) {
 function busMount(prefix, targetId) {
   const el = document.getElementById(targetId);
   if (!el) return;
+  if (el.dataset.mounted === prefix) return; // 이미 마운트됨
+  el.dataset.mounted = prefix;
   el.innerHTML = busDiagramHTML(prefix);
-  // 터치 이벤트 등록 (모바일 대응)
+
   ['front','back','left','right'].forEach(view => {
     const div = document.getElementById('bus-' + prefix + '-' + view);
     if (!div) return;
-    div.addEventListener('touchend', e => {
-      e.preventDefault();
-      const t   = e.changedTouches[0];
-      const r   = div.getBoundingClientRect();
-      const x   = ((t.clientX - r.left) / r.width  * 100).toFixed(1);
-      const y   = ((t.clientY - r.top)  / r.height * 100).toFixed(1);
-      const n   = BUS_MARKERS[prefix].length + 1;
+
+    function handleMark(clientX, clientY) {
+      const r = div.getBoundingClientRect();
+      const x = ((clientX - r.left) / r.width  * 100).toFixed(1);
+      const y = ((clientY - r.top)  / r.height * 100).toFixed(1);
+      const n = BUS_MARKERS[prefix].length + 1;
       BUS_MARKERS[prefix].push({ view, x: parseFloat(x), y: parseFloat(y), n });
       busRenderMarkers(prefix, view);
       busRenderList(prefix);
+    }
+
+    // 터치 (모바일)
+    div.addEventListener('touchend', e => {
+      e.preventDefault();
+      const t = e.changedTouches[0];
+      handleMark(t.clientX, t.clientY);
     }, { passive: false });
+
+    // 클릭 (PC)
+    div.addEventListener('click', e => {
+      handleMark(e.clientX, e.clientY);
+    });
   });
 }
 
