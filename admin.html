@@ -814,13 +814,27 @@ function saveM(){
     if(!gv('f1')){toast('가이드명 필수','er');return}
     const o={GuideID:gv('f0')||'SG'+(DB.G.length+1).toString().padStart(3,'0'),Guide_Name:gv('f1'),Mobile:gv('f2'),Agency:gv('f3'),Email:gv('f4'),Remarks:gv('f5')};
     ie?DB.G[idx]=o:DB.G.push(o);closeM();rG();
-  } else if(t==='PC'){
+  } else if(t==='NEWAG'){
+    if(!gv('fa')){toast('여행사명 필수','er');return}
+    const newAg=gv('fa');
+    if(!DB.PC[newAg]) DB.PC[newAg]={};
+    ST.curAg=newAg; closeM(); rP();
+  } else if(t==='PCR'){
     if(!gv('fa')){toast('코스명 필수','er');return}
-    const att=gv('fa');
-    const entry={max_hours:gn('fmh'),trailer:{'21':gn('ftf'),'25':gn('ftf'),'40':0,'50':0},'21':{rate:gn('r21'),ot:gn('o21')},'25':{rate:gn('r25'),ot:gn('o25')},'40':{rate:gn('r40'),ot:gn('o40')},'50':{rate:gn('r50'),ot:gn('o50')}};
-    if(ie&&idx!==att)delete DB.PC[idx];
-    DB.PC[att]=entry;closeM();rP();
-  } else if(t==='PD'){
+    const ag3=gv('fag')||ST.curAg;
+    const newAtt=gv('fa');
+    const oldAtt=(idx&&idx.att)||null;
+    if(!DB.PC[ag3]) DB.PC[ag3]={};
+    if(oldAtt&&oldAtt!==newAtt) delete DB.PC[ag3][oldAtt];
+    DB.PC[ag3][newAtt]={max_hours:gn('fmh'),'21':{rate:gn('r21'),ot:gn('o21')},'25':{rate:gn('r25'),ot:gn('o25')},'40':{rate:gn('r40'),ot:gn('o40')},'50':{rate:gn('r50'),ot:gn('o50')}};
+    ST.curAg=ag3; closeM(); rP();
+  } else if(t==='PDR'){
+    if(!gv('fa')){toast('코스명 필수','er');return}
+    const newAttPD=gv('fa');
+    const oldAttPD=(typeof idx==='string'&&idx)||null;
+    if(oldAttPD&&oldAttPD!==newAttPD) delete DB.PD[oldAttPD];
+    DB.PD[newAttPD]={max_hours:gn('fmh'),'21':{base:gn('b21'),ot:gn('o21')},'25':{base:gn('b25'),ot:gn('o25')},'40':{base:gn('b40'),ot:gn('o40')},'50':{base:gn('b50'),ot:gn('o50')}};
+    closeM(); rP(); else if(t==='PD'){
     if(!gv('fa')){toast('코스명 필수','er');return}
     const att=gv('fa');
     const entry={max_hours:gn('fmh'),'21':{base:gn('b21'),ot:gn('o21')},'25':{base:gn('b25'),ot:gn('o25')},'40':{base:gn('b40'),ot:gn('o40')},'50':{base:gn('b50'),ot:gn('o50')}};
@@ -846,6 +860,8 @@ function execDel(){
   const t=ST.dt,i=ST.di;
   if(['V','D','C','G','H'].includes(t))DB[t].splice(i,1);
   else if(t==='PC')delete DB.PC[i];
+  else if(t==='PCR'){if(i&&i.ag&&i.att&&DB.PC[i.ag])delete DB.PC[i.ag][i.att];}
+  else if(t==='PDR'){if(i&&DB.PD[i])delete DB.PD[i];}
   else if(t==='PD')delete DB.PD[i];
   document.getElementById('cdm').classList.remove('on');
   const rm={V:rV,D:rD,C:rC,G:rG,H:rH,PC:rP,PD:rP};
