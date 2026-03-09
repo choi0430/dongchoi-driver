@@ -474,18 +474,17 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
               <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
             </select>
           </div>
-          <div class="form-group" id="dr-seats-placeholder"></div>
-        </div>
-        <div class="form-group mb14">
-          <label class="form-label">관광지<span class="req">*</span></label>
-          <select class="form-select" id="dr-attraction" onchange="autoRate()">
-            <option value="">선택</option>
-            <option>AIRPORT TRANSFER</option><option>BLUE MOUNTAINS</option><option>CITY TOUR</option>
-            <option>CITY TOUR / HALF</option><option>CANBERRA</option><option>CENTRAL COAST</option>
-            <option>HUNTER VALLEY</option><option>JERVIS BAY</option><option>PORT STEPHENS</option>
-            <option>NEWCASTLE</option><option>WOLLONGONG</option><option>DINNER TRANSFER</option>
-            <option>HOTEL TRANSFER</option><option>CHARTER</option>
-          </select>
+          <div class="form-group">
+            <label class="form-label">관광지<span class="req">*</span></label>
+            <select class="form-select" id="dr-attraction" onchange="autoRate()">
+              <option value="">선택</option>
+              <option>AIRPORT TRANSFER</option><option>BLUE MOUNTAINS</option><option>CITY TOUR</option>
+              <option>CITY TOUR / HALF</option><option>CANBERRA</option><option>CENTRAL COAST</option>
+              <option>HUNTER VALLEY</option><option>JERVIS BAY</option><option>PORT STEPHENS</option>
+              <option>NEWCASTLE</option><option>WOLLONGONG</option><option>DINNER TRANSFER</option>
+              <option>HOTEL TRANSFER</option><option>CHARTER</option>
+            </select>
+          </div>
         </div>
         <div class="form-row mb14">
           <div class="form-group">
@@ -1618,7 +1617,17 @@ document.getElementById('app').style.display = 'none';
 document.getElementById('login-screen').style.display = 'flex';
 
 document.getElementById('today-label').textContent = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
-loadMasterData(); // Google Sheets 마스터 데이터 로드
+document.getElementById('pre-date').value = todayDisplay();
+  loadMasterData(); // Google Sheets 마스터 데이터 로드
+document.getElementById('dr-date').value = todayDisplay();
+
+initChecks();
+renderShiftSection();
+renderTodayReports();
+renderContacts();
+renderAttractions();
+renderNotices();
+renderSalary();
 
 function initChecks(){
   ['pre-checks','end-checks'].forEach(id=>{
@@ -1643,9 +1652,6 @@ function showPage(id){
 
 function startReport(){
   showPage('report');
-  // 날짜 항상 오늘로 재설정
-  const _pd=document.getElementById('pre-date'); if(_pd) _pd.value=todayDisplay();
-  const _dd=document.getElementById('dr-date');  if(_dd) _dd.value=todayDisplay();
   if(activeShifts.length===0){
     goStep(1);
   } else {
@@ -1745,12 +1751,9 @@ function addDailyReport(shiftId){
   editingShiftId = shiftId;
   showPage('report');
   goStep(2);
-  // 날짜 항상 오늘로 재설정
+  // 날짜 초기화 (매번 오늘 날짜로)
   const drDate = document.getElementById('dr-date');
-  if(drDate) drDate.value = todayDisplay();
-  // 인승 초기화
-  const drSeats = document.getElementById('dr-seats');
-  if(drSeats) drSeats.value = '';
+  if(drDate && !drDate.value) drDate.value = todayDisplay();
   updateStep2UI();
 }
 
@@ -2139,24 +2142,9 @@ function onDistSelectChange(){ calcTotal(); }
 
 // Pre-seats 변경 시 surcharge 옵션 업데이트
 document.addEventListener('DOMContentLoaded', ()=>{
-  // ── 날짜 초기화 ──
-  const _td = todayDisplay();
-  const _pdEl = document.getElementById('pre-date');
-  const _drEl = document.getElementById('dr-date');
-  if(_pdEl) _pdEl.value = _td;
-  if(_drEl) _drEl.value = _td;
-  
-  buildLoginSelect();
+  buildLoginSelect(); // CONTACTS 기반 드라이버 로그인 목록 자동 생성
   const drSeatsEl = document.getElementById('dr-seats');
   if(drSeatsEl) drSeatsEl.addEventListener('change', updateSurchargeOptions);
-  
-  initChecks();
-  renderShiftSection();
-  renderTodayReports();
-  renderContacts();
-  renderAttractions();
-  renderNotices();
-  renderSalary();
 });
 
 function getSvcValue(){
