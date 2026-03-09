@@ -893,11 +893,12 @@ async function loadMasterData() {
     const data = await res.json();
     setBar(70);
     if(data.ok && data.data) {
-      MASTER.drivers  = (data.data.M_Drivers  || []).filter(r => String(r.Active).toUpperCase() === 'Y');
-      MASTER.guides   = (data.data.M_Guides   || []).filter(r => String(r.Active).toUpperCase() === 'Y');
-      MASTER.vehicles = (data.data.M_Vehicles || []).filter(r => String(r.Active).toUpperCase() === 'Y');
-      MASTER.agencies = (data.data.M_Agencies || []).filter(r => String(r.Active).toUpperCase() === 'Y');
-      MASTER.courses  = (data.data.M_Courses  || []).filter(r => String(r.Active).toUpperCase() === 'Y');
+      MASTER.drivers  = (data.data.M_Drivers  || []);
+      MASTER.guides   = (data.data.M_Guides   || []);
+      MASTER.vehicles = (data.data.M_Vehicles || []);
+      MASTER.agencies = (data.data.M_Clients  || data.data.M_Agencies || []);
+      MASTER.courses  = (data.data.M_Courses  || []);
+      MASTER.hotels   = (data.data.M_Hotels   || []);
       setMsg('데이터 로드 완료 (가이드 ' + MASTER.guides.length + '명)');
     } else {
       setMsg('⚠️ 시트 연결 실패 — 기본 데이터 사용');
@@ -1029,14 +1030,52 @@ let GUIDE_LIST = [{"id": "SG001", "name": "AARON", "mobile": "0405907800"}, {"id
 // 사용자 추가 목록 (localStorage 저장)
 function getCustomHotels(){return JSON.parse(localStorage.getItem('custom_hotels')||'[]');}
 function getCustomGuides(){return JSON.parse(localStorage.getItem('custom_guides')||'[]');}
-function saveCustomHotel(name){const l=getCustomHotels();if(!l.includes(name)){l.push(name);localStorage.setItem('custom_hotels',JSON.stringify(l));}}
-function saveCustomGuide(name){const l=getCustomGuides();if(!l.includes(name)){l.push(name);localStorage.setItem('custom_guides',JSON.stringify(l));}}
+function saveCustomHotel(name){
+  const l=getCustomHotels();
+  if(!l.includes(name)){
+    l.push(name);
+    localStorage.setItem('custom_hotels',JSON.stringify(l));
+    // Sheets에도 저장
+    if(MASTER.hotels) MASTER.hotels.push({Hotel_Name:name,Phone:'',Address:'',Surcharge_Area:''});
+    fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'add_master',sheet:'M_Hotels',data:{Hotel_Name:name,Phone:'',Address:'',Surcharge_Area:''}})
+    }).catch(()=>{});
+  }
+}
+function saveCustomGuide(name){
+  const l=getCustomGuides();
+  if(!l.includes(name)){
+    l.push(name);
+    localStorage.setItem('custom_guides',JSON.stringify(l));
+    // Sheets에도 저장
+    const guideId='SG'+(Date.now().toString().slice(-4));
+    if(MASTER.guides) MASTER.guides.push({GuideID:guideId,Guide_Name:name,Mobile:'',Agency:'',Email:'',Remarks:''});
+    fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'add_master',sheet:'M_Guides',data:{GuideID:guideId,Guide_Name:name,Mobile:'',Agency:'',Email:'',Remarks:''}})
+    }).catch(()=>{});
+  }
+}
 
 // ─── Searchable Dropdown ───
 const SDD_CONFIG = {
-  pickup:  { list: ()=>[...HOTEL_LIST_OBJ,...getCustomHotels().map(n=>({name:n,sub:''}))], type:'hotel' },
-  dropoff: { list: ()=>[...HOTEL_LIST_OBJ,...getCustomHotels().map(n=>({name:n,sub:''}))], type:'hotel' },
-  guide:   { list: ()=>[...GUIDE_LIST.map(g=>({name:g.name,sub:g.mobile})),...getCustomGuides().map(n=>({name:n,sub:''}))], type:'guide' }
+  pickup:  { list: ()=>{
+    const base = MASTER.hotels?.length
+      ? MASTER.hotels.map(h=>({name:h.Hotel_Name,sub:h.Address||''}))
+      : HOTEL_LIST_OBJ;
+    return [...base,...getCustomHotels().map(n=>({name:n,sub:''}))];
+  }, type:'hotel' },
+  dropoff: { list: ()=>{
+    const base = MASTER.hotels?.length
+      ? MASTER.hotels.map(h=>({name:h.Hotel_Name,sub:h.Address||''}))
+      : HOTEL_LIST_OBJ;
+    return [...base,...getCustomHotels().map(n=>({name:n,sub:''}))];
+  }, type:'hotel' },
+  guide:   { list: ()=>{
+    const base = MASTER.guides?.length
+      ? MASTER.guides.map(g=>({name:g.Guide_Name||g.name||'',sub:g.Mobile||g.mobile||''}))
+      : GUIDE_LIST.map(g=>({name:g.name,sub:g.mobile}));
+    return [...base,...getCustomGuides().map(n=>({name:n,sub:''}))];
+  }, type:'guide' }
 };
 
 function sddOpen(key) {

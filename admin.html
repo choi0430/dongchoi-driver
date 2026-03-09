@@ -389,6 +389,7 @@ const DB = {
 // ═══════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
 let ST = {pin:'',mt:null,mi:null,dt:null,di:null,ptype:'client',curAg:null};
 
 // ═══════════════════════════════════════
@@ -404,8 +405,8 @@ function doLogin(){
   document.getElementById('sl').classList.remove('on');
   document.getElementById('sm').classList.add('on');
   document.getElementById('ddate').textContent=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
-  rDash();
-  toast('관리자 접속 완료 ✓','ok');
+  toast('데이터 로딩 중...','ok');
+  loadAllFromSheets();
 }
 
 // ═══════════════════════════════════════
@@ -806,30 +807,49 @@ function openM(type,idx){
 // ═══════════════════════════════════════
 function saveM(){
   const t=ST.mt,idx=ST.mi,ie=idx!==null;
+  let sheetName='', obj={};
+
   if(t==='V'){
     if(!gv('f0')){toast('차량번호 필수','er');return}
-    const o={Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),'Manufacture Date':gn('f4'),Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:gv('f7'),HVIS_Date:gv('f8'),Current_KM:gn('f9'),Last_Service_KM:gn('f10'),Service_Interval:gn('f11')||10000,VIN:gv('f12'),'Engine Number':gv('f13'),Accreditation:gv('f14')};
-    ie?DB.V[idx]=o:DB.V.push(o);closeM();rV();
+    sheetName='M_Vehicles';
+    obj={Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),Manufacture_Date:gn('f4'),
+         Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:gv('f7'),HVIS_Date:gv('f8'),
+         Current_KM:gn('f9'),Last_Service_KM:gn('f10'),Service_Interval:gn('f11')||10000,
+         VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14')};
+    ie?DB.V[idx]=obj:DB.V.push(obj);
   } else if(t==='D'){
-    if(!gv('f0')||!gv('f2')){toast('이름·이메일 필수','er');return}
-    const o={Name_EN:gv('f0'),Name_KR:gv('f1'),DriverID:gv('f2'),Mobile_1:gv('f3'),'NEXT OF KIN':gv('f4'),License_Class:gv('f5'),'License_#':gv('f6'),License_Expiry:gv('f7'),'Authority_#':gv('f8'),Authority_Expiry:gv('f9'),Address:gv('f10'),Suburb:gv('f11'),Bank_Name:gv('f12'),BSB:gv('f13'),Account_Number:gv('f14'),PIN:gv('f15')};
-    ie?DB.D[idx]=o:DB.D.push(o);
-    localStorage.setItem('dc_drivers',JSON.stringify(DB.D));
-    closeM();rD();
+    if(!gv('f0')){toast('이름 필수','er');return}
+    sheetName='M_Drivers';
+    obj={Name_EN:gv('f0'),Name_KR:gv('f1'),DriverID:gv('f2'),Mobile_1:gv('f3'),NEXT_OF_KIN:gv('f4'),
+         License_Class:gv('f5'),License_No:gv('f6'),License_Expiry:gv('f7'),
+         Authority_No:gv('f8'),Authority_Expiry:gv('f9'),
+         Address:gv('f10'),Suburb:gv('f11'),Bank_Name:gv('f12'),BSB:gv('f13'),
+         Account_Number:gv('f14'),PIN:gv('f15')};
+    ie?DB.D[idx]=obj:DB.D.push(obj);
   } else if(t==='C'){
     if(!gv('f0')){toast('여행사명 필수','er');return}
-    const o={Name:gv('f0'),ClientID:gv('f1')||Date.now().toString(16).slice(-8),Mobile:gv('f2'),Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6')};
-    ie?DB.C[idx]=o:DB.C.push(o);closeM();rC();
+    sheetName='M_Clients';
+    obj={Name:gv('f0'),ClientID:gv('f1')||Date.now().toString(16).slice(-8),
+         Mobile:gv('f2'),Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6')};
+    ie?DB.C[idx]=obj:DB.C.push(obj);
   } else if(t==='G'){
     if(!gv('f1')){toast('가이드명 필수','er');return}
-    const o={GuideID:gv('f0')||'SG'+(DB.G.length+1).toString().padStart(3,'0'),Guide_Name:gv('f1'),Mobile:gv('f2'),Agency:gv('f3'),Email:gv('f4'),Remarks:gv('f5')};
-    ie?DB.G[idx]=o:DB.G.push(o);closeM();rG();
+    sheetName='M_Guides';
+    obj={GuideID:gv('f0')||'SG'+(DB.G.length+1).toString().padStart(3,'0'),
+         Guide_Name:gv('f1'),Mobile:gv('f2'),Agency:gv('f3'),Email:gv('f4'),Remarks:gv('f5')};
+    ie?DB.G[idx]=obj:DB.G.push(obj);
+  } else if(t==='H'){
+    if(!gv('f0')){toast('호텔명 필수','er');return}
+    sheetName='M_Hotels';
+    obj={Hotel_Name:gv('f0'),Phone:gv('f1'),Address:gv('f2'),Surcharge_Area:gv('f3')||''};
+    ie?DB.H[idx]=obj:DB.H.push(obj);
   } else if(t==='AG'){
     let agName=gv('fagname');
     if(agName==='__new__') agName=gv('fnewname');
     if(!agName){toast('여행사를 선택하세요','er');return}
     if(!DB.PC[agName])DB.PC[agName]={};
     closeM();rP();selAg(agName);toast(`${agName} 요금표 생성됨`,'ok');
+    return;
   } else if(t==='PC'){
     if(!gv('fa')){toast('코스명 필수','er');return}
     const ag=ST.curAg;
@@ -838,19 +858,26 @@ function saveM(){
     if(!DB.PC[ag])DB.PC[ag]={};
     const entry={max_hours:gn('fmh'),'21':{rate:gn('r21'),ot:gn('o21')},'25':{rate:gn('r25'),ot:gn('o25')},'40':{rate:gn('r40'),ot:gn('o40')},'50':{rate:gn('r50'),ot:gn('o50')}};
     if(ie&&idx!==att)delete DB.PC[ag][idx];
-    DB.PC[ag][att]=entry;closeM();rPC(ag);
+    DB.PC[ag][att]=entry;
+    savePCToSheets();
+    closeM();rPC(ag);
+    toast((ie?'수정':'추가')+' 완료 ✓','ok');
+    return;
   } else if(t==='PD'){
     if(!gv('fa')){toast('코스명 필수','er');return}
     const att=gv('fa');
     const entry={max_hours:gn('fmh'),'21':{base:gn('b21'),ot:gn('o21')},'25':{base:gn('b25'),ot:gn('o25')},'40':{base:gn('b40'),ot:gn('o40')},'50':{base:gn('b50'),ot:gn('o50')}};
     if(ie&&idx!==att)delete DB.PD[idx];
-    DB.PD[att]=entry;closeM();rPD();
-  } else if(t==='H'){
-    if(!gv('f0')){toast('호텔명 필수','er');return}
-    const o={Hotel_Name:gv('f0'),Phone:gv('f1'),Address:gv('f2'),Surcharge_Area:gv('f3')||null};
-    ie?DB.H[idx]=o:DB.H.push(o);closeM();rH();
+    DB.PD[att]=entry;
+    savePDToSheets();
+    closeM();rPD();
+    toast((ie?'수정':'추가')+' 완료 ✓','ok');
+    return;
   }
-  toast((ie?'수정':'추가')+' 완료 ✓','ok');
+
+  if(!sheetName){toast('저장 실패','er');return}
+  closeM();
+  apiSaveMaster(sheetName, obj, ie, idx);
 }
 
 // ═══════════════════════════════════════
@@ -859,12 +886,24 @@ function saveM(){
 function cDel(t,i,nm){ST.dt=t;ST.di=i;document.getElementById('cdmsg').textContent=`"${nm}" 을(를) 삭제하시겠습니까?`;document.getElementById('cdm').classList.add('on');}
 function execDel(){
   const t=ST.dt,i=ST.di;
-  if(['V','D','C','G','H'].includes(t))DB[t].splice(i,1);
-  else if(t==='PC'){delete DB.PC[ST.curAg]?.[i];rPC(ST.curAg);}
-  else if(t==='PD'){delete DB.PD[i];rPD();}
   document.getElementById('cdm').classList.remove('on');
-  const rm={V:rV,D:rD,C:rC,G:rG,H:rH};
-  rm[t]?.();rDash();toast('삭제 완료','ok');
+  const sheetMap={V:'M_Vehicles',D:'M_Drivers',C:'M_Clients',G:'M_Guides',H:'M_Hotels'};
+  const renderMap={V:rV,D:rD,C:rC,G:rG,H:rH};
+
+  if(['V','D','C','G','H'].includes(t)){
+    DB[t].splice(i,1);
+    renderMap[t]?.();rDash();
+    apiDeleteMaster(sheetMap[t], i+2); // +2: 헤더행(1) + 0-based→1-based
+  } else if(t==='PC'){
+    delete DB.PC[ST.curAg]?.[i];
+    savePCToSheets();
+    rPC(ST.curAg);
+  } else if(t==='PD'){
+    delete DB.PD[i];
+    savePDToSheets();
+    rPD();
+  }
+  toast('삭제 완료','ok');
 }
 
 function closeM(){document.getElementById('modal').classList.remove('on')}
@@ -896,6 +935,160 @@ function saveAdminPin(){
   localStorage.setItem('admin_pin',nw);
   closePinModal();
   toast('✅ 관리자 PIN이 변경되었습니다','ok');
+}
+
+
+// ═══════════════════════════════════════
+// GOOGLE SHEETS API 연동
+// ═══════════════════════════════════════
+
+async function loadAllFromSheets(){
+  try {
+    toast('📡 Google Sheets 로딩 중...','ok');
+    const res = await fetch(SCRIPT_URL + '?action=get_all_masters');
+    const json = await res.json();
+    if(!json.ok){ toast('데이터 로드 실패','er'); rDash(); return; }
+    const d = json.data;
+
+    // M_Vehicles → DB.V
+    if(d.M_Vehicles?.length) DB.V = d.M_Vehicles.map(r=>({
+      Rego:r.Rego,Current_Status:r.Current_Status,Make:r.Make,Model:r.Model,
+      'Manufacture Date':r.Manufacture_Date,Capacity:r.Capacity,Owner:r.Owner,
+      Rego_Date:r.Rego_Date,HVIS_Date:r.HVIS_Date,Current_KM:r.Current_KM,
+      Last_Service_KM:r.Last_Service_KM,Service_Interval:r.Service_Interval||10000,
+      VIN:r.VIN,'Engine Number':r.Engine_Number,Accreditation:r.Accreditation
+    }));
+
+    // M_Drivers → DB.D
+    if(d.M_Drivers?.length) DB.D = d.M_Drivers.map(r=>({
+      Name_EN:r.Name_EN,Name_KR:r.Name_KR,DriverID:r.DriverID,Mobile_1:r.Mobile_1,
+      'NEXT OF KIN':r.NEXT_OF_KIN,License_Class:r.License_Class,
+      'License_#':r.License_No,License_Expiry:r.License_Expiry,
+      'Authority_#':r.Authority_No,Authority_Expiry:r.Authority_Expiry,
+      Address:r.Address,Suburb:r.Suburb,Bank_Name:r.Bank_Name,
+      BSB:r.BSB,Account_Number:r.Account_Number,PIN:r.PIN
+    }));
+
+    // M_Clients → DB.C
+    if(d.M_Clients?.length) DB.C = d.M_Clients.map(r=>({
+      Name:r.Name,ClientID:r.ClientID,Mobile:r.Mobile,Address:r.Address,
+      Bank_Name:r.Bank_Name,BSB:r.BSB,Account_Number:r.Account_Number
+    }));
+
+    // M_Guides → DB.G
+    if(d.M_Guides?.length) DB.G = d.M_Guides.map(r=>({
+      GuideID:r.GuideID,Guide_Name:r.Guide_Name,Mobile:r.Mobile,
+      Agency:r.Agency,Email:r.Email,Remarks:r.Remarks
+    }));
+
+    // M_Hotels → DB.H
+    if(d.M_Hotels?.length) DB.H = d.M_Hotels.map(r=>({
+      Hotel_Name:r.Hotel_Name,Phone:r.Phone,Address:r.Address,Surcharge_Area:r.Surcharge_Area
+    }));
+
+    // M_PriceClient → DB.PC
+    if(d.M_PriceClient?.length){
+      DB.PC={};
+      d.M_PriceClient.forEach(r=>{
+        if(!DB.PC[r.Agency])DB.PC[r.Agency]={};
+        DB.PC[r.Agency][r.Course]={
+          max_hours:r.max_hours,
+          '21':{rate:r.seats_21_rate,ot:r.seats_21_ot},
+          '25':{rate:r.seats_25_rate,ot:r.seats_25_ot},
+          '40':{rate:r.seats_40_rate,ot:r.seats_40_ot},
+          '50':{rate:r.seats_50_rate,ot:r.seats_50_ot}
+        };
+      });
+    }
+
+    // M_PriceDriver → DB.PD
+    if(d.M_PriceDriver?.length){
+      DB.PD={};
+      d.M_PriceDriver.forEach(r=>{
+        DB.PD[r.Course]={
+          max_hours:r.max_hours,
+          '21':{base:r.seats_21_base,ot:r.seats_21_ot},
+          '25':{base:r.seats_25_base,ot:r.seats_25_ot},
+          '40':{base:r.seats_40_base,ot:r.seats_40_ot},
+          '50':{base:r.seats_50_base,ot:r.seats_50_ot}
+        };
+      });
+    }
+
+    document.getElementById('sl').classList.remove('on');
+    document.getElementById('sm').classList.add('on');
+    document.getElementById('ddate').textContent=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
+    rDash();
+    toast('✅ 데이터 로드 완료','ok');
+  } catch(e){
+    console.error(e);
+    // 실패해도 기존 하드코딩 데이터로 진행
+    document.getElementById('sl').classList.remove('on');
+    document.getElementById('sm').classList.add('on');
+    document.getElementById('ddate').textContent=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
+    rDash();
+    toast('⚠️ 오프라인 모드 (Sheets 연결 실패)','er');
+  }
+}
+
+async function apiSaveMaster(sheetName, obj, isEdit, idx){
+  try {
+    const renderMap={M_Vehicles:rV,M_Drivers:rD,M_Clients:rC,M_Guides:rG,M_Hotels:rH};
+    renderMap[sheetName]?.();rDash();
+    toast((isEdit?'수정':'추가')+' 완료 ✓','ok');
+
+    const action = isEdit ? 'update_master' : 'add_master';
+    const body = {action, sheet:sheetName, data:obj};
+    if(isEdit) body.rowIndex = idx + 2; // 헤더(1) + 0-based
+
+    await fetch(SCRIPT_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify(body)
+    });
+  } catch(e){ console.error('apiSaveMaster error:', e); }
+}
+
+async function apiDeleteMaster(sheetName, rowIndex){
+  try {
+    await fetch(SCRIPT_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'delete_master', sheet:sheetName, rowIndex})
+    });
+  } catch(e){ console.error('apiDeleteMaster error:', e); }
+}
+
+async function savePCToSheets(){
+  try {
+    const rows=[];
+    Object.entries(DB.PC).forEach(([ag,courses])=>{
+      Object.entries(courses).forEach(([course,v])=>{
+        rows.push({Agency:ag,Course:course,max_hours:v.max_hours,
+          seats_21_rate:v['21']?.rate,seats_21_ot:v['21']?.ot,
+          seats_25_rate:v['25']?.rate,seats_25_ot:v['25']?.ot,
+          seats_40_rate:v['40']?.rate,seats_40_ot:v['40']?.ot,
+          seats_50_rate:v['50']?.rate,seats_50_ot:v['50']?.ot
+        });
+      });
+    });
+    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'replace_master',sheet:'M_PriceClient',rows})});
+  } catch(e){ console.error('savePCToSheets error:',e); }
+}
+
+async function savePDToSheets(){
+  try {
+    const rows=Object.entries(DB.PD).map(([course,v])=>({
+      Course:course,max_hours:v.max_hours,
+      seats_21_base:v['21']?.base,seats_21_ot:v['21']?.ot,
+      seats_25_base:v['25']?.base,seats_25_ot:v['25']?.ot,
+      seats_40_base:v['40']?.base,seats_40_ot:v['40']?.ot,
+      seats_50_base:v['50']?.base,seats_50_ot:v['50']?.ot
+    }));
+    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'replace_master',sheet:'M_PriceDriver',rows})});
+  } catch(e){ console.error('savePDToSheets error:',e); }
 }
 
 </script>
