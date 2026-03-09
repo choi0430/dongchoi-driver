@@ -1502,6 +1502,20 @@ function completePre(){
   activeShifts.push(shift);
   editingShiftId = id;
   showToast(`✅ ${rego} Pre Departure 완료 Complete`,'success');
+  // ── Google Sheets 자동 전송 (Pre Departure) ──
+  postToSheets('save_predeparture', {
+    Driver: currentDriver?.name || '',
+    Date: shift.date,
+    Rego: rego,
+    Seats: shift.seats,
+    Start_KM: shift.startKm,
+    Fuel: shift.fuel,
+    Start_Time: shift.startTime,
+    Check_Results: JSON.stringify(shift.preChecks),
+    Remarks: shift.remarks
+  }).then(r => {
+    if(r?.ok) console.log('Pre Departure → Sheets OK');
+  });
   renderShiftSection();
   goStep(2);
   updateStep2UI();
@@ -1560,11 +1574,39 @@ function submitDailyReport(){
   shift.dailyReports.push(report);
   todayReports.push({...report, rego: shift.rego, driver: currentDriver?.name||''});
   showToast(`✅ Daily Report 저장됨 ($${total})`,'success');
-  // 드라이버별 저장
+  // 드라이버별 localStorage 저장
   if(currentDriver?.name) {
     localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
     localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
   }
+  // ── Google Sheets 자동 전송 ──
+  postToSheets('save_report', {
+    Driver: currentDriver?.name || '',
+    Date: report.date,
+    Rego: shift.rego,
+    Agency: report.agency,
+    Attraction: report.attraction,
+    Pickup: report.pickup,
+    Dropoff: report.dropoff,
+    KM_Start: report.kmStart,
+    KM_End: report.kmEnd,
+    Time_Start: report.timeStart,
+    Time_End: report.timeEnd,
+    Guide: report.guide,
+    Tour_Code: report.tourcode,
+    SVC_Label: report.svcLabel,
+    SVC_Charge: report.svcCharge,
+    Hotel_Surcharge: report.hotelSurcharge,
+    Dist_Surcharge: report.distSurcharge,
+    OT: report.ot,
+    Trailer: report.trailer,
+    Total_TA: report.total,
+    DR_Cost: report.dr,
+    Remarks: report.remarks
+  }).then(r => {
+    if(r?.ok) showToast('☁️ Google Sheets 저장 완료','success');
+    else console.warn('Sheets 저장 실패:', r);
+  });
   renderTodayReports();
   renderStep2SavedReports();
   // reset form
@@ -1650,15 +1692,21 @@ function submitEndShift(){
     submittedAt: new Date().toISOString()
   };
 
-  fetch(SHEET_URL, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload)
-  }).catch(()=>{}); // no-cors라 응답 확인 불가, 에러 무시
+  // ── Google Sheets 자동 전송 (End of Shift) ──
+  postToSheets('save_endofshift', {
+    Driver: currentDriver?.name || '',
+    Date: shift.date || new Date().toLocaleDateString('en-AU'),
+    Rego: shift.rego,
+    End_KM: shift.endKm,
+    End_Time: shift.endTime,
+    Fuel_End: shift.endFuel,
+    Remarks: shift.damage || ''
+  }).then(r => {
+    if(r?.ok) showToast('☁️ Google Sheets 저장 완료','success');
+  });
 
   activeShifts = activeShifts.filter(s=>s.id!==editingShiftId);
-  showToast(`🏁 ${shift.rego} End of Shift 완료 — 데이터 전송됨`,'success');
+  showToast(`🏁 ${shift.rego} End of Shift 완료`,'success');
   // 드라이버별 저장
   if(currentDriver?.name) {
     localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
