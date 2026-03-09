@@ -1099,6 +1099,10 @@ function doLogin() {
 
   currentDriver = { name, initials, englishName: englishName || name };
 
+  // ── 드라이버별 localStorage 데이터 로드 ──
+  try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
+  try { todayReports = JSON.parse(localStorage.getItem('reports_'+name)||'[]'); } catch(e){ todayReports=[]; }
+
   // 드라이버 이름 표시
   document.getElementById('driver-name-pill').textContent = name + ' ▾';
   document.getElementById('logout-menu-name').textContent = '👤 ' + name;
@@ -1114,6 +1118,10 @@ function doLogin() {
   document.getElementById('app').style.display = 'flex';
   // 서약서에 드라이버 이름 주입
   injectDeclName(name, englishName);
+  // 데이터 렌더링 갱신
+  renderShiftSection();
+  renderTodayReports();
+  renderSalary();
 }
 
 function showLoginError(msg) {
@@ -1127,6 +1135,11 @@ function showLoginError(msg) {
 }
 
 function doLogout() {
+  // 로그아웃 전 현재 드라이버 데이터 저장
+  if(currentDriver?.name) {
+    localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+    localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
+  }
   currentDriver = null;
   // 상태 초기화
   activeShifts = [];
@@ -1335,8 +1348,13 @@ function submitDailyReport(){
     remarks: document.getElementById('dr-remarks').value,
   };
   shift.dailyReports.push(report);
-  todayReports.push({...report, rego: shift.rego});
+  todayReports.push({...report, rego: shift.rego, driver: currentDriver?.name||''});
   showToast(`✅ Daily Report 저장됨 ($${total})`,'success');
+  // 드라이버별 저장
+  if(currentDriver?.name) {
+    localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+    localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
+  }
   renderTodayReports();
   renderStep2SavedReports();
   // reset form
@@ -1431,6 +1449,11 @@ function submitEndShift(){
 
   activeShifts = activeShifts.filter(s=>s.id!==editingShiftId);
   showToast(`🏁 ${shift.rego} End of Shift 완료 — 데이터 전송됨`,'success');
+  // 드라이버별 저장
+  if(currentDriver?.name) {
+    localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+    localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
+  }
   renderShiftSection();
   renderTodayReports();
   showPage('home');
@@ -1474,12 +1497,13 @@ function renderShiftSummary(){
 
 function renderTodayReports(){
   const el = document.getElementById('today-reports-list');
-  document.getElementById('today-report-count').textContent = todayReports.length+'건';
-  if(todayReports.length===0){
+  const myReports = todayReports.filter(r => !r.driver || r.driver === (currentDriver?.name||''));
+  document.getElementById('today-report-count').textContent = myReports.length+'건';
+  if(myReports.length===0){
     el.innerHTML=`<div style="padding:0 12px 12px;text-align:center;color:var(--muted);font-size:13px;padding:20px;">오늘 제출된 리포트가 없습니다</div>`;
     return;
   }
-  el.innerHTML = todayReports.map(r=>`
+  el.innerHTML = myReports.map(r=>`
     <div class="report-item">
       <div class="report-header">
         <div>
@@ -1675,12 +1699,15 @@ function renderContacts(filter,search){
 }
 
 function renderContactItem(c){
-  const warn=c.note.includes('만료');
+  const isOtherDriver = c.type==='driver' && c.name !== (currentDriver?.name||'');
+  const warn = !isOtherDriver && c.note.includes('만료');
+  // 다른 드라이버는 이름·연락처만 표시 (비용·급여 관련 내용 숨김)
+  const noteText = isOtherDriver ? c.note.replace(/\$[\d,]+/g,'').replace(/급여.*/i,'').trim() : c.note;
   return `<div class="contact-item">
-    <div class="contact-avatar ${c.type}" style="background:${c.type==='driver'?'#eff4ff':'#f0fdf4'};color:${c.color};">${c.initials}</div>
+    <div class="contact-avatar ${c.type}" style="background:${c.type==='driver'?'#eff4ff':'#f0fdf4'};color:${c.color};">
     <div style="flex:1;min-width:0;">
       <div class="contact-name">${c.name}</div>
-      <div class="contact-sub" style="${warn?'color:var(--red);font-weight:600;':''}">${c.note}</div>
+      <div class="contact-sub" style="${warn?'color:var(--red);font-weight:600;':''}">${noteText}</div>
     </div>
     <div class="contact-actions">
       <button class="contact-btn contact-btn-call" onclick="callContact('${c.phone}')">📞</button>
