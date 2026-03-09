@@ -202,6 +202,16 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pprc','nprc');rP()"><div style="font-size:20px;margin-bottom:4px">💰</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Price Tables</div><div style="font-size:11px;color:var(--t3)">여행사별 요금 관리</div></div>
     <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('phtl','nhtl');rH()"><div style="font-size:20px;margin-bottom:4px">🏨</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Hotel</div><div style="font-size:11px;color:var(--t3)" id="qh">—</div></div>
   </div>
+
+  <div class="shd" style="margin-top:14px"><div class="stl">⚙️ 설정</div></div>
+  <div class="crd" style="padding:16px;cursor:pointer;display:flex;align-items:center;gap:14px" onclick="openChangePinModal()">
+    <div style="font-size:28px">🔑</div>
+    <div>
+      <div style="font-family:var(--fd);font-size:14px;font-weight:700">관리자 PIN 변경</div>
+      <div style="font-size:11px;color:var(--t3);margin-top:2px">Admin password change</div>
+    </div>
+    <div style="margin-left:auto;font-size:18px;color:var(--t3)">›</div>
+  </div>
 </div>
 
 <!-- VEHICLE -->
@@ -387,7 +397,8 @@ function PPD(){ST.pin=ST.pin.slice(0,-1);upP()}
 function upP(){for(let i=0;i<4;i++)document.getElementById('p'+i).classList.toggle('on',i<ST.pin.length)}
 function doLogin(){
   if(!document.getElementById('la').value){toast('계정 선택','er');return}
-  if(ST.pin!=='0000'){toast('PIN 오류','er');ST.pin='';upP();return}
+  const savedPin = localStorage.getItem('admin_pin')||'0000';
+  if(ST.pin!==savedPin){toast('PIN 오류','er');ST.pin='';upP();return}
   document.getElementById('sl').classList.remove('on');
   document.getElementById('sm').classList.add('on');
   document.getElementById('ddate').textContent=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
@@ -860,6 +871,57 @@ function toast(msg,type=''){
   el.textContent=msg;el.className='toast on '+type;
   clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('on'),2400);
 }
+
+// ── 관리자 PIN 변경 ──
+function openChangePinModal(){
+  document.getElementById('pin-current').value='';
+  document.getElementById('pin-new').value='';
+  document.getElementById('pin-confirm').value='';
+  document.getElementById('pin-modal').style.display='flex';
+  setTimeout(()=>document.getElementById('pin-current').focus(),100);
+}
+function closePinModal(){
+  document.getElementById('pin-modal').style.display='none';
+}
+function saveAdminPin(){
+  const cur  = document.getElementById('pin-current').value.trim();
+  const nw   = document.getElementById('pin-new').value.trim();
+  const conf = document.getElementById('pin-confirm').value.trim();
+  const saved = localStorage.getItem('admin_pin')||'0000';
+  if(cur!==saved){toast('현재 PIN이 올바르지 않습니다','er');return}
+  if(nw.length!==4||!/^\d{4}$/.test(nw)){toast('새 PIN은 숫자 4자리여야 합니다','er');return}
+  if(nw!==conf){toast('새 PIN이 일치하지 않습니다','er');return}
+  localStorage.setItem('admin_pin',nw);
+  closePinModal();
+  toast('✅ 관리자 PIN이 변경되었습니다','ok');
+}
+
 </script>
+
+<!-- ADMIN PIN CHANGE MODAL -->
+<div id="pin-modal" style="display:none;position:fixed;inset:0;z-index:1100;background:rgba(0,0,0,.85);align-items:center;justify-content:center;">
+  <div style="background:var(--s1);border-radius:20px;padding:24px 20px;width:calc(100% - 40px);max-width:360px;margin:auto;">
+    <div style="font-size:18px;font-weight:800;margin-bottom:16px;">🔑 관리자 PIN 변경</div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:12px;color:var(--t3);font-weight:700;">현재 PIN</label>
+      <input id="pin-current" type="password" inputmode="numeric" maxlength="4" placeholder="현재 PIN 4자리"
+        style="width:100%;padding:12px;border:1.5px solid var(--b2);border-radius:10px;font-size:20px;letter-spacing:8px;text-align:center;background:var(--bg);color:var(--tx);box-sizing:border-box;margin-top:4px;">
+    </div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:12px;color:var(--t3);font-weight:700;">새 PIN</label>
+      <input id="pin-new" type="password" inputmode="numeric" maxlength="4" placeholder="새 PIN 4자리"
+        style="width:100%;padding:12px;border:1.5px solid var(--b2);border-radius:10px;font-size:20px;letter-spacing:8px;text-align:center;background:var(--bg);color:var(--tx);box-sizing:border-box;margin-top:4px;">
+    </div>
+    <div style="margin-bottom:20px;">
+      <label style="font-size:12px;color:var(--t3);font-weight:700;">새 PIN 확인</label>
+      <input id="pin-confirm" type="password" inputmode="numeric" maxlength="4" placeholder="새 PIN 재입력"
+        style="width:100%;padding:12px;border:1.5px solid var(--b2);border-radius:10px;font-size:20px;letter-spacing:8px;text-align:center;background:var(--bg);color:var(--tx);box-sizing:border-box;margin-top:4px;">
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="closePinModal()" style="flex:1;padding:13px;border-radius:10px;border:1.5px solid var(--b2);background:var(--s1);color:var(--tx);font-size:14px;font-weight:700;cursor:pointer;">취소</button>
+      <button onclick="saveAdminPin()" style="flex:2;padding:13px;border-radius:10px;border:none;background:var(--ac);color:white;font-size:14px;font-weight:700;cursor:pointer;">💾 변경 저장</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
