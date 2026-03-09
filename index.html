@@ -389,7 +389,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
       <div class="card-head"><span class="card-title">🔑 Pre Departure</span><span class="pill pill-blue">출발 전</span></div>
       <div class="card-body">
         <div class="form-row mb14">
-          <div class="form-group"><label class="form-label">날짜<span class="req">*</span></label><input type="date" class="form-input" id="pre-date"></div>
+          <div class="form-group"><label class="form-label">날짜<span class="req">*</span></label><input type="text" class="form-input" id="pre-date" placeholder="dd/mm/yyyy"></div>
           <div class="form-group"><label class="form-label">출발 시간</label><input type="time" class="form-input" id="pre-time"></div>
         </div>
         <div class="form-row mb14">
@@ -463,7 +463,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
           <div class="form-group">
             <label class="form-label">날짜</label>
-            <input type="date" class="form-input" id="dr-date">
+            <input type="text" class="form-input" id="dr-date" placeholder="dd/mm/yyyy">
           </div>
         </div>
         <div class="form-row mb14">
@@ -792,6 +792,19 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 
 <script>
 
+// ── 전화번호 앞 0 복원 ──
+function fixPhone(p) {
+  // Google Sheets에서 숫자로 저장된 전화번호 앞 0 복원
+  // 예: 430175195 (9자리) → 0430175195 (10자리)
+  if(p === null || p === undefined || p === '') return '';
+  let s = String(p).replace(/\.0+$/, '').replace(/\s/g, '').replace(/[^0-9]/g, '');
+  if(!s) return '';
+  if(s.length === 9) return '0' + s;   // 04xxxxxxxx 형식
+  if(s.length === 10) return s;         // 이미 정상
+  // 비정상 길이도 원본 숫자 그대로
+  return String(p).replace(/\.0+$/, '').trim();
+}
+
 // ── 날짜 포맷 헬퍼 dd/mm/yyyy ──
 function fmtDate(val) {
   if (!val) return '';
@@ -851,11 +864,18 @@ async function loadMasterData() {
   if(overlay) { overlay.style.opacity='0'; overlay.style.transition='opacity 0.4s'; setTimeout(()=>overlay.remove(),400); }
 }
 
-// 전화번호 0 보정 헬퍼
+// 전화번호 0 보정 헬퍼 (Google Sheets 숫자 형식 → 앞 0 복원)
 function fixPhone(p) {
-  const s = String(p || '').trim();
-  if (!s) return '';
-  return s.startsWith('0') ? s : '0' + s;
+  if(p === null || p === undefined || p === '') return '';
+  // Sheets에서 숫자로 저장된 경우 소수점 제거 (예: 430175195.0)
+  let s = String(p).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
+  if(!s) return '';
+  // 9자리 숫자 → 0 + 9자리 = 10자리 호주 전화번호
+  if(s.length === 9) return '0' + s;
+  // 이미 10자리면 그대로
+  if(s.length === 10) return s;
+  // 8자리 이하는 원본 유지
+  return s;
 }
 
 function useFallbackMaster() {
@@ -1262,7 +1282,7 @@ async function submitToSheets(action, data) {
 
 // postToSheets — 비동기 전송 (실패해도 앱 동작에 영향 없음)
 function postToSheets(action, data) {
-  data.Submitted = new Date().toLocaleString('en-AU', {timeZone:'Australia/Sydney'});
+  const _syd = new Date(new Date().toLocaleString('en-US',{timeZone:'Australia/Sydney'})); data.Submitted = todayDisplay() + ' ' + _syd.toTimeString().slice(0,5);
   submitToSheets(action, data)
     .then(r => {
       if(r.ok) showToast('📊 Google Sheets 저장됨','success');
@@ -1588,9 +1608,9 @@ document.getElementById('app').style.display = 'none';
 document.getElementById('login-screen').style.display = 'flex';
 
 document.getElementById('today-label').textContent = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
-document.getElementById('pre-date').value = todayISO();
+document.getElementById('pre-date').value = todayDisplay();
   loadMasterData(); // Google Sheets 마스터 데이터 로드
-document.getElementById('dr-date').value = todayISO();
+document.getElementById('dr-date').value = todayDisplay();
 
 initChecks();
 renderShiftSection();
@@ -1877,7 +1897,7 @@ function submitEndShift(){
     type: 'shift',
     driver: currentDriver ? currentDriver.name : '',
     rego: shift.rego,
-    date: shift.startDate || new Date().toLocaleDateString('ko-KR'),
+    date: shift.startDate || todayDisplay(),
     startTime: shift.startTime || '',
     endTime: shift.endTime,
     startKm: shift.startKm || '',
@@ -1888,7 +1908,7 @@ function submitEndShift(){
     dailyReports: shift.dailyReports || [],
     startChecks: shift.startChecks || {},
     endChecks: shift.endChecks || {},
-    submittedAt: new Date().toISOString()
+    submittedAt: todayDisplay()
   };
 
   // ── Google Sheets 자동 전송 (End of Shift) ──
@@ -2062,12 +2082,11 @@ function getSeatsFromShift(){
   // 활성 운행에서 먼저 읽기 (step2/3에서)
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(shift?.seats) return shift.seats;
-  // 없으면 Pre-departure 화면에서 선택한 인승 (step1에서)
-  return document.getElementById('pre-seats')?.value || '';
+  return document.getElementById('dr-seats')?.value || '';
 }
 
 function updateSurchargeOptions(){
-  const seats = getSeatsFromShift() || document.getElementById('pre-seats')?.value || '';
+  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   const isLarge = seats==='40S'||seats==='50S';
   const isSmall = seats==='21S'||seats==='25S';
 
