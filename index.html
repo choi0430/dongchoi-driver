@@ -1618,17 +1618,7 @@ document.getElementById('app').style.display = 'none';
 document.getElementById('login-screen').style.display = 'flex';
 
 document.getElementById('today-label').textContent = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
-document.getElementById('pre-date').value = todayDisplay();
-  loadMasterData(); // Google Sheets 마스터 데이터 로드
-document.getElementById('dr-date').value = todayDisplay();
-
-initChecks();
-renderShiftSection();
-renderTodayReports();
-renderContacts();
-renderAttractions();
-renderNotices();
-renderSalary();
+loadMasterData(); // Google Sheets 마스터 데이터 로드
 
 function initChecks(){
   ['pre-checks','end-checks'].forEach(id=>{
@@ -1653,6 +1643,9 @@ function showPage(id){
 
 function startReport(){
   showPage('report');
+  // 날짜 항상 오늘로 재설정
+  const _pd=document.getElementById('pre-date'); if(_pd) _pd.value=todayDisplay();
+  const _dd=document.getElementById('dr-date');  if(_dd) _dd.value=todayDisplay();
   if(activeShifts.length===0){
     goStep(1);
   } else {
@@ -1752,9 +1745,12 @@ function addDailyReport(shiftId){
   editingShiftId = shiftId;
   showPage('report');
   goStep(2);
-  // 날짜 초기화 (매번 오늘 날짜로)
+  // 날짜 항상 오늘로 재설정
   const drDate = document.getElementById('dr-date');
-  if(drDate && !drDate.value) drDate.value = todayDisplay();
+  if(drDate) drDate.value = todayDisplay();
+  // 인승 초기화
+  const drSeats = document.getElementById('dr-seats');
+  if(drSeats) drSeats.value = '';
   updateStep2UI();
 }
 
@@ -2143,9 +2139,24 @@ function onDistSelectChange(){ calcTotal(); }
 
 // Pre-seats 변경 시 surcharge 옵션 업데이트
 document.addEventListener('DOMContentLoaded', ()=>{
-  buildLoginSelect(); // CONTACTS 기반 드라이버 로그인 목록 자동 생성
+  // ── 날짜 초기화 ──
+  const _td = todayDisplay();
+  const _pdEl = document.getElementById('pre-date');
+  const _drEl = document.getElementById('dr-date');
+  if(_pdEl) _pdEl.value = _td;
+  if(_drEl) _drEl.value = _td;
+  
+  buildLoginSelect();
   const drSeatsEl = document.getElementById('dr-seats');
   if(drSeatsEl) drSeatsEl.addEventListener('change', updateSurchargeOptions);
+  
+  initChecks();
+  renderShiftSection();
+  renderTodayReports();
+  renderContacts();
+  renderAttractions();
+  renderNotices();
+  renderSalary();
 });
 
 function getSvcValue(){
