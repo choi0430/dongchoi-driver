@@ -1073,6 +1073,34 @@ const CONTACTS = [
   {type:'guide',name:'손수영',initials:'손수',phone:'',note:'프리랜서',color:'#0e9f6e'}
 ];
 
+// ── Google Sheets API 설정 ──
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
+
+async function submitToSheets(action, data) {
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action, data })
+    });
+    return await res.json();
+  } catch(e) {
+    console.error('Sheets 연동 오류:', e);
+    return { ok: false, error: e.toString() };
+  }
+}
+
+// postToSheets — 비동기 전송 (실패해도 앱 동작에 영향 없음)
+function postToSheets(action, data) {
+  data.Submitted = new Date().toLocaleString('en-AU', {timeZone:'Australia/Sydney'});
+  submitToSheets(action, data)
+    .then(r => {
+      if(r.ok) showToast('📊 Google Sheets 저장됨','success');
+      else console.warn('Sheets 저장 실패:', r);
+    })
+    .catch(e => console.warn('Sheets 오류:', e));
+}
+
 // ── 로그인 드롭다운 자동 생성 (CONTACTS 드라이버 데이터 기반) ──
 function buildLoginSelect() {
   const sel = document.getElementById('login-driver-select');
@@ -1513,8 +1541,6 @@ function completePre(){
     Start_Time: shift.startTime,
     Check_Results: JSON.stringify(shift.preChecks),
     Remarks: shift.remarks
-  }).then(r => {
-    if(r?.ok) console.log('Pre Departure → Sheets OK');
   });
   renderShiftSection();
   goStep(2);
