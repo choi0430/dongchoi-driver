@@ -2381,25 +2381,57 @@ const _sigStates = {};
 function initSigCanvas(canvasId) {
   const c = document.getElementById(canvasId);
   if (!c || _sigStates[canvasId]) return;
-  // 캔버스 실제 픽셀 크기를 CSS 크기에 맞춤 (devicePixelRatio 포함)
-  const dpr = window.devicePixelRatio || 1;
-  const rect0 = c.getBoundingClientRect();
-  c.width  = Math.round(rect0.width  * dpr);
-  c.height = Math.round(rect0.height * dpr);
   _sigStates[canvasId] = { drawing: false };
   const ctx = c.getContext('2d');
-  ctx.scale(dpr, dpr);
-  function pos(e) {
-    const r = c.getBoundingClientRect(), t = e.touches ? e.touches[0] : e;
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const r   = c.getBoundingClientRect();
+    // 기존 그림 저장
+    const img = c.toDataURL();
+    c.width  = Math.round(r.width  * dpr);
+    c.height = Math.round(r.height * dpr);
+    ctx.scale(dpr, dpr);
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth   = 2.5;
+    ctx.lineCap     = 'round';
+    ctx.lineJoin    = 'round';
+    // 그림 복원
+    const i = new Image(); i.onload = () => ctx.drawImage(i, 0, 0, r.width, r.height); i.src = img;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function getPos(e) {
+    const r = c.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
     return { x: t.clientX - r.left, y: t.clientY - r.top };
   }
-  c.addEventListener('mousedown', e => { _sigStates[canvasId].drawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
-  c.addEventListener('mousemove', e => { if (!_sigStates[canvasId].drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.strokeStyle = '#111827'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke(); });
-  c.addEventListener('mouseup', () => _sigStates[canvasId].drawing = false);
-  c.addEventListener('touchstart', e => { e.preventDefault(); _sigStates[canvasId].drawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }, { passive: false });
-  c.addEventListener('touchmove', e => { e.preventDefault(); if (!_sigStates[canvasId].drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.strokeStyle = '#111827'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke(); }, { passive: false });
-  c.addEventListener('touchend', () => _sigStates[canvasId].drawing = false);
-  setTimeout(() => { c.width = c.offsetWidth * window.devicePixelRatio; c.height = c.offsetHeight * window.devicePixelRatio; ctx.scale(window.devicePixelRatio, window.devicePixelRatio); }, 150);
+
+  // Mouse
+  c.addEventListener('mousedown', e => {
+    _sigStates[canvasId].drawing = true;
+    const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y);
+  });
+  c.addEventListener('mousemove', e => {
+    if (!_sigStates[canvasId].drawing) return;
+    const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke();
+  });
+  c.addEventListener('mouseup',   () => { _sigStates[canvasId].drawing = false; });
+  c.addEventListener('mouseleave',() => { _sigStates[canvasId].drawing = false; });
+
+  // Touch
+  c.addEventListener('touchstart', e => {
+    e.preventDefault();
+    _sigStates[canvasId].drawing = true;
+    const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y);
+  }, { passive: false });
+  c.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!_sigStates[canvasId].drawing) return;
+    const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke();
+  }, { passive: false });
+  c.addEventListener('touchend', () => { _sigStates[canvasId].drawing = false; });
 }
 
 function clearSigById(canvasId) {
@@ -2556,7 +2588,24 @@ function busGetSummary(prefix) {
 
 function busMount(prefix, targetId) {
   const el = document.getElementById(targetId);
-  if (el) { el.innerHTML = busDiagramHTML(prefix); }
+  if (!el) return;
+  el.innerHTML = busDiagramHTML(prefix);
+  // 터치 이벤트 등록 (모바일 대응)
+  ['front','back','left','right'].forEach(view => {
+    const div = document.getElementById('bus-' + prefix + '-' + view);
+    if (!div) return;
+    div.addEventListener('touchend', e => {
+      e.preventDefault();
+      const t   = e.changedTouches[0];
+      const r   = div.getBoundingClientRect();
+      const x   = ((t.clientX - r.left) / r.width  * 100).toFixed(1);
+      const y   = ((t.clientY - r.top)  / r.height * 100).toFixed(1);
+      const n   = BUS_MARKERS[prefix].length + 1;
+      BUS_MARKERS[prefix].push({ view, x: parseFloat(x), y: parseFloat(y), n });
+      busRenderMarkers(prefix, view);
+      busRenderList(prefix);
+    }, { passive: false });
+  });
 }
 
 </script>
