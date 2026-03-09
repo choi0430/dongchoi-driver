@@ -1584,6 +1584,10 @@ function doLogin() {
   // ── 드라이버별 localStorage 데이터 로드 ──
   try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
   try { todayReports = JSON.parse(localStorage.getItem('reports_'+name)||'[]'); } catch(e){ todayReports=[]; }
+  // 진행 중인 shift가 있으면 editingShiftId 복원
+  if(activeShifts.length > 0) {
+    editingShiftId = activeShifts[activeShifts.length - 1].id;
+  }
 
   // 드라이버 이름 표시
   document.getElementById('driver-name-pill').textContent = name + ' ▾';
@@ -1782,6 +1786,10 @@ function completePre(){
   };
   activeShifts.push(shift);
   editingShiftId = id;
+  // Pre-Departure 완료 즉시 localStorage 저장
+  if(currentDriver?.name) {
+    localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+  }
   showToast(`✅ ${rego} Pre Departure 완료 Complete`,'success');
   // ── Google Sheets 자동 전송 (Pre Departure) ──
   postToSheets('save_predeparture', {
