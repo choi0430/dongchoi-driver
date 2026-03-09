@@ -2381,11 +2381,17 @@ const _sigStates = {};
 function initSigCanvas(canvasId) {
   const c = document.getElementById(canvasId);
   if (!c || _sigStates[canvasId]) return;
+  // 캔버스 실제 픽셀 크기를 CSS 크기에 맞춤 (devicePixelRatio 포함)
+  const dpr = window.devicePixelRatio || 1;
+  const rect0 = c.getBoundingClientRect();
+  c.width  = Math.round(rect0.width  * dpr);
+  c.height = Math.round(rect0.height * dpr);
   _sigStates[canvasId] = { drawing: false };
   const ctx = c.getContext('2d');
+  ctx.scale(dpr, dpr);
   function pos(e) {
     const r = c.getBoundingClientRect(), t = e.touches ? e.touches[0] : e;
-    return { x: (t.clientX - r.left) * (c.width / r.width), y: (t.clientY - r.top) * (c.height / r.height) };
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
   }
   c.addEventListener('mousedown', e => { _sigStates[canvasId].drawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
   c.addEventListener('mousemove', e => { if (!_sigStates[canvasId].drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.strokeStyle = '#111827'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke(); });
