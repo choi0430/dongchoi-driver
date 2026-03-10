@@ -1868,16 +1868,30 @@ function renderShiftSection(){
         <button class="btn btn-primary" onclick="startReport()">Pre Departure 시작</button>
       </div>`;
   } else {
-    el.innerHTML = activeShifts.map(s=>`
-      <div class="shift-status" style="margin-top:10px;">
-        <div class="shift-label">운행 중 · ${fmtDate(s.date)}</div>
-        <div class="shift-rego">${s.rego}</div>
-        <div class="shift-detail">${s.seats} · 출발 ${s.startTime} · ${s.startKm.toLocaleString()} km · Daily Report ${s.dailyReports.length}건</div>
-        <div class="shift-actions">
-          <button class="shift-btn shift-btn-secondary" onclick="addDailyReport('${s.id}')">+ Daily Report</button>
-          <button class="shift-btn ${s.eosStarted?'shift-btn-secondary':'shift-btn-danger'}" onclick="startEndShift('${s.id}')">${s.eosStarted?'🏁 EOS 진행 중...':'🏁 End of Shift'}</button>
-        </div>
-      </div>`).join('');
+    const shiftFrag = document.createDocumentFragment();
+  activeShifts.forEach(s=>{
+    const div = document.createElement('div');
+    div.className = 'shift-status';
+    div.style.marginTop = '10px';
+    div.innerHTML = `
+      <div class="shift-label">운행 중 · ${fmtDate(s.date)}</div>
+      <div class="shift-rego">${s.rego}</div>
+      <div class="shift-detail">${s.seats} · 출발 ${s.startTime} · ${s.startKm.toLocaleString()} km · Daily Report ${s.dailyReports.length}건</div>
+      <div class="shift-actions">
+        <button class="shift-btn shift-btn-secondary" data-sid="${s.id}" data-action="daily">+ Daily Report</button>
+        <button class="shift-btn ${s.eosStarted?'shift-btn-secondary':'shift-btn-danger'}" data-sid="${s.id}" data-action="eos">${s.eosStarted?'🏁 EOS 진행 중...':'🏁 End of Shift'}</button>
+      </div>`;
+    div.querySelectorAll('button[data-sid]').forEach(btn=>{
+      btn.addEventListener('click', function(){
+        const sid = this.dataset.sid;
+        if(this.dataset.action==='daily') addDailyReport(sid);
+        else startEndShift(sid);
+      });
+    });
+    shiftFrag.appendChild(div);
+  });
+  el.innerHTML = '';
+  el.appendChild(shiftFrag);
     // also show add new shift button if needed
     el.innerHTML += `<div style="padding:8px 12px 0;"><button class="btn btn-secondary" onclick="startReport()">+ 다른 차량 Pre Departure</button></div>`;
   }
@@ -2196,7 +2210,7 @@ function renderStep2SavedReports(){
   const el = document.getElementById('step2-saved-reports');
   if(!shift||shift.dailyReports.length===0){el.innerHTML='';return;}
   el.innerHTML = `
-    <div style="padding:0 12px 4px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-family:'DM Mono',monospace;">이번 운행 리포트 (${shift.dailyReports.length}건)</div>
+    <div style="padding:0 12px 4px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">이번 운행 리포트 (${shift.dailyReports.length}건)</div>
     ${shift.dailyReports.map(r=>`
       <div class="report-item">
         <div class="report-header">
@@ -2689,7 +2703,7 @@ function renderAttractions(){
                 <div class="poi-name">${p.name}</div>
                 <div class="poi-detail">${p.detail}</div>
               </div>
-              <button class="poi-map-btn" onclick="openMap('${p.map}')">지도 →</button>
+              <button class="poi-map-btn" data-map="${p.map}" onclick="openMap(this.dataset.map)">지도 →</button>
             </div>`).join('')}
         </div>
       </div>
