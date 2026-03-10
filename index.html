@@ -1081,11 +1081,20 @@ const SDD_CONFIG = {
 function sddOpen(key) {
   const input = document.getElementById('dr-'+key);
   const list  = document.getElementById('sdd-'+key+'-list');
-  // fixed 위치 계산
   const rect = input.getBoundingClientRect();
-  list.style.top    = (rect.bottom + 4) + 'px';
-  list.style.left   = rect.left + 'px';
-  list.style.width  = rect.width + 'px';
+  // rect가 0이면 offsetWidth로 fallback (페이지 비활성 시 발생)
+  const w = rect.width || input.offsetWidth || 260;
+  const dropdownMaxH = 244;
+  const spaceBelow = window.innerHeight - rect.bottom - 8;
+  if (spaceBelow < dropdownMaxH && rect.top > dropdownMaxH) {
+    list.style.top    = 'auto';
+    list.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+  } else {
+    list.style.bottom = 'auto';
+    list.style.top    = (rect.bottom + 4) + 'px';
+  }
+  list.style.left  = rect.left + 'px';
+  list.style.width = w + 'px';
   sddFilter(key);
   list.classList.add('open');
 }
