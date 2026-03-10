@@ -111,9 +111,20 @@ function getMaster(sheetName) {
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) return {ok:true, sheet:sheetName, rows:[]};
   const headers = data[0];
+  // 전화번호 컬럼은 숫자로 저장돼도 문자열로 변환 (앞자리 0 보존)
+  const phoneFields = ['Mobile','Phone','mobile','phone'];
   const rows = data.slice(1).map(row => {
     const obj = {};
-    headers.forEach((h,i) => { obj[h] = row[i]; });
+    headers.forEach((h,i) => {
+      if (phoneFields.includes(h) && row[i] !== '' && row[i] !== null) {
+        // 숫자면 9자리 → 앞에 0 붙여서 10자리 문자열로
+        let v = String(row[i]).replace(/\.0+$/, '').replace(/\s/g, '');
+        if (/^\d{9}$/.test(v)) v = '0' + v;
+        obj[h] = v;
+      } else {
+        obj[h] = row[i];
+      }
+    });
     return obj;
   });
   return {ok:true, sheet:sheetName, rows};
