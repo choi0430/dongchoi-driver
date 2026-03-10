@@ -576,9 +576,19 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <div id="ot-btn-group" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
             <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-ot" placeholder="0" oninput="calcTotal();document.querySelectorAll('[id^=\"ot-btn-\"]').forEach(b=>{b.style.background='var(--surface2)';b.style.color='var(--text)';b.style.borderColor='var(--border)';});"></div>
           </div>
-          <div class="form-group">
+          <div class="form-group" id="trailer-group" style="display:none;">
             <label class="form-label">트레일러</label>
-            <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-trailer" placeholder="0" oninput="calcTotal()"></div>
+            <div style="display:flex;gap:6px;margin-bottom:4px;">
+              <button type="button" id="trailer-btn-0" onclick="selectTrailer(0)"
+                style="flex:1;padding:8px 0;border-radius:8px;border:1.5px solid var(--accent);background:var(--accent);color:white;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;">
+                $0
+              </button>
+              <button type="button" id="trailer-btn-30" onclick="selectTrailer(30)"
+                style="flex:1;padding:8px 0;border-radius:8px;border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;">
+                $30
+              </button>
+            </div>
+            <input type="hidden" id="f-trailer" value="0">
           </div>
         </div>
 
@@ -1964,7 +1974,8 @@ function submitDailyReport(){
   renderStep2SavedReports();
   // reset form
   ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  ['f-ot','f-trailer','f-early','f-night','f-tip','f-toll','f-fuel','f-wash','f-meal','f-etc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['f-ot','f-early','f-night','f-tip','f-toll','f-fuel','f-wash','f-meal','f-etc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  selectTrailer(0); // 트레일러 초기화
   // reset surcharge selects
   {const s=document.getElementById('f-svc-select'); if(s&&s.options.length>0)s.selectedIndex=0;}
   {const h=document.getElementById('f-hotel-select'); if(h)h.selectedIndex=0;}
@@ -2259,6 +2270,18 @@ function selectOTAmount(amt){
   });
   calcTotal();
 }
+function selectTrailer(amt){
+  document.getElementById('f-trailer').value = amt;
+  [0, 30].forEach(v=>{
+    const b = document.getElementById('trailer-btn-'+v);
+    if(!b) return;
+    const sel = v === amt;
+    b.style.background  = sel ? 'var(--accent)' : 'var(--surface2)';
+    b.style.color       = sel ? 'white' : 'var(--text)';
+    b.style.borderColor = sel ? 'var(--accent)' : 'var(--border)';
+  });
+  calcTotal();
+}
 
 function updateSurchargeOptions(){
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
@@ -2267,6 +2290,17 @@ function updateSurchargeOptions(){
 
   // OT 버튼 렌더링
   renderOTButtons(seats);
+
+  // 트레일러: 21/25인승만 표시, 나머지 숨기고 0으로 초기화
+  const trailerGroup = document.getElementById('trailer-group');
+  if(trailerGroup){
+    if(isSmall){
+      trailerGroup.style.display = 'block';
+    } else {
+      trailerGroup.style.display = 'none';
+      selectTrailer(0);
+    }
+  }
 
   // Service Charge
   const svcSel = document.getElementById('f-svc-select');
