@@ -534,7 +534,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
           <div class="form-group">
             <label class="form-label">시작 시간</label>
-            <input type="time" class="form-input" id="dr-start">
+            <input type="time" class="form-input" id="dr-start" onchange="calcOT();updateEarlyHint();">
           </div>
           <div class="form-group">
             <label class="form-label">종료 시간</label>
@@ -608,7 +608,16 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
         </div>
         <div class="form-row-3 mb14">
-          <div class="form-group"><label class="form-label">조기출발</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-early" placeholder="0" oninput="calcTotal()"></div></div>
+          <div class="form-group" id="early-group">
+            <label class="form-label">조기출발 <span id="early-time-hint" style="font-size:11px;font-weight:600;"></span></label>
+            <div id="early-btn-group" style="display:flex;gap:6px;margin-bottom:4px;">
+              <button type="button" id="early-btn-0" onclick="selectEarly(0)"
+                style="flex:1;padding:8px 0;border-radius:8px;border:1.5px solid var(--accent);background:var(--accent);color:white;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;">$0</button>
+              <button type="button" id="early-btn-rate" onclick="selectEarly(getEarlyRate())"
+                style="flex:1;padding:8px 0;border-radius:8px;border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;" id="early-btn-rate">$30</button>
+            </div>
+            <input type="hidden" id="f-early" value="0">
+          </div>
           <div class="form-group"><label class="form-label">야간투어</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-night" placeholder="0" oninput="calcTotal()"></div></div>
           <div class="form-group"><label class="form-label">팁</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-tip" placeholder="0" oninput="calcTotal()"></div></div>
         </div>
@@ -1974,8 +1983,9 @@ function submitDailyReport(){
   renderStep2SavedReports();
   // reset form
   ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  ['f-ot','f-early','f-night','f-tip','f-toll','f-fuel','f-wash','f-meal','f-etc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['f-ot','f-night','f-tip','f-toll','f-fuel','f-wash','f-meal','f-etc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   selectTrailer(0); // 트레일러 초기화
+  selectEarly(0);   // 조기출발 초기화
   // reset surcharge selects
   {const s=document.getElementById('f-svc-select'); if(s&&s.options.length>0)s.selectedIndex=0;}
   {const h=document.getElementById('f-hotel-select'); if(h)h.selectedIndex=0;}
@@ -2166,6 +2176,7 @@ function autoRate(){
 }
 
 function calcOT(){
+  updateEarlyHint();
   const st=document.getElementById('dr-start').value, et=document.getElementById('dr-end').value;
   if(!st||!et) return;
   const [sh,sm]=st.split(':').map(Number),[eh,em]=et.split(':').map(Number);
@@ -2282,6 +2293,53 @@ function selectTrailer(amt){
   });
   calcTotal();
 }
+function getEarlyRate(){
+  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+  return (seats==='40S'||seats==='50S') ? 40 : 30;
+}
+function updateEarlyBtn(){
+  const rate = getEarlyRate();
+  const rateBtn = document.getElementById('early-btn-rate');
+  if(rateBtn) rateBtn.textContent = '$'+rate;
+}
+function selectEarly(amt){
+  document.getElementById('f-early').value = amt;
+  const rate = getEarlyRate();
+  // $0 버튼
+  const b0 = document.getElementById('early-btn-0');
+  if(b0){
+    const sel = amt===0;
+    b0.style.background  = sel ? 'var(--accent)' : 'var(--surface2)';
+    b0.style.color       = sel ? 'white' : 'var(--text)';
+    b0.style.borderColor = sel ? 'var(--accent)' : 'var(--border)';
+  }
+  // 요금 버튼
+  const br = document.getElementById('early-btn-rate');
+  if(br){
+    const sel = amt===rate;
+    br.style.background  = sel ? 'var(--accent)' : 'var(--surface2)';
+    br.style.color       = sel ? 'white' : 'var(--text)';
+    br.style.borderColor = sel ? 'var(--accent)' : 'var(--border)';
+  }
+  calcTotal();
+}
+function updateEarlyHint(){
+  const hint = document.getElementById('early-time-hint');
+  if(!hint) return;
+  const startVal = document.getElementById('dr-start')?.value; // "HH:MM"
+  if(!startVal){ hint.textContent=''; return; }
+  const [h, m] = startVal.split(':').map(Number);
+  const totalMin = h * 60 + m;
+  const before6  = totalMin < 6 * 60;         // 06:00 이전
+  const after11  = totalMin >= 11 * 60;        // 11:00 이후
+  if(before6 || after11){
+    hint.textContent = '✅ 조기출발 적용 가능 (' + startVal + ')';
+    hint.style.color = 'var(--green)';
+  } else {
+    hint.textContent = '⚠️ 06:00 이전 또는 11:00 이후 출발만 해당 (' + startVal + ')';
+    hint.style.color = 'var(--red,#e02424)';
+  }
+}
 
 function updateSurchargeOptions(){
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
@@ -2301,6 +2359,10 @@ function updateSurchargeOptions(){
       selectTrailer(0);
     }
   }
+
+  // 조기출발 버튼 요금 갱신 (인승에 따라 $30 or $40)
+  updateEarlyBtn();
+  selectEarly(0); // 인승 변경 시 초기화
 
   // Service Charge
   const svcSel = document.getElementById('f-svc-select');
