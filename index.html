@@ -219,6 +219,27 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 .salary-amt{text-align:center;}
 .salary-amt-label{font-size:10px;color:var(--muted);margin-bottom:2px;}
 .salary-amt-val{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;}
+/* PAY PAGE */
+.pay-week-card{background:white;border-radius:14px;margin:0 12px 10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);border:1.5px solid var(--border);cursor:pointer;transition:box-shadow .15s;}
+.pay-week-card:active{box-shadow:0 0 0 2px var(--accent);}
+.pay-week-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.pay-week-label{font-size:12px;font-weight:700;color:var(--muted);}
+.pay-week-total{font-size:20px;font-weight:800;color:var(--accent);}
+.pay-week-bar{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
+.pay-week-stat{background:var(--surface2);border-radius:8px;padding:8px 10px;text-align:center;}
+.pay-week-stat-label{font-size:10px;color:var(--muted);margin-bottom:2px;}
+.pay-week-stat-val{font-size:13px;font-weight:700;}
+.pay-detail-header{display:flex;align-items:center;gap:10px;padding:14px 16px 8px;}
+.pay-detail-back{background:none;border:none;font-size:18px;cursor:pointer;color:var(--accent);padding:0;}
+.pay-detail-title{font-size:16px;font-weight:800;}
+.pay-report-row{background:white;border-radius:12px;margin:0 12px 8px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,0.04);}
+.pay-report-row-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;}
+.pay-report-agency{font-size:13px;font-weight:700;}
+.pay-report-attr{font-size:12px;color:var(--muted);}
+.pay-report-amount{font-size:16px;font-weight:800;color:var(--accent);}
+.pay-report-tags{display:flex;flex-wrap:wrap;gap:4px;}
+.pay-report-tag{padding:2px 7px;background:var(--surface2);border-radius:5px;font-size:11px;color:var(--muted);}
+.pay-empty{text-align:center;padding:60px 20px;color:var(--muted);font-size:14px;}
 
 /* MISC */
 .px16{padding:0 16px;}
@@ -824,6 +845,25 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 </div>
 
 <!-- ══════ MY INFO ══════ -->
+<div class="page" id="page-pay">
+  <div class="sec-head">
+    <div><div class="sec-title">💰 급여</div></div>
+    <span class="pill pill-green" id="pay-unpaid-badge">집계 중...</span>
+  </div>
+  <!-- 주별 목록 뷰 -->
+  <div id="pay-weeks-view">
+    <div id="pay-weeks-list"></div>
+  </div>
+  <!-- 주간 상세 뷰 -->
+  <div id="pay-detail-view" style="display:none;">
+    <div class="pay-detail-header">
+      <button class="pay-detail-back" onclick="showPayWeeks()">←</button>
+      <div class="pay-detail-title" id="pay-detail-title"></div>
+    </div>
+    <div id="pay-detail-list"></div>
+  </div>
+</div>
+
 <div class="page" id="page-me">
   <div class="sec-head"><div><div class="sec-title">내 정보</div></div></div>
   <div class="card" style="margin:0 12px 10px;">
@@ -888,7 +928,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
   <div class="nav-item" onclick="startReport()" id="nav-report"><div class="nav-icon">📋</div>리포트</div>
   <div class="nav-item" onclick="showPage('contacts')" id="nav-contacts"><div class="nav-icon">📞</div>연락처</div>
   <div class="nav-item" onclick="showPage('attractions')" id="nav-attractions"><div class="nav-icon">📍</div>관광지</div>
-  <div class="nav-item" onclick="showPage('me')" id="nav-me"><div class="nav-icon">👤</div>내 정보</div>
+  <div class="nav-item" onclick="showPage('pay');renderPay();" id="nav-pay"><div class="nav-icon">💰</div>급여</div>
 </div>
 </div><!-- /app -->
 
@@ -1816,6 +1856,8 @@ function showPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('page-'+id).classList.add('active');
+  const navEl = document.getElementById('nav-'+id);
+  if(navEl) navEl.classList.add('active');
   const nav = document.getElementById('nav-'+id);
   if(nav) nav.classList.add('active');
   const _s=document.getElementById('screen'); if(_s) _s.scrollTop=0;
@@ -2738,6 +2780,174 @@ function renderNotices(){
 // ═══════════════════════════════════════
 // SALARY
 // ═══════════════════════════════════════
+// ═══════════════════════════════════════
+// PAY PAGE
+// ═══════════════════════════════════════
+function getWeekKey(dateStr){
+  // dateStr: "dd/mm/yy" or "dd/mm/yyyy"
+  const parts = dateStr.split('/');
+  if(parts.length!==3) return null;
+  const d = parseInt(parts[0]), mo = parseInt(parts[1])-1;
+  const yr = parseInt(parts[2])<100 ? 2000+parseInt(parts[2]) : parseInt(parts[2]);
+  const dt = new Date(yr, mo, d);
+  if(isNaN(dt)) return null;
+  // 월요일 기준 주 시작일 계산
+  const day = dt.getDay(); // 0=Sun
+  const diff = (day===0) ? -6 : 1-day; // Mon offset
+  const mon = new Date(dt); mon.setDate(dt.getDate()+diff);
+  const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+  const fmt = d => String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getFullYear()).slice(2);
+  return { key: fmt(mon)+'~'+fmt(sun), label: fmt(mon)+' — '+fmt(sun), mon, sun };
+}
+
+function getAllReports(){
+  // localStorage에서 현재 드라이버의 모든 리포트 수집
+  const name = currentDriver?.name || '';
+  let all = [];
+  try { all = JSON.parse(localStorage.getItem('reports_'+name)||'[]'); } catch(e){}
+  // 현재 세션 todayReports에 있지만 저장 안된 것 병합 (중복 제거)
+  const ids = new Set(all.map(r=>r.id));
+  todayReports.forEach(r=>{ if(!ids.has(r.id)) all.push(r); });
+  return all;
+}
+
+function renderPay(){
+  const all = getAllReports();
+  // 주별 그룹핑 (월~일)
+  const weekMap = {};
+  all.forEach(r=>{
+    const wk = getWeekKey(r.date);
+    if(!wk) return;
+    if(!weekMap[wk.key]) weekMap[wk.key] = { label:wk.label, mon:wk.mon, reports:[] };
+    weekMap[wk.key].reports.push(r);
+  });
+  // 최신 주 순 정렬
+  const weeks = Object.values(weekMap).sort((a,b)=>b.mon-a.mon);
+
+  // 미지급 배지 (SALARY_DATA 기준)
+  const unpaid = SALARY_DATA.reduce((s,w)=>s+(w.balance||0),0);
+  const badge = document.getElementById('pay-unpaid-badge');
+  if(badge) badge.textContent = unpaid>0 ? '미지급 $'+unpaid : '최신';
+
+  const el = document.getElementById('pay-weeks-list');
+  if(!el) return;
+
+  if(weeks.length===0){
+    el.innerHTML = '<div class="pay-empty">📋 아직 저장된 리포트가 없어요.<br>Daily Report를 작성하면 여기에 표시됩니다.</div>';
+    return;
+  }
+
+  el.innerHTML='';
+  weeks.forEach(wk=>{
+    const drTotal = wk.reports.reduce((s,r)=>s+(r.dr||0),0);
+    const days = [...new Set(wk.reports.map(r=>r.date))].length;
+    const trips = wk.reports.length;
+    // 야간투어 회사 납입금 합산
+    const ownerTotal = wk.reports.reduce((s,r)=>s+(r.nightOwner||0),0);
+    const netPay = drTotal - ownerTotal;
+
+    const card = document.createElement('div');
+    card.className = 'pay-week-card';
+    card.innerHTML = `
+      <div class="pay-week-top">
+        <div>
+          <div class="pay-week-label">📅 ${wk.label}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;">${days}일 · ${trips}건</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="pay-week-total">$${netPay.toLocaleString()}</div>
+          ${ownerTotal>0?'<div style="font-size:11px;color:var(--red);font-weight:600;">회사납입 -$'+ownerTotal+'</div>':''}
+        </div>
+      </div>
+      <div class="pay-week-bar">
+        <div class="pay-week-stat"><div class="pay-week-stat-label">드라이버 발생</div><div class="pay-week-stat-val" style="color:var(--green);">$${drTotal}</div></div>
+        <div class="pay-week-stat"><div class="pay-week-stat-label">회사 납입</div><div class="pay-week-stat-val" style="color:var(--red);">$${ownerTotal}</div></div>
+        <div class="pay-week-stat"><div class="pay-week-stat-label">실수령</div><div class="pay-week-stat-val" style="color:var(--accent);">$${netPay}</div></div>
+      </div>`;
+    card.dataset.weekKey = wk.key;
+    card.addEventListener('click', ()=>showPayDetail(wk));
+    el.appendChild(card);
+  });
+}
+
+function showPayWeeks(){
+  document.getElementById('pay-weeks-view').style.display='';
+  document.getElementById('pay-detail-view').style.display='none';
+}
+
+function showPayDetail(wk){
+  document.getElementById('pay-weeks-view').style.display='none';
+  document.getElementById('pay-detail-view').style.display='';
+  document.getElementById('pay-detail-title').textContent = wk.label;
+
+  const el = document.getElementById('pay-detail-list');
+  // 날짜순 정렬
+  const sorted = [...wk.reports].sort((a,b)=>{
+    const parse = s=>{ const p=s.split('/'); return new Date(2000+parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0])); };
+    return parse(a.date)-parse(b.date);
+  });
+
+  // 날짜별 그룹
+  const byDate = {};
+  sorted.forEach(r=>{
+    if(!byDate[r.date]) byDate[r.date]=[];
+    byDate[r.date].push(r);
+  });
+
+  let html='';
+  const drGrand = sorted.reduce((s,r)=>s+(r.dr||0),0);
+  const ownerGrand = sorted.reduce((s,r)=>s+(r.nightOwner||0),0);
+  const netGrand = drGrand - ownerGrand;
+
+  // 상단 합계 카드
+  html+=`<div style="background:var(--accent);border-radius:14px;margin:0 12px 14px;padding:16px;">
+    <div style="color:rgba(255,255,255,.7);font-size:11px;font-weight:700;margin-bottom:6px;">이번 주 실수령 합계</div>
+    <div style="color:white;font-size:28px;font-weight:800;">$${netGrand.toLocaleString()}</div>
+    <div style="display:flex;gap:16px;margin-top:10px;">
+      <div><div style="color:rgba(255,255,255,.6);font-size:10px;">드라이버 발생</div><div style="color:white;font-size:13px;font-weight:700;">$${drGrand}</div></div>
+      <div><div style="color:rgba(255,255,255,.6);font-size:10px;">회사 납입</div><div style="color:rgba(255,100,100,.9);font-size:13px;font-weight:700;">-$${ownerGrand}</div></div>
+    </div>
+  </div>`;
+
+  Object.entries(byDate).forEach(([date, reports])=>{
+    const dayDr = reports.reduce((s,r)=>s+(r.dr||0),0);
+    const dayOwner = reports.reduce((s,r)=>s+(r.nightOwner||0),0);
+    html+=`<div style="padding:0 16px 6px;display:flex;justify-content:space-between;align-items:baseline;">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);">${date}</div>
+      <div style="font-size:13px;font-weight:700;color:var(--accent);">$${(dayDr-dayOwner).toLocaleString()}</div>
+    </div>`;
+    reports.forEach(r=>{
+      const extras=[];
+      if(r.ot>0) extras.push('OT $'+r.ot);
+      if(r.trailer>0) extras.push('트레일러 $'+r.trailer);
+      if(r.early>0) extras.push('조기출발 $'+r.early);
+      if(r.night>0||r.nightType!=='none') extras.push('야간투어');
+      if(r.wash>0) extras.push('세차 $'+r.wash);
+      if(r.meal>0) extras.push('식비 $'+r.meal);
+      if(r.tollPersonal&&r.toll>0) extras.push('톨비 $'+r.toll);
+      if(r.fuelPersonal&&r.fuel>0) extras.push('연료 $'+r.fuel);
+      if(r.tip>0) extras.push('팁 $'+r.tip);
+      const nightOwnerNote = (r.nightOwner||0)>0 ? `<div style="font-size:11px;color:var(--red);font-weight:600;margin-top:4px;">회사납입 -$${r.nightOwner}</div>` : '';
+      html+=`<div class="pay-report-row">
+        <div class="pay-report-row-top">
+          <div>
+            <div class="pay-report-agency">${r.agency||'—'}</div>
+            <div class="pay-report-attr">${r.attraction||''} ${r.rego?'· '+r.rego:''}</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="pay-report-amount">$${(r.dr||0)}</div>
+            ${nightOwnerNote}
+          </div>
+        </div>
+        ${extras.length?'<div class="pay-report-tags">'+extras.map(e=>'<span class="pay-report-tag">'+e+'</span>').join('')+'</div>':''}
+        ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:4px;">⏱ '+r.timeStart+' – '+(r.timeEnd||'')+'</div>':''}
+      </div>`;
+    });
+  });
+
+  el.innerHTML = html;
+}
+
 function renderSalary(){
   const el=document.getElementById('salary-list');
   const meEl=document.getElementById('me-salary-detail');
