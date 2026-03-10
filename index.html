@@ -1168,27 +1168,38 @@ function sddFilter(key) {
   const list  = document.getElementById('sdd-'+key+'-list');
   const q     = input.value.trim().toLowerCase();
   const cfg   = SDD_CONFIG[key];
-  const all   = cfg.list(); // [{name, sub}]
-  const filtered = q ? all.filter(o=>o.name.toLowerCase().includes(q) || (o.sub||'').toLowerCase().includes(q)) : all;
+  const all   = cfg.list();
+  const filtered = q ? all.filter(o=>o.name.toLowerCase().includes(q)||(o.sub||'').toLowerCase().includes(q)) : all;
 
-  if(filtered.length===0 && !q) { list.innerHTML='<div class="sdd-empty">목록이 없습니다</div>'; return; }
+  if(filtered.length===0 && !q){ list.innerHTML='<div class="sdd-empty">목록이 없습니다</div>'; return; }
 
-  let html = filtered.slice(0,60).map(o=>{
-    const esc = o.name.replace(/'/g,"\\'\\'");
-    const sub = o.sub ? `<div class="sdd-sub">${o.sub}</div>` : '';
-    return `<div class="sdd-item" onmousedown="sddSelect('${key}','${esc}')">
-      <div class="sdd-name">${o.name}</div>${sub}
-    </div>`;
-  }).join('');
+  // data-index 방식으로 렌더 (onmousedown 인라인 따옴표 문제 방지)
+  const frag = document.createDocumentFragment();
+  filtered.slice(0,60).forEach((o,i)=>{
+    const div = document.createElement('div');
+    div.className = 'sdd-item';
+    div.dataset.key = key;
+    div.dataset.val = o.name;
+    div.innerHTML = '<div class="sdd-name">'+o.name+'</div>'+(o.sub?'<div class="sdd-sub">'+o.sub+'</div>':'');
+    div.addEventListener('mousedown', function(e){ e.preventDefault(); sddSelect(this.dataset.key, this.dataset.val); });
+    frag.appendChild(div);
+  });
 
   // 목록에 없고 입력값 있으면 추가 버튼
   const inputVal = input.value.trim();
-  if(q && !all.some(o=>o.name.toLowerCase()===q)) {
-    html += `<div class="sdd-item add-new" onmousedown="sddAddNew('${key}','${inputVal.replace(/'/g,"\\'\\'")}')">
-      ➕ &nbsp;<b>\"${inputVal}\"</b> &nbsp;새로 추가하기
-    </div>`;
+  if(q && !all.some(o=>o.name.toLowerCase()===q)){
+    const addDiv = document.createElement('div');
+    addDiv.className = 'sdd-item add-new';
+    addDiv.dataset.key = key;
+    addDiv.dataset.val = inputVal;
+    addDiv.innerHTML = '➕ &nbsp;<b>"'+inputVal+'"</b> &nbsp;새로 추가하기';
+    addDiv.addEventListener('mousedown', function(e){ e.preventDefault(); sddAddNew(this.dataset.key, this.dataset.val); });
+    frag.appendChild(addDiv);
   }
-  list.innerHTML = html || '<div class="sdd-empty">검색 결과 없음</div>';
+
+  list.innerHTML = '';
+  if(frag.childNodes.length===0){ list.innerHTML='<div class="sdd-empty">검색 결과 없음</div>'; }
+  else { list.appendChild(frag); }
   list.classList.add('open');
 }
 function sddSelect(key, value) {
