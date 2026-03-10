@@ -571,9 +571,10 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         </div>
 
         <div class="form-row mb14">
-          <div class="form-group">
-            <label class="form-label">OT 요금</label>
-            <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-ot" placeholder="0" oninput="calcTotal()"></div>
+          <div class="form-group" style="flex:1;">
+            <label class="form-label">OT 요금 <span style="font-size:11px;color:var(--muted);" id="ot-rate-hint"></span></label>
+            <div id="ot-btn-group" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
+            <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-ot" placeholder="0" oninput="calcTotal();document.querySelectorAll('[id^=\"ot-btn-\"]').forEach(b=>{b.style.background='var(--surface2)';b.style.color='var(--text)';b.style.borderColor='var(--border)';});"></div>
           </div>
           <div class="form-group">
             <label class="form-label">트레일러</label>
@@ -613,7 +614,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div class="form-group mb14"><label class="form-label">톨 경로</label><textarea class="form-textarea" id="f-toll-detail" placeholder="M2, M7..." style="min-height:56px;"></textarea></div>
 
         <div class="total-box">
-          <div class="total-row" style="display:none;"><span class="total-label">서비스 합계</span><span class="total-val green" id="t-ta">$0</span></div>
+          <div class="total-row"><span class="total-label">서비스 합계</span><span class="total-val green" id="t-ta">$0</span></div>
           <div class="total-row"><span class="total-label">드라이버 지급</span><span class="total-val accent" id="t-dr">$0</span></div>
         </div>
 
@@ -2090,7 +2091,7 @@ function renderStep2SavedReports(){
       <div class="report-item">
         <div class="report-header">
           <div><div style="font-weight:700;">${r.agency}</div><div style="font-size:12px;color:var(--muted);">${r.attraction}</div></div>
-          <div class="report-amount">$${r.dr||0}</div>
+          <div class="report-amount">$${r.total}</div>
         </div>
         <div class="report-detail">
           ${r.timeStart?`<span class="report-tag">⏱ ${r.timeStart}–${r.timeEnd}</span>`:''}
@@ -2105,15 +2106,15 @@ function renderShiftSummary(){
   if(!shift||shift.dailyReports.length===0){
     el.textContent='이번 운행에 Daily Report가 없습니다.';return;
   }
-  const totalAmt = shift.dailyReports.reduce((a,r)=>a+(r.dr||0),0);
+  const totalAmt = shift.dailyReports.reduce((a,r)=>a+r.total,0);
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
       <span>Daily Reports</span><span style="font-weight:700;">${shift.dailyReports.length}건</span>
     </div>
     <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-      <span>드라이버 지급 합계</span><span style="font-weight:700;color:var(--accent);">$${totalAmt}</span>
+      <span>총 서비스 요금</span><span style="font-weight:700;color:var(--green);">$${totalAmt}</span>
     </div>
-    ${shift.dailyReports.map(r=>`<div style="padding:4px 0;font-size:12px;color:var(--muted);">• ${r.agency} · ${r.attraction} · $${r.dr||0}</div>`).join('')}`;
+    ${shift.dailyReports.map(r=>`<div style="padding:4px 0;font-size:12px;color:var(--muted);">• ${r.agency} · ${r.attraction} · $${r.total}</div>`).join('')}`;
 }
 
 function renderTodayReports(){
@@ -2131,7 +2132,7 @@ function renderTodayReports(){
           <div style="font-weight:700;">${r.agency}</div>
           <div style="font-size:12px;color:var(--muted);">${r.attraction} · ${r.rego}</div>
         </div>
-        <div class="report-amount">$${r.dr||0}</div>
+        <div class="report-amount">$${r.total}</div>
       </div>
       <div class="report-detail">
         ${r.timeStart?`<span class="report-tag">⏱ ${r.timeStart}–${r.timeEnd}</span>`:''}
@@ -2229,10 +2230,43 @@ function getSeatsFromShift(){
   return document.getElementById('dr-seats')?.value || '';
 }
 
+function renderOTButtons(seats){
+  const group = document.getElementById('ot-btn-group');
+  const hint  = document.getElementById('ot-rate-hint');
+  if(!group) return;
+  const isLarge = seats==='40S'||seats==='50S';
+  const isSmall = seats==='21S'||seats==='25S';
+  if(!isSmall && !isLarge){ group.innerHTML=''; if(hint) hint.textContent=''; return; }
+  const rate    = isSmall ? 30 : 40;
+  const amounts = [rate, rate*2, rate*3, rate*4];
+  if(hint) hint.textContent = isSmall ? '(21/25인승 시간당 $30)' : '(40/50인승 시간당 $40)';
+  group.innerHTML = amounts.map(a=>`
+    <button type="button"
+      onclick="selectOTAmount(${a})"
+      id="ot-btn-${a}"
+      style="padding:7px 13px;border-radius:8px;border:1.5px solid var(--border);background:var(--surface2);font-size:13px;font-weight:700;cursor:pointer;color:var(--text);font-family:'Noto Sans KR',sans-serif;">
+      $${a}
+    </button>`).join('');
+}
+function selectOTAmount(amt){
+  document.getElementById('f-ot').value = amt;
+  // 선택된 버튼 강조
+  document.querySelectorAll('[id^="ot-btn-"]').forEach(b=>{
+    const selected = parseInt(b.id.replace('ot-btn-','')) === amt;
+    b.style.background = selected ? 'var(--accent)' : 'var(--surface2)';
+    b.style.color      = selected ? 'white' : 'var(--text)';
+    b.style.borderColor= selected ? 'var(--accent)' : 'var(--border)';
+  });
+  calcTotal();
+}
+
 function updateSurchargeOptions(){
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   const isLarge = seats==='40S'||seats==='50S';
   const isSmall = seats==='21S'||seats==='25S';
+
+  // OT 버튼 렌더링
+  renderOTButtons(seats);
 
   // Service Charge
   const svcSel = document.getElementById('f-svc-select');
