@@ -111,20 +111,9 @@ function getMaster(sheetName) {
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) return {ok:true, sheet:sheetName, rows:[]};
   const headers = data[0];
-  // 전화번호 컬럼은 숫자로 저장돼도 문자열로 변환 (앞자리 0 보존)
-  const phoneFields = ['Mobile','Phone','mobile','phone'];
   const rows = data.slice(1).map(row => {
     const obj = {};
-    headers.forEach((h,i) => {
-      if (phoneFields.includes(h) && row[i] !== '' && row[i] !== null) {
-        // 숫자면 9자리 → 앞에 0 붙여서 10자리 문자열로
-        let v = String(row[i]).replace(/\.0+$/, '').replace(/\s/g, '');
-        if (/^\d{9}$/.test(v)) v = '0' + v;
-        obj[h] = v;
-      } else {
-        obj[h] = row[i];
-      }
-    });
+    headers.forEach((h,i) => { obj[h] = row[i]; });
     return obj;
   });
   return {ok:true, sheet:sheetName, rows};
@@ -241,4 +230,55 @@ function initAllMasters() {
     results.push({sheet:name, status:'created'});
   });
   return {ok:true, results};
+}
+
+/**
+ * M_Guides, M_Drivers, M_Hotels 시트의 전화번호 컬럼 앞자리 0 복원
+ * Apps Script 편집기에서 한 번만 실행하세요.
+ */
+function fixPhoneNumbers() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  
+  const targets = [
+    { sheet: 'M_Guides',  col: 'Mobile' },
+    { sheet: 'M_Drivers', col: 'Phone'  },
+    { sheet: 'M_Hotels',  col: 'Phone'  },
+  ];
+  
+  let totalFixed = 0;
+  
+  targets.forEach(({ sheet: sheetName, col: colName }) => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) { Logger.log(sheetName + ' 시트 없음, 건너뜀'); return; }
+    
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return;
+    
+    const headers = data[0];
+    const colIdx = headers.indexOf(colName);
+    if (colIdx === -1) { Logger.log(sheetName + '.' + colName + ' 컬럼 없음'); return; }
+    
+    let fixed = 0;
+    for (let r = 1; r < data.length; r++) {
+      const val = data[r][colIdx];
+      if (val === '' || val === null) continue;
+      
+      let s = String(val).replace(/\.0+$/, '').replace(/\s/g, '').replace(/[^0-9]/g, '');
+      if (s.length === 9) {
+        s = '0' + s;
+        // 셀에 텍스트로 저장 (앞에 ' 붙여서 강제 텍스트)
+        sheet.getRange(r + 1, colIdx + 1).setValue(s).setNumberFormat('@');
+        fixed++;
+      } else if (s.length === 10 && !String(val).startsWith('0')) {
+        // 10자리인데 텍스트 아닌 경우도 텍스트로 재저장
+        sheet.getRange(r + 1, colIdx + 1).setValue(s).setNumberFormat('@');
+        fixed++;
+      }
+    }
+    Logger.log(sheetName + '.' + colName + ': ' + fixed + '개 수정');
+    totalFixed += fixed;
+  });
+  
+  Logger.log('총 ' + totalFixed + '개 전화번호 수정 완료');
+  SpreadsheetApp.getUi().alert('완료! ' + totalFixed + '개 전화번호 앞자리 0 복원됨');
 }
