@@ -108,6 +108,7 @@ function doPost(e) {
     if (action === 'add_wage')           return cors(addMasterRow('Wages', payload.data));
     if (action === 'update_wage')        return cors(updateMasterRow('Wages', payload.rowIndex, payload.data));
     if (action === 'delete_wage')        return cors(deleteMasterRow('Wages', payload.rowIndex));
+    if (action === 'replace_wages')      return cors(replaceMasterSheet('Wages', payload.rows));
 
     return cors({ok:false, msg:'Unknown action: ' + action});
   } catch(err) {
