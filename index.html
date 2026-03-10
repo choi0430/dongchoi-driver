@@ -618,7 +618,17 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             </div>
             <input type="hidden" id="f-early" value="0">
           </div>
-          <div class="form-group"><label class="form-label">야간투어</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-night" placeholder="0" oninput="calcTotal()"></div></div>
+          <div class="form-group">
+            <label class="form-label">야간투어</label>
+            <select class="form-select" id="f-night-type" onchange="onNightChange()" style="margin-bottom:6px;">
+              <option value="none">없음 ($0)</option>
+              <option value="guide_opt">가이드 옵션 (현장 수령)</option>
+              <option value="agency_incl">여행사 포함 약식</option>
+              <option value="prepaid_opt">옵션 - 한국 선결제</option>
+            </select>
+            <div id="night-info" style="display:none;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.7;"></div>
+            <input type="hidden" id="f-night" value="0">
+          </div>
           <div class="form-group"><label class="form-label">팁</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-tip" placeholder="0" oninput="calcTotal()"></div></div>
         </div>
         <div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:10px 12px;margin-bottom:14px;">
@@ -1986,7 +1996,9 @@ function submitDailyReport(){
     fuel: parseFloat(document.getElementById('f-fuel')?.value||0),
     fuelPersonal: document.getElementById('fuel-personal')?.checked || false,
     early: parseFloat(document.getElementById('f-early')?.value||0),
+    nightType: document.getElementById('f-night-type')?.value || 'none',
     night: parseFloat(document.getElementById('f-night')?.value||0),
+    nightOwner: getNightRate()?.owner || 0,
     tip: parseFloat(document.getElementById('f-tip')?.value||0),
     remarks: document.getElementById('dr-remarks').value,
   };
@@ -2035,6 +2047,9 @@ function submitDailyReport(){
   ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
   selectWash(0);
   selectMeal(0);
+  const ntEl=document.getElementById('f-night-type');if(ntEl)ntEl.value='none';
+  const niEl=document.getElementById('night-info');if(niEl)niEl.style.display='none';
+  const nfEl=document.getElementById('f-night');if(nfEl)nfEl.value=0;
   ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
   selectTrailer(0); // 트레일러 초기화
   selectEarly(0);   // 조기출발 초기화
@@ -2375,6 +2390,50 @@ function selectEarly(amt){
   }
   calcTotal();
 }
+// 야간투어 요율 테이블
+const NIGHT_RATES = {
+  guide_opt:   { small:{ ta:0,   dr:0,   owner:50  }, large:{ ta:0,   dr:0,   owner:100 } },
+  agency_incl: { small:{ ta:250, dr:200, owner:50  }, large:{ ta:350, dr:300, owner:50  } },
+  prepaid_opt: { small:{ ta:330, dr:250, owner:50  }, large:{ ta:450, dr:350, owner:100 } },
+};
+function getNightRate(){
+  const type  = document.getElementById('f-night-type')?.value || 'none';
+  if(type==='none') return null;
+  const seats = document.getElementById('dr-seats')?.value || '';
+  const isLarge = (seats==='40S'||seats==='50S');
+  return NIGHT_RATES[type]?.[isLarge?'large':'small'] || null;
+}
+function onNightChange(){
+  const type  = document.getElementById('f-night-type')?.value || 'none';
+  const info  = document.getElementById('night-info');
+  const input = document.getElementById('f-night');
+  if(type==='none'){ info.style.display='none'; input.value=0; calcTotal(); return; }
+  const r = getNightRate();
+  if(!r){ info.style.display='none'; calcTotal(); return; }
+  const typeLabel = {guide_opt:'가이드 옵션 (현장 수령)', agency_incl:'여행사 포함 약식', prepaid_opt:'옵션 — 한국 선결제'}[type];
+  const seats = document.getElementById('dr-seats')?.value||'';
+  let html='';
+  if(type==='guide_opt'){
+    html=`<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:8px 10px;">
+      <div style="font-weight:700;color:#166534;margin-bottom:4px;">🌃 ${typeLabel}</div>
+      <div style="color:#15803d;">• 여행사 청구: <b>$0</b> (가이드가 현장 지급)</div>
+      <div style="color:#15803d;">• 드라이버 지급: <b>현장 수령</b></div>
+      <div style="color:#dc2626;font-weight:700;">• 차주 반납: <b>$${r.owner}</b></div>
+    </div>`;
+    input.value = 0;
+  } else {
+    html=`<div style="background:#eff6ff;border:1.5px solid #93c5fd;border-radius:8px;padding:8px 10px;">
+      <div style="font-weight:700;color:#1e40af;margin-bottom:4px;">🌃 ${typeLabel} (${seats||'인승 선택 필요'})</div>
+      <div style="color:#1d4ed8;">• 여행사 청구: <b>$${r.ta}</b></div>
+      <div style="color:#1d4ed8;">• 드라이버 지급: <b>$${r.dr}</b></div>
+      <div style="color:#dc2626;font-weight:700;">• 차주 반납: <b>$${r.owner}</b></div>
+    </div>`;
+    input.value = r.dr;
+  }
+  info.innerHTML = html;
+  info.style.display = 'block';
+  calcTotal();
+}
 function selectWash(amt){
   document.getElementById('f-wash').value = amt;
   [0, 15].forEach(v=>{
@@ -2439,6 +2498,8 @@ function updateSurchargeOptions(){
   // 조기출발 버튼 요금 갱신 (인승에 따라 $30 or $40)
   updateEarlyBtn();
   selectEarly(0); // 인승 변경 시 초기화
+  // 야간투어: 인승 변경 시 요율 표시 갱신
+  onNightChange();
 
   // Service Charge
   const svcSel = document.getElementById('f-svc-select');
@@ -2503,15 +2564,21 @@ function calcTotal(){
   const fuelVal  = parseFloat(document.getElementById('f-fuel')?.value||0);
   const washVal  = parseFloat(document.getElementById('f-wash')?.value||0);
   const mealVal  = parseFloat(document.getElementById('f-meal')?.value||0);
-  // ta(여행사 청구): 톨비는 40/50인승만, 연료비는 포함 안 함, 세차/식비는 포함 안 함
-  const fixedTA=['f-ot','f-trailer','f-early','f-night','f-tip','f-etc'];
+  // 야간투어: 유형별 ta/dr 별도 계산
+  const nightType = document.getElementById('f-night-type')?.value || 'none';
+  const nightRate = getNightRate();
+  const nightTA = (nightType!=='none' && nightRate) ? nightRate.ta : 0;
+  const nightDR = (nightType!=='none' && nightRate) ? nightRate.dr : 0;
+  // ta(여행사 청구): 톨비는 40/50인승만, 연료비/세차/식비 포함 안 함, 야간투어 별도
+  const fixedTA=['f-ot','f-trailer','f-early','f-tip','f-etc'];
   let ta=getSvcValue()+getHotelValue()+getDistValue();
   fixedTA.forEach(id=>{ta+=parseFloat(document.getElementById(id)?.value||0);});
-  if(isLarge) ta += tollVal; // 40/50인승만 톨비 여행사 청구
-  // dr(드라이버 지급): 기본 수당 + OT 50% + 세차 + 식비 + 개인결제 톨/연료
+  if(isLarge) ta += tollVal;
+  ta += nightTA;
+  // dr(드라이버 지급): 기본 수당 + OT 50% + 야간투어 + 세차 + 식비 + 개인결제 톨/연료
   const att=document.getElementById('dr-attraction')?.value;
   let dr=att&&RATES[att]?RATES[att].dr+(parseFloat(document.getElementById('f-ot')?.value||0)*0.5):0;
-  dr += washVal + mealVal;
+  dr += nightDR + washVal + mealVal;
   const tollPersonal = document.getElementById('toll-personal')?.checked;
   const fuelPersonal = document.getElementById('fuel-personal')?.checked;
   if(tollPersonal) dr += tollVal;
