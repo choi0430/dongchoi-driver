@@ -365,6 +365,21 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 </div>
 
 
+<!-- WAGE PAGE -->
+<div class="pg" id="pwage">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">💵 드라이버 급여</div><div class="ssb">지급 기록 관리</div></div>
+    <button class="btn bac sm" onclick="openWageEntry(null)">+ 지급 추가</button>
+  </div>
+  <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;">
+    <select id="wage-driver-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
+    <select id="wage-week-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
+    <button class="btn brd sm" onclick="deleteWageWeek()" style="padding:0 10px;" title="주간 삭제">🗑</button>
+  </div>
+  <div id="wage-summary" style="padding:10px 14px 0;"></div>
+  <div id="wage-list" style="padding:0 14px;"></div>
+</div>
+
 <!-- SUB CONTRACT PAGE -->
 <div class="pg" id="psub">
   <div class="shd" style="padding-top:8px">
@@ -394,6 +409,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
             <tr>
               <th style="min-width:140px">투어 / 코스</th>
               <th>21인승</th><th>25인승</th><th>40인승</th><th>50인승</th>
+              <th style="min-width:36px"></th>
             </tr>
           </thead>
           <tbody id="subRatesTbody"></tbody>
@@ -463,9 +479,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
   <!-- 정산 내역 뷰 -->
   <div id="sub-view-ledger" style="display:none;">
-    <div style="padding:10px 14px 0;display:flex;justify-content:space-between;align-items:center;">
-      <select id="ledger-week-sel" class="profit-sel" style="flex:1;margin-right:8px;" onchange="renderLedger()"></select>
-      <button class="btn bac sm" onclick="addLedgerWeek()" style="white-space:nowrap;">+ 주간 추가</button>
+    <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;">
+      <select id="ledger-week-sel" class="profit-sel" style="flex:1;" onchange="renderLedger()"></select>
+      <button class="btn bac sm" onclick="addLedgerWeek()" style="white-space:nowrap;padding:0 10px;">+</button>
+      <button class="btn brd sm" onclick="deleteLedgerWeek()" style="white-space:nowrap;padding:0 10px;" title="선택한 주간 삭제">🗑</button>
     </div>
     <div id="ledger-body" style="padding:10px 14px 0;"></div>
   </div>
@@ -483,6 +500,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div class="ni" id="nprc" onclick="nv('pprc','nprc');rP()"><div class="nie">💰</div><div class="nil">요금</div></div>
   <div class="ni" id="nhtl" onclick="nv('phtl','nhtl');rH()"><div class="nie">🏨</div><div class="nil">호텔</div></div>
   <div class="ni" id="nsub" onclick="nv('psub','nsub');rSub()"><div class="nie">🤝</div><div class="nil">서브</div></div>
+  <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
 </div>
 </div><!-- /sm -->
 
@@ -856,10 +874,15 @@ function renderSubRates(){
     const r = vRates[tour]||{};
     const tr = document.createElement('tr');
     tr.dataset.tour = tour;
+    const delBtn = document.createElement('button');
+    delBtn.className='btn brd xs';delBtn.style.cssText='padding:2px 7px;font-size:12px;';
+    delBtn.textContent='🗑';delBtn.dataset.tour=tour;
+    delBtn.addEventListener('click',function(){ deleteSubRate(this.dataset.tour); });
     tr.innerHTML = '<td>'+tour+'</td>'+
       ['21','25','40','50'].map(cap=>
         '<td><input class="sub-inp" data-cap="'+cap+'" type="number" value="'+(r[cap]||'')+'" placeholder="0" min="0"></td>'
-      ).join('');
+      ).join('')+'<td></td>';
+    tr.querySelector('td:last-child').appendChild(delBtn);
     tbody.appendChild(tr);
   });
 }
@@ -874,6 +897,16 @@ function addSubRate(){
   rates[rego][tour]={'21':0,'25':0,'40':0,'50':0};
   localStorage.setItem('admin_sub_rates', JSON.stringify(rates));
   renderSubRates();
+}
+
+function deleteSubRate(tour){
+  if(!confirm('"'+tour+'" 코스를 삭제하시겠습니까?')) return;
+  const rego = ST.curSubVeh;
+  const rates = getSubRates();
+  if(rates[rego]) delete rates[rego][tour];
+  localStorage.setItem('admin_sub_rates', JSON.stringify(rates));
+  renderSubRates();
+  toast('코스 삭제 완료','ok');
 }
 
 function showSubTab(tab){
@@ -1002,6 +1035,22 @@ function addLedgerWeek(){
   saveLedger(ledger);
   initLedger();
   toast('주간 추가됨: '+getWeekLabel(monStr),'ok');
+}
+
+function deleteLedgerWeek(){
+  if(!ST.ledgerWeek){toast('주간을 선택하세요','er');return;}
+  const ledger = getLedger();
+  const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
+  if(!week) return;
+  const label = getWeekLabel(ST.ledgerWeek);
+  const cnt = week.entries?.length||0;
+  if(!confirm(label+' 주간을 삭제하시겠습니까?'+(cnt>0?'
+(포함된 '+cnt+'건의 내역도 함께 삭제됩니다)':''))) return;
+  const newLedger = ledger.filter(w=>w.weekStart!==ST.ledgerWeek);
+  saveLedger(newLedger);
+  ST.ledgerWeek = newLedger[0]?.weekStart||null;
+  initLedger();
+  toast('주간 삭제 완료','ok');
 }
 
 function initLedger(){
@@ -1273,6 +1322,195 @@ function deleteLedgerEntry(idx){
   saveLedger(ledger);
   renderLedger();
   toast('삭제 완료','ok');
+}
+
+// ═══════════════════════════════════════
+// WAGE (드라이버 급여 지급)
+// ═══════════════════════════════════════
+function getWages(){ try{return JSON.parse(localStorage.getItem('admin_wages')||'{}');}catch(e){return {};} }
+function saveWages(d){ localStorage.setItem('admin_wages',JSON.stringify(d)); }
+// wages 구조: { "드라이버명": { "YYYY-MM-DD(월요일)": { total:0, paid:0, entries:[] } } }
+// entry: { date, amount, method, note }
+
+function rWage(){
+  // 드라이버 셀렉트 초기화
+  const dSel = document.getElementById('wage-driver-sel');
+  if(!dSel) return;
+  const drivers = DB.D.map(d=>({name:d.Name_KR||d.Name_EN, en:d.Name_EN}));
+  dSel.innerHTML = drivers.map(d=>'<option value="'+escH(d.name)+'">'+escH(d.name)+'</option>').join('');
+  if(!ST.wageDriver && drivers.length>0) ST.wageDriver = drivers[0].name;
+  if(ST.wageDriver) dSel.value = ST.wageDriver;
+  dSel.onchange = function(){ ST.wageDriver=this.value; initWageWeeks(); };
+  initWageWeeks();
+}
+
+function initWageWeeks(){
+  const wages = getWages();
+  const drv = ST.wageDriver;
+  if(!drv) return;
+  const drvWages = wages[drv] || {};
+  // 이번 주 자동 생성
+  const thisMon = getMondayStr();
+  if(!drvWages[thisMon]){
+    drvWages[thisMon] = {entries:[]};
+    wages[drv] = drvWages;
+    saveWages(wages);
+  }
+  const weeks = Object.keys(drvWages).sort((a,b)=>b.localeCompare(a));
+  const wSel = document.getElementById('wage-week-sel');
+  if(!wSel) return;
+  wSel.innerHTML = weeks.map(w=>'<option value="'+w+'">'+getWeekLabel(w)+'</option>').join('');
+  if(!ST.wageWeek || !drvWages[ST.wageWeek]) ST.wageWeek = weeks[0];
+  wSel.value = ST.wageWeek;
+  wSel.onchange = function(){ ST.wageWeek=this.value; renderWage(); };
+  renderWage();
+}
+
+function renderWage(){
+  ST.wageDriver = document.getElementById('wage-driver-sel')?.value || ST.wageDriver;
+  ST.wageWeek   = document.getElementById('wage-week-sel')?.value   || ST.wageWeek;
+  const wages   = getWages();
+  const week    = wages[ST.wageDriver]?.[ST.wageWeek] || {entries:[]};
+  const entries = week.entries || [];
+
+  // 드라이버 앱 리포트에서 해당 주 dr 합산
+  const drvName = DB.D.find(d=>(d.Name_KR||d.Name_EN)===ST.wageDriver)?.Name_EN || ST.wageDriver;
+  let earned = 0;
+  try {
+    const rpts = JSON.parse(localStorage.getItem('reports_'+drvName)||'[]');
+    rpts.forEach(r=>{
+      const wk = getWeekKey(r.date);
+      if(wk && wk.key.replace('~','—')===getWeekLabel(ST.wageWeek).replace(' ','')) {
+        // 간단히 weekStart 비교
+      }
+      // 날짜로 주간 비교
+      if(r.date && ST.wageWeek){
+        const rDate = new Date(r.date.split('/').reverse().map((v,i)=>i===2?'20'+v:v).join('-'));
+        const mon = new Date(ST.wageWeek);
+        const sun = new Date(ST.wageWeek); sun.setDate(mon.getDate()+6);
+        if(rDate>=mon && rDate<=sun) earned += (r.dr||0);
+      }
+    });
+  } catch(e){}
+
+  const totalPaid = entries.reduce((s,e)=>s+(e.amount||0),0);
+  const balance   = earned - totalPaid;
+
+  // 요약 카드
+  const sumEl = document.getElementById('wage-summary');
+  if(sumEl) sumEl.innerHTML =
+    '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:4px;">'+
+      '<div style="font-size:11px;color:var(--t3);font-weight:700;margin-bottom:10px;">'+escH(ST.wageDriver)+' — '+getWeekLabel(ST.wageWeek)+'</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
+        wstat('리포트 발생', earned, 'var(--gn)')+
+        wstat('지급 합계',   totalPaid, 'var(--ac)')+
+        wstat('잔액',        balance,   balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)')+
+      '</div>'+
+    '</div>';
+
+  // 지급 내역 목록
+  const listEl = document.getElementById('wage-list');
+  if(!listEl) return;
+  if(entries.length===0){
+    listEl.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">지급 내역이 없습니다.<br>+ 지급 추가 버튼으로 기록하세요.</div>';
+    return;
+  }
+  listEl.innerHTML = entries.map((e,i)=>
+    '<div style="background:var(--sf2);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">'+
+      '<div>'+
+        '<div style="font-size:13px;font-weight:700;color:var(--t1);">'+escH(e.date||'')+'</div>'+
+        '<div style="font-size:11px;color:var(--t3);margin-top:2px;">'+escH(e.method||'현금')+(e.note?' · '+escH(e.note):'')+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;align-items:center;">'+
+        '<span style="font-size:16px;font-weight:800;color:var(--ac);">$'+((e.amount||0)).toLocaleString()+'</span>'+
+        '<button class="btn bgh xs" onclick="openWageEntry('+i+')">✏️</button>'+
+        '<button class="btn brd xs" onclick="deleteWageEntry('+i+')">🗑</button>'+
+      '</div>'+
+    '</div>'
+  ).join('');
+}
+
+function wstat(label,val,color){
+  return '<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'+
+    '<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">'+label+'</div>'+
+    '<div style="font-size:15px;font-weight:800;color:'+color+';">$'+Math.abs(val).toLocaleString()+'</div>'+
+  '</div>';
+}
+
+function openWageEntry(idx){
+  const wages = getWages();
+  const week  = wages[ST.wageDriver]?.[ST.wageWeek] || {entries:[]};
+  const entry = idx!==null ? {...(week.entries[idx]||{})} : {date:'',amount:0,method:'현금',note:''};
+  ST.wageEditIdx = idx;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'wage-modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9000;display:flex;align-items:flex-end;justify-content:center;';
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--sf);border-radius:20px 20px 0 0;padding:20px 16px 36px;width:100%;max-width:480px;';
+  modal.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'+
+      '<div style="font-size:16px;font-weight:800;">'+(idx!==null?'✏️ 지급 수정':'➕ 지급 추가')+'</div>'+
+      '<button onclick="document.getElementById(&quot;wage-modal-overlay&quot;).remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--t2);">✕</button>'+
+    '</div>'+
+    wfield('지급일','date','we-date',entry.date||'')+
+    wfield('지급 금액 $','number','we-amount',entry.amount||0)+
+    '<div style="margin-bottom:10px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:5px;">지급 방법</div>'+
+      '<select id="we-method" class="profit-sel" style="width:100%;">'+
+        ['현금','계좌이체','체크','기타'].map(m=>'<option value="'+m+'"'+(entry.method===m?' selected':'')+'>'+m+'</option>').join('')+
+      '</select></div>'+
+    wfield('메모','text','we-note',entry.note||'')+
+    '<button class="btn bac" style="width:100%;margin-top:6px;" onclick="saveWageEntry()">💾 저장</button>';
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function wfield(label,type,id,val){
+  return '<div style="margin-bottom:10px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:5px;">'+label+'</div>'+
+    '<input id="'+id+'" type="'+type+'" class="profit-finp" style="width:100%;box-sizing:border-box;font-size:14px;" value="'+escH(String(val))+'"></div>';
+}
+
+function saveWageEntry(){
+  const date   = document.getElementById('we-date')?.value||'';
+  const amount = parseFloat(document.getElementById('we-amount')?.value)||0;
+  const method = document.getElementById('we-method')?.value||'현금';
+  const note   = document.getElementById('we-note')?.value||'';
+  if(!date){toast('날짜를 입력하세요','er');return;}
+  if(amount<=0){toast('금액을 입력하세요','er');return;}
+  const wages = getWages();
+  if(!wages[ST.wageDriver]) wages[ST.wageDriver]={};
+  if(!wages[ST.wageDriver][ST.wageWeek]) wages[ST.wageDriver][ST.wageWeek]={entries:[]};
+  const entries = wages[ST.wageDriver][ST.wageWeek].entries;
+  const entry = {date,amount,method,note};
+  if(ST.wageEditIdx!==null) entries[ST.wageEditIdx]=entry;
+  else entries.push(entry);
+  entries.sort((a,b)=>a.date.localeCompare(b.date));
+  saveWages(wages);
+  document.getElementById('wage-modal-overlay')?.remove();
+  renderWage();
+  toast(ST.wageEditIdx!==null?'수정 완료':'지급 기록 추가','ok');
+}
+
+function deleteWageEntry(idx){
+  if(!confirm('이 지급 기록을 삭제하시겠습니까?')) return;
+  const wages = getWages();
+  wages[ST.wageDriver]?.[ST.wageWeek]?.entries?.splice(idx,1);
+  saveWages(wages);
+  renderWage();
+  toast('삭제 완료','ok');
+}
+
+function deleteWageWeek(){
+  if(!ST.wageWeek||!ST.wageDriver){toast('드라이버와 주간을 선택하세요','er');return;}
+  const wages = getWages();
+  const cnt = wages[ST.wageDriver]?.[ST.wageWeek]?.entries?.length||0;
+  if(!confirm(getWeekLabel(ST.wageWeek)+' 주간 기록을 삭제하시겠습니까?'+(cnt>0?'
+('+cnt+'건의 지급 기록도 함께 삭제됩니다)':''))) return;
+  if(wages[ST.wageDriver]) delete wages[ST.wageDriver][ST.wageWeek];
+  saveWages(wages);
+  ST.wageWeek = null;
+  initWageWeeks();
+  toast('주간 삭제 완료','ok');
 }
 
 // ═══════════════════════════════════════
