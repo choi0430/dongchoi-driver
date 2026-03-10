@@ -384,6 +384,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 <div class="pg" id="psub">
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">🤝 Sub Contract</div><div class="ssb">서브 요금 &amp; 수익 계산</div></div>
+    <button class="btn bgh sm" onclick="loadSubRatesFromSheet().then(()=>{renderSubRates();toast('새로고침 완료','ok');})" title="시트에서 새로고침">↻ 새로고침</button>
     <button class="btn bac sm" onclick="saveSubRates()">💾 저장</button>
   </div>
 
@@ -813,8 +814,21 @@ function getSubVehicles(){
 function getSubRates(){
   try { return JSON.parse(localStorage.getItem('admin_sub_rates')||'{}'); } catch(e){ return {}; }
 }
-function saveSubRates(){
-  // 테이블에서 현재 입력값 수집
+async function loadSubRatesFromSheet(){
+  try{
+    const res = await fetch(SCRIPT_URL+'?action=get_sub_rates');
+    const json = await res.json();
+    if(!json.ok||!json.rows?.length) return;
+    const rates={};
+    json.rows.forEach(r=>{
+      if(!r.Rego||!r.Tour) return;
+      if(!rates[r.Rego]) rates[r.Rego]={};
+      rates[r.Rego][r.Tour]={'21':Number(r.seats_21)||0,'25':Number(r.seats_25)||0,'40':Number(r.seats_40)||0,'50':Number(r.seats_50)||0};
+    });
+    localStorage.setItem('admin_sub_rates',JSON.stringify(rates));
+  }catch(e){console.warn('서브 요금 로드 실패:',e);}
+}
+async function saveSubRates(){
   const rego = ST.curSubVeh;
   if(!rego){toast('차량을 선택하세요','er');return;}
   const rates = getSubRates();
@@ -829,8 +843,16 @@ function saveSubRates(){
       '50': parseInt(tr.querySelector('[data-cap="50"]')?.value)||0,
     };
   });
-  localStorage.setItem('admin_sub_rates', JSON.stringify(rates));
-  toast('서브 요금 저장 완료','ok');
+  localStorage.setItem('admin_sub_rates',JSON.stringify(rates));
+  try{
+    const rows=[];
+    Object.entries(rates).forEach(([rg,tours])=>Object.entries(tours).forEach(([tour,caps])=>{
+      rows.push({Rego:rg,Tour:tour,seats_21:caps['21']||0,seats_25:caps['25']||0,seats_40:caps['40']||0,seats_50:caps['50']||0});
+    }));
+    const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'replace_sub_rates',rows})});
+    const json=await res.json();
+    toast(json.ok?'서브 요금 저장 완료 ☁️':'서브 요금 저장됨 (Sheets 오류)','ok');
+  }catch(e){toast('서브 요금 저장됨 (오프라인)','ok');}
 }
 
 function rSub(){
@@ -1008,6 +1030,58 @@ function calcProfit(){
 function getLedger(){ try{return JSON.parse(localStorage.getItem('admin_ledger')||'[]');}catch(e){return[];} }
 function saveLedger(d){ localStorage.setItem('admin_ledger',JSON.stringify(d)); }
 
+// 시트에서 Ledger 로드 (행 배열 → 주간 트리 구조)
+async function loadLedgerFromSheet(){
+  try{
+    const res = await fetch(SCRIPT_URL+'?action=get_ledger');
+    const json = await res.json();
+    if(!json.ok||!json.rows?.length) return;
+    // rows → [{weekStart, entries:[...]}] 구조로 변환
+    const weekMap={};
+    json.rows.forEach((r,i)=>{
+      const ws = r.WeekStart||'';
+      if(!ws) return;
+      if(!weekMap[ws]) weekMap[ws]={weekStart:ws,entries:[]};
+      weekMap[ws].entries.push({
+        _rowIndex: i+2, // 헤더+1, 0-based
+        date:r.Date||'',rego:r.Rego||'',tour:r.Tour||'',
+        ta:Number(r.TA)||0,subTotal:Number(r.SubTotal)||0,
+        myDr:Number(r.MyDr)||0,extra:Number(r.Extra)||0,
+        ot:Number(r.OT)||0,trailer:Number(r.Trailer)||0,
+        hotel:Number(r.Hotel)||0,note:r.Note||''
+      });
+    });
+    const ledger = Object.values(weekMap).sort((a,b)=>b.weekStart.localeCompare(a.weekStart));
+    localStorage.setItem('admin_ledger',JSON.stringify(ledger));
+  }catch(e){console.warn('Ledger 로드 실패:',e);}
+}
+
+// 정산 건을 시트에 저장 (추가 또는 수정)
+async function syncLedgerEntryToSheet(entry, rowIndex){
+  const row = {WeekStart:ST.ledgerWeek,Date:entry.date,Rego:entry.rego,Tour:entry.tour,
+    TA:entry.ta,SubTotal:entry.subTotal,MyDr:entry.myDr,Extra:entry.extra,
+    OT:entry.ot,Trailer:entry.trailer,Hotel:entry.hotel,Note:entry.note};
+  try{
+    if(rowIndex){
+      await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({action:'update_ledger',rowIndex,data:row})});
+    } else {
+      const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({action:'add_ledger',data:row})});
+      const json=await res.json();
+      return json.row; // 새 rowIndex 반환
+    }
+  }catch(e){console.warn('Ledger sync 실패:',e);}
+}
+
+async function deleteLedgerEntryFromSheet(rowIndex){
+  if(!rowIndex) return;
+  try{
+    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'delete_ledger',rowIndex})});
+  }catch(e){console.warn('Ledger delete 실패:',e);}
+}
+
 function getWeekLabel(dateStr){
   // dateStr: "YYYY-MM-DD" (월요일)
   const d = new Date(dateStr);
@@ -1053,7 +1127,8 @@ function deleteLedgerWeek(){
   toast('주간 삭제 완료','ok');
 }
 
-function initLedger(){
+async function initLedger(){
+  await loadLedgerFromSheet();
   const ledger = getLedger();
   const sel = document.getElementById('ledger-week-sel');
   if(!sel) return;
@@ -1282,7 +1357,7 @@ function ledgerPreview(){
     '</div>';
 }
 
-function saveLedgerEntry(){
+async function saveLedgerEntry(){
   const entry = {
     date:  document.getElementById('le-date')?.value||'',
     rego:  document.getElementById('le-rego')?.value||'',
@@ -1303,14 +1378,26 @@ function saveLedgerEntry(){
   const ledger = getLedger();
   const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
   if(!week){toast('주간을 먼저 선택하세요','er');return;}
-  if(ST.ledgerEditIdx!==null) week.entries[ST.ledgerEditIdx]=entry;
+
+  const isEdit = ST.ledgerEditIdx!==null;
+  const existingRow = isEdit ? week.entries[ST.ledgerEditIdx]?._rowIndex : null;
+  if(isEdit) week.entries[ST.ledgerEditIdx]=entry;
   else week.entries.push(entry);
-  // 날짜순 정렬
   week.entries.sort((a,b)=>a.date.localeCompare(b.date));
   saveLedger(ledger);
   document.getElementById('ledger-modal-overlay')?.remove();
   renderLedger();
-  toast(ST.ledgerEditIdx!==null ? '수정 완료' : '건 추가 완료', 'ok');
+  toast(isEdit ? '수정 완료 ☁️' : '건 추가 완료 ☁️', 'ok');
+  // 시트 sync
+  syncLedgerEntryToSheet(entry, existingRow).then(newRow=>{
+    if(newRow && !isEdit){
+      // 새로 추가된 행의 rowIndex를 entry에 저장
+      const w = getLedger().find(w=>w.weekStart===ST.ledgerWeek);
+      const e2 = w?.entries.find(e=>e.date===entry.date&&e.tour===entry.tour&&e.ta===entry.ta);
+      if(e2) e2._rowIndex=newRow;
+      saveLedger(getLedger());
+    }
+  });
 }
 
 function deleteLedgerEntry(idx){
@@ -1318,10 +1405,12 @@ function deleteLedgerEntry(idx){
   const ledger = getLedger();
   const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
   if(!week) return;
+  const rowIndex = week.entries[idx]?._rowIndex;
   week.entries.splice(idx,1);
   saveLedger(ledger);
   renderLedger();
-  toast('삭제 완료','ok');
+  toast('삭제 완료 ☁️','ok');
+  deleteLedgerEntryFromSheet(rowIndex);
 }
 
 // ═══════════════════════════════════════
@@ -1329,11 +1418,32 @@ function deleteLedgerEntry(idx){
 // ═══════════════════════════════════════
 function getWages(){ try{return JSON.parse(localStorage.getItem('admin_wages')||'{}');}catch(e){return {};} }
 function saveWages(d){ localStorage.setItem('admin_wages',JSON.stringify(d)); }
+
+async function loadWagesFromSheet(){
+  try{
+    const res = await fetch(SCRIPT_URL+'?action=get_wages');
+    const json = await res.json();
+    if(!json.ok||!json.rows?.length) return;
+    // rows → { 드라이버: { weekStart: { entries:[] } } } 구조
+    const wages={};
+    json.rows.forEach((r,i)=>{
+      const drv=r.Driver||''; const ws=r.WeekStart||'';
+      if(!drv||!ws) return;
+      if(!wages[drv]) wages[drv]={};
+      if(!wages[drv][ws]) wages[drv][ws]={entries:[]};
+      wages[drv][ws].entries.push({
+        _rowIndex:i+2,
+        date:r.Date||'',amount:Number(r.Amount)||0,method:r.Method||'현금',note:r.Note||''
+      });
+    });
+    localStorage.setItem('admin_wages',JSON.stringify(wages));
+  }catch(e){console.warn('급여 로드 실패:',e);}
+}
 // wages 구조: { "드라이버명": { "YYYY-MM-DD(월요일)": { total:0, paid:0, entries:[] } } }
 // entry: { date, amount, method, note }
 
-function rWage(){
-  // 드라이버 셀렉트 초기화
+async function rWage(){
+  await loadWagesFromSheet();
   const dSel = document.getElementById('wage-driver-sel');
   if(!dSel) return;
   const drivers = DB.D.map(d=>({name:d.Name_KR||d.Name_EN, en:d.Name_EN}));
@@ -1470,7 +1580,7 @@ function wfield(label,type,id,val){
     '<input id="'+id+'" type="'+type+'" class="profit-finp" style="width:100%;box-sizing:border-box;font-size:14px;" value="'+escH(String(val))+'"></div>';
 }
 
-function saveWageEntry(){
+async function saveWageEntry(){
   const date   = document.getElementById('we-date')?.value||'';
   const amount = parseFloat(document.getElementById('we-amount')?.value)||0;
   const method = document.getElementById('we-method')?.value||'현금';
@@ -1481,23 +1591,50 @@ function saveWageEntry(){
   if(!wages[ST.wageDriver]) wages[ST.wageDriver]={};
   if(!wages[ST.wageDriver][ST.wageWeek]) wages[ST.wageDriver][ST.wageWeek]={entries:[]};
   const entries = wages[ST.wageDriver][ST.wageWeek].entries;
+  const isEdit = ST.wageEditIdx!==null;
+  const existingRow = isEdit ? entries[ST.wageEditIdx]?._rowIndex : null;
   const entry = {date,amount,method,note};
-  if(ST.wageEditIdx!==null) entries[ST.wageEditIdx]=entry;
+  if(isEdit) entries[ST.wageEditIdx]=entry;
   else entries.push(entry);
   entries.sort((a,b)=>a.date.localeCompare(b.date));
   saveWages(wages);
   document.getElementById('wage-modal-overlay')?.remove();
   renderWage();
-  toast(ST.wageEditIdx!==null?'수정 완료':'지급 기록 추가','ok');
+  toast(isEdit?'수정 완료 ☁️':'지급 기록 추가 ☁️','ok');
+  // 시트 sync
+  const row={Driver:ST.wageDriver,WeekStart:ST.wageWeek,Date:date,Amount:amount,Method:method,Note:note};
+  try{
+    if(isEdit && existingRow){
+      await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({action:'update_wage',rowIndex:existingRow,data:row})});
+    } else {
+      const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({action:'add_wage',data:row})});
+      const json=await res.json();
+      if(json.row){
+        // rowIndex 저장
+        const w2=getWages();
+        const e2=w2[ST.wageDriver]?.[ST.wageWeek]?.entries?.find(e=>e.date===date&&e.amount===amount);
+        if(e2){e2._rowIndex=json.row;saveWages(w2);}
+      }
+    }
+  }catch(e){console.warn('급여 시트 sync 실패:',e);}
 }
 
-function deleteWageEntry(idx){
+async function deleteWageEntry(idx){
   if(!confirm('이 지급 기록을 삭제하시겠습니까?')) return;
   const wages = getWages();
-  wages[ST.wageDriver]?.[ST.wageWeek]?.entries?.splice(idx,1);
+  const entries = wages[ST.wageDriver]?.[ST.wageWeek]?.entries;
+  const rowIndex = entries?.[idx]?._rowIndex;
+  entries?.splice(idx,1);
   saveWages(wages);
   renderWage();
-  toast('삭제 완료','ok');
+  toast('삭제 완료 ☁️','ok');
+  if(rowIndex){
+    try{await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'delete_wage',rowIndex})});}
+    catch(e){console.warn('급여 삭제 sync 실패:',e);}
+  }
 }
 
 function deleteWageWeek(){
@@ -1896,6 +2033,13 @@ async function loadAllFromSheets(){
       });
     }
 
+    // 추가 데이터 로드 (실패해도 무시)
+    await Promise.allSettled([
+      loadSubRatesFromSheet(),
+      loadLedgerFromSheet(),
+      loadWagesFromSheet()
+    ]);
+
     document.getElementById('sl').classList.remove('on');
     document.getElementById('sm').classList.add('on');
     document.getElementById('ddate').textContent=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
@@ -1903,7 +2047,6 @@ async function loadAllFromSheets(){
     toast('✅ 데이터 로드 완료','ok');
   } catch(e){
     console.error(e);
-    // 실패해도 기존 하드코딩 데이터로 진행
     document.getElementById('sl').classList.remove('on');
     document.getElementById('sm').classList.add('on');
     document.getElementById('ddate').textContent=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
