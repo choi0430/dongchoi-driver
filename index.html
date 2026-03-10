@@ -621,9 +621,28 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           <div class="form-group"><label class="form-label">야간투어</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-night" placeholder="0" oninput="calcTotal()"></div></div>
           <div class="form-group"><label class="form-label">팁</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-tip" placeholder="0" oninput="calcTotal()"></div></div>
         </div>
-        <div class="form-row mb14">
-          <div class="form-group"><label class="form-label">톨비</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-toll" placeholder="0" oninput="calcTotal()"></div></div>
-          <div class="form-group"><label class="form-label">연료비</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-fuel" placeholder="0" oninput="calcTotal()"></div></div>
+        <div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:10px 12px;margin-bottom:14px;">
+          <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:8px;">⚠️ 톨비 · 연료비 — ETAG/주유카드 사용이 기본입니다. 개인 결제 시에만 금액을 입력하고 체크하세요.</div>
+          <div class="form-row" style="margin-bottom:8px;">
+            <div class="form-group">
+              <label class="form-label">톨비</label>
+              <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-toll" placeholder="0" oninput="calcTotal()"></div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">연료비</label>
+              <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-fuel" placeholder="0" oninput="calcTotal()"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:16px;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#92400e;cursor:pointer;">
+              <input type="checkbox" id="toll-personal" onchange="calcTotal()" style="width:16px;height:16px;accent-color:var(--accent);">
+              톨비 개인 결제 (드라이버 지급)
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#92400e;cursor:pointer;">
+              <input type="checkbox" id="fuel-personal" onchange="calcTotal()" style="width:16px;height:16px;accent-color:var(--accent);">
+              연료비 개인 결제 (드라이버 지급)
+            </label>
+          </div>
         </div>
         <div class="form-row-3 mb14">
           <div class="form-group"><label class="form-label">세차($15)</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-wash" placeholder="0" oninput="calcTotal()"></div></div>
@@ -1940,6 +1959,13 @@ function submitDailyReport(){
     distSurcharge: getDistValue(),
     ot: parseFloat(document.getElementById('f-ot')?.value||0),
     trailer: parseFloat(document.getElementById('f-trailer')?.value||0),
+    toll: parseFloat(document.getElementById('f-toll')?.value||0),
+    tollPersonal: document.getElementById('toll-personal')?.checked || false,
+    fuel: parseFloat(document.getElementById('f-fuel')?.value||0),
+    fuelPersonal: document.getElementById('fuel-personal')?.checked || false,
+    early: parseFloat(document.getElementById('f-early')?.value||0),
+    night: parseFloat(document.getElementById('f-night')?.value||0),
+    tip: parseFloat(document.getElementById('f-tip')?.value||0),
     remarks: document.getElementById('dr-remarks').value,
   };
   shift.dailyReports.push(report);
@@ -1984,6 +2010,8 @@ function submitDailyReport(){
   // reset form
   ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   ['f-ot','f-night','f-tip','f-toll','f-fuel','f-wash','f-meal','f-etc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
+  ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
   selectTrailer(0); // 트레일러 초기화
   selectEarly(0);   // 조기출발 초기화
   // reset surcharge selects
@@ -2425,7 +2453,12 @@ function calcTotal(){
   let ta=getSvcValue()+getHotelValue()+getDistValue();
   fixed.forEach(id=>{ta+=parseFloat(document.getElementById(id)?.value||0);});
   const att=document.getElementById('dr-attraction')?.value;
-  const dr=att&&RATES[att]?RATES[att].dr+(parseFloat(document.getElementById('f-ot')?.value||0)*0.5):0;
+  let dr=att&&RATES[att]?RATES[att].dr+(parseFloat(document.getElementById('f-ot')?.value||0)*0.5):0;
+  // 톨비/연료비: 개인 결제 체크 시에만 드라이버 지급에 포함
+  const tollPersonal = document.getElementById('toll-personal')?.checked;
+  const fuelPersonal = document.getElementById('fuel-personal')?.checked;
+  if(tollPersonal) dr += parseFloat(document.getElementById('f-toll')?.value||0);
+  if(fuelPersonal) dr += parseFloat(document.getElementById('f-fuel')?.value||0);
   document.getElementById('t-ta').textContent='$'+ta.toFixed(0);
   document.getElementById('t-dr').textContent='$'+dr.toFixed(0);
 }
