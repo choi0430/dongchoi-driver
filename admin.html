@@ -1111,20 +1111,29 @@ function addLedgerWeek(){
   toast('주간 추가됨: '+getWeekLabel(monStr),'ok');
 }
 
-function deleteLedgerWeek(){
+async function deleteLedgerWeek(){
   if(!ST.ledgerWeek){toast('주간을 선택하세요','er');return;}
   const ledger = getLedger();
   const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
   if(!week) return;
   const label = getWeekLabel(ST.ledgerWeek);
   const cnt = week.entries?.length||0;
-  if(!confirm(label+' 주간을 삭제하시겠습니까?'+(cnt>0?'
-(포함된 '+cnt+'건의 내역도 함께 삭제됩니다)':''))) return;
+  if(!confirm(label+' 주간을 삭제하시겠습니까?'+(cnt>0?'\n(포함된 '+cnt+'건의 내역도 함께 삭제됩니다)':''))) return;
   const newLedger = ledger.filter(w=>w.weekStart!==ST.ledgerWeek);
   saveLedger(newLedger);
   ST.ledgerWeek = newLedger[0]?.weekStart||null;
   initLedger();
-  toast('주간 삭제 완료','ok');
+  toast('주간 삭제 완료 ☁️','ok');
+  try{
+    const rows=[];
+    newLedger.forEach(w=>w.entries?.forEach(e=>rows.push({
+      WeekStart:w.weekStart,Date:e.date,Rego:e.rego,Tour:e.tour,
+      TA:e.ta,SubTotal:e.subTotal,MyDr:e.myDr,Extra:e.extra,
+      OT:e.ot,Trailer:e.trailer,Hotel:e.hotel,Note:e.note
+    })));
+    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'replace_ledger',rows})});
+  }catch(e){console.warn('Ledger 주간 삭제 sync:',e);}
 }
 
 async function initLedger(){
@@ -1637,17 +1646,29 @@ async function deleteWageEntry(idx){
   }
 }
 
-function deleteWageWeek(){
+async function deleteWageWeek(){
   if(!ST.wageWeek||!ST.wageDriver){toast('드라이버와 주간을 선택하세요','er');return;}
   const wages = getWages();
   const cnt = wages[ST.wageDriver]?.[ST.wageWeek]?.entries?.length||0;
-  if(!confirm(getWeekLabel(ST.wageWeek)+' 주간 기록을 삭제하시겠습니까?'+(cnt>0?'
-('+cnt+'건의 지급 기록도 함께 삭제됩니다)':''))) return;
+  if(!confirm(getWeekLabel(ST.wageWeek)+' 주간 기록을 삭제하시겠습니까?'+(cnt>0?'\n('+cnt+'건의 지급 기록도 함께 삭제됩니다)':''))) return;
   if(wages[ST.wageDriver]) delete wages[ST.wageDriver][ST.wageWeek];
   saveWages(wages);
   ST.wageWeek = null;
   initWageWeeks();
-  toast('주간 삭제 완료','ok');
+  toast('주간 삭제 완료 ☁️','ok');
+  try{
+    const allWages = getWages();
+    const rows=[];
+    Object.entries(allWages).forEach(([drv,weeks])=>
+      Object.entries(weeks).forEach(([ws,wk])=>
+        (wk.entries||[]).forEach(e=>rows.push({
+          Driver:drv,WeekStart:ws,Date:e.date,Amount:e.amount,Method:e.method,Note:e.note
+        }))
+      )
+    );
+    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'replace_wages',rows})});
+  }catch(e){console.warn('급여 주간 삭제 sync:',e);}
 }
 
 // ═══════════════════════════════════════
