@@ -559,9 +559,17 @@ function rP(){
   // Build agency tabs from DB.PC keys + DB.C list
   const agencies=[...new Set([...Object.keys(DB.PC),...DB.C.map(c=>c.Name)])].filter(Boolean);
   const tabs=document.getElementById('agTabs');
-  tabs.innerHTML=agencies.map(ag=>
-    `<button class="agtab${ST.curAg===ag?' on':''}" onclick="selAg('${esc(ag)}')">${ag}</button>`
-  ).join('');
+  const tabFrag = document.createDocumentFragment();
+  agencies.forEach(ag=>{
+    const btn = document.createElement('button');
+    btn.className = 'agtab' + (ST.curAg===ag?' on':'');
+    btn.textContent = ag;
+    btn.dataset.ag = ag;
+    btn.addEventListener('click', function(){ selAg(this.dataset.ag); });
+    tabFrag.appendChild(btn);
+  });
+  tabs.innerHTML = '';
+  tabs.appendChild(tabFrag);
   // auto-select first
   if(!ST.curAg&&agencies.length>0) selAg(agencies[0]);
   else if(ST.curAg) rPC(ST.curAg);
