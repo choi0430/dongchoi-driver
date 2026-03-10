@@ -641,13 +641,13 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
       <div class="card-head"><span class="card-title">🏁 End of Shift</span></div>
       <div class="card-body">
         <div class="form-row mb14">
-          <div class="form-group"><label class="form-label">날짜</label><input type="text" class="form-input" id="end-date" placeholder="dd/mm/yyyy" readonly style="background:var(--surface2);"></div>
+          <div class="form-group"><label class="form-label">날짜</label><input type="text" class="form-input" id="end-date" placeholder="dd/mm/yyyy"></div>
           <div class="form-group"><label class="form-label">종료 시간</label><input type="time" class="form-input" id="end-time"></div>
         </div>
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">차량 (Rego)</label>
-            <input type="text" class="form-input" id="end-rego" readonly style="background:var(--surface2);">
+            <input type="text" class="form-input" id="end-rego">
           </div>
           <div class="form-group"><label class="form-label">종료 KM<span class="req">*</span></label><input type="number" class="form-input" id="end-km" placeholder="0"></div>
         </div>
@@ -1793,7 +1793,7 @@ function renderShiftSection(){
         <div class="shift-detail">${s.seats} · 출발 ${s.startTime} · ${s.startKm.toLocaleString()} km · Daily Report ${s.dailyReports.length}건</div>
         <div class="shift-actions">
           <button class="shift-btn shift-btn-secondary" onclick="addDailyReport('${s.id}')">+ Daily Report</button>
-          <button class="shift-btn shift-btn-danger" onclick="startEndShift('${s.id}')">🏁 End of Shift</button>
+          <button class="shift-btn ${s.eosStarted?'shift-btn-secondary':'shift-btn-danger'}" onclick="startEndShift('${s.id}')">${s.eosStarted?'🏁 EOS 진행 중...':'🏁 End of Shift'}</button>
         </div>
       </div>`).join('');
     // also show add new shift button if needed
@@ -1859,17 +1859,29 @@ function addDailyReport(shiftId){
 }
 
 function startEndShift(shiftId){
+  const shift = activeShifts.find(s=>s.id===shiftId);
+  if(!shift){showToast('운행 정보를 찾을 수 없습니다','error');return;}
+  // 이미 EOS 진행 중이면 중복 방지 - 그냥 해당 화면으로 이동
+  if(shift.eosStarted){
+    editingShiftId = shiftId;
+    showPage('report');
+    goStep(3);
+    renderShiftSummary();
+    return;
+  }
+  // EOS 시작 플래그 설정
+  shift.eosStarted = true;
+  if(currentDriver && currentDriver.name){
+    localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+  }
   editingShiftId = shiftId;
   showPage('report');
   goStep(3);
-  // Pre-Departure 값을 기초값으로 설정
-  const shift = activeShifts.find(s=>s.id===shiftId);
-  if(shift){
-    const dateEl = document.getElementById('end-date');
-    const regoEl = document.getElementById('end-rego');
-    if(dateEl) dateEl.value = fmtDate(shift.date) || todayDisplay();
-    if(regoEl) regoEl.value = shift.rego || '';
-  }
+  // Pre-Departure 값을 초기값으로 설정 (수정 가능)
+  const dateEl = document.getElementById('end-date');
+  const regoEl = document.getElementById('end-rego');
+  if(dateEl) dateEl.value = fmtDate(shift.date) || todayDisplay();
+  if(regoEl) regoEl.value = shift.rego || '';
   renderShiftSummary();
 }
 
