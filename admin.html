@@ -372,10 +372,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <button class="btn bac sm" onclick="saveSubRates()">💾 저장</button>
   </div>
 
-  <!-- 탭: 서브 요금표 / 수익 계산기 -->
-  <div style="display:flex;gap:0;padding:10px 14px 0;">
-    <button id="sub-tab-rates" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;" onclick="showSubTab('rates')">📋 서브 요금표</button>
-    <button id="sub-tab-calc" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="showSubTab('calc')">🧮 수익 계산기</button>
+  <!-- 탭: 서브 요금표 / 수익 계산기 / 정산 내역 -->
+  <div style="display:flex;gap:0;padding:10px 14px 0;flex-wrap:wrap;gap:0;">
+    <button id="sub-tab-rates" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;margin-bottom:0;" onclick="showSubTab('rates')">📋 서브 요금표</button>
+    <button id="sub-tab-calc" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="showSubTab('calc')">🧮 수익 계산기</button>
+    <button id="sub-tab-ledger" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="showSubTab('ledger')">🗂 정산 내역</button>
   </div>
 
   <!-- 서브 요금표 뷰 -->
@@ -458,6 +459,15 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- 정산 내역 뷰 -->
+  <div id="sub-view-ledger" style="display:none;">
+    <div style="padding:10px 14px 0;display:flex;justify-content:space-between;align-items:center;">
+      <select id="ledger-week-sel" class="profit-sel" style="flex:1;margin-right:8px;" onchange="renderLedger()"></select>
+      <button class="btn bac sm" onclick="addLedgerWeek()" style="white-space:nowrap;">+ 주간 추가</button>
+    </div>
+    <div id="ledger-body" style="padding:10px 14px 0;"></div>
   </div>
 </div>
 
@@ -868,11 +878,17 @@ function addSubRate(){
 
 function showSubTab(tab){
   ST.subTab=tab;
-  document.getElementById('sub-view-rates').style.display = tab==='rates'?'':'none';
-  document.getElementById('sub-view-calc').style.display  = tab==='calc'?'':'none';
-  document.getElementById('sub-tab-rates').classList.toggle('on', tab==='rates');
-  document.getElementById('sub-tab-calc').classList.toggle('on', tab==='calc');
+  document.getElementById('sub-view-rates').style.display  = tab==='rates'?'':'none';
+  document.getElementById('sub-view-calc').style.display   = tab==='calc'?'':'none';
+  document.getElementById('sub-view-ledger').style.display = tab==='ledger'?'':'none';
+  document.getElementById('sub-tab-rates').classList.toggle('on',  tab==='rates');
+  document.getElementById('sub-tab-calc').classList.toggle('on',   tab==='calc');
+  document.getElementById('sub-tab-ledger').classList.toggle('on', tab==='ledger');
+  // 저장 버튼: 요금표일 때만 표시
+  const saveBtn = document.querySelector('#psub .shd .btn');
+  if(saveBtn) saveBtn.style.display = tab==='rates' ? '' : 'none';
   if(tab==='calc') calcProfit();
+  if(tab==='ledger') initLedger();
 }
 
 function initCalcSelects(){
@@ -951,6 +967,312 @@ function calcProfit(){
         '수입 $'+taTotal+' - 서브 $'+subTotal+' - 드라이버 $'+myDr+(extra?'- 기타 $'+extra:'')+'</div></div>'+
       '<div class="profit-net-val">'+(profit>=0?'':'- ')+'$'+Math.abs(profit).toLocaleString()+'</div>'+
     '</div>';
+}
+
+// ═══════════════════════════════════════
+// LEDGER (정산 내역)
+// ═══════════════════════════════════════
+function getLedger(){ try{return JSON.parse(localStorage.getItem('admin_ledger')||'[]');}catch(e){return[];} }
+function saveLedger(d){ localStorage.setItem('admin_ledger',JSON.stringify(d)); }
+
+function getWeekLabel(dateStr){
+  // dateStr: "YYYY-MM-DD" (월요일)
+  const d = new Date(dateStr);
+  const sun = new Date(d); sun.setDate(d.getDate()+6);
+  const fmt = x => String(x.getDate()).padStart(2,'0')+'/'+(x.getMonth()+1).toString().padStart(2,'0')+'/'+String(x.getFullYear()).slice(2);
+  return fmt(d)+' — '+fmt(sun);
+}
+
+function getMondayStr(offset=0){
+  const d = new Date();
+  const day = d.getDay(); // 0=Sun
+  const diff = (day===0)?-6:1-day;
+  d.setDate(d.getDate()+diff+(offset*7));
+  return d.toISOString().slice(0,10);
+}
+
+function addLedgerWeek(){
+  const monStr = prompt('주간 시작일 (월요일) 입력
+형식: YYYY-MM-DD', getMondayStr());
+  if(!monStr) return;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(monStr)){toast('날짜 형식 오류 (YYYY-MM-DD)','er');return;}
+  const ledger = getLedger();
+  if(ledger.find(w=>w.weekStart===monStr)){toast('이미 존재하는 주간입니다','er');return;}
+  ledger.unshift({weekStart:monStr, entries:[]});
+  saveLedger(ledger);
+  initLedger();
+  toast('주간 추가됨: '+getWeekLabel(monStr),'ok');
+}
+
+function initLedger(){
+  const ledger = getLedger();
+  const sel = document.getElementById('ledger-week-sel');
+  if(!sel) return;
+  // 현재 주 없으면 자동 생성
+  const thisMon = getMondayStr();
+  if(!ledger.find(w=>w.weekStart===thisMon)){
+    ledger.unshift({weekStart:thisMon, entries:[]});
+    saveLedger(ledger);
+  }
+  sel.innerHTML = ledger.map(w=>'<option value="'+w.weekStart+'">'+getWeekLabel(w.weekStart)+'</option>').join('');
+  if(!ST.ledgerWeek || !ledger.find(w=>w.weekStart===ST.ledgerWeek)){
+    ST.ledgerWeek = ledger[0]?.weekStart || thisMon;
+  }
+  sel.value = ST.ledgerWeek;
+  renderLedger();
+}
+
+function renderLedger(){
+  ST.ledgerWeek = document.getElementById('ledger-week-sel')?.value;
+  const ledger = getLedger();
+  const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
+  const bd = document.getElementById('ledger-body');
+  if(!bd) return;
+
+  const vehs = getSubVehicles();
+  const subRates = getSubRates();
+
+  // 집계
+  let totalTA=0, totalSub=0, totalMyDr=0, totalExtra=0;
+  const entries = week?.entries||[];
+  entries.forEach(e=>{
+    totalTA    += (e.ta||0);
+    totalSub   += (e.subTotal||0);
+    totalMyDr  += (e.myDr||0);
+    totalExtra += (e.extra||0);
+  });
+  const totalProfit = totalTA - totalSub - totalMyDr - totalExtra;
+
+  // 헤더 요약
+  let html = '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:12px;">';
+  html += '<div style="font-size:11px;color:var(--t3);font-weight:700;margin-bottom:10px;letter-spacing:.5px;">주간 합계</div>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">';
+  html += lsum('여행사 수입', totalTA, 'var(--gn)');
+  html += lsum('서브 지급', -totalSub, 'var(--rd)');
+  html += lsum('드라이버 비용', -totalMyDr, 'var(--rd)');
+  html += lsum('기타 비용', -totalExtra, totalExtra>0?'var(--rd)':'var(--t3)');
+  html += '</div>';
+  html += '<div style="border-top:1px solid var(--bd);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">';
+  html += '<span style="font-size:13px;font-weight:700;color:var(--t2);">순이익</span>';
+  html += '<span style="font-size:22px;font-weight:800;color:'+(totalProfit>=0?'var(--gn)':'var(--rd)')+';">'+(totalProfit>=0?'':'- ')+'$'+Math.abs(totalProfit).toLocaleString()+'</span>';
+  html += '</div></div>';
+
+  // 건별 목록
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+  html += '<div style="font-size:12px;font-weight:700;color:var(--t2);">건별 내역 ('+entries.length+'건)</div>';
+  html += '<button class="btn bac sm" onclick="openLedgerEntry(null)">+ 건 추가</button>';
+  html += '</div>';
+
+  if(entries.length===0){
+    html += '<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">아직 입력된 건이 없어요.<br>+ 건 추가 버튼으로 투어를 추가하세요.</div>';
+  } else {
+    entries.forEach((e,i)=>{
+      const profit = (e.ta||0)-(e.subTotal||0)-(e.myDr||0)-(e.extra||0);
+      html += '<div style="background:var(--sf2);border-radius:10px;padding:12px 14px;margin-bottom:8px;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">';
+      html += '<div>';
+      html += '<div style="font-size:13px;font-weight:700;color:var(--t1);">'+escH(e.date||'날짜미정')+' &nbsp;·&nbsp; '+escH(e.tour||'투어미정')+'</div>';
+      html += '<div style="font-size:11px;color:var(--t3);margin-top:2px;">';
+      if(e.rego) html += escH(e.rego)+' (서브)';
+      else html += '내 차량';
+      html += '</div></div>';
+      html += '<div style="display:flex;gap:6px;align-items:center;">';
+      html += '<span style="font-size:14px;font-weight:800;color:'+(profit>=0?'var(--gn)':'var(--rd)');'">'+(profit>=0?'':'- ')+'$'+Math.abs(profit).toLocaleString()+'</span>';
+      html += '<button class="btn bac sm" style="padding:3px 8px;font-size:11px;" data-idx="'+i+'" onclick="openLedgerEntry('+i+')">✏️</button>';
+      html += '<button class="btn sm" style="padding:3px 8px;font-size:11px;background:var(--rd-dim);color:var(--rd);" data-idx="'+i+'" onclick="deleteLedgerEntry('+i+')">🗑</button>';
+      html += '</div></div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4px;">';
+      html += lrow('TA 수입', e.ta||0, 'var(--gn)');
+      html += lrow('서브 지급', e.subTotal||0, 'var(--rd)');
+      html += lrow('드라이버', e.myDr||0, 'var(--rd)');
+      html += lrow('순이익', profit, profit>=0?'var(--gn)':'var(--rd)');
+      html += '</div></div>';
+    });
+  }
+  bd.innerHTML = html;
+}
+
+function lsum(label, val, color){
+  return '<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'+
+    '<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">'+label+'</div>'+
+    '<div style="font-size:15px;font-weight:800;color:'+color+';">'+(val>=0?'':'- ')+'$'+Math.abs(val).toLocaleString()+'</div>'+
+  '</div>';
+}
+function lrow(label, val, color){
+  return '<div style="background:var(--sf3);border-radius:6px;padding:5px 8px;text-align:center;">'+
+    '<div style="font-size:10px;color:var(--t3);">'+label+'</div>'+
+    '<div style="font-size:12px;font-weight:700;color:'+color+';">$'+Math.abs(val).toLocaleString()+'</div>'+
+  '</div>';
+}
+function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ─── 건 추가/수정 모달 ─────────────────────
+function openLedgerEntry(idx){
+  const ledger = getLedger();
+  const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
+  if(!week) return;
+  const entry = idx!==null ? {...week.entries[idx]} : {date:'',rego:'',tour:'',ta:0,subTotal:0,myDr:0,extra:0,note:''};
+  ST.ledgerEditIdx = idx;
+
+  const vehs = getSubVehicles();
+  const tours = Object.keys(DB.PD);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ledger-modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9000;display:flex;align-items:flex-end;justify-content:center;';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--sf);border-radius:20px 20px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;';
+
+  const vehOpts = '<option value="">내 차량 (서브 없음)</option>' +
+    vehs.map(v=>'<option value="'+escH(v.Rego)+'"'+( entry.rego===v.Rego?' selected':'')+'>'+escH(v.Rego)+' — '+escH(v.Owner)+'</option>').join('');
+  const tourOpts = '<option value="">-- 투어 선택 --</option>' +
+    tours.map(t=>'<option value="'+escH(t)+'"'+(entry.tour===t?' selected':'')+'>'+escH(t)+'</option>').join('');
+
+  modal.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'+
+      '<div style="font-size:16px;font-weight:800;">'+(idx!==null?'✏️ 건 수정':'➕ 건 추가')+'</div>'+
+      '<button onclick="document.getElementById('ledger-modal-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--t2);">✕</button>'+
+    '</div>'+
+    field('날짜','date','date',entry.date)+
+    '<div style="margin-bottom:10px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:5px;">서브 차량 (없으면 내 차량)</div>'+
+      '<select id="le-rego" class="profit-sel" onchange="ledgerAutoFill()" style="width:100%;">'+vehOpts+'</select></div>'+
+    '<div style="margin-bottom:10px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:5px;">투어 코스</div>'+
+      '<select id="le-tour" class="profit-sel" onchange="ledgerAutoFill()" style="width:100%;">'+tourOpts+'</select></div>'+
+    field('여행사 청구 (TA) $','number','ta',entry.ta||0)+
+    '<div id="le-sub-detail" style="background:var(--sf2);border-radius:10px;padding:12px;margin-bottom:10px;"></div>'+
+    field('서브 지급 합계 $','number','subTotal',entry.subTotal||0,'자동계산 후 수정 가능')+
+    field('내 차량 드라이버 비용 $','number','myDr',entry.myDr||0)+
+    field('기타 비용 $','number','extra',entry.extra||0)+
+    field('메모','text','note',entry.note||'')+
+    '<div id="le-profit-preview" style="background:var(--sf2);border-radius:10px;padding:12px;margin-bottom:14px;"></div>'+
+    '<button class="btn bac" style="width:100%;" onclick="saveLedgerEntry()">💾 저장</button>';
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  // OT/트레일러/호텔 숨김 필드
+  modal.insertAdjacentHTML('beforeend',
+    '<input type="hidden" id="le-ot" value="'+(entry.ot||0)+'">'+
+    '<input type="hidden" id="le-trailer" value="'+(entry.trailer||0)+'">'+
+    '<input type="hidden" id="le-hotel" value="'+(entry.hotel||0)+'">'
+  );
+  // 서브 상세 입력 토글
+  const subSection = document.createElement('div');
+  subSection.id = 'le-sub-surcharges';
+  subSection.style.cssText = 'background:var(--sf2);border-radius:10px;padding:12px;margin-bottom:10px;';
+  subSection.innerHTML =
+    '<div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:8px;">서브 추가 옵션</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">'+
+      miniField('OT (시간)','le-ot2',entry.ot||0)+
+      miniField('트레일러 ($)','le-trailer2',entry.trailer||0)+
+      miniField('호텔 서차지 ($)','le-hotel2',entry.hotel||0)+
+    '</div>';
+  const subDetailEl = modal.querySelector('#le-sub-detail');
+  subDetailEl.parentNode.insertBefore(subSection, subDetailEl);
+  // 이벤트
+  ['le-ta','le-subTotal','le-myDr','le-extra','le-ot2','le-trailer2','le-hotel2'].forEach(id=>{
+    const el = modal.querySelector('#'+id);
+    if(el) el.addEventListener('input', ledgerPreview);
+  });
+  ledgerPreview();
+}
+
+function field(label,type,id,val,placeholder=''){
+  return '<div style="margin-bottom:10px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:5px;">'+label+'</div>'+
+    '<input id="le-'+id+'" type="'+type+'" class="profit-finp" style="width:100%;box-sizing:border-box;font-size:14px;" value="'+escH(String(val))+'" placeholder="'+escH(placeholder)+'"></div>';
+}
+function miniField(label,id,val){
+  return '<div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">'+label+'</div>'+
+    '<input id="'+id+'" type="number" class="profit-finp" style="width:100%;box-sizing:border-box;font-size:13px;" value="'+val+'" placeholder="0"></div>';
+}
+
+function ledgerAutoFill(){
+  const rego = document.getElementById('le-rego')?.value;
+  const tour = document.getElementById('le-tour')?.value;
+  if(!rego || !tour){ ledgerPreview(); return; }
+  const veh = DB.V.find(v=>v.Rego===rego);
+  const cap = String(veh?.Capacity||25);
+  const capKey = cap>='50'?'50':cap>='40'?'40':cap>='25'?'25':'21';
+  const subRates = getSubRates();
+  const base = parseFloat(subRates[rego]?.[tour]?.[capKey])||0;
+  const otH = parseFloat(document.getElementById('le-ot2')?.value)||0;
+  const pdOT = DB.PD[tour]?.[capKey]?.ot||0;
+  const trailerAmt = parseFloat(document.getElementById('le-trailer2')?.value)||0;
+  const hotelAmt = parseFloat(document.getElementById('le-hotel2')?.value)||0;
+  const total = base + otH*pdOT + trailerAmt + hotelAmt;
+  const el = document.getElementById('le-subTotal');
+  if(el) el.value = total;
+  // 상세 표시
+  const det = document.getElementById('le-sub-detail');
+  if(det){
+    det.innerHTML = base>0 ?
+      '<div style="font-size:11px;color:var(--t3);margin-bottom:4px;font-weight:700;">서브 자동계산 ('+escH(rego)+')</div>'+
+      '<div style="font-size:12px;color:var(--t2);">기본 $'+base+' + OT $'+(otH*pdOT)+' = <strong>$'+total+'</strong></div>' :
+      '<div style="font-size:12px;color:var(--t3);">서브 요금표에 해당 투어 요금이 없으면 직접 입력하세요</div>';
+  }
+  ledgerPreview();
+}
+
+function ledgerPreview(){
+  ledgerAutoFill && void 0; // 의존성 체크용
+  const ta = parseFloat(document.getElementById('le-ta')?.value)||0;
+  const sub = parseFloat(document.getElementById('le-subTotal')?.value)||0;
+  const myDr = parseFloat(document.getElementById('le-myDr')?.value)||0;
+  const extra = parseFloat(document.getElementById('le-extra')?.value)||0;
+  const profit = ta - sub - myDr - extra;
+  const el = document.getElementById('le-profit-preview');
+  if(!el) return;
+  el.innerHTML =
+    '<div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:8px;">이 건 순이익 미리보기</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:8px;">'+
+      lrow('TA 수입',ta,'var(--gn)')+lrow('서브',sub,'var(--rd)')+lrow('드라이버',myDr,'var(--rd)')+lrow('기타',extra,'var(--t3)')+
+    '</div>'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--bd);padding-top:8px;">'+
+      '<span style="font-size:12px;font-weight:700;color:var(--t2);">순이익</span>'+
+      '<span style="font-size:18px;font-weight:800;color:'+(profit>=0?'var(--gn)':'var(--rd)')+';">'+(profit>=0?'':'- ')+'$'+Math.abs(profit).toLocaleString()+'</span>'+
+    '</div>';
+}
+
+function saveLedgerEntry(){
+  const entry = {
+    date:  document.getElementById('le-date')?.value||'',
+    rego:  document.getElementById('le-rego')?.value||'',
+    tour:  document.getElementById('le-tour')?.value||'',
+    ta:    parseFloat(document.getElementById('le-ta')?.value)||0,
+    subTotal: parseFloat(document.getElementById('le-subTotal')?.value)||0,
+    myDr:  parseFloat(document.getElementById('le-myDr')?.value)||0,
+    extra: parseFloat(document.getElementById('le-extra')?.value)||0,
+    ot:    parseFloat(document.getElementById('le-ot2')?.value)||0,
+    trailer: parseFloat(document.getElementById('le-trailer2')?.value)||0,
+    hotel: parseFloat(document.getElementById('le-hotel2')?.value)||0,
+    note:  document.getElementById('le-note')?.value||'',
+  };
+  if(!entry.date){toast('날짜를 입력하세요','er');return;}
+  if(!entry.tour){toast('투어 코스를 선택하세요','er');return;}
+  if(entry.ta===0){toast('여행사 청구 금액을 입력하세요','er');return;}
+
+  const ledger = getLedger();
+  const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
+  if(!week){toast('주간을 먼저 선택하세요','er');return;}
+  if(ST.ledgerEditIdx!==null) week.entries[ST.ledgerEditIdx]=entry;
+  else week.entries.push(entry);
+  // 날짜순 정렬
+  week.entries.sort((a,b)=>a.date.localeCompare(b.date));
+  saveLedger(ledger);
+  document.getElementById('ledger-modal-overlay')?.remove();
+  renderLedger();
+  toast(ST.ledgerEditIdx!==null ? '수정 완료' : '건 추가 완료', 'ok');
+}
+
+function deleteLedgerEntry(idx){
+  if(!confirm('이 건을 삭제하시겠습니까?')) return;
+  const ledger = getLedger();
+  const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
+  if(!week) return;
+  week.entries.splice(idx,1);
+  saveLedger(ledger);
+  renderLedger();
+  toast('삭제 완료','ok');
 }
 
 // ═══════════════════════════════════════
