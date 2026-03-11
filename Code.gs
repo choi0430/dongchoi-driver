@@ -36,6 +36,9 @@ const MASTER_HEADERS = {
                     'seats_25_base','seats_25_ot','seats_40_base','seats_40_ot',
                     'seats_50_base','seats_50_ot'],
   // ── 신규 ──
+  'M_PriceSub': ['SubCo','Course','max_hours','seats_21_rate','seats_21_ot',
+                   'seats_25_rate','seats_25_ot','seats_40_rate','seats_40_ot',
+                   'seats_50_rate','seats_50_ot'],
   'Sub_Rates':  ['Rego','Tour','seats_21','seats_25','seats_40','seats_50'],
   'Ledger':     ['WeekStart','Date','Rego','Tour','TA','SubTotal','MyDr','Extra',
                  'OT','Trailer','Hotel','Note'],
@@ -46,7 +49,7 @@ const MASTER_HEADERS = {
 const TAB_COLORS = {
   'M_Vehicles':'#d97706','M_Drivers':'#1a56db','M_Clients':'#7e3af2',
   'M_Guides':'#0e9f6e','M_Hotels':'#e02424','M_PriceClient':'#0694a2',
-  'M_PriceDriver':'#057a55','Sub_Rates':'#b45309','Ledger':'#1e40af','Wages':'#065f46'
+  'M_PriceDriver':'#057a55','M_PriceSub':'#7c3aed','Sub_Rates':'#b45309','Ledger':'#1e40af','Wages':'#065f46'
 };
 
 function cors(data) {
@@ -67,6 +70,7 @@ function doGet(e) {
     if (action === 'get_all_masters') return cors(getAllMasters());
     // ── 신규 ──
     if (action === 'get_sub_rates')   return cors(getSubRatesSheet());
+    if (action === 'get_price_sub')   return cors(getPriceSubSheet());
     if (action === 'get_ledger')      return cors(getLedgerSheet());
     if (action === 'get_wages')       return cors(getWagesSheet(e.parameter.driver));
     return cors({ok:false, msg:'Unknown action: ' + action});
@@ -97,6 +101,7 @@ function doPost(e) {
 
     // ── 신규: 서브 요금표 ──
     if (action === 'replace_sub_rates')  return cors(replaceMasterSheet('Sub_Rates', payload.rows));
+    if (action === 'replace_price_sub')  return cors(replaceMasterSheet('M_PriceSub', payload.rows));
 
     // ── 신규: 정산 내역 (Ledger) ──
     if (action === 'add_ledger')         return cors(addMasterRow('Ledger', payload.data));
@@ -153,7 +158,7 @@ function getMaster(sheetName) {
 }
 
 function getAllMasters() {
-  const sheets = ['M_Vehicles','M_Drivers','M_Clients','M_Guides','M_Hotels','M_PriceClient','M_PriceDriver'];
+  const sheets = ['M_Vehicles','M_Drivers','M_Clients','M_Guides','M_Hotels','M_PriceClient','M_PriceDriver','M_PriceSub'];
   const result = {};
   sheets.forEach(name => {
     const r = getMaster(name);
@@ -167,6 +172,11 @@ function getAllMasters() {
 // ═══════════════════════════════════════════════════
 function getSubRatesSheet() {
   const r = getMaster('Sub_Rates');
+  return {ok:r.ok, rows:r.rows||[]};
+}
+
+function getPriceSubSheet() {
+  const r = getMaster('M_PriceSub');
   return {ok:r.ok, rows:r.rows||[]};
 }
 
