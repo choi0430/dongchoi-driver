@@ -1266,11 +1266,21 @@ const SDD_CONFIG = {
 function sddOpen(key) {
   const input = document.getElementById('dr-'+key);
   const list  = document.getElementById('sdd-'+key+'-list');
-  // fixed 위치 계산
-  const rect = input.getBoundingClientRect();
-  list.style.top    = (rect.bottom + 4) + 'px';
-  list.style.left   = rect.left + 'px';
-  list.style.width  = rect.width + 'px';
+  const rect  = input.getBoundingClientRect();
+  const dropH = 244; // max-height + 여유
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const spaceAbove = rect.top;
+  list.style.left  = rect.left + 'px';
+  list.style.width = rect.width + 'px';
+  if (spaceBelow < dropH && spaceAbove > spaceBelow) {
+    // 위로 펼치기
+    list.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+    list.style.top    = 'auto';
+  } else {
+    // 아래로 펼치기
+    list.style.top    = (rect.bottom + 4) + 'px';
+    list.style.bottom = 'auto';
+  }
   sddFilter(key);
   list.classList.add('open');
 }
