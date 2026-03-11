@@ -2390,6 +2390,7 @@ function saveM(){
     obj={Name:gv('f0'),ClientID:gv('f1')||Date.now().toString(16).slice(-8),
          Mobile:gv('f2'),Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6')};
     ie?DB.C[idx]=obj:DB.C.push(obj);
+    if(obj.Name && !DB.PC[obj.Name]) DB.PC[obj.Name]={};
   } else if(t==='G'){
     if(!gv('f1')){toast('가이드명 필수','er');return}
     sheetName='M_Guides';
@@ -2406,6 +2407,8 @@ function saveM(){
     if(agName==='__new__') agName=gv('fnewname');
     if(!agName){toast('여행사를 선택하세요','er');return}
     if(!DB.PC[agName])DB.PC[agName]={};
+    if(!DB.C.find(c=>c.Name===agName))
+      DB.C.push({Name:agName,ClientID:Date.now().toString(16).slice(-8),Mobile:'',Address:'',Bank_Name:'',BSB:'',Account_Number:''});
     closeM();rP();selAg(agName);toast(`${agName} 요금표 생성됨`,'ok');
     return;
   } else if(t==='SG_SUB'){
@@ -2679,6 +2682,15 @@ async function loadAllFromSheets(){
     document.getElementById('sm').classList.add('on');
     document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
     await loadPSFromSheets();
+    // DB.PC에 있는 여행사가 DB.C에 없으면 자동 추가
+    Object.keys(DB.PC).forEach(ag=>{
+      if(!DB.C.find(c=>c.Name===ag))
+        DB.C.push({Name:ag,ClientID:Date.now().toString(16).slice(-8),Mobile:'',Address:'',Bank_Name:'',BSB:'',Account_Number:''});
+    });
+    // DB.C에 있는 여행사가 DB.PC에 없으면 빈 요금표 생성
+    DB.C.forEach(client=>{
+      if(client.Name && !DB.PC[client.Name]) DB.PC[client.Name]={};
+    });
     rDash();
     toast('✅ 데이터 로드 완료','ok');
   } catch(e){
