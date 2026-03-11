@@ -2375,6 +2375,8 @@ function saveM(){
          Current_KM:gn('f9'),Last_Service_KM:gn('f10'),Service_Interval:gn('f11')||10000,
          VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14')};
     ie?DB.V[idx]=obj:DB.V.push(obj);
+    // 서브 차량이면 DB.PS에 슬롯 보장
+    if(obj.Owner && !DC_OWNERS.includes(obj.Owner) && !DB.PS[obj.Owner]) DB.PS[obj.Owner]={};
   } else if(t==='D'){
     if(!gv('f0')){toast('이름 필수','er');return}
     sheetName='M_Drivers';
@@ -2691,6 +2693,12 @@ async function loadAllFromSheets(){
     DB.C.forEach(client=>{
       if(client.Name && !DB.PC[client.Name]) DB.PC[client.Name]={};
     });
+    // DB.PS에 있는 서브 회사가 SubVehicle Owner에 없으면 DB.V에 더미 차량 추가 (탭 표시용)
+    // → 반대로: SubVehicle Owner가 DB.PS에 없으면 빈 요금표 생성
+    getSubVehicles().forEach(v=>{
+      if(v.Owner && !DB.PS[v.Owner]) DB.PS[v.Owner]={};
+    });
+    // DB.PS에 있는 회사가 어떤 차량 Owner에도 없으면 그대로 유지 (수동 추가 회사)
     rDash();
     toast('✅ 데이터 로드 완료','ok');
   } catch(e){
