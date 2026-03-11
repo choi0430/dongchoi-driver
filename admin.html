@@ -2493,6 +2493,14 @@ function execDel(){
   const renderMap={V:rV,D:rD,C:rC,G:rG,H:rH};
 
   if(['V','D','C','G','H'].includes(t)){
+    // 여행사 삭제 시 요금표(DB.PC)에서도 제거
+    if(t==='C'){
+      const agName = DB.C[i]?.Name;
+      if(agName && DB.PC[agName] !== undefined){
+        delete DB.PC[agName];
+        savePCToSheets();
+      }
+    }
     DB[t].splice(i,1);
     renderMap[t]?.();rDash();
     apiDeleteMaster(sheetMap[t], i+2); // +2: 헤더행(1) + 0-based→1-based
