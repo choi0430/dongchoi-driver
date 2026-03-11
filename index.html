@@ -1629,6 +1629,13 @@ function buildLoginSelect() {
     opt.style.background = '#1e293b';
     sel.appendChild(opt);
   });
+
+  // 마지막 로그인 드라이버 자동 선택
+  const lastLogin = localStorage.getItem('dc_last_driver');
+  if (lastLogin) {
+    const found = [...sel.options].find(o => o.value === lastLogin);
+    if (found) sel.value = lastLogin;
+  }
 }
 
 const ATTRACTIONS = [
@@ -1830,6 +1837,8 @@ function doLogin() {
   if(pin !== correctPin){ showLoginError('PIN 번호가 틀렸습니다'); return; }
 
   currentDriver = { name, initials, englishName: englishName || name };
+  // 마지막 로그인 드라이버 저장
+  localStorage.setItem('dc_last_driver', sel);
 
   // ── 드라이버별 localStorage 데이터 로드 ──
   try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
