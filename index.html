@@ -519,7 +519,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
           <div class="form-group">
             <label class="form-label">관광지<span class="req">*</span></label>
-            <select class="form-select" id="dr-attraction" onchange="autoRate()">
+            <select class="form-select" id="dr-attraction" onchange="autoRate();onAttractionChange()">
               <option value="">선택</option>
               <option>AIRPORT TRANSFER</option><option>BLUE MOUNTAINS</option><option>CITY TOUR</option>
               <option>CITY TOUR / HALF</option><option>CANBERRA</option><option>CENTRAL COAST</option>
@@ -529,6 +529,8 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             </select>
           </div>
         </div>
+        <!-- OT / 1박2일 힌트 -->
+        <div id="att-hint-box" style="display:none;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12px;line-height:1.7;"></div>
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">픽업 장소</label>
@@ -558,11 +560,11 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
           <div class="form-group">
             <label class="form-label">시작 시간</label>
-            <input type="time" class="form-input" id="dr-start" onchange="calcOT();updateEarlyHint();">
+            <input type="time" class="form-input" id="dr-start" onchange="calcOT();updateEarlyHint();updateOTHint();">
           </div>
           <div class="form-group">
             <label class="form-label">종료 시간</label>
-            <input type="time" class="form-input" id="dr-end" onchange="calcOT()">
+            <input type="time" class="form-input" id="dr-end" onchange="calcOT();updateOTHint();">
           </div>
         </div>
         <div class="form-row mb14">
@@ -599,6 +601,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">OT 요금 <span style="font-size:11px;color:var(--muted);" id="ot-rate-hint"></span></label>
             <div id="ot-btn-group" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
             <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-ot" placeholder="0" oninput="onOTInput()"></div>
+            <div id="ot-hint-box" style="display:none;margin-top:6px;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.6;"></div>
           </div>
           <div class="form-group" id="trailer-group" style="display:none;">
             <label class="form-label">트레일러</label>
@@ -1012,7 +1015,9 @@ async function loadMasterData() {
       MASTER.vehicles = (data.data.M_Vehicles || []);
       MASTER.agencies = (data.data.M_Clients  || data.data.M_Agencies || []);
       MASTER.courses  = (data.data.M_Courses  || []);
-      MASTER.hotels   = (data.data.M_Hotels   || []);
+      MASTER.hotels      = (data.data.M_Hotels      || []);
+      MASTER.priceClient = (data.data.M_PriceClient || []);
+      MASTER.priceDriver = (data.data.M_PriceDriver || []);
       setMsg('데이터 로드 완료 (가이드 ' + MASTER.guides.length + '명)');
     } else {
       setMsg('⚠️ 시트 연결 실패 — 기본 데이터 사용');
@@ -1257,7 +1262,7 @@ function sddSelect(key, value) {
 function sddAddNew(key, value) {
   if(!value) return;
   const cfg = SDD_CONFIG[key];
-  if(cfg.type==='hotel') saveCustomHotel(value);
+  if(cfg.type==='hotel'){ saveCustomHotel(value); onHotelSelected(value); }
   else saveCustomGuide(value);
   sddSelect(key, value);
   showToast('✅ "'+value+'" 추가됐어요!');
@@ -2323,16 +2328,251 @@ function autoRate(){
   showToast(`${att} 요금 자동 입력: $${r.ta}`,'success');
 }
 
+// ═══════════════════════════════════════
+// OT / 호텔 서차지 / 1박2일 스마트 힌트
+// ═══════════════════════════════════════
+
+// DB.PD에서 코스 찾기 (대소문자 무시 fuzzy)
+function getPDCourse(att){
+  if(!att) return null;
+  const pd = DB?.PD || {};
+  // 정확히 일치
+  if(pd[att]) return pd[att];
+  // 대소문자 무시
+  const lc = att.toLowerCase();
+  const key = Object.keys(pd).find(k=>k.toLowerCase()===lc);
+  return key ? pd[key] : null;
+}
+
+// MASTER.priceDriver에서도 조회 (Sheets 로드 후)
+function getPDCourseFromMaster(att){
+  if(!att) return null;
+  const rows = MASTER.priceDriver || [];
+  const lc = att.toLowerCase();
+  // rows는 M_PriceDriver 시트 행 배열: {Course, max_hours, seats_21_base, ...}
+  const row = rows.find(r=>r.Course && r.Course.toLowerCase()===lc);
+  if(!row) return null;
+  return {
+    max_hours: row.max_hours ? Number(row.max_hours) : null,
+    '21': {base:Number(row.seats_21_base)||0, ot:Number(row.seats_21_ot)||30, hotel_fee:Number(row.hotel_fee_21)||0},
+    '25': {base:Number(row.seats_25_base)||0, ot:Number(row.seats_25_ot)||30, hotel_fee:Number(row.hotel_fee_25)||0},
+    '40': {base:Number(row.seats_40_base)||0, ot:Number(row.seats_40_ot)||40, hotel_fee:Number(row.hotel_fee_40)||0},
+    '50': {base:Number(row.seats_50_base)||0, ot:Number(row.seats_50_ot)||40, hotel_fee:Number(row.hotel_fee_50)||0},
+  };
+}
+
+function getCourseData(att){
+  return getPDCourse(att) || getPDCourseFromMaster(att) || null;
+}
+
+// 인승 코드 → PD 키 (21S → '21')
+function seatKey(seats){ return seats?.replace('S','') || '21'; }
+
+// max_hours 가져오기
+function getMaxHours(att){
+  const d = getCourseData(att);
+  if(!d || !d.max_hours) return null;
+  return Number(d.max_hours);
+}
+
+// OT 시간당 요율
+function getOTRate(att, seats){
+  const d = getCourseData(att);
+  const k = seatKey(seats);
+  if(d && d[k]) return d[k].ot || (seats==='40S'||seats==='50S' ? 40 : 30);
+  return (seats==='40S'||seats==='50S') ? 40 : 30;
+}
+
+// 1박2일 코스 패턴 감지
+const OVERNIGHT_PAIRS = [
+  { day1:/1박\s*2일\s*첫째날/i, day2:'1박 2일 둘째날' },
+  { day1:/Port\s*Stephens$/i,      day2:'Port Stephens (2nd Day)' },
+  { day1:/Newcastle$/i,            day2:'Newcastle (2nd Day)' },
+  { day1:/Jervis\s*Bay$/i,         day2:'Jervis Bay (2nd Day)' },
+  { day1:/Hunter\s*Valley$/i,      day2:null }, // 1박 있을 수 있음
+  { day1:/Canberra$/i,             day2:null },
+];
+
+function getOvernightPair(att){
+  if(!att) return null;
+  for(const p of OVERNIGHT_PAIRS){
+    if(p.day1.test(att)) return p;
+  }
+  return null;
+}
+
+function isOvernightFirst(att){
+  const p = getOvernightPair(att);
+  return p ? (p.day2 ? p.day2 : null) : null;
+}
+
+// 관광지 선택 시 호출: 1박2일 힌트 + OT 힌트 갱신
+function onAttractionChange(){
+  const att = document.getElementById('dr-attraction')?.value;
+  const hintBox = document.getElementById('att-hint-box');
+  if(!hintBox) return;
+
+  if(!att){ hintBox.style.display='none'; return; }
+
+  const maxH = getMaxHours(att);
+  const day2 = isOvernightFirst(att);
+  const isDay2 = att && (att.includes('2nd Day') || att.includes('둘째날'));
+  let html = '';
+
+  // 1박2일 첫째날
+  if(day2){
+    html += `<div style="background:#eff6ff;border:1.5px solid #93c5fd;border-radius:8px;padding:8px 10px;margin-bottom:6px;">
+      <div style="font-weight:700;color:#1e40af;margin-bottom:3px;">🌙 1박 2일 일정 — 첫째날</div>
+      <div style="color:#1d4ed8;">• 이 코스는 1박 2일 일정입니다. 다음 날 리포트 코스: <b>${day2}</b></div>
+      <div style="color:#1d4ed8;">• 각 날 max ${maxH||10}시간, 초과 시 OT 적용 (15분 waive)</div>
+    </div>`;
+  }
+  // 1박2일 둘째날
+  if(isDay2){
+    html += `<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:8px 10px;margin-bottom:6px;">
+      <div style="font-weight:700;color:#166534;margin-bottom:3px;">🌅 1박 2일 일정 — 둘째날</div>
+      <div style="color:#15803d;">• max ${maxH||10}시간 기준, 초과 시 OT (15분 waive)</div>
+    </div>`;
+  }
+  // max_hours 표시
+  if(maxH && !day2 && !isDay2){
+    html += `<div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:7px 10px;">
+      <span style="font-weight:700;color:#374151;">⏱ 이 코스 기준 시간: <span style="color:#6d28d9;">${maxH}시간</span></span>
+      <span style="color:#6b7280;margin-left:6px;">(초과 + 15분 waive 후 OT)</span>
+    </div>`;
+  }
+
+  hintBox.innerHTML = html;
+  hintBox.style.display = html ? 'block' : 'none';
+  updateOTHint();
+}
+
+// 실시간 OT 경고 박스 갱신
+function updateOTHint(){
+  const hintBox = document.getElementById('ot-hint-box');
+  if(!hintBox) return;
+  const st = document.getElementById('dr-start')?.value;
+  const et = document.getElementById('dr-end')?.value;
+  const att = document.getElementById('dr-attraction')?.value;
+  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+
+  if(!st){ hintBox.style.display='none'; return; }
+
+  const [sh,sm] = st.split(':').map(Number);
+  const maxH = getMaxHours(att);
+  const otRate = getOTRate(att, seats);
+  const WAIVE = 15; // minutes
+
+  let lines = [];
+
+  // ① 오후 8시(20:00) 초과 조건
+  const pm8Min = 20*60; // 20:00 = 1200분
+  const pm8WaiveMin = pm8Min + WAIVE; // 20:15
+  const startMin = sh*60+sm;
+  const pm8OTStart = Math.max(startMin, pm8Min); // 시작시간이 이미 20시 이후면 즉시
+  // OT 발생 시각 (20:15)
+  const pm8OTTime = String(Math.floor(pm8WaiveMin/60)).padStart(2,'0')+':'+String(pm8WaiveMin%60).padStart(2,'0');
+  lines.push(`🕗 <b>20:00 이후 OT</b> — 20:15 이후부터 적용 (15분 waive)`);
+
+  // ② max_hours 초과 조건
+  if(maxH){
+    const maxMin = startMin + maxH*60;
+    const waiveMin = maxMin + WAIVE;
+    const hh = String(Math.floor(maxMin/60)%24).padStart(2,'0');
+    const mm = String(maxMin%60).padStart(2,'0');
+    const hwh = String(Math.floor(waiveMin/60)%24).padStart(2,'0');
+    const hwm = String(waiveMin%60).padStart(2,'0');
+    lines.push(`⏱ <b>${maxH}시간 초과 OT</b> — ${hh}:${mm} 이후, waive 후 <b>${hwh}:${hwm}</b>부터 적용`);
+  }
+
+  // ③ 종료 시간 있으면 실제 OT 계산해서 표시
+  if(et && att){
+    const [eh,em] = et.split(':').map(Number);
+    let totalMin = (eh*60+em) - startMin;
+    if(totalMin < 0) totalMin += 24*60;
+
+    // 20:00 기준 OT
+    let pm8OT = 0;
+    const endAbsMin = startMin + totalMin;
+    if(endAbsMin > pm8WaiveMin){ pm8OT = (endAbsMin - pm8WaiveMin)/60; }
+
+    // max_hours 기준 OT
+    let durOT = 0;
+    if(maxH){ const waiveMin2 = maxH*60+WAIVE; if(totalMin > waiveMin2) durOT = (totalMin-waiveMin2)/60; }
+
+    const effOT = Math.max(pm8OT, durOT);
+    if(effOT > 0){
+      const otAmt = Math.round(effOT * otRate);
+      lines.push(`🔴 <b>OT 발생</b>: ${effOT.toFixed(2)}h × $${otRate}/h = <b>$${otAmt}</b>${seats ? '' : ' (인승 선택 필요)'}`);
+    } else if(totalMin > 0){
+      lines.push(`✅ 현재 OT 없음`);
+    }
+  }
+
+  if(!lines.length){ hintBox.style.display='none'; return; }
+  const isOT = lines.some(l=>l.includes('OT 발생'));
+  hintBox.style.cssText = `display:block;margin-top:6px;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.8;background:${isOT?'#fff7ed':'#f0f9ff'};border:1px solid ${isOT?'#fed7aa':'#bae6fd'};`;
+  hintBox.innerHTML = lines.join('<br>');
+}
+
+// 호텔 선택 시 서차지 자동 적용
+function onHotelSelected(hotelName){
+  if(!hotelName) return;
+  // MASTER.hotels에서 Surcharge_Area 확인
+  const hotelData = (MASTER.hotels || []).find(h=>h.Hotel_Name===hotelName);
+  const sArea = hotelData?.Surcharge_Area || '';
+  if(!sArea){ return; } // 서차지 없음
+
+  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+  const att = document.getElementById('dr-attraction')?.value || '';
+  const d = getCourseData(att);
+  const k = seatKey(seats);
+  const hotelFee = (d && d[k]) ? d[k].hotel_fee : ((seats==='40S'||seats==='50S') ? 30 : 10);
+
+  if(hotelFee > 0){
+    const sel = document.getElementById('f-hotel-select');
+    if(sel){
+      // 가장 가까운 옵션 선택
+      const opts = Array.from(sel.options);
+      const best = opts.reduce((prev,opt)=>Math.abs(Number(opt.value)-hotelFee)<Math.abs(Number(prev.value)-hotelFee)?opt:prev);
+      sel.value = best.value;
+    }
+    showToast(`🏨 호텔 서차지 자동적용: ${hotelName} (${sArea}) — $${hotelFee}`,'success');
+    calcTotal();
+  }
+}
+
 function calcOT(){
   updateEarlyHint();
+  updateOTHint();
   const st=document.getElementById('dr-start').value, et=document.getElementById('dr-end').value;
   if(!st||!et) return;
   const [sh,sm]=st.split(':').map(Number),[eh,em]=et.split(':').map(Number);
-  let hrs=((eh*60+em)-(sh*60+sm))/60; if(hrs<0)hrs+=24;
+  let totalMin=((eh*60+em)-(sh*60+sm)); if(totalMin<0)totalMin+=24*60;
   const att=document.getElementById('dr-attraction').value;
-  const base=att&&att.includes('HALF')||att&&att.includes('TRANSFER')?5:att&&att.includes('CITY')?8:10;
-  const ot=Math.max(0,hrs-base);
-  if(ot>0){document.getElementById('f-ot').value=Math.round(ot*80);calcTotal();showToast(`OT ${ot.toFixed(1)}h 자동 계산`,'success');}
+  const seats=getSeatsFromShift()||document.getElementById('dr-seats')?.value||'';
+  const maxH=getMaxHours(att);
+  const otRate=getOTRate(att,seats);
+  const WAIVE=15;
+  const startMin=sh*60+sm;
+  const pm8WaiveMin=20*60+WAIVE;
+  const endAbsMin=startMin+totalMin;
+
+  // OT 계산: max(20:15 초과분, maxHours+15분 초과분)
+  let pm8OT=0, durOT=0;
+  if(endAbsMin>pm8WaiveMin) pm8OT=(endAbsMin-pm8WaiveMin)/60;
+  if(maxH){ const waiveMin=maxH*60+WAIVE; if(totalMin>waiveMin) durOT=(totalMin-waiveMin)/60; }
+  const effOT=Math.max(pm8OT,durOT);
+
+  if(effOT>0){
+    const cur=parseFloat(document.getElementById('f-ot')?.value||0);
+    if(cur===0){
+      const otAmt=Math.round(effOT*otRate);
+      document.getElementById('f-ot').value=otAmt;
+      calcTotal();
+      showToast(`OT 자동계산: ${effOT.toFixed(2)}h × $${otRate} = $${otAmt}`,'success');
+    }
+  }
 }
 
 // ═══════════════════════════════════════
