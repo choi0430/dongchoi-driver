@@ -1542,7 +1542,7 @@ const CONTACTS = [
   {type:'guide',name:'최유성',initials:'최유',phone:'0412423588',note:'프리랜서',color:'#0e9f6e'},
   {type:'guide',name:'최진우',initials:'최진',phone:'0426899629',note:'프리랜서',color:'#0e9f6e'},
   {type:'guide',name:'최혁근',initials:'최혁',phone:'0430892592',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'티나정',initials:'티나',phone:'0404038709',note:'프리랜서',color:'#0e9f6e'},
+  {type:'driver-guide',name:'티나정 (Tina Jung)',initials:'TJ',phone:'0404038709',note:'드라이버·가이드',color:'#7e3af2'},
   {type:'guide',name:'한정호',initials:'한정',phone:'0421594472',note:'프리랜서',color:'#0e9f6e'},
   {type:'guide',name:'한주영',initials:'한주',phone:'0413070891',note:'프리랜서',color:'#0e9f6e'},
   {type:'guide',name:'한현숙',initials:'한현',phone:'0411042160',note:'프리랜서',color:'#0e9f6e'},
@@ -1587,14 +1587,27 @@ function buildLoginSelect() {
   if (!sel) return;
   sel.innerHTML = '<option value="" style="background:#1e293b">— 선택하세요 —</option>';
 
-  // 1) 기본 CONTACTS 드라이버
-  let driverList = CONTACTS.filter(c => c.type === 'driver').map(d => {
+  // 1) 기본 CONTACTS 드라이버 (driver 또는 driver-guide 타입)
+  let driverList = CONTACTS.filter(c => c.type === 'driver' || c.type === 'driver-guide').map(d => {
     const nameKr = d.name.includes('(') ? d.name.split('(')[0].trim() : d.name;
     const nameEn = d.name.includes('(') ? d.name.split('(')[1].replace(')','').trim() : d.name;
     return { nameKr, nameEn, initials: d.initials, display: d.name };
   });
 
-  // 2) Admin 앱에서 추가된 드라이버(localStorage) 병합
+  // 2) Google Sheets M_Drivers 병합 (로그인 후 MASTER에 로드된 경우)
+  try {
+    (MASTER.drivers || []).forEach(d => {
+      const nameKr = d.Name_KR || d.Name_EN || '';
+      const nameEn = d.Name_EN || '';
+      const display = nameKr ? nameKr + ' (' + nameEn + ')' : nameEn;
+      const initials = d.Initials || nameEn.trim().split(' ').filter(Boolean).map(w=>w[0]).join('').toUpperCase().slice(0,2) || '??';
+      if (!driverList.find(x => x.nameKr === nameKr)) {
+        driverList.push({ nameKr, nameEn, initials, display });
+      }
+    });
+  } catch(e) {}
+
+  // 3) Admin 앱에서 추가된 드라이버(localStorage) 병합
   try {
     const extra = JSON.parse(localStorage.getItem('dc_drivers') || '[]');
     extra.forEach(d => {
@@ -1902,7 +1915,7 @@ document.addEventListener('click', (e) => {
 document.getElementById('app').style.display = 'none';
 document.getElementById('login-screen').style.display = 'flex';
 
-document.getElementById('today-label').textContent = (()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
+document.getElementById('today-label').textContent = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
 document.getElementById('pre-date').value = todayDisplay();
   loadMasterData(); // Google Sheets 마스터 데이터 로드
 document.getElementById('dr-date').value = todayDisplay();
@@ -3179,7 +3192,7 @@ function renderMyDefects(){
       <div style="font-size:12px;font-weight:600;color:var(--text);">${r.category||'기타'}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:2px;">${r.description||''}</div>
       <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:var(--muted);">
-        <span>${(r.submittedAt?(r.submittedAt.slice(0,10).split('-').reverse().join('/')+r.submittedAt.slice(10,16)):'')}</span>
+        <span>${r.submittedAt?.slice(0,16)||''}</span>
         <span style="${r.status==='resolved'?'color:#16a34a':r.status==='in_progress'?'color:#d97706':'color:#dc2626'}">${statusLabel[r.status]||r.status}</span>
       </div>
       ${r.adminNote?`<div style="margin-top:6px;background:var(--surface);border-radius:6px;padding:6px 8px;font-size:11px;color:var(--text);">📝 관리자: ${r.adminNote}</div>`:''}
@@ -3199,7 +3212,7 @@ function getWeekKey(dateStr){
   const diff = (day===0) ? -6 : 1-day; // Mon offset
   const mon = new Date(dt); mon.setDate(dt.getDate()+diff);
   const sun = new Date(mon); sun.setDate(mon.getDate()+6);
-  const fmt = d => String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+  const fmt = d => String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getFullYear()).slice(2);
   return { key: fmt(mon)+'~'+fmt(sun), label: fmt(mon)+' — '+fmt(sun), mon, sun };
 }
 
