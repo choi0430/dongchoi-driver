@@ -1267,14 +1267,18 @@ function sddOpen(key) {
   const input = document.getElementById('dr-'+key);
   const list  = document.getElementById('sdd-'+key+'-list');
   const rect  = input.getBoundingClientRect();
-  const dropH = 244; // max-height + 여유
-  const spaceBelow = window.innerHeight - rect.bottom;
+  const dropH = 260; // max-height + 여유
+  // 모바일 실제 가시 영역 (주소창 제외)
+  const visH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  const spaceBelow = visH - rect.bottom;
   const spaceAbove = rect.top;
   list.style.left  = rect.left + 'px';
   list.style.width = rect.width + 'px';
-  if (spaceBelow < dropH && spaceAbove > spaceBelow) {
+  // 가이드는 항상 위로, 나머지는 공간 자동 판단
+  const forceUp = (key === 'guide');
+  if (forceUp || (spaceBelow < dropH && spaceAbove > spaceBelow)) {
     // 위로 펼치기
-    list.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+    list.style.bottom = (visH - rect.top + 4) + 'px';
     list.style.top    = 'auto';
   } else {
     // 아래로 펼치기
