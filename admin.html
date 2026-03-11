@@ -1109,12 +1109,10 @@ async function rP(){
       e.stopPropagation();
       if(!confirm('"'+ag+'" \uc694\uae08\ud45c \uc804\uccb4\ub97c \uc0ad\uc81c\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?')) return;
       delete DB.PC[ag];
-      savePCToSheets();
+      delete DB.PC[ag];
       if(ST.curAg===ag) ST.curAg='';
-      rP();
-      toast('\uc0ad\uc81c \uc644\ub8cc','ok');
+      savePCToSheets().then(()=>{ rP(); toast('\uc0ad\uc81c \uc644\ub8cc','ok'); });
     });
-    wrap.appendChild(btn);
     wrap.appendChild(del);
     tabFrag.appendChild(wrap);
   });
@@ -2693,7 +2691,7 @@ async function syncClients(){
   }));
   // PC 동기화
   Object.keys(DB.PC).forEach(ag=>{ if(!DB.C.find(c=>c.Name===ag)) DB.C.push({Name:ag,ClientID:Date.now().toString(16).slice(-8),Mobile:'',Address:'',Bank_Name:'',BSB:'',Account_Number:''}); });
-  DB.C.forEach(client=>{ if(client.Name&&!DB.PC[client.Name]) DB.PC[client.Name]={}; });
+  // DB.C→DB.PC 자동 슬롯 생성 제거 (삭제 후 복원 방지)
 }
 
 async function syncGuides(){
@@ -2743,8 +2741,11 @@ async function syncPrices(){
   // PriceSub
   await loadPSFromSheets();
   // 동기화
+  // DB.PC에 있는 여행사 중 DB.C에 없는 것은 추가 (단 이미 Sheets에서 로드된 데이터 우선)
   Object.keys(DB.PC).forEach(ag=>{ if(!DB.C.find(cc=>cc.Name===ag)) DB.C.push({Name:ag,ClientID:Date.now().toString(16).slice(-8),Mobile:'',Address:'',Bank_Name:'',BSB:'',Account_Number:''}); });
-  DB.C.forEach(client=>{ if(client.Name&&!DB.PC[client.Name]) DB.PC[client.Name]={}; });
+  // DB.C에 있는 여행사는 DB.PC에 슬롯 보장 (단 코스가 하나도 없는 빈 슬롯만 생성, Sheets에 없던 항목은 추가 안 함)
+  // ※ 삭제 후 재로드 시 복원 방지: DB.PC에 없는 여행사만 추가
+  // DB.C→DB.PC 자동 슬롯 생성 제거 (삭제 후 복원 방지)
 }
 
 async function syncSub(){
