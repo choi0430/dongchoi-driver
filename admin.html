@@ -1193,7 +1193,10 @@ function renderLedger(){
   // 건별 목록
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
   html += '<div style="font-size:12px;font-weight:700;color:var(--t2);">건별 내역 ('+entries.length+'건)</div>';
+  html += '<div style="display:flex;gap:6px;">';
+  html += '<button class="btn sm" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;" onclick="importFromReports()">📋 리포트 불러오기</button>';
   html += '<button class="btn bac sm" onclick="openLedgerEntry(null)">+ 건 추가</button>';
+  html += '</div>';
   html += '</div>';
 
   if(entries.length===0){
@@ -1407,6 +1410,146 @@ async function saveLedgerEntry(){
       saveLedger(getLedger());
     }
   });
+}
+
+// ═══════════════════════════════════════
+// 드라이버 리포트 → Ledger 자동 생성
+// ═══════════════════════════════════════
+async function importFromReports(){
+  if(!ST.ledgerWeek){ toast('주간을 먼저 선택하세요','er'); return; }
+  const weekStart = ST.ledgerWeek; // 'YYYY-MM-DD' Monday
+  const weekEnd = (() => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate()+6);
+    return d.toISOString().slice(0,10);
+  })();
+  toast('리포트 불러오는 중...','ok');
+
+  let reports = [];
+  try {
+    const res = await fetch(SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+    const json = await res.json();
+    if(json.ok) reports = json.rows;
+    else throw new Error(json.msg);
+  } catch(e) {
+    toast('리포트 로드 실패: '+e.message,'er');
+    return;
+  }
+
+  // 해당 주간 리포트만 필터 (Date 필드: 'dd/mm/yyyy' 또는 'YYYY-MM-DD')
+  const inWeek = reports.filter(r => {
+    const ds = String(r.Date||'');
+    let iso;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(ds)) iso = ds;
+    else if(/^\d{2}\/\d{2}\/\d{4}$/.test(ds)){
+      const [dd,mm,yyyy] = ds.split('/');
+      iso = `${yyyy}-${mm}-${dd}`;
+    } else return false;
+    return iso >= weekStart && iso <= weekEnd;
+  });
+
+  if(inWeek.length===0){
+    toast('이 주간에 리포트가 없습니다','er'); return;
+  }
+
+  const ledger = getLedger();
+  const week = ledger.find(w=>w.weekStart===weekStart);
+  if(!week){ toast('주간 데이터 오류','er'); return; }
+
+  let added=0, skipped=0, errors=[];
+
+  inWeek.forEach(r => {
+    // Date 정규화
+    const ds = String(r.Date||'');
+    let isoDate;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(ds)) isoDate = ds;
+    else { const [dd,mm,yyyy]=ds.split('/'); isoDate=`${yyyy}-${mm}-${dd}`; }
+
+    const rego       = String(r.Rego||'').trim();
+    const agency     = String(r.Agency||'').trim();
+    const attraction = String(r.Attraction||'').trim();
+    const seats      = String(r.Seats||'').trim();           // '21S','25S','40S','50S'
+    const totalTA    = parseFloat(r.Total_TA)||0;
+    const drCost     = parseFloat(r.DR_Cost)||0;
+    const otAmt      = parseFloat(r.OT)||0;
+    const trailerAmt = parseFloat(r.Trailer)||0;
+    const hotelAmt   = parseFloat(r.Hotel_Surcharge)||0;
+
+    // 중복 체크 (날짜+차량+코스 동일한 건 있으면 스킵)
+    const dup = week.entries.find(e=>e.date===isoDate && e.rego===rego && e.tour===attraction);
+    if(dup){ skipped++; return; }
+
+    // 인승 키 (21S→'21', 25S→'25' ...)
+    const capKey = seats.replace('S','') || '25';
+
+    // ── TA 금액 ──
+    // 리포트에 Total_TA가 있으면 그걸 사용 (드라이버가 입력한 실제 청구 금액)
+    let taAmount = totalTA;
+
+    // ── 서브 비용 계산 ──
+    let subTotal = 0;
+    const isSub = rego && !DC_OWNERS.includes(
+      DB.V.find(v=>v.Rego===rego)?.Owner || ''
+    );
+    if(isSub){
+      const subRates = getSubRates();
+      const baseRate = parseFloat(subRates[rego]?.[attraction]?.[capKey])||0;
+      // OT: 금액 기준으로 시간 역산 (PD OT 요율로 나눔)
+      const pdOTRate = DB.PD[attraction]?.[capKey]?.ot || (capKey>='40'?40:30);
+      const otHours = pdOTRate>0 ? otAmt/pdOTRate : 0;
+      subTotal = baseRate + (otHours*pdOTRate) + trailerAmt + hotelAmt;
+      if(baseRate===0 && subTotal===0){
+        errors.push(isoDate+' '+attraction+' — 서브 요금표 없음 (직접 입력 필요)');
+      }
+    }
+
+    // ── 내 차량 드라이버 비용 ──
+    let myDr = 0;
+    if(!isSub){
+      myDr = drCost;
+    }
+
+    const entry = {
+      date:     isoDate,
+      rego:     isSub ? rego : '',
+      tour:     attraction,
+      agency:   agency,
+      seats:    seats,
+      ta:       taAmount,
+      subTotal: Math.round(subTotal),
+      myDr:     Math.round(myDr),
+      extra:    0,
+      ot:       otAmt,
+      trailer:  trailerAmt,
+      hotel:    hotelAmt,
+      note:     `[리포트 자동생성] ${agency}`,
+    };
+    week.entries.push(entry);
+    added++;
+  });
+
+  week.entries.sort((a,b)=>a.date.localeCompare(b.date));
+  saveLedger(ledger);
+  renderLedger();
+
+  let msg = `✅ ${added}건 추가`;
+  if(skipped>0) msg += `, ${skipped}건 중복 스킵`;
+  toast(msg,'ok');
+  if(errors.length>0){
+    setTimeout(()=>alert('⚠️ 서브 요금표 없는 항목:\n'+errors.join('\n')),500);
+  }
+
+  // 시트 sync (전체 replace)
+  try {
+    const rows=[];
+    getLedger().forEach(w=>w.entries?.forEach(e=>rows.push({
+      WeekStart:w.weekStart,Date:e.date,Rego:e.rego,Tour:e.tour,
+      TA:e.ta,SubTotal:e.subTotal,MyDr:e.myDr,Extra:e.extra,
+      OT:e.ot,Trailer:e.trailer,Hotel:e.hotel,Note:e.note
+    })));
+    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'replace_ledger',rows})});
+  } catch(e){ console.warn('Ledger sync:', e); }
 }
 
 function deleteLedgerEntry(idx){
