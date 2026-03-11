@@ -852,6 +852,64 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 </div>
 
 <!-- ══════ MY INFO ══════ -->
+<div class="page" id="page-defect">
+  <div style="padding:16px 16px 0;">
+    <span style="background:linear-gradient(135deg,#ef4444,#dc2626);color:white;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;">⚠️ 차량 결함 리포트</span>
+  </div>
+  <div class="card" style="margin:12px;">
+    <div class="card-head"><span class="card-title">🔧 결함 신고</span></div>
+    <div class="card-body">
+      <div class="form-row mb14">
+        <div class="form-group">
+          <label class="form-label">차량 (Rego)</label>
+          <select class="form-select" id="def-rego"><option value="">선택</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">카테고리</label>
+          <select class="form-select" id="def-cat">
+            <option value="">선택</option>
+            <option>Engine / 엔진</option><option>Brakes / 브레이크</option><option>Tyres / 타이어</option>
+            <option>Lights / 라이트</option><option>Air Con / 에어컨</option><option>Doors / 문</option>
+            <option>Body Damage / 외관 손상</option><option>Interior / 실내</option>
+            <option>Electrical / 전기</option><option>Other / 기타</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group mb14">
+        <label class="form-label">결함 위치</label>
+        <input type="text" class="form-input" id="def-location" placeholder="예: 운전석 앞 타이어, 실내 뒷줄 천장">
+      </div>
+      <div class="form-group mb14">
+        <label class="form-label">결함 내용 <span class="req">*</span></label>
+        <textarea class="form-input" id="def-desc" rows="4" placeholder="결함 증상을 자세히 설명해주세요..." style="resize:vertical;min-height:80px;"></textarea>
+      </div>
+      <div class="form-row mb14">
+        <div class="form-group">
+          <label class="form-label">심각도</label>
+          <select class="form-select" id="def-severity">
+            <option value="low">낮음 — 운행 가능</option>
+            <option value="medium">중간 — 주의 필요</option>
+            <option value="high">높음 — 즉시 점검!</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">현재 KM</label>
+          <div class="num-row"><input type="number" class="num-input" id="def-km" placeholder="0" style="border-radius:10px;padding:12px 14px;"></div>
+        </div>
+      </div>
+      <button type="button" onclick="submitDefectReport()"
+        style="width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;background:var(--accent);color:white;border:none;cursor:pointer;font-family:sans-serif;">
+        📤 결함 리포트 제출
+      </button>
+    </div>
+  </div>
+  <div class="card" style="margin:0 12px 80px;">
+    <div class="card-head"><span class="card-title">📋 내 리포트 기록</span></div>
+    <div class="card-body" id="defect-my-reports">
+      <div style="text-align:center;color:var(--muted);font-size:13px;padding:20px;">제출한 리포트가 없습니다</div>
+    </div>
+  </div>
+</div>
 <div class="page" id="page-pay">
   <div class="sec-head">
     <div><div class="sec-title">💰 급여</div></div>
@@ -936,6 +994,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
   <div class="nav-item" onclick="showPage('contacts')" id="nav-contacts"><div class="nav-icon">📞</div>연락처</div>
   <div class="nav-item" onclick="showPage('attractions')" id="nav-attractions"><div class="nav-icon">📍</div>관광지</div>
   <div class="nav-item" onclick="showPage('pay');renderPay();" id="nav-pay"><div class="nav-icon">💰</div>급여</div>
+  <div class="nav-item" onclick="showPage('defect');renderMyDefects();" id="nav-defect"><div class="nav-icon">🔧</div>결함</div>
 </div>
 </div><!-- /app -->
 
@@ -1074,6 +1133,12 @@ function populateMasterSelects() {
   if(attSel && MASTER.courses.length > 0) {
     attSel.innerHTML = '<option value="">선택</option>' +
       MASTER.courses.map(c=>`<option value="${c.Course_Name}">${c.Course_Name}</option>`).join('');
+  }
+  // 결함 리포트 차량 드롭다운
+  const defRegoSel = document.getElementById('def-rego');
+  if(defRegoSel && MASTER.vehicles.length > 0) {
+    defRegoSel.innerHTML = '<option value="">선택</option>' +
+      MASTER.vehicles.map(v=>`<option value="${v.Rego}">${v.Rego}</option>`).join('');
   }
   // 가이드 GUIDE_LIST 갱신
   rebuildGuideList();
@@ -3039,6 +3104,88 @@ function renderNotices(){
 // ═══════════════════════════════════════
 // PAY PAGE
 // ═══════════════════════════════════════
+// ═══════════════════════════════════════
+// DEFECT REPORT
+// ═══════════════════════════════════════
+function getDefectReports(){ try{return JSON.parse(localStorage.getItem('defect_reports')||'[]');}catch(e){return[];} }
+function saveDefectReports(d){ localStorage.setItem('defect_reports',JSON.stringify(d)); }
+
+function submitDefectReport(){
+  const rego     = document.getElementById('def-rego')?.value||'';
+  const cat      = document.getElementById('def-cat')?.value||'';
+  const location = document.getElementById('def-location')?.value||'';
+  const desc     = document.getElementById('def-desc')?.value||'';
+  const severity = document.getElementById('def-severity')?.value||'low';
+  const km       = parseInt(document.getElementById('def-km')?.value)||null;
+
+  if(!rego){ showToast('차량을 선택하세요','error'); return; }
+  if(!desc){ showToast('결함 내용을 입력하세요','error'); return; }
+
+  const shift = JSON.parse(localStorage.getItem('currentShift')||'{}');
+  const driver = shift.driverName || localStorage.getItem('driverName') || '';
+
+  const entry = {
+    id: Date.now().toString(),
+    rego, category:cat, location, description:desc,
+    severity, km,
+    driver,
+    status: 'open',
+    submittedAt: new Date().toISOString().slice(0,16),
+    adminNote: '',
+  };
+
+  const reports = getDefectReports();
+  reports.unshift(entry);
+  saveDefectReports(reports);
+
+  // 필드 초기화
+  ['def-rego','def-cat','def-location','def-desc','def-km'].forEach(id=>{
+    const el=document.getElementById(id); if(el)el.value='';
+  });
+  const sevEl=document.getElementById('def-severity');
+  if(sevEl)sevEl.value='low';
+
+  renderMyDefects();
+
+  const sev = {low:'🟢 낮음', medium:'🟡 중간', high:'🔴 높음'}[severity]||'';
+  showToast(`⚠️ 결함 리포트 제출 완료 (${sev})`,'success');
+}
+
+function renderMyDefects(){
+  const el = document.getElementById('defect-my-reports');
+  if(!el) return;
+  const shift = JSON.parse(localStorage.getItem('currentShift')||'{}');
+  const driver = shift.driverName || localStorage.getItem('driverName') || '';
+  // 내 드라이버 이름으로 필터 (없으면 전체)
+  let reports = getDefectReports();
+  if(driver) reports = reports.filter(r=>r.driver===driver||!r.driver);
+  reports = reports.slice(0,20);
+
+  if(!reports.length){
+    el.innerHTML='<div style="text-align:center;color:var(--muted);font-size:13px;padding:20px;">제출한 리포트가 없습니다</div>';
+    return;
+  }
+
+  const sevStyle={low:'color:#16a34a',medium:'color:#d97706',high:'color:#dc2626;font-weight:700'};
+  const sevLabel={low:'🟢 낮음',medium:'🟡 중간',high:'🔴 높음'};
+  const statusLabel={open:'미처리',in_progress:'처리중',resolved:'✅ 완료'};
+
+  el.innerHTML = reports.map(r=>`
+    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
+        <div style="font-size:13px;font-weight:700;color:var(--accent);">${r.rego}</div>
+        <div style="font-size:11px;${sevStyle[r.severity]||''}">${sevLabel[r.severity]||''}</div>
+      </div>
+      <div style="font-size:12px;font-weight:600;color:var(--text);">${r.category||'기타'}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;">${r.description||''}</div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:var(--muted);">
+        <span>${r.submittedAt?.slice(0,16)||''}</span>
+        <span style="${r.status==='resolved'?'color:#16a34a':r.status==='in_progress'?'color:#d97706':'color:#dc2626'}">${statusLabel[r.status]||r.status}</span>
+      </div>
+      ${r.adminNote?`<div style="margin-top:6px;background:var(--surface);border-radius:6px;padding:6px 8px;font-size:11px;color:var(--text);">📝 관리자: ${r.adminNote}</div>`:''}
+    </div>`).join('');
+}
+
 function getWeekKey(dateStr){
   // dateStr: "dd/mm/yy" or "dd/mm/yyyy"
   const parts = dateStr.split('/');
