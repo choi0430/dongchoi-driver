@@ -253,15 +253,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
 <!-- VEHICLE -->
 <div class="pg" id="pveh">
-  <!-- 차량 서브탭 -->
   <div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px;">
     <button class="btn bac sm" id="vtab-list"   onclick="setVTab('list')"   style="white-space:nowrap;">🚌 차량 목록</button>
     <button class="btn sm"     id="vtab-hvis"   onclick="setVTab('hvis')"   style="white-space:nowrap;background:var(--sf2);">🔧 HVIS 관리</button>
     <button class="btn sm"     id="vtab-maint"  onclick="setVTab('maint')"  style="white-space:nowrap;background:var(--sf2);">🛠 정비 내역</button>
     <button class="btn sm"     id="vtab-defect" onclick="setVTab('defect')" style="white-space:nowrap;background:var(--sf2);">⚠️ 결함 리포트</button>
   </div>
-
-  <!-- 차량 목록 섹션 -->
   <div id="vsec-list">
     <div class="shd" style="padding-top:0">
       <div><div class="stl">🚌 Vehicle Master</div><div class="ssb" id="vcnt"></div></div>
@@ -270,8 +267,6 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="srw"><span class="sri">🔍</span><input type="text" placeholder="번호·제조사 검색..." oninput="flt('V',this.value)"></div>
     <div id="vlist"></div>
   </div>
-
-  <!-- HVIS 관리 섹션 -->
   <div id="vsec-hvis" style="display:none;">
     <div class="shd" style="padding-top:0">
       <div class="stl">🔧 HVIS 관리</div>
@@ -280,8 +275,6 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div id="hvis-alert-box" style="margin-bottom:12px;"></div>
     <div id="hvis-list"></div>
   </div>
-
-  <!-- 정비 내역 섹션 -->
   <div id="vsec-maint" style="display:none;">
     <div class="shd" style="padding-top:0">
       <div class="stl">🛠 정비 내역</div>
@@ -289,8 +282,6 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     </div>
     <div id="maint-list"></div>
   </div>
-
-  <!-- 결함 리포트 섹션 -->
   <div id="vsec-defect" style="display:none;">
     <div class="shd" style="padding-top:0">
       <div class="stl">⚠️ 결함 리포트</div>
@@ -544,7 +535,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 <!-- BOTTOM NAV -->
 <div class="bnav">
   <div class="ni on" id="ndash" onclick="nv('pdash','ndash');rDash()"><div class="nie">🏠</div><div class="nil">홈</div></div>
-  <div class="ni" id="nveh" onclick="nv('pveh','nveh');rV();setVTab('list')"><div class="nie">🚌</div><div class="nil">차량</div></div>
+  <div class="ni" id="nveh" onclick="nv('pveh','nveh');rV()"><div class="nie">🚌</div><div class="nil">차량</div></div>
   <div class="ni" id="ndrv" onclick="nv('pdrv','ndrv');rD()"><div class="nie">👤</div><div class="nil">드라이버</div></div>
   <div class="ni" id="ncli" onclick="nv('pcli','ncli');rC()"><div class="nie">🏢</div><div class="nil">여행사</div></div>
   <div class="ni" id="ngui" onclick="nv('pgui','ngui');rG()"><div class="nie">🧭</div><div class="nil">가이드</div></div>
@@ -672,12 +663,8 @@ function rDash(){
     const rd=du(v.Rego_Date),hd=du(v.HVIS_Date);
     if(v.Rego_Date&&rd<90)als.push({c:rd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — Rego ${rd<0?'만료됨':rd+'일 남음'}`});
     if(v.HVIS_Date&&hd<90)als.push({c:hd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — HVIS ${hd<0?'만료됨':hd+'일 남음'}`});
-    // 서비스 KM 알림
-    const curKM2=Number(v.Current_KM)||0,lastSvc2=Number(v.Last_Service_KM)||0,svcInt2=Number(v.Service_Interval)||10000;
-    if(curKM2>0&&(lastSvc2+svcInt2-curKM2)<=1000)als.push({c:'var(--pu)',m:`${v.Rego} — 서비스까지 ${Math.max(0,lastSvc2+svcInt2-curKM2)}km 남음`});
-    // HVIS 6개월/1년 예정 알림 (레죠 기준)
-    const sch2=getHvisSchedule(v.Rego_Date);
-    if(sch2){const d6=daysDiff(sch2.m6);if(d6!==null&&d6<=30)als.push({c:d6<0?'var(--rd)':'var(--yl)',m:`${v.Rego} — HVIS 6개월 예정 ${d6<0?'만료':d6+'일 후'}(${sch2.m6})`});}
+    const _cKM=Number(v.Current_KM)||0,_lKM=Number(v.Last_Service_KM)||0,_iKM=Number(v.Service_Interval)||10000;
+    if(_cKM>0&&(_lKM+_iKM-_cKM)<=1000)als.push({c:'var(--pu)',m:v.Rego+' — 서비스까지 '+Math.max(0,_lKM+_iKM-_cKM)+'km 남음'});
   });
   document.getElementById('alct').textContent=als.length+'건';
   document.getElementById('als').innerHTML=als.length
@@ -685,412 +672,302 @@ function rDash(){
     :'<div class="crd" style="color:var(--gn);text-align:center">✅ 현재 만료 예정 없음</div>';
 }
 
-// ═══════════════════════════════════════
-// VEHICLE MANAGEMENT
-// ═══════════════════════════════════════
 
-// localStorage 헬퍼
-function getHvisBookings(){ try{return JSON.parse(localStorage.getItem('hvis_bookings')||'[]');}catch(e){return[];} }
-function saveHvisBookings(d){ localStorage.setItem('hvis_bookings',JSON.stringify(d)); }
-function getMaintRecords(){ try{return JSON.parse(localStorage.getItem('maint_records')||'[]');}catch(e){return[];} }
-function saveMaintRecords(d){ localStorage.setItem('maint_records',JSON.stringify(d)); }
-function getDefectReports(){ try{return JSON.parse(localStorage.getItem('defect_reports')||'[]');}catch(e){return[];} }
-function saveDefectReports(d){ localStorage.setItem('defect_reports',JSON.stringify(d)); }
+// ===== VEHICLE MANAGEMENT =====
+function getHvisBookings(){try{return JSON.parse(localStorage.getItem('hvis_bookings')||'[]');}catch(e){return[];}}
+function saveHvisBookings(d){localStorage.setItem('hvis_bookings',JSON.stringify(d));}
+function getMaintRecords(){try{return JSON.parse(localStorage.getItem('maint_records')||'[]');}catch(e){return[];}}
+function saveMaintRecords(d){localStorage.setItem('maint_records',JSON.stringify(d));}
+function getDefectReports(){try{return JSON.parse(localStorage.getItem('defect_reports')||'[]');}catch(e){return[];}}
+function saveDefectReports(d){localStorage.setItem('defect_reports',JSON.stringify(d));}
 
-// 차량 서브탭 전환
 function setVTab(tab){
-  ['list','hvis','maint','defect'].forEach(t=>{
-    const sec=document.getElementById('vsec-'+t);
-    const btn=document.getElementById('vtab-'+t);
-    if(sec) sec.style.display=t===tab?'block':'none';
-    if(btn){
-      btn.className=t===tab?'btn bac sm':'btn sm';
-      btn.style.background=t===tab?'':'var(--sf2)';
-      btn.style.whiteSpace='nowrap';
-    }
+  ['list','hvis','maint','defect'].forEach(function(t){
+    var sec=document.getElementById('vsec-'+t);
+    var btn=document.getElementById('vtab-'+t);
+    if(sec)sec.style.display=t===tab?'block':'none';
+    if(btn){btn.className=t===tab?'btn bac sm':'btn sm';btn.style.background=t===tab?'':'var(--sf2)';btn.style.whiteSpace='nowrap';}
   });
-  if(tab==='hvis') renderHvis();
-  if(tab==='maint') renderMaint();
-  if(tab==='defect'){ renderDefects(); populateDefectFilter(); }
+  if(tab==='hvis')renderHvis();
+  if(tab==='maint')renderMaint();
+  if(tab==='defect'){renderDefects();populateDefectFilter();}
 }
 
-// ─── HVIS 알림 계산 ──────────────────────────────
-// Rego_Date 기준으로 HVIS 예정일 계산 (6개월, 1년 후)
 function getHvisSchedule(regoDate){
-  if(!regoDate) return null;
-  const d = new Date(regoDate);
-  const m6 = new Date(d); m6.setMonth(m6.getMonth()+6);
-  const y1 = new Date(d); y1.setFullYear(y1.getFullYear()+1);
-  return { m6: m6.toISOString().slice(0,10), y1: y1.toISOString().slice(0,10) };
+  if(!regoDate)return null;
+  var d=new Date(regoDate);
+  var m6=new Date(d.getTime());m6.setMonth(m6.getMonth()+6);
+  var y1=new Date(d.getTime());y1.setFullYear(y1.getFullYear()+1);
+  return{m6:m6.toISOString().slice(0,10),y1:y1.toISOString().slice(0,10)};
+}
+function vDaysDiff(dateStr){
+  if(!dateStr)return null;
+  return Math.round((new Date(dateStr)-new Date())/86400000);
+}
+function vFmtD(ds){
+  if(!ds)return '-';
+  var p=ds.split('-');return p[2]+'/'+p[1]+'/'+p[0];
+}
+function vDaysLbl(n){
+  if(n===null)return '';
+  if(n<0)return 'EXPIRED';
+  return n+' days';
 }
 
-function daysDiff(dateStr){
-  if(!dateStr) return null;
-  return Math.round((new Date(dateStr) - new Date()) / 86400000);
-}
-
-function formatDate(dateStr){
-  if(!dateStr) return '—';
-  const [y,m,d]=dateStr.split('-');
-  return `${d}/${m}/${y}`;
-}
-
-// HVIS 섹션 렌더
 function renderHvis(){
-  const box = document.getElementById('hvis-alert-box');
-  const list = document.getElementById('hvis-list');
-  if(!box||!list) return;
+  var box=document.getElementById('hvis-alert-box');
+  var list=document.getElementById('hvis-list');
+  if(!box||!list)return;
+  var bookings=getHvisBookings();
+  var alertHtml='',listHtml='';
+  DB.V.forEach(function(v){
+    if(!v.Rego)return;
+    var sch=getHvisSchedule(v.Rego_Date);
+    var regoDays=vDaysDiff(v.Rego_Date);
+    var hvisDays=vDaysDiff(v.HVIS_Date);
+    var curKM=Number(v.Current_KM)||0,lastSvc=Number(v.Last_Service_KM)||0,svcInt=Number(v.Service_Interval)||10000;
+    var nextSvcKM=lastSvc+svcInt,kmToSvc=nextSvcKM-curKM;
 
-  const bookings = getHvisBookings();
-  const today = new Date();
-  let alertHtml='', listHtml='';
-
-  DB.V.filter(v=>!DC_OWNERS.includes(v.Owner||'')||v.Owner===null||DC_OWNERS.includes(v.Owner)).forEach(v=>{
-    if(!v.Rego) return;
-    const sch = getHvisSchedule(v.Rego_Date);
-    const regoDays = daysDiff(v.Rego_Date);
-    const hvisDate = v.HVIS_Date;
-    const hvisDays = daysDiff(hvisDate);
-
-    // 서비스 KM 알림
-    const curKM = Number(v.Current_KM)||0;
-    const lastSvc = Number(v.Last_Service_KM)||0;
-    const svcInterval = Number(v.Service_Interval)||10000;
-    const nextSvcKM = lastSvc + svcInterval;
-    const kmToSvc = nextSvcKM - curKM;
-
-    // 알림 생성
-    if(v.Rego_Date && regoDays!==null && regoDays<=30){
-      alertHtml+=`<div style="background:#fff7ed;border:1.5px solid #fb923c;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">
-        🟠 <b>${v.Rego}</b> — Rego 만료 ${regoDays<0?'<b style="color:#dc2626">만료됨</b>':regoDays+'일 후'} <span style="color:#9ca3af;">(${formatDate(v.Rego_Date)})</span>
-      </div>`;
+    if(v.Rego_Date&&regoDays!==null&&regoDays<=30){
+      alertHtml+='<div style="background:#fff7ed;border:1.5px solid #fb923c;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
+        +'&#x1F7E0; <b>'+v.Rego+'</b> — Rego expiry: <b style="color:#dc2626">'+vDaysLbl(regoDays)+'</b> ('+vFmtD(v.Rego_Date)+')</div>';
     }
-    if(hvisDate && hvisDays!==null && hvisDays<=90){
-      const urgency=hvisDays<30?'#dc2626':hvisDays<60?'#d97706':'#ca8a04';
-      alertHtml+=`<div style="background:#fefce8;border:1.5px solid #fde047;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">
-        ⚠️ <b>${v.Rego}</b> — HVIS 만료 ${hvisDays<0?'<b style="color:#dc2626">만료됨</b>':'<b style="color:'+urgency+'">'+hvisDays+'일 후</b>'} <span style="color:#9ca3af;">(${formatDate(hvisDate)})</span>
-        ${hvisDays<=30&&hvisDays>0?'<br><span style="color:#dc2626;font-size:11px;">⏰ 부킹 기한 임박! 1달 전 부킹 필요</span>':''}
-      </div>`;
+    if(v.HVIS_Date&&hvisDays!==null&&hvisDays<=90){
+      var urg=hvisDays<30?'#dc2626':hvisDays<60?'#d97706':'#ca8a04';
+      alertHtml+='<div style="background:#fefce8;border:1.5px solid #fde047;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
+        +'&#x26A0;&#xFE0F; <b>'+v.Rego+'</b> — HVIS due: <b style="color:'+urg+'">'+vDaysLbl(hvisDays)+'</b> ('+vFmtD(v.HVIS_Date)+')'
+        +(hvisDays<=30&&hvisDays>0?'<br><span style="color:#dc2626;font-size:11px;">&#x23F0; Booking required — 1 month before due date</span>':'')
+        +'</div>';
     }
-    if(curKM>0 && kmToSvc<=1000){
-      alertHtml+=`<div style="background:#faf5ff;border:1.5px solid #c084fc;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">
-        🔧 <b>${v.Rego}</b> — 서비스까지 <b style="color:#7c3aed;">${kmToSvc<=0?'초과! '+Math.abs(kmToSvc)+'km':kmToSvc+'km 남음'}</b> (현재 ${curKM.toLocaleString()}km / 예정 ${nextSvcKM.toLocaleString()}km)
-      </div>`;
+    if(curKM>0&&kmToSvc<=1000){
+      alertHtml+='<div style="background:#faf5ff;border:1.5px solid #c084fc;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
+        +'&#x1F527; <b>'+v.Rego+'</b> — Service due in <b style="color:#7c3aed;">'+(kmToSvc<=0?'OVERDUE '+Math.abs(kmToSvc)+'km':kmToSvc+'km')+'</b>'
+        +' (Current: '+curKM.toLocaleString()+'km / Next: '+nextSvcKM.toLocaleString()+'km)</div>';
     }
 
-    // 차량별 카드
-    const vBookings = bookings.filter(b=>b.rego===v.Rego);
-    const lastBooking = vBookings.sort((a,b)=>b.bookingDate?.localeCompare(a.bookingDate||'')||0)[0];
-    const sch6 = sch?.m6, sch12 = sch?.y1;
-    const days6 = daysDiff(sch6), days12 = daysDiff(sch12);
+    var vBk=bookings.filter(function(b){return b.rego===v.Rego;});
+    var lastB=vBk.sort(function(a,b2){return(b2.inspDate||'').localeCompare(a.inspDate||'');})[0];
+    var sch6=sch?sch.m6:null,sch12=sch?sch.y1:null;
+    var d6=vDaysDiff(sch6);
+    var regoC=regoDays!==null&&regoDays<30?'var(--rd)':regoDays!==null&&regoDays<60?'var(--yl)':'var(--t2)';
+    var hvisC=hvisDays!==null&&hvisDays<30?'var(--rd)':hvisDays!==null&&hvisDays<90?'var(--yl)':'var(--t2)';
+    var d6C=d6!==null&&d6<30?'var(--rd)':d6!==null&&d6<60?'var(--yl)':'var(--t2)';
 
-    listHtml+=`<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:10px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-        <div>
-          <div style="font-size:14px;font-weight:800;color:var(--t1);">${v.Rego} <span style="font-size:11px;font-weight:400;color:var(--t3);">${v.Make||''} ${v.Model||''}</span></div>
-          <div style="font-size:11px;color:var(--t3);margin-top:2px;">${v.Owner||v.Accreditation||'—'}</div>
-        </div>
-        <button class="btn bac sm" style="font-size:11px;" onclick="openHvisBooking('${v.Rego}')">+ 부킹</button>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
-        <div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">
-          <div style="font-size:10px;color:var(--t3);margin-bottom:3px;">Rego 만료</div>
-          <div style="font-size:12px;font-weight:700;color:${regoDays!==null&&regoDays<30?'var(--rd)':regoDays!==null&&regoDays<60?'var(--yl)':'var(--t2)'};">${formatDate(v.Rego_Date)}</div>
-          ${regoDays!==null?`<div style="font-size:10px;color:var(--t3);">${regoDays<0?'만료됨':regoDays+'일 남음'}</div>`:''}
-        </div>
-        <div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">
-          <div style="font-size:10px;color:var(--t3);margin-bottom:3px;">HVIS 만료</div>
-          <div style="font-size:12px;font-weight:700;color:${hvisDays!==null&&hvisDays<30?'var(--rd)':hvisDays!==null&&hvisDays<90?'var(--yl)':'var(--t2)'};">${formatDate(hvisDate)}</div>
-          ${hvisDays!==null?`<div style="font-size:10px;color:var(--t3);">${hvisDays<0?'만료됨':hvisDays+'일 남음'}</div>`:''}
-        </div>
-        <div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">
-          <div style="font-size:10px;color:var(--t3);margin-bottom:3px;">HVIS 6개월 예정</div>
-          <div style="font-size:12px;font-weight:700;color:${days6!==null&&days6<30?'var(--rd)':days6!==null&&days6<60?'var(--yl)':'var(--t2)'};">${formatDate(sch6)||'—'}</div>
-        </div>
-        <div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">
-          <div style="font-size:10px;color:var(--t3);margin-bottom:3px;">HVIS 1년 예정</div>
-          <div style="font-size:12px;font-weight:700;">${formatDate(sch12)||'—'}</div>
-        </div>
-      </div>
-      ${sch?`<div style="font-size:11px;color:var(--t3);margin-bottom:6px;">⏰ 인스펙션 기간: due date 기준 3개월 이내 · 부킹은 1달 전 권장</div>`:''}
-      ${lastBooking?`<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;font-size:11px;">
-        <span style="font-weight:700;color:var(--t2);">최근 부킹:</span>
-        ${formatDate(lastBooking.inspDate)} ${lastBooking.inspTime||''} · ${lastBooking.location||'장소미정'}
-        <span style="color:var(--t3);"> · Booking# ${lastBooking.bookingNo||'—'}</span>
-        <button style="background:none;border:none;color:var(--ac);font-size:10px;cursor:pointer;margin-left:6px;" onclick="openHvisBooking('${v.Rego}')">전체보기</button>
-      </div>`:'<div style="font-size:11px;color:var(--t3);">부킹 기록 없음</div>'}
-    </div>`;
+    listHtml+='<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:10px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">'
+      +'<div><div style="font-size:14px;font-weight:800;color:var(--t1);">'+v.Rego
+      +' <span style="font-size:11px;font-weight:400;color:var(--t3);">'+(v.Make||'')+' '+(v.Model||'')+'</span></div>'
+      +'<div style="font-size:11px;color:var(--t3);margin-top:2px;">'+(v.Owner||v.Accreditation||'-')+'</div></div>'
+      +'<button class="btn bac sm" style="font-size:11px;" onclick="openHvisBooking(\''+v.Rego+'\')">+ Booking</button></div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">'
+      +'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'
+      +'<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">Rego Expiry</div>'
+      +'<div style="font-size:12px;font-weight:700;color:'+regoC+';">'+vFmtD(v.Rego_Date)+'</div>'
+      +(regoDays!==null?'<div style="font-size:10px;color:var(--t3);">'+vDaysLbl(regoDays)+'</div>':'')+'</div>'
+      +'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'
+      +'<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">HVIS Due</div>'
+      +'<div style="font-size:12px;font-weight:700;color:'+hvisC+';">'+vFmtD(v.HVIS_Date)+'</div>'
+      +(hvisDays!==null?'<div style="font-size:10px;color:var(--t3);">'+vDaysLbl(hvisDays)+'</div>':'')+'</div>'
+      +'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'
+      +'<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">HVIS @6mo (Rego+6m)</div>'
+      +'<div style="font-size:12px;font-weight:700;color:'+d6C+';">'+vFmtD(sch6)+'</div></div>'
+      +'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'
+      +'<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">HVIS @1yr (Rego+12m)</div>'
+      +'<div style="font-size:12px;font-weight:700;">'+vFmtD(sch12)+'</div></div></div>'
+      +'<div style="font-size:11px;color:var(--t3);margin-bottom:6px;">&#x23F0; Inspection window: within 3 months of due date. Book 1 month before.</div>'
+      +(lastB?'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;font-size:11px;">'
+        +'<b>Latest booking:</b> '+vFmtD(lastB.inspDate)+' '+(lastB.inspTime||'')+' — '+(lastB.location||'TBD')
+        +' <span style="color:var(--t3);">Booking# '+(lastB.bookingNo||'-')+'</span>'
+        +'<button style="background:none;border:none;color:var(--ac);font-size:10px;cursor:pointer;margin-left:6px;" onclick="openHvisBooking(\''+v.Rego+'\')">View all</button></div>'
+        :'<div style="font-size:11px;color:var(--t3);">No booking on record</div>')
+      +'</div>';
   });
-
-  box.innerHTML = alertHtml || '<div style="text-align:center;padding:12px;color:var(--gn);font-size:12px;">✅ 현재 임박한 알림 없음</div>';
-  list.innerHTML = listHtml || '<div style="text-align:center;padding:20px;color:var(--t3);font-size:12px;">차량 데이터 없음</div>';
+  box.innerHTML=alertHtml||'<div style="text-align:center;padding:12px;color:var(--gn);font-size:12px;">&#x2705; No urgent alerts</div>';
+  list.innerHTML=listHtml||'<div style="text-align:center;padding:20px;color:var(--t3);font-size:12px;">No vehicles</div>';
 }
 
-// ─── HVIS 부킹 모달 ──────────────────────────────
 function openHvisBooking(rego){
-  const bookings = getHvisBookings().filter(b=>!rego||b.rego===rego);
-  const vehs = DB.V.filter(v=>!rego||v.Rego===rego);
-  const overlay = document.createElement('div');
-  overlay.id = 'hvis-modal-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9000;display:flex;align-items:flex-end;justify-content:center;';
-  const modal = document.createElement('div');
-  modal.style.cssText = 'background:var(--sf);border-radius:20px 20px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;';
-
-  const regoOpts = DB.V.map(v=>`<option value="${v.Rego}"${v.Rego===rego?' selected':''}>${v.Rego} — ${v.Make||''} ${v.Model||''}</option>`).join('');
-
-  // 기존 부킹 목록
-  const bList = bookings.length ? bookings.sort((a,b)=>b.inspDate?.localeCompare(a.inspDate||'')||0).map(b=>`
-    <div style="background:var(--sf2);border-radius:8px;padding:10px;margin-bottom:6px;font-size:12px;">
-      <div style="display:flex;justify-content:space-between;">
-        <div>
-          <b>${formatDate(b.inspDate)}</b> ${b.inspTime||''} · ${b.location||'장소미정'}
-        </div>
-        <button onclick="deleteHvisBooking('${b.id}')" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;">🗑</button>
-      </div>
-      <div style="color:var(--t3);margin-top:4px;">
-        Booking# ${b.bookingNo||'—'} · Customer# ${b.customerNo||'—'} · ${b.ownerName||'—'}
-      </div>
-    </div>`).join('') : '<div style="color:var(--t3);font-size:12px;padding:8px 0;">기록 없음</div>';
-
-  modal.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <div style="font-size:16px;font-weight:800;">🔧 HVIS 부킹</div>
-      <button onclick="document.getElementById('hvis-modal-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;">✕</button>
-    </div>
-    <div style="font-size:12px;font-weight:700;color:var(--t3);margin-bottom:8px;">기존 부킹 기록 ${rego?'('+rego+')':''}</div>
-    <div id="hvis-booking-list">${bList}</div>
-    <div style="border-top:1px solid var(--bd);margin:14px 0;"></div>
-    <div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:10px;">+ 새 부킹 추가</div>
-    <div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">차량</div>
-      <select id="hb-rego" class="profit-sel" style="width:100%;">${regoOpts}</select></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">인스펙션 날짜</div>
-        <input id="hb-date" type="date" class="profit-finp" style="width:100%;"></div>
-      <div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">인스펙션 시간</div>
-        <input id="hb-time" type="time" class="profit-finp" style="width:100%;"></div>
-    </div>
-    <div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">부킹 장소</div>
-      <input id="hb-location" class="profit-finp" style="width:100%;" placeholder="예: 97-99 Derby St, Silverwater"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">Customer No.</div>
-        <input id="hb-custno" class="profit-finp" style="width:100%;" placeholder="예: 21854511"></div>
-      <div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">Booking No.</div>
-        <input id="hb-bookno" class="profit-finp" style="width:100%;" placeholder="예: B123456"></div>
-    </div>
-    <div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">차주 명의 (Owner Name)</div>
-      <input id="hb-owner" class="profit-finp" style="width:100%;" placeholder="예: DONG CHOI PTY LTD"></div>
-    <button class="btn bac" style="width:100%;" onclick="saveHvisBookingEntry()">💾 부킹 저장</button>`;
-
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  var bAll=getHvisBookings();
+  var bookings=bAll.filter(function(b){return !rego||b.rego===rego;});
+  var overlay=document.createElement('div');
+  overlay.id='hvis-modal-overlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9000;display:flex;align-items:flex-end;justify-content:center;';
+  var modal=document.createElement('div');
+  modal.style.cssText='background:var(--sf);border-radius:20px 20px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;';
+  var regoOpts=DB.V.map(function(v){
+    return'<option value="'+v.Rego+'"'+(v.Rego===rego?' selected':'')+'>'+v.Rego+' — '+(v.Make||'')+' '+(v.Model||'')+'</option>';
+  }).join('');
+  var sorted=bookings.sort(function(a,b){return(b.inspDate||'').localeCompare(a.inspDate||'');});
+  var bList=sorted.length?sorted.map(function(b){
+    return'<div style="background:var(--sf2);border-radius:8px;padding:10px;margin-bottom:6px;font-size:12px;">'
+      +'<div style="display:flex;justify-content:space-between;">'
+      +'<div><b>'+vFmtD(b.inspDate)+'</b> '+(b.inspTime||'')+' — '+(b.location||'TBD')+'</div>'
+      +'<button onclick="deleteHvisBooking(\''+b.id+'\')" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;">&#x1F5D1;</button></div>'
+      +'<div style="color:var(--t3);margin-top:4px;">Booking# '+(b.bookingNo||'-')+' | Customer# '+(b.customerNo||'-')+' | '+(b.ownerName||'-')+'</div></div>';
+  }).join(''):'<div style="color:var(--t3);font-size:12px;padding:8px 0;">No records</div>';
+  modal.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'
+    +'<div style="font-size:16px;font-weight:800;">&#x1F527; HVIS Booking</div>'
+    +'<button onclick="document.getElementById(\'hvis-modal-overlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;">&#x2715;</button></div>'
+    +'<div style="font-size:12px;font-weight:700;color:var(--t3);margin-bottom:8px;">Existing bookings '+(rego?'('+rego+')':'')+'</div>'
+    +'<div id="hvis-booking-list">'+bList+'</div>'
+    +'<div style="border-top:1px solid var(--bd);margin:14px 0;"></div>'
+    +'<div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:10px;">+ Add New Booking</div>'
+    +'<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">Vehicle</div>'
+    +'<select id="hb-rego" class="profit-sel" style="width:100%;">'+regoOpts+'</select></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">Inspection Date</div>'
+    +'<input id="hb-date" type="date" class="profit-finp" style="width:100%;"></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">Inspection Time</div>'
+    +'<input id="hb-time" type="time" class="profit-finp" style="width:100%;"></div></div>'
+    +'<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">Location</div>'
+    +'<input id="hb-location" class="profit-finp" style="width:100%;" placeholder="e.g. 97-99 Derby St, Silverwater"></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">Customer No.</div>'
+    +'<input id="hb-custno" class="profit-finp" style="width:100%;" placeholder="21854511"></div>'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">Booking No.</div>'
+    +'<input id="hb-bookno" class="profit-finp" style="width:100%;" placeholder="B123456"></div></div>'
+    +'<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">Owner Name</div>'
+    +'<input id="hb-owner" class="profit-finp" style="width:100%;" placeholder="DONG CHOI PTY LTD"></div>'
+    +'<button class="btn bac" style="width:100%;" onclick="saveHvisBookingEntry()">&#x1F4BE; Save Booking</button>';
+  overlay.appendChild(modal);document.body.appendChild(overlay);
 }
-
 function saveHvisBookingEntry(){
-  const entry = {
-    id: Date.now().toString(),
-    rego: document.getElementById('hb-rego')?.value||'',
-    inspDate: document.getElementById('hb-date')?.value||'',
-    inspTime: document.getElementById('hb-time')?.value||'',
-    location: document.getElementById('hb-location')?.value||'',
-    customerNo: document.getElementById('hb-custno')?.value||'',
-    bookingNo: document.getElementById('hb-bookno')?.value||'',
-    ownerName: document.getElementById('hb-owner')?.value||'',
-    bookingDate: new Date().toISOString().slice(0,10),
-  };
-  if(!entry.rego){ toast('차량을 선택하세요','er'); return; }
-  if(!entry.inspDate){ toast('인스펙션 날짜를 입력하세요','er'); return; }
-  const bookings = getHvisBookings();
-  bookings.push(entry);
-  saveHvisBookings(bookings);
-  document.getElementById('hvis-modal-overlay')?.remove();
-  renderHvis();
-  toast('HVIS 부킹 저장 완료','ok');
+  function gVal(id){var e=document.getElementById(id);return e?e.value:'';}
+  var entry={id:Date.now().toString(),rego:gVal('hb-rego'),inspDate:gVal('hb-date'),inspTime:gVal('hb-time'),
+    location:gVal('hb-location'),customerNo:gVal('hb-custno'),bookingNo:gVal('hb-bookno'),
+    ownerName:gVal('hb-owner'),bookingDate:new Date().toISOString().slice(0,10)};
+  if(!entry.rego){toast('Select a vehicle','er');return;}
+  if(!entry.inspDate){toast('Enter inspection date','er');return;}
+  var bk=getHvisBookings();bk.push(entry);saveHvisBookings(bk);
+  document.getElementById('hvis-modal-overlay').remove();
+  renderHvis();toast('HVIS booking saved','ok');
 }
-
 function deleteHvisBooking(id){
-  if(!confirm('이 부킹 기록을 삭제하시겠습니까?')) return;
-  saveHvisBookings(getHvisBookings().filter(b=>b.id!==id));
-  document.getElementById('hvis-modal-overlay')?.remove();
-  renderHvis();
-  toast('삭제 완료','ok');
+  if(!confirm('Delete this booking?'))return;
+  saveHvisBookings(getHvisBookings().filter(function(b){return b.id!==id;}));
+  document.getElementById('hvis-modal-overlay').remove();
+  renderHvis();toast('Deleted','ok');
 }
 
-// ─── 정비 내역 ──────────────────────────────
 function renderMaint(){
-  const list = document.getElementById('maint-list');
-  if(!list) return;
-  const records = getMaintRecords().sort((a,b)=>b.date?.localeCompare(a.date||'')||0);
-  if(!records.length){
-    list.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">정비 내역이 없습니다</div>';
-    return;
-  }
-  list.innerHTML = records.map(r=>`
-    <div style="background:var(--sf2);border-radius:10px;padding:12px;margin-bottom:8px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-        <div>
-          <div style="font-size:13px;font-weight:700;">${formatDate(r.date)} · <span style="color:var(--ac);">${r.rego}</span></div>
-          <div style="font-size:12px;color:var(--t2);margin-top:3px;">${r.type||''} — ${r.description||''}</div>
-          <div style="font-size:11px;color:var(--t3);margin-top:2px;">
-            ${r.km?r.km.toLocaleString()+'km':'KM 미기록'} · ${r.workshop||'정비소 미기재'} · $${r.cost||0}
-          </div>
-          ${r.nextServiceKM?`<div style="font-size:11px;color:var(--pu);margin-top:2px;">다음 서비스: ${Number(r.nextServiceKM).toLocaleString()}km</div>`:''}
-        </div>
-        <div style="display:flex;gap:4px;">
-          <button class="btn bac sm" style="font-size:10px;" onclick="openMaintEntry('${r.id}')">✏️</button>
-          <button class="btn sm" style="font-size:10px;background:var(--rd-dim);color:var(--rd);" onclick="deleteMaint('${r.id}')">🗑</button>
-        </div>
-      </div>
-    </div>`).join('');
+  var list=document.getElementById('maint-list');
+  if(!list)return;
+  var records=getMaintRecords().sort(function(a,b){return(b.date||'').localeCompare(a.date||'');});
+  if(!records.length){list.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">No maintenance records</div>';return;}
+  list.innerHTML=records.map(function(r){
+    return'<div style="background:var(--sf2);border-radius:10px;padding:12px;margin-bottom:8px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
+      +'<div><div style="font-size:13px;font-weight:700;">'+vFmtD(r.date)+' — <span style="color:var(--ac);">'+r.rego+'</span></div>'
+      +'<div style="font-size:12px;color:var(--t2);margin-top:3px;">'+(r.type||'')+' — '+(r.description||'')+'</div>'
+      +'<div style="font-size:11px;color:var(--t3);margin-top:2px;">'+(r.km?Number(r.km).toLocaleString()+'km':'KM N/A')+' | '+(r.workshop||'Workshop N/A')+' | $'+(r.cost||0)+'</div>'
+      +(r.nextServiceKM?'<div style="font-size:11px;color:var(--pu);margin-top:2px;">Next service: '+Number(r.nextServiceKM).toLocaleString()+'km</div>':'')
+      +'</div><div style="display:flex;gap:4px;">'
+      +'<button class="btn bac sm" style="font-size:10px;" onclick="openMaintEntry(\''+r.id+'\')">&#x270F;</button>'
+      +'<button class="btn sm" style="font-size:10px;background:var(--rd-dim);color:var(--rd);" onclick="deleteMaint(\''+r.id+'\')">&#x1F5D1;</button>'
+      +'</div></div></div>';
+  }).join('');
 }
-
 function openMaintEntry(id){
-  const records = getMaintRecords();
-  const r = id ? records.find(x=>x.id===id)||{} : {};
-  const overlay = document.createElement('div');
-  overlay.id = 'maint-modal-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9000;display:flex;align-items:flex-end;justify-content:center;';
-  const modal = document.createElement('div');
-  modal.style.cssText = 'background:var(--sf);border-radius:20px 20px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;';
-  const regoOpts = DB.V.map(v=>`<option value="${v.Rego}"${v.Rego===(r.rego||'')?' selected':''}>${v.Rego}</option>`).join('');
-  const typeOpts = ['Engine Oil & Filter','Tyre Rotation','Brake Check','Full Service','Tyre Replacement','Battery','Air Filter','Coolant','Timing Belt','Other'].map(t=>`<option value="${t}"${t===(r.type||'')?' selected':''}>${t}</option>`).join('');
-
-  modal.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <div style="font-size:16px;font-weight:800;">${id?'✏️ 정비 수정':'🛠 정비 추가'}</div>
-      <button onclick="document.getElementById('maint-modal-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;">✕</button>
-    </div>
-    <div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">차량</div>
-      <select id="mt-rego" class="profit-sel" style="width:100%;">${regoOpts}</select></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">정비일</div>
-        <input id="mt-date" type="date" class="profit-finp" style="width:100%;" value="${r.date||''}"></div>
-      <div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">현재 KM</div>
-        <input id="mt-km" type="number" class="profit-finp" style="width:100%;" value="${r.km||''}" placeholder="예: 250000"></div>
-    </div>
-    <div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">정비 종류</div>
-      <select id="mt-type" class="profit-sel" style="width:100%;"><option value="">선택</option>${typeOpts}</select></div>
-    <div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">상세 내용</div>
-      <textarea id="mt-desc" class="profit-finp" style="width:100%;min-height:60px;" placeholder="정비 내용 입력...">${r.description||''}</textarea></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">정비소</div>
-        <input id="mt-shop" class="profit-finp" style="width:100%;" value="${r.workshop||''}" placeholder="예: Sam Merhi"></div>
-      <div><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">비용 ($)</div>
-        <input id="mt-cost" type="number" class="profit-finp" style="width:100%;" value="${r.cost||''}" placeholder="0"></div>
-    </div>
-    <div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;">다음 서비스 예정 KM</div>
-      <input id="mt-nextkm" type="number" class="profit-finp" style="width:100%;" value="${r.nextServiceKM||''}" placeholder="예: 260000"></div>
-    <button class="btn bac" style="width:100%;" onclick="saveMaintEntry('${id||''}')">💾 저장</button>`;
-
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  var records=getMaintRecords();
+  var r=id?records.find(function(x){return x.id===id;})||{}:{};
+  var overlay=document.createElement('div');
+  overlay.id='maint-modal-overlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9000;display:flex;align-items:flex-end;justify-content:center;';
+  var modal=document.createElement('div');
+  modal.style.cssText='background:var(--sf);border-radius:20px 20px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;';
+  var regoOpts=DB.V.map(function(v){return'<option value="'+v.Rego+'"'+(v.Rego===(r.rego||'')?' selected':'')+'>'+v.Rego+'</option>';}).join('');
+  var types=['Engine Oil & Filter','Tyre Rotation','Brake Check','Full Service','Tyre Replacement','Battery','Air Filter','Coolant','Timing Belt','Other'];
+  var typeOpts=types.map(function(t){return'<option value="'+t+'"'+(t===(r.type||'')?' selected':'')+'>'+t+'</option>';}).join('');
+  modal.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'
+    +'<div style="font-size:16px;font-weight:800;">'+(id?'&#x270F; Edit Maintenance':'&#x1F6E0; Add Maintenance')+'</div>'
+    +'<button onclick="document.getElementById(\'maint-modal-overlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;">&#x2715;</button></div>'
+    +'<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:700;color:var(--t3);">Vehicle</label>'
+    +'<select id="mt-rego" class="profit-sel" style="width:100%;margin-top:4px;">'+regoOpts+'</select></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'
+    +'<div><label style="font-size:11px;font-weight:700;color:var(--t3);">Date</label>'
+    +'<input id="mt-date" type="date" class="profit-finp" style="width:100%;margin-top:4px;" value="'+(r.date||'')+'"></div>'
+    +'<div><label style="font-size:11px;font-weight:700;color:var(--t3);">Current KM</label>'
+    +'<input id="mt-km" type="number" class="profit-finp" style="width:100%;margin-top:4px;" value="'+(r.km||'')+'" placeholder="250000"></div></div>'
+    +'<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:700;color:var(--t3);">Service Type</label>'
+    +'<select id="mt-type" class="profit-sel" style="width:100%;margin-top:4px;"><option value="">Select</option>'+typeOpts+'</select></div>'
+    +'<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:700;color:var(--t3);">Description</label>'
+    +'<textarea id="mt-desc" class="profit-finp" style="width:100%;min-height:60px;margin-top:4px;" placeholder="Details...">'+(r.description||'')+'</textarea></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'
+    +'<div><label style="font-size:11px;font-weight:700;color:var(--t3);">Workshop</label>'
+    +'<input id="mt-shop" class="profit-finp" style="width:100%;margin-top:4px;" value="'+(r.workshop||'')+'" placeholder="e.g. Sam Merhi"></div>'
+    +'<div><label style="font-size:11px;font-weight:700;color:var(--t3);">Cost ($)</label>'
+    +'<input id="mt-cost" type="number" class="profit-finp" style="width:100%;margin-top:4px;" value="'+(r.cost||'')+'" placeholder="0"></div></div>'
+    +'<div style="margin-bottom:14px;"><label style="font-size:11px;font-weight:700;color:var(--t3);">Next Service KM</label>'
+    +'<input id="mt-nextkm" type="number" class="profit-finp" style="width:100%;margin-top:4px;" value="'+(r.nextServiceKM||'')+'" placeholder="260000"></div>'
+    +'<button class="btn bac" style="width:100%;" onclick="saveMaintEntry(\''+id+'\')">&#x1F4BE; Save</button>';
+  overlay.appendChild(modal);document.body.appendChild(overlay);
 }
-
 function saveMaintEntry(id){
-  const entry = {
-    id: id || Date.now().toString(),
-    rego: document.getElementById('mt-rego')?.value||'',
-    date: document.getElementById('mt-date')?.value||'',
-    km: parseInt(document.getElementById('mt-km')?.value)||null,
-    type: document.getElementById('mt-type')?.value||'',
-    description: document.getElementById('mt-desc')?.value||'',
-    workshop: document.getElementById('mt-shop')?.value||'',
-    cost: parseFloat(document.getElementById('mt-cost')?.value)||0,
-    nextServiceKM: parseInt(document.getElementById('mt-nextkm')?.value)||null,
-  };
-  if(!entry.rego){ toast('차량을 선택하세요','er'); return; }
-  if(!entry.date){ toast('정비일을 입력하세요','er'); return; }
-  const records = getMaintRecords();
-  if(id){ const i=records.findIndex(r=>r.id===id); if(i>=0)records[i]=entry; else records.push(entry); }
-  else records.push(entry);
-  saveMaintRecords(records);
-  // 차량 Last_Service_KM 자동 갱신
-  if(entry.km){
-    const vi=DB.V.findIndex(v=>v.Rego===entry.rego);
-    if(vi>=0 && (entry.km > (DB.V[vi].Last_Service_KM||0))){
-      DB.V[vi].Last_Service_KM = entry.km;
-      if(entry.nextServiceKM) DB.V[vi].Service_Interval = entry.nextServiceKM - entry.km;
-    }
-  }
-  document.getElementById('maint-modal-overlay')?.remove();
-  renderMaint();
-  toast('정비 내역 저장 완료','ok');
+  function gVal(i){var e=document.getElementById(i);return e?e.value:'';}
+  var entry={id:id||Date.now().toString(),rego:gVal('mt-rego'),date:gVal('mt-date'),
+    km:parseInt(gVal('mt-km'))||null,type:gVal('mt-type'),description:gVal('mt-desc'),
+    workshop:gVal('mt-shop'),cost:parseFloat(gVal('mt-cost'))||0,nextServiceKM:parseInt(gVal('mt-nextkm'))||null};
+  if(!entry.rego){toast('Select a vehicle','er');return;}
+  if(!entry.date){toast('Enter date','er');return;}
+  var recs=getMaintRecords();
+  if(id){var ix=recs.findIndex(function(r){return r.id===id;});if(ix>=0)recs[ix]=entry;else recs.push(entry);}
+  else recs.push(entry);
+  saveMaintRecords(recs);
+  if(entry.km){var vi=DB.V.findIndex(function(v){return v.Rego===entry.rego;});if(vi>=0&&entry.km>(DB.V[vi].Last_Service_KM||0)){DB.V[vi].Last_Service_KM=entry.km;if(entry.nextServiceKM)DB.V[vi].Service_Interval=entry.nextServiceKM-entry.km;}}
+  document.getElementById('maint-modal-overlay').remove();
+  renderMaint();toast('Maintenance record saved','ok');
 }
-
 function deleteMaint(id){
-  if(!confirm('이 정비 기록을 삭제하시겠습니까?')) return;
-  saveMaintRecords(getMaintRecords().filter(r=>r.id!==id));
-  renderMaint();
-  toast('삭제 완료','ok');
+  if(!confirm('Delete this maintenance record?'))return;
+  saveMaintRecords(getMaintRecords().filter(function(r){return r.id!==id;}));
+  renderMaint();toast('Deleted','ok');
 }
 
-// ─── 결함 리포트 ──────────────────────────────
 function populateDefectFilter(){
-  const sel = document.getElementById('defect-rego-filter');
-  if(!sel) return;
-  const regos = [...new Set(getDefectReports().map(r=>r.rego).filter(Boolean))];
-  sel.innerHTML = '<option value="">전체 차량</option>' + DB.V.map(v=>`<option value="${v.Rego}">${v.Rego}</option>`).join('');
+  var sel=document.getElementById('defect-rego-filter');if(!sel)return;
+  sel.innerHTML='<option value="">All vehicles</option>'+DB.V.map(function(v){return'<option value="'+v.Rego+'">'+v.Rego+'</option>';}).join('');
 }
-
 function renderDefects(){
-  const list = document.getElementById('defect-list');
-  if(!list) return;
-  const regoFilter = document.getElementById('defect-rego-filter')?.value||'';
-  const statusFilter = document.getElementById('defect-status-filter')?.value||'';
-  let reports = getDefectReports().sort((a,b)=>b.submittedAt?.localeCompare(a.submittedAt||'')||0);
-  if(regoFilter) reports=reports.filter(r=>r.rego===regoFilter);
-  if(statusFilter) reports=reports.filter(r=>r.status===statusFilter);
-
-  if(!reports.length){
-    list.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">결함 리포트가 없습니다</div>';
-    return;
-  }
-
-  const statusLabel={'open':'🔴 미처리','in_progress':'🟡 처리중','resolved':'✅ 완료'};
-  const statusColor={'open':'var(--rd)','in_progress':'var(--yl)','resolved':'var(--gn)'};
-
-  list.innerHTML = reports.map(r=>`
-    <div style="background:var(--sf2);border-radius:10px;padding:12px;margin-bottom:8px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
-        <div>
-          <span style="font-weight:700;color:var(--ac);">${r.rego}</span>
-          <span style="color:var(--t3);font-size:11px;margin-left:6px;">${r.driver||''}</span>
-          <span style="color:var(--t3);font-size:11px;margin-left:6px;">${r.submittedAt?.slice(0,10)||''}</span>
-        </div>
-        <div style="display:flex;gap:4px;align-items:center;">
-          <select onchange="updateDefectStatus('${r.id}',this.value)" style="font-size:10px;border:1px solid var(--bd);border-radius:5px;padding:2px 4px;background:var(--sf);color:var(--t1);">
-            ${['open','in_progress','resolved'].map(s=>`<option value="${s}"${s===r.status?' selected':''}>${statusLabel[s]}</option>`).join('')}
-          </select>
-          <button onclick="deleteDefect('${r.id}')" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;">🗑</button>
-        </div>
-      </div>
-      <div style="font-size:13px;font-weight:600;color:var(--t1);margin-bottom:4px;">${r.category||'기타'}</div>
-      <div style="font-size:12px;color:var(--t2);">${r.description||''}</div>
-      ${r.location?`<div style="font-size:11px;color:var(--t3);margin-top:3px;">📍 ${r.location}</div>`:''}
-      ${r.adminNote?`<div style="background:var(--sf3);border-radius:6px;padding:6px 8px;margin-top:6px;font-size:11px;color:var(--t2);">📝 관리자 메모: ${r.adminNote}</div>`:''}
-      <div style="margin-top:6px;">
-        <input id="note-${r.id}" type="text" placeholder="관리자 메모..." value="${r.adminNote||''}"
-          style="width:100%;font-size:11px;border:1px solid var(--bd);border-radius:6px;padding:5px 8px;background:var(--sf);color:var(--t1);box-sizing:border-box;"
-          onblur="saveDefectNote('${r.id}',this.value)">
-      </div>
-    </div>`).join('');
+  var list=document.getElementById('defect-list');if(!list)return;
+  var rf=document.getElementById('defect-rego-filter'),sf=document.getElementById('defect-status-filter');
+  var regoFilter=rf?rf.value:'',statusFilter=sf?sf.value:'';
+  var reports=getDefectReports().sort(function(a,b){return(b.submittedAt||'').localeCompare(a.submittedAt||'');});
+  if(regoFilter)reports=reports.filter(function(r){return r.rego===regoFilter;});
+  if(statusFilter)reports=reports.filter(function(r){return r.status===statusFilter;});
+  if(!reports.length){list.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">No defect reports</div>';return;}
+  var sLbl={open:'&#x1F534; Open',in_progress:'&#x1F7E1; In Progress',resolved:'&#x2705; Resolved'};
+  list.innerHTML=reports.map(function(r){
+    var sopts=['open','in_progress','resolved'].map(function(s){return'<option value="'+s+'"'+(s===r.status?' selected':'')+'>'+sLbl[s]+'</option>';}).join('');
+    return'<div style="background:var(--sf2);border-radius:10px;padding:12px;margin-bottom:8px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">'
+      +'<div><span style="font-weight:700;color:var(--ac);">'+r.rego+'</span>'
+      +'<span style="color:var(--t3);font-size:11px;margin-left:6px;">'+(r.driver||'')+'</span>'
+      +'<span style="color:var(--t3);font-size:11px;margin-left:6px;">'+(r.submittedAt?r.submittedAt.slice(0,10):'')+'</span></div>'
+      +'<div style="display:flex;gap:4px;align-items:center;">'
+      +'<select onchange="updateDefectStatus(\''+r.id+'\',this.value)" style="font-size:10px;border:1px solid var(--bd);border-radius:5px;padding:2px 4px;background:var(--sf);color:var(--t1);">'+sopts+'</select>'
+      +'<button onclick="deleteDefect(\''+r.id+'\')" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;">&#x1F5D1;</button></div></div>'
+      +'<div style="font-size:13px;font-weight:600;color:var(--t1);margin-bottom:4px;">'+(r.category||'Other')+'</div>'
+      +'<div style="font-size:12px;color:var(--t2);">'+(r.description||'')+'</div>'
+      +(r.location?'<div style="font-size:11px;color:var(--t3);margin-top:3px;">&#x1F4CD; '+r.location+'</div>':'')
+      +'<input id="note-'+r.id+'" type="text" placeholder="Admin note..." value="'+(r.adminNote||'')+'"'
+      +' style="width:100%;font-size:11px;border:1px solid var(--bd);border-radius:6px;padding:5px 8px;background:var(--sf);color:var(--t1);box-sizing:border-box;margin-top:6px;"'
+      +' onblur="saveDefectNote(\''+r.id+'\',this.value)"></div>';
+  }).join('');
 }
-
-function updateDefectStatus(id, status){
-  const reports = getDefectReports();
-  const r = reports.find(x=>x.id===id);
-  if(r){ r.status=status; saveDefectReports(reports); renderDefects(); }
+function updateDefectStatus(id,status){
+  var rpts=getDefectReports();var r=rpts.find(function(x){return x.id===id;});
+  if(r){r.status=status;saveDefectReports(rpts);renderDefects();}
 }
-function saveDefectNote(id, note){
-  const reports = getDefectReports();
-  const r = reports.find(x=>x.id===id);
-  if(r && r.adminNote!==note){ r.adminNote=note; saveDefectReports(reports); }
+function saveDefectNote(id,note){
+  var rpts=getDefectReports();var r=rpts.find(function(x){return x.id===id;});
+  if(r&&r.adminNote!==note){r.adminNote=note;saveDefectReports(rpts);}
 }
 function deleteDefect(id){
-  if(!confirm('이 결함 리포트를 삭제하시겠습니까?')) return;
-  saveDefectReports(getDefectReports().filter(r=>r.id!==id));
-  renderDefects();
-  toast('삭제 완료','ok');
+  if(!confirm('Delete this defect report?'))return;
+  saveDefectReports(getDefectReports().filter(function(r){return r.id!==id;}));
+  renderDefects();toast('Deleted','ok');
 }
+// ===== END VEHICLE MANAGEMENT =====
 
 // ═══════════════════════════════════════
 // VEHICLE
