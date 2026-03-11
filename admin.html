@@ -2479,21 +2479,21 @@ async function loadAllFromSheets(){
 
     // M_Vehicles → DB.V
     if(d.M_Vehicles?.length) DB.V = d.M_Vehicles.map(r=>({
-      Rego:r.Rego,Current_Status:r.Current_Status,Make:r.Make,Model:r.Model,
-      'Manufacture Date':r.Manufacture_Date,Capacity:r.Capacity,Owner:r.Owner,
-      Rego_Date:r.Rego_Date,HVIS_Date:r.HVIS_Date,Current_KM:r.Current_KM,
-      Last_Service_KM:r.Last_Service_KM,Service_Interval:r.Service_Interval||10000,
-      VIN:r.VIN,'Engine Number':r.Engine_Number,Accreditation:r.Accreditation
+      Rego:r.Rego,Current_Status:r.Active==='Y'?'Active':'Inactive',Make:r.Make,Model:r.Model,
+      'Manufacture Date':r.Year?String(r.Year):'',Capacity:r.Seats||0,Owner:'DONG CHOI PTY LTD',
+      Rego_Date:r.Rego_Expiry?r.Rego_Expiry.slice(0,10):'',HVIS_Date:r.HVIS_Expiry?r.HVIS_Expiry.slice(0,10):'',
+      Current_KM:0,Last_Service_KM:0,Service_Interval:10000,
+      VIN:'','Engine Number':'',Accreditation:''
     }));
 
     // M_Drivers → DB.D
     if(d.M_Drivers?.length) DB.D = d.M_Drivers.map(r=>({
-      Name_EN:r.Name_EN,Name_KR:r.Name_KR,DriverID:r.DriverID,Mobile_1:r.Mobile_1,
-      'NEXT OF KIN':r.NEXT_OF_KIN,License_Class:r.License_Class,
-      'License_#':r.License_No,License_Expiry:r.License_Expiry,
-      'Authority_#':r.Authority_No,Authority_Expiry:r.Authority_Expiry,
-      Address:r.Address,Suburb:r.Suburb,Bank_Name:r.Bank_Name,
-      BSB:r.BSB,Account_Number:r.Account_Number,PIN:r.PIN
+      Name_EN:r.Name_EN,Name_KR:r.Name_KR,DriverID:r.Name_EN,Mobile_1:r.Phone?String(r.Phone):'',
+      'NEXT OF KIN':'',License_Class:r.License_Class,
+      'License_#':'',License_Expiry:r.License_Expiry?r.License_Expiry.slice(0,10):'',
+      'Authority_#':r.Authority_No||'',Authority_Expiry:r.Authority_Expiry?r.Authority_Expiry.slice(0,10):'',
+      Address:'',Suburb:'',Bank_Name:'',
+      BSB:'',Account_Number:'',PIN:r.PIN?String(r.PIN):''
     }));
 
     // M_Clients → DB.C
@@ -2503,9 +2503,9 @@ async function loadAllFromSheets(){
     }));
 
     // M_Guides → DB.G
-    if(d.M_Guides?.length) DB.G = d.M_Guides.map(r=>({
-      GuideID:r.GuideID,Guide_Name:r.Guide_Name,Mobile:r.Mobile,
-      Agency:r.Agency,Email:r.Email,Remarks:r.Remarks
+    if(d.M_Guides?.length) DB.G = d.M_Guides.map((r,i)=>({
+      GuideID:'SG'+String(i+1).padStart(3,'0'),Guide_Name:r.Name,Mobile:r.Phone?String(r.Phone):'',
+      Agency:r.Type||'',Email:'',Remarks:r.Active==='N'?'비활성':''
     }));
 
     // M_Hotels → DB.H
