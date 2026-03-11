@@ -536,7 +536,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">픽업 장소</label>
             <div class="sdd-wrap" id="sdd-pickup-wrap">
               <input class="sdd-input" id="dr-pickup" placeholder="픽업" autocomplete="off"
-                oninput="sddFilter('pickup')" onfocus="sddOpen('pickup')" onblur="sddBlur('pickup')">
+                oninput="sddFilter('pickup')" onfocus="sddOpen('pickup')" onblur="sddBlur('pickup');checkHotelSurchargeHint();">
               <div class="sdd-dropdown" id="sdd-pickup-list"></div>
             </div>
           </div>
@@ -544,7 +544,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">드롭 장소</label>
             <div class="sdd-wrap" id="sdd-dropoff-wrap">
               <input class="sdd-input" id="dr-dropoff" placeholder="드롭" autocomplete="off"
-                oninput="sddFilter('dropoff')" onfocus="sddOpen('dropoff')" onblur="sddBlur('dropoff')">
+                oninput="sddFilter('dropoff')" onfocus="sddOpen('dropoff')" onblur="sddBlur('dropoff');checkHotelSurchargeHint();">
               <div class="sdd-dropdown" id="sdd-dropoff-list"></div>
             </div>
           </div>
@@ -620,6 +620,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         </div>
 
         <!-- Hotel & Distance Surcharge -->
+        <div id="hotel-surcharge-hint" style="display:none;"></div>
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">Hotel Surcharge 호텔</label>
@@ -1253,16 +1254,17 @@ function sddFilter(key) {
 function sddSelect(key, value) {
   document.getElementById('dr-'+key).value = value;
   document.getElementById('sdd-'+key+'-list').classList.remove('open');
-  // guide 선택 시 전화번호 자동 반영 (연락처 탭)
   if(key==='guide'){
     const found = GUIDE_LIST.find(g=>g.name===value);
     if(found && window.currentGuidePhone !== undefined) window.currentGuidePhone = found.mobile;
   }
+  // 픽업/드롭 선택 시 호텔 서차지 힌트 갱신
+  if(key==='pickup'||key==='dropoff') checkHotelSurchargeHint();
 }
 function sddAddNew(key, value) {
   if(!value) return;
   const cfg = SDD_CONFIG[key];
-  if(cfg.type==='hotel'){ saveCustomHotel(value); onHotelSelected(value); }
+  if(cfg.type==='hotel') saveCustomHotel(value);
   else saveCustomGuide(value);
   sddSelect(key, value);
   showToast('✅ "'+value+'" 추가됐어요!');
@@ -2516,30 +2518,66 @@ function updateOTHint(){
 }
 
 // 호텔 선택 시 서차지 자동 적용
-function onHotelSelected(hotelName){
-  if(!hotelName) return;
-  // MASTER.hotels에서 Surcharge_Area 확인
-  const hotelData = (MASTER.hotels || []).find(h=>h.Hotel_Name===hotelName);
-  const sArea = hotelData?.Surcharge_Area || '';
-  if(!sArea){ return; } // 서차지 없음
+// 공항 패턴
+const AIRPORT_PATTERN = /airport|공항/i;
+
+function isSurchargeHotel(name){
+  if(!name) return false;
+  const h = (MASTER.hotels||[]).find(h=>h.Hotel_Name===name);
+  return h?.Surcharge_Area ? h.Surcharge_Area.trim()!=='' : false;
+}
+
+// 픽업/드롭 변경될 때마다 호출 — 알림만 표시
+function checkHotelSurchargeHint(){
+  const pickup  = document.getElementById('dr-pickup')?.value?.trim()  || '';
+  const dropoff = document.getElementById('dr-dropoff')?.value?.trim() || '';
+  const hintEl  = document.getElementById('hotel-surcharge-hint');
+  if(!hintEl) return;
 
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
-  const att = document.getElementById('dr-attraction')?.value || '';
-  const d = getCourseData(att);
-  const k = seatKey(seats);
-  const hotelFee = (d && d[k]) ? d[k].hotel_fee : ((seats==='40S'||seats==='50S') ? 30 : 10);
+  const att   = document.getElementById('dr-attraction')?.value || '';
+  const d     = getCourseData(att);
+  const k     = seatKey(seats);
+  // 인승별 full 서차지
+  const fullFee = (d && d[k]?.hotel_fee) ? d[k].hotel_fee : ((seats==='40S'||seats==='50S') ? 30 : 10);
+  const halfFee = Math.round(fullFee / 2);
 
-  if(hotelFee > 0){
-    const sel = document.getElementById('f-hotel-select');
-    if(sel){
-      // 가장 가까운 옵션 선택
-      const opts = Array.from(sel.options);
-      const best = opts.reduce((prev,opt)=>Math.abs(Number(opt.value)-hotelFee)<Math.abs(Number(prev.value)-hotelFee)?opt:prev);
-      sel.value = best.value;
-    }
-    showToast(`🏨 호텔 서차지 자동적용: ${hotelName} (${sArea}) — $${hotelFee}`,'success');
-    calcTotal();
+  const pickupSurcharge  = isSurchargeHotel(pickup);
+  const dropoffSurcharge = isSurchargeHotel(dropoff);
+  const pickupAirport    = AIRPORT_PATTERN.test(pickup);
+  const dropoffAirport   = AIRPORT_PATTERN.test(dropoff);
+
+  let msg = '', color = '';
+
+  if(pickupSurcharge && dropoffSurcharge){
+    // 서차지 호텔 → 서차지 호텔 : 100%
+    msg = `🏨 호텔 서차지 <b>전액 적용</b> 대상 — $${fullFee}<br><span style="color:#6b7280;font-size:10px;">픽업·드롭 모두 서차지 호텔</span>`;
+    color = 'orange';
+  } else if(pickupSurcharge && dropoffAirport){
+    // 서차지 호텔 → 공항 : 50%
+    msg = `🏨 호텔 서차지 <b>50% 적용</b> 대상 — $${halfFee}<br><span style="color:#6b7280;font-size:10px;">서차지 호텔 픽업 → 공항 드롭</span>`;
+    color = 'blue';
+  } else if(pickupAirport && dropoffSurcharge){
+    // 공항 → 서차지 호텔 : 50%
+    msg = `🏨 호텔 서차지 <b>50% 적용</b> 대상 — $${halfFee}<br><span style="color:#6b7280;font-size:10px;">공항 픽업 → 서차지 호텔 드롭</span>`;
+    color = 'blue';
+  } else if(pickupSurcharge || dropoffSurcharge){
+    // 한쪽만 서차지 호텔 (일반 → 서차지 또는 서차지 → 일반)
+    const which = pickupSurcharge ? `${pickup} (픽업)` : `${dropoff} (드롭)`;
+    msg = `🏨 서차지 호텔 포함 — ${which}<br><span style="color:#6b7280;font-size:10px;">픽업·드롭 상황에 따라 요금 확인 필요</span>`;
+    color = 'gray';
+  } else {
+    hintEl.style.display = 'none';
+    return;
   }
+
+  const styles = {
+    orange:'background:#fff7ed;border:1.5px solid #fb923c;',
+    blue:  'background:#eff6ff;border:1.5px solid #60a5fa;',
+    gray:  'background:#f9fafb;border:1.5px solid #d1d5db;'
+  };
+  hintEl.style.cssText = `display:block;border-radius:9px;padding:9px 12px;margin-bottom:12px;font-size:12px;line-height:1.7;${styles[color]}`;
+  hintEl.innerHTML = msg + `<br><span style="color:#9ca3af;font-size:10px;">※ 서차지 적용 여부는 드라이버가 확인 후 직접 선택하세요</span>`;
 }
 
 function calcOT(){
@@ -2856,6 +2894,7 @@ function updateSurchargeOptions(){
     distSel.innerHTML = distOpts.map(o=>`<option value="${o.val}">${o.label}</option>`).join('');
   }
 
+  checkHotelSurchargeHint();
   calcTotal();
 }
 
