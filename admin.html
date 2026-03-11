@@ -984,7 +984,8 @@ function deleteDefect(id){
 // ═══════════════════════════════════════
 // VEHICLE
 // ═══════════════════════════════════════
-function rV(q=''){
+async function rV(q=''){
+  if(!q){await syncVehicles();}
   const list=DB.V.filter(v=>!q||v.Rego?.toLowerCase().includes(q.toLowerCase())||v.Make?.toLowerCase().includes(q.toLowerCase()));
   document.getElementById('vcnt').textContent=`총 ${DB.V.length}대 · 표시 ${list.length}`;
   document.getElementById('vlist').innerHTML=list.map(v=>{
@@ -1002,7 +1003,8 @@ function rV(q=''){
 // ═══════════════════════════════════════
 // DRIVER
 // ═══════════════════════════════════════
-function rD(q=''){
+async function rD(q=''){
+  if(!q){await syncDrivers();}
   const list=DB.D.filter(d=>!q||d.Name_EN?.toLowerCase().includes(q.toLowerCase())||(d.Name_KR&&d.Name_KR.includes(q)));
   document.getElementById('dcnt').textContent=`총 ${DB.D.length}명 · 표시 ${list.length}`;
   document.getElementById('dlist').innerHTML=list.map(d=>{
@@ -1020,7 +1022,8 @@ function rD(q=''){
 // ═══════════════════════════════════════
 // CLIENT
 // ═══════════════════════════════════════
-function rC(q=''){
+async function rC(q=''){
+  if(!q){await syncClients();}
   const list=DB.C.filter(c=>!q||c.Name?.toLowerCase().includes(q.toLowerCase()));
   document.getElementById('ccnt').textContent=`총 ${DB.C.length}개사`;
   document.getElementById('clist').innerHTML=list.map(c=>{
@@ -1043,7 +1046,8 @@ function rC(q=''){
 // ═══════════════════════════════════════
 // GUIDE
 // ═══════════════════════════════════════
-function rG(q=''){
+async function rG(q=''){
+  if(!q){await syncGuides();}
   const list=DB.G.filter(g=>!q||g.Guide_Name?.toLowerCase().includes(q.toLowerCase())||g.Mobile?.includes(q));
   document.getElementById('gcnt').textContent=`총 ${DB.G.length}명 · 표시 ${list.length}`;
   document.getElementById('glist').innerHTML=list.map(g=>{
@@ -1069,7 +1073,8 @@ function setPtype(t){
   if(t==='driver')rPD();
 }
 
-function rP(){
+async function rP(){
+  await syncPrices();
   // Build agency tabs from DB.PC keys + DB.C list
   const agencies=[...new Set([...Object.keys(DB.PC),...DB.C.map(c=>c.Name)])].filter(Boolean);
   const tabs=document.getElementById('agTabs');
@@ -1135,7 +1140,8 @@ function rPD(){
 // ═══════════════════════════════════════
 // HOTEL
 // ═══════════════════════════════════════
-function rH(q=''){
+async function rH(q=''){
+  if(!q){await syncHotels();}
   const list=DB.H.filter(h=>!q||h.Hotel_Name?.toLowerCase().includes(q.toLowerCase()));
   document.getElementById('hcnt').textContent=`총 ${DB.H.length}개 · 표시 ${list.length}`;
   document.getElementById('hlist').innerHTML=list.map(h=>{
@@ -1207,7 +1213,8 @@ async function saveSubRates(){
   }catch(e){toast('서브 요금 저장됨 (오프라인)','ok');}
 }
 
-function rSub(){
+async function rSub(){
+  await syncSub();
   // 서브 회사 탭 렌더
   const subs = Object.keys(DB.PS);
   if(!ST.curSub && subs.length>0) ST.curSub = subs[0];
@@ -2598,6 +2605,112 @@ async function loadPSFromSheets(){
     });
     if(Object.keys(ps).length) DB.PS=ps;
   }catch(e){console.warn('서브 요금 로드 실패:',e);}
+}
+
+
+// ═══════════════════════════════════════
+// 탭별 개별 Sheets 로드 (탭 진입 시 자동 동기화)
+// ═══════════════════════════════════════
+
+async function loadTab(sheet){
+  try {
+    const res = await fetch(SCRIPT_URL+'?action=get_master&sheet='+sheet);
+    const json = await res.json();
+    if(!json.ok||!json.rows?.length) return null;
+    return json.rows;
+  } catch(e){ return null; }
+}
+
+async function syncVehicles(){
+  const rows = await loadTab('M_Vehicles');
+  if(!rows) return;
+  DB.V = rows.map(r=>({
+    Rego:r.Rego,Current_Status:r.Active==='Y'?'Active':'Inactive',Make:r.Make,Model:r.Model,
+    'Manufacture Date':r.Year?String(r.Year):'',Capacity:r.Seats||0,Owner:r.Owner||'DONG CHOI PTY LTD',
+    Rego_Date:r.Rego_Expiry?r.Rego_Expiry.slice(0,10):'',HVIS_Date:r.HVIS_Expiry?r.HVIS_Expiry.slice(0,10):'',
+    Current_KM:0,Last_Service_KM:0,Service_Interval:10000,VIN:'','Engine Number':'',Accreditation:''
+  }));
+  getSubVehicles().forEach(v=>{ if(v.Owner&&!DB.PS[v.Owner]) DB.PS[v.Owner]={}; });
+}
+
+async function syncDrivers(){
+  const rows = await loadTab('M_Drivers');
+  if(!rows) return;
+  DB.D = rows.map(r=>({
+    Name_EN:r.Name_EN,Name_KR:r.Name_KR,DriverID:r.Name_EN,Mobile_1:r.Phone?String(r.Phone):'',
+    'NEXT OF KIN':'',License_Class:r.License_Class,
+    'License_#':'',License_Expiry:r.License_Expiry?r.License_Expiry.slice(0,10):'',
+    'Authority_#':r.Authority_No||'',Authority_Expiry:r.Authority_Expiry?r.Authority_Expiry.slice(0,10):'',
+    Address:'',Suburb:'',Bank_Name:'',BSB:'',Account_Number:'',PIN:r.PIN?String(r.PIN):''
+  }));
+}
+
+async function syncClients(){
+  const rows = await loadTab('M_Clients');
+  if(!rows) return;
+  DB.C = rows.map(r=>({
+    Name:r.Name,ClientID:r.ClientID,Mobile:r.Mobile,Address:r.Address,
+    Bank_Name:r.Bank_Name,BSB:r.BSB,Account_Number:r.Account_Number
+  }));
+  // PC 동기화
+  Object.keys(DB.PC).forEach(ag=>{ if(!DB.C.find(c=>c.Name===ag)) DB.C.push({Name:ag,ClientID:Date.now().toString(16).slice(-8),Mobile:'',Address:'',Bank_Name:'',BSB:'',Account_Number:''}); });
+  DB.C.forEach(client=>{ if(client.Name&&!DB.PC[client.Name]) DB.PC[client.Name]={}; });
+}
+
+async function syncGuides(){
+  const rows = await loadTab('M_Guides');
+  if(!rows) return;
+  DB.G = rows.map((r,i)=>({
+    GuideID:'SG'+String(i+1).padStart(3,'0'),Guide_Name:r.Name||r.Guide_Name,
+    Mobile:r.Phone?String(r.Phone):(r.Mobile||''),
+    Agency:r.Type||r.Agency||'',Email:r.Email||'',Remarks:r.Active==='N'?'비활성':(r.Remarks||'')
+  }));
+}
+
+async function syncHotels(){
+  const rows = await loadTab('M_Hotels');
+  if(!rows) return;
+  DB.H = rows.map(r=>({
+    Hotel_Name:r.Hotel_Name,Phone:r.Phone,Address:r.Address,Surcharge_Area:r.Surcharge_Area
+  }));
+}
+
+async function syncPrices(){
+  // PriceClient
+  const pcRows = await loadTab('M_PriceClient');
+  if(pcRows?.length){
+    DB.PC={};
+    pcRows.forEach(r=>{
+      if(!DB.PC[r.Agency]) DB.PC[r.Agency]={};
+      DB.PC[r.Agency][r.Course]={max_hours:r.max_hours,
+        '21':{rate:r.seats_21_rate,ot:r.seats_21_ot},
+        '25':{rate:r.seats_25_rate,ot:r.seats_25_ot},
+        '40':{rate:r.seats_40_rate,ot:r.seats_40_ot},
+        '50':{rate:r.seats_50_rate,ot:r.seats_50_ot}};
+    });
+  }
+  // PriceDriver
+  const pdRows = await loadTab('M_PriceDriver');
+  if(pdRows?.length){
+    DB.PD={};
+    pdRows.forEach(r=>{
+      DB.PD[r.Course]={max_hours:r.max_hours,
+        '21':{base:r.seats_21_base,ot:r.seats_21_ot},
+        '25':{base:r.seats_25_base,ot:r.seats_25_ot},
+        '40':{base:r.seats_40_base,ot:r.seats_40_ot},
+        '50':{base:r.seats_50_base,ot:r.seats_50_ot}};
+    });
+  }
+  // PriceSub
+  await loadPSFromSheets();
+  // 동기화
+  Object.keys(DB.PC).forEach(ag=>{ if(!DB.C.find(cc=>cc.Name===ag)) DB.C.push({Name:ag,ClientID:Date.now().toString(16).slice(-8),Mobile:'',Address:'',Bank_Name:'',BSB:'',Account_Number:''}); });
+  DB.C.forEach(client=>{ if(client.Name&&!DB.PC[client.Name]) DB.PC[client.Name]={}; });
+}
+
+async function syncSub(){
+  await loadPSFromSheets();
+  getSubVehicles().forEach(v=>{ if(v.Owner&&!DB.PS[v.Owner]) DB.PS[v.Owner]={}; });
 }
 
 async function loadAllFromSheets(){
