@@ -1092,12 +1092,31 @@ async function rP(){
   const tabs=document.getElementById('agTabs');
   const tabFrag = document.createDocumentFragment();
   agencies.forEach(ag=>{
+    const wrap = document.createElement('span');
+    wrap.style.cssText = 'display:inline-flex;align-items:center;gap:0;margin-right:4px;';
     const btn = document.createElement('button');
     btn.className = 'agtab' + (ST.curAg===ag?' on':'');
+    btn.style.cssText = 'border-radius:6px 0 0 6px;padding-right:6px;margin-right:0;';
     btn.textContent = ag;
     btn.dataset.ag = ag;
     btn.addEventListener('click', function(){ selAg(this.dataset.ag); });
-    tabFrag.appendChild(btn);
+    const del = document.createElement('button');
+    del.className = 'agtab' + (ST.curAg===ag?' on':'');
+    del.style.cssText = 'border-radius:0 6px 6px 0;padding:0 7px;font-size:13px;border-left:1px solid rgba(0,0,0,0.15);color:var(--rd);margin-left:0;';
+    del.textContent = '\u00d7';
+    del.title = ag + ' \uc694\uae08\ud45c \uc804\uccb4 \uc0ad\uc81c';
+    del.addEventListener('click', function(e){
+      e.stopPropagation();
+      if(!confirm('"'+ag+'" \uc694\uae08\ud45c \uc804\uccb4\ub97c \uc0ad\uc81c\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?')) return;
+      delete DB.PC[ag];
+      savePCToSheets();
+      if(ST.curAg===ag) ST.curAg='';
+      rP();
+      toast('\uc0ad\uc81c \uc644\ub8cc','ok');
+    });
+    wrap.appendChild(btn);
+    wrap.appendChild(del);
+    tabFrag.appendChild(wrap);
   });
   tabs.innerHTML = '';
   tabs.appendChild(tabFrag);
