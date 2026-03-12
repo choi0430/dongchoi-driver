@@ -999,7 +999,7 @@ function getHvisSchedule(regoDate){
   var d=new Date(regoDate);
   var m6=new Date(d.getTime());m6.setMonth(m6.getMonth()+6);
   var y1=new Date(d.getTime());y1.setFullYear(y1.getFullYear()+1);
-  return{m6:m6.toISOString().slice(0,10),y1:y1.toISOString().slice(0,10)};
+  return{m6:toLocalISO(m6),y1:toLocalISO(y1)};
 }
 function vDaysDiff(dateStr){
   if(!dateStr)return null;
@@ -1136,7 +1136,7 @@ function saveHvisBookingEntry(){
   function gVal(id){var e=document.getElementById(id);return e?e.value:'';}
   var entry={id:Date.now().toString(),rego:gVal('hb-rego'),inspDate:gVal('hb-date'),inspTime:gVal('hb-time'),
     location:gVal('hb-location'),customerNo:gVal('hb-custno'),bookingNo:gVal('hb-bookno'),
-    ownerName:gVal('hb-owner'),bookingDate:new Date().toISOString().slice(0,10)};
+    ownerName:gVal('hb-owner'),bookingDate:toLocalISO(new Date())};
   if(!entry.rego){toast('Select a vehicle','er');return;}
   if(!entry.inspDate){toast('Enter inspection date','er');return;}
   var bk=getHvisBookings();bk.push(entry);saveHvisBookings(bk);
@@ -1752,12 +1752,21 @@ function getWeekLabel(dateStr){
   return fmt(d)+' — '+fmt(sun);
 }
 
+function toLocalISO(d){
+  // toISOString()은 UTC 기준이라 시드니(UTC+11)에서 하루 차이 발생
+  // 로컬 날짜 기준으로 YYYY-MM-DD 반환
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return y+'-'+m+'-'+dd;
+}
+
 function getMondayStr(offset=0){
   const d = new Date();
   const day = d.getDay(); // 0=Sun
   const diff = (day===0)?-6:1-day;
   d.setDate(d.getDate()+diff+(offset*7));
-  return d.toISOString().slice(0,10);
+  return toLocalISO(d);
 }
 
 function addLedgerWeek(){
@@ -2082,7 +2091,7 @@ async function importFromReports(){
   const weekEnd = (() => {
     const d = new Date(weekStart);
     d.setDate(d.getDate()+6);
-    return d.toISOString().slice(0,10);
+    return toLocalISO(d);
   })();
   toast('리포트 불러오는 중...','ok');
 
@@ -2462,7 +2471,7 @@ function getMonday(d) {
   const day = dt.getDay();
   const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
   dt.setDate(diff);
-  return dt.toISOString().slice(0, 10);
+  return toLocalISO(dt);
 }
 
 function setInvPeriod(type) {
@@ -2470,17 +2479,17 @@ function setInvPeriod(type) {
   let from, to;
   if (type === 'thisweek') {
     from = getMonday(today);
-    to   = new Date(from); to.setDate(to.getDate() + 6); to = to.toISOString().slice(0,10);
+    to   = new Date(from); to.setDate(to.getDate() + 6); to = toLocalISO(to);
   } else if (type === 'lastweek') {
     const lm = new Date(today); lm.setDate(lm.getDate() - 7);
     from = getMonday(lm);
-    to   = new Date(from); to.setDate(to.getDate() + 6); to = to.toISOString().slice(0,10);
+    to   = new Date(from); to.setDate(to.getDate() + 6); to = toLocalISO(to);
   } else if (type === 'thismonth') {
-    from = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0,10);
-    to   = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0,10);
+    from = toLocalISO(new Date(today.getFullYear(), today.getMonth(), 1));
+    to   = toLocalISO(new Date(today.getFullYear(), today.getMonth() + 1, 0));
   } else if (type === 'lastmonth') {
-    from = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().slice(0,10);
-    to   = new Date(today.getFullYear(), today.getMonth(), 0).toISOString().slice(0,10);
+    from = toLocalISO(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+    to   = toLocalISO(new Date(today.getFullYear(), today.getMonth(), 0));
   }
   document.getElementById('inv-from').value = from;
   document.getElementById('inv-to').value   = to;
@@ -2814,12 +2823,12 @@ function _isoToMonday(iso) {
   const day = d.getDay(); // 0=Sun
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
+  return toLocalISO(d);
 }
 function _isoToSunday(iso) {
   const d = new Date(_isoToMonday(iso) + 'T00:00:00');
   d.setDate(d.getDate() + 6);
-  return d.toISOString().slice(0, 10);
+  return toLocalISO(d);
 }
 
 // ─── generateInvoice: 그룹 모드 반영 ───
@@ -3339,7 +3348,7 @@ async function ensureReportsCache() {
 async function getEarnedFromSheets(driverName, weekStart) {
   const rows = await ensureReportsCache();
   const mon  = weekStart;
-  const sun  = (() => { const d = new Date(weekStart); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10); })();
+  const sun  = (() => { const d = new Date(weekStart); d.setDate(d.getDate()+6); return toLocalISO(d); })();
 
   // 드라이버명 매칭: Name_KR 또는 Name_EN 또는 Driver 컬럼 직접
   const drRow = DB.D.find(d => (d.Name_KR||'')===driverName || (d.Name_EN||'')===driverName);
@@ -3412,7 +3421,7 @@ async function renderWage(){
   // 리포트 건수도 표시
   const rows = _reportsCache || [];
   const mon  = ST.wageWeek;
-  const sun  = (() => { const d=new Date(mon); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10); })();
+  const sun  = (() => { const d=new Date(mon); d.setDate(d.getDate()+6); return toLocalISO(d); })();
   const drRow = DB.D.find(d=>(d.Name_KR||'')===ST.wageDriver||(d.Name_EN||'')===ST.wageDriver);
   const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
   const weekReports = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
