@@ -278,6 +278,24 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 .dmk-item{display:flex;align-items:center;gap:8px;background:white;border-radius:8px;padding:6px 10px;border:1px solid var(--border);font-size:12px;}
 .dmk-dot{width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0;}
 .dmk-del{margin-left:auto;color:#ef4444;font-size:14px;cursor:pointer;line-height:1;}
+
+/* ── 커스텀 셀렉트 (csel) ───────────────────────── */
+.csel-wrap{position:relative;}
+.csel-btn{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;
+  color:var(--text);font-size:15px;padding:12px 36px 12px 14px;font-family:sans-serif;
+  outline:none;text-align:left;cursor:pointer;transition:border-color .15s;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;}
+.csel-btn:focus,.csel-btn.open{border-color:var(--accent);}
+.csel-btn::after{content:'▾';position:absolute;right:12px;top:50%;transform:translateY(-50%);
+  font-size:13px;color:var(--muted);pointer-events:none;}
+.csel-dropdown{position:fixed;background:white;border-radius:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.15);border:1px solid var(--border);
+  z-index:9999;max-height:240px;overflow-y:auto;display:none;}
+.csel-dropdown.open{display:block;}
+.csel-item{padding:10px 14px;font-size:14px;cursor:pointer;
+  border-bottom:1px solid #f1f5f9;color:#0f172a;}
+.csel-item:last-child{border-bottom:none;}
+.csel-item:hover,.csel-item.selected{background:var(--accent-light);color:var(--accent);}
 </style>
 </head>
 <body>
@@ -597,9 +615,12 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <!-- Service Charge -->
         <div class="form-group mb14">
           <label class="form-label">Service Charge 서비스 요금</label>
-          <select class="form-select" id="f-svc-select" onchange="onSvcSelectChange()">
-            <option value="">— 선택 (인승 선택 후 활성화) —</option>
-          </select>
+          <div class="csel-wrap">
+            <button type="button" class="csel-btn" data-csel="f-svc-select" data-value=""
+              onclick="cselOpen('f-svc-select')">— 선택 (인승 선택 후 활성화) —</button>
+            <div class="csel-dropdown" id="csel-drop-f-svc-select" data-csel="f-svc-select"></div>
+          </div>
+          <input type="hidden" id="f-svc-select">
           <div id="f-svc-custom-wrap" style="display:none;margin-top:6px;">
             <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-svc-custom" placeholder="직접 입력" oninput="calcTotal()"></div>
           </div>
@@ -634,15 +655,21 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">Hotel Surcharge 호텔</label>
-            <select class="form-select" id="f-hotel-select" onchange="onHotelSelectChange()">
-              <option value="0">$0</option>
-            </select>
+            <div class="csel-wrap">
+              <button type="button" class="csel-btn" data-csel="f-hotel-select" data-value="0"
+                onclick="cselOpen('f-hotel-select')">$0</button>
+              <div class="csel-dropdown" id="csel-drop-f-hotel-select" data-csel="f-hotel-select"></div>
+            </div>
+            <input type="hidden" id="f-hotel-select" value="0">
           </div>
           <div class="form-group">
             <label class="form-label">Distance Surcharge 거리</label>
-            <select class="form-select" id="f-dist-select" onchange="onDistSelectChange()">
-              <option value="0">$0</option>
-            </select>
+            <div class="csel-wrap">
+              <button type="button" class="csel-btn" data-csel="f-dist-select" data-value="0"
+                onclick="cselOpen('f-dist-select')">$0</button>
+              <div class="csel-dropdown" id="csel-drop-f-dist-select" data-csel="f-dist-select"></div>
+            </div>
+            <input type="hidden" id="f-dist-select" value="0">
             <div id="dist-hint-box" style="display:none;margin-top:6px;"></div>
           </div>
         </div>
@@ -665,12 +692,14 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div id="early-hint-box" style="display:none;margin-bottom:12px;"></div>
         <div class="form-group mb14">
           <label class="form-label">야간투어</label>
-          <select class="form-select" id="f-night-type" onchange="onNightChange()" style="margin-bottom:6px;">
-            <option value="none">없음 ($0)</option>
-            <option value="guide_opt">가이드 옵션 (현장 수령)</option>
-            <option value="agency_incl">여행사 포함 약식</option>
-            <option value="prepaid_opt">옵션 - 한국 선결제</option>
-          </select>
+          <div class="csel-wrap">
+            <button type="button" class="csel-btn" data-csel="f-night-type" data-value="none"
+              style="margin-bottom:6px;" onclick="cselOpen('f-night-type')">없음 ($0)</button>
+            <div class="csel-dropdown" id="csel-drop-f-night-type" data-csel="f-night-type"></div>
+          </div>
+          <input type="hidden" id="f-night-type" value="none">
+          <!-- 아래 옵션은 JS에서 cselBuild로 구성 -->
+<!-- 야간투어 옵션은 initNightCsel()으로 구성 -->
           <div id="night-info" style="display:none;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.7;"></div>
           <input type="hidden" id="f-night" value="0">
         </div>
@@ -3064,8 +3093,7 @@ function submitDailyReport(){
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(!shift){showToast('운행 중인 차량이 없습니다','error');return;}
   const total = parseFloat(document.getElementById('t-ta').textContent.replace('$',''))||0;
-  const svcSel = document.getElementById('f-svc-select');
-  const svcLabel = svcSel?.options[svcSel?.selectedIndex]?.text || '';
+  const svcLabel = (()=>{ const b=document.querySelector('.csel-btn[data-csel="f-svc-select"]'); return b?b.textContent.trim():''; })();
   const report = {
     id: 'dr_'+Date.now(),
     date: document.getElementById('dr-date').value,
@@ -3142,16 +3170,17 @@ function submitDailyReport(){
   ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
   selectWash(0);
   selectMeal(0);
-  const ntEl=document.getElementById('f-night-type');if(ntEl)ntEl.value='none';
+  const ntEl=document.getElementById('f-night-type');if(ntEl)ntEl.value='none'; cselSetValue('f-night-type','none');
   const niEl=document.getElementById('night-info');if(niEl)niEl.style.display='none';
   const nfEl=document.getElementById('f-night');if(nfEl)nfEl.value=0;
   ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
   selectTrailer(0); // 트레일러 초기화
   selectEarly(0);   // 조기출발 초기화
   // reset surcharge selects
-  {const s=document.getElementById('f-svc-select'); if(s&&s.options.length>0)s.selectedIndex=0;}
-  {const h=document.getElementById('f-hotel-select'); if(h)h.selectedIndex=0;}
-  {const d=document.getElementById('f-dist-select'); if(d)d.selectedIndex=0;}
+  // csel 초기화
+  {const h=document.getElementById('f-hotel-select'); if(h){h.value='0';} cselSetValue('f-hotel-select','0');}
+  {const d=document.getElementById('f-dist-select'); if(d){d.value='0';} cselSetValue('f-dist-select','0');}
+  cselSetValue('f-night-type','none');
   {const w=document.getElementById('f-svc-custom-wrap'); if(w)w.style.display='none';}
   {const c=document.getElementById('f-svc-custom'); if(c)c.value='';}
   document.getElementById('t-ta').textContent='$0';
@@ -3744,7 +3773,7 @@ function updateSvcHint(){
   if(!hintEl) return;
   const att   = document.getElementById('dr-attraction')?.value || '';
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
-  const curVal = document.getElementById('f-svc-select')?.value || '';
+  const curVal = cselGetValue('f-svc-select') || '';
 
   if(!att || !seats){ hintEl.style.display='none'; return; }
 
@@ -3988,6 +4017,80 @@ const DIST_OPTIONS = {
   '50S': [{val:'0',label:'$0 — 없음'},{val:'40',label:'$40 — 40/50S 거리 서차지'}],
 };
 
+// ═══════════════════════════════════════════════════
+// CSEL — 커스텀 셀렉트 드롭다운 (항상 위로 열림)
+// ═══════════════════════════════════════════════════
+function cselPosition(btn, drop) {
+  const rect = btn.getBoundingClientRect();
+  const dropH = Math.min(drop.scrollHeight || 240, 240);
+  drop.style.left  = rect.left + 'px';
+  drop.style.width = rect.width + 'px';
+  drop.style.top   = (rect.top - dropH - 4) + 'px';
+  drop.style.bottom = 'auto';
+}
+function cselOpen(id) {
+  // 다른 모든 csel 닫기
+  document.querySelectorAll('.csel-dropdown.open').forEach(d => {
+    d.classList.remove('open');
+    d.style.display = '';
+    const b = document.querySelector('.csel-btn[data-csel="'+d.dataset.csel+'"]');
+    if(b) b.classList.remove('open');
+  });
+  const btn  = document.querySelector('.csel-btn[data-csel="'+id+'"]');
+  const drop = document.getElementById('csel-drop-'+id);
+  if(!btn || !drop) return;
+  cselPosition(btn, drop);
+  drop.classList.add('open');
+  btn.classList.add('open');
+}
+function cselClose(id) {
+  const btn  = document.querySelector('.csel-btn[data-csel="'+id+'"]');
+  const drop = document.getElementById('csel-drop-'+id);
+  if(drop){ drop.classList.remove('open'); drop.style.display = ''; }
+  if(btn) btn.classList.remove('open');
+}
+function cselSelect(id, value, label) {
+  cselClose(id);
+  const btn = document.querySelector('.csel-btn[data-csel="'+id+'"]');
+  if(btn){ btn.textContent = label; btn.dataset.value = value; }
+  // hidden input 동기화
+  const hidden = document.getElementById(id);
+  if(hidden){ hidden.value = value; hidden.dispatchEvent(new Event('change')); }
+}
+function cselGetValue(id) {
+  const btn = document.querySelector('.csel-btn[data-csel="'+id+'"]');
+  return btn ? btn.dataset.value || '' : '';
+}
+function cselSetValue(id, value) {
+  const drop = document.getElementById('csel-drop-'+id);
+  if(!drop) return;
+  const item = [...drop.querySelectorAll('.csel-item')].find(i=>i.dataset.val===String(value));
+  if(item){ cselSelect(id, item.dataset.val, item.textContent); }
+}
+function cselBuild(id, options, currentVal) {
+  // options: [{val, label}]
+  const drop = document.getElementById('csel-drop-'+id);
+  const btn  = document.querySelector('.csel-btn[data-csel="'+id+'"]');
+  if(!drop || !btn) return;
+  drop.innerHTML = options.map(o =>
+    `<div class="csel-item${String(o.val)===String(currentVal)?' selected':''}" data-val="${o.val}"
+      onmousedown="event.preventDefault();cselSelect('${id}','${o.val}',this.textContent)">${o.label}</div>`
+  ).join('');
+  // 현재 선택값 버튼에 표시
+  const sel = options.find(o=>String(o.val)===String(currentVal));
+  if(sel){ btn.textContent = sel.label; btn.dataset.value = String(currentVal); }
+  else if(options.length){ btn.textContent = options[0].label; btn.dataset.value = String(options[0].val); }
+}
+// 화면 밖 클릭 시 모든 csel 닫기
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.csel-wrap')){
+    document.querySelectorAll('.csel-dropdown.open').forEach(d=>{
+      d.classList.remove('open'); d.style.display='';
+    });
+    document.querySelectorAll('.csel-btn.open').forEach(b=>b.classList.remove('open'));
+  }
+});
+
 function getSeatsFromShift(){
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(shift?.seats) return shift.seats;
@@ -4098,6 +4201,15 @@ function getNightRate(){
   const seats = document.getElementById('dr-seats')?.value || '';
   const isLarge = (seats==='40S'||seats==='50S');
   return NIGHT_RATES[type]?.[isLarge?'large':'small'] || null;
+}
+// 야간투어 csel 초기 빌드 (한 번만 실행)
+function initNightCsel(){
+  cselBuild('f-night-type',[
+    {val:'none',         label:'없음 ($0)'},
+    {val:'guide_opt',    label:'가이드 옵션 (현장 수령)'},
+    {val:'agency_incl',  label:'여행사 포함 약식'},
+    {val:'prepaid_opt',  label:'옵션 — 한국 선결제'},
+  ],'none');
 }
 function onNightChange(){
   const type  = document.getElementById('f-night-type')?.value || 'none';
@@ -4260,30 +4372,21 @@ function updateSurchargeOptions(){
   onNightChange();
 
   // Service Charge
-  const svcSel = document.getElementById('f-svc-select');
-  if(svcSel){
-    const opts = SVC_OPTIONS[seats] || [];
-    if(opts.length===0){
-      svcSel.innerHTML = '<option value="">— 인승(Seats)을 먼저 선택하세요 —</option>';
-    } else {
-      svcSel.innerHTML = opts.map(o=>`<option value="${o.val}">${o.label}</option>`).join('');
-    }
-    onSvcSelectChange();
+  const svcOpts = SVC_OPTIONS[seats] || [];
+  if(svcOpts.length===0){
+    cselBuild('f-svc-select',[{val:'',label:'— 인승(Seats)을 먼저 선택하세요 —'}],'');
+  } else {
+    cselBuild('f-svc-select', svcOpts.map(o=>({val:o.val,label:o.label})), '');
   }
+  onSvcSelectChange();
 
   // Hotel Surcharge
-  const hotelSel = document.getElementById('f-hotel-select');
-  if(hotelSel){
-    const hotelOpts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
-    hotelSel.innerHTML = hotelOpts.map(o=>`<option value="${o.val}">${o.label}</option>`).join('');
-  }
+  const hotelOpts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
+  cselBuild('f-hotel-select', hotelOpts.map(o=>({val:o.val,label:o.label})), '0');
 
   // Distance Surcharge
-  const distSel = document.getElementById('f-dist-select');
-  if(distSel){
-    const distOpts = DIST_OPTIONS[seats] || DIST_OPTIONS['21S'];
-    distSel.innerHTML = distOpts.map(o=>`<option value="${o.val}">${o.label}</option>`).join('');
-  }
+  const distOpts = DIST_OPTIONS[seats] || DIST_OPTIONS['21S'];
+  cselBuild('f-dist-select', distOpts.map(o=>({val:o.val,label:o.label})), '0');
 
   checkHotelSurchargeHint();
   updateSvcHint();
@@ -4292,9 +4395,9 @@ function updateSurchargeOptions(){
 }
 
 function onSvcSelectChange(){
-  const sel = document.getElementById('f-svc-select');
+  const val  = cselGetValue('f-svc-select');
   const wrap = document.getElementById('f-svc-custom-wrap');
-  if(sel&&wrap) wrap.style.display = sel.value==='OTHER' ? 'block' : 'none';
+  if(wrap) wrap.style.display = val==='OTHER' ? 'block' : 'none';
   calcTotal();
   updateSvcHint();
   // SVC 변경 시 수동 차량 힌트 금액 조건 재확인
@@ -4305,7 +4408,8 @@ function onDistSelectChange(){ calcTotal(); updateDistHint(); }
 
 // Pre-seats 변경 시 surcharge 옵션 업데이트
 document.addEventListener('DOMContentLoaded', ()=>{
-  buildLoginSelect(); // CONTACTS 기반 드라이버 로그인 목록 자동 생성
+  buildLoginSelect();
+  initNightCsel(); // 야간투어 csel 초기화 // CONTACTS 기반 드라이버 로그인 목록 자동 생성
   autoRestoreSession(); // 마지막 로그인 세션 복원
   const drSeatsEl = document.getElementById('dr-seats');
   if(drSeatsEl) drSeatsEl.addEventListener('change', updateSurchargeOptions);
