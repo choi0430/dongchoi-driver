@@ -550,7 +550,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">픽업 장소</label>
             <div class="sdd-wrap" id="sdd-pickup-wrap">
               <input class="sdd-input" id="dr-pickup" placeholder="픽업" autocomplete="off"
-                oninput="sddFilter('pickup')" onfocus="sddOpen('pickup')" onblur="sddBlur('pickup');checkHotelSurchargeHint();">
+                oninput="sddFilter('pickup')" onfocus="sddOpen('pickup')" onblur="sddBlur('pickup');checkHotelSurchargeHint();updateEarlyHint();">
               <div class="sdd-dropdown" id="sdd-pickup-list"></div>
             </div>
           </div>
@@ -558,7 +558,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">드롭 장소</label>
             <div class="sdd-wrap" id="sdd-dropoff-wrap">
               <input class="sdd-input" id="dr-dropoff" placeholder="드롭" autocomplete="off"
-                oninput="sddFilter('dropoff')" onfocus="sddOpen('dropoff')" onblur="sddBlur('dropoff');checkHotelSurchargeHint();">
+                oninput="sddFilter('dropoff')" onfocus="sddOpen('dropoff')" onblur="sddBlur('dropoff');checkHotelSurchargeHint();updateEarlyHint();">
               <div class="sdd-dropdown" id="sdd-dropoff-list"></div>
             </div>
           </div>
@@ -1338,7 +1338,7 @@ function sddSelect(key, value) {
     if(found && window.currentGuidePhone !== undefined) window.currentGuidePhone = found.mobile;
   }
   // 픽업/드롭 선택 시 호텔 서차지 힌트 갱신
-  if(key==='pickup'||key==='dropoff') checkHotelSurchargeHint();
+  if(key==='pickup'||key==='dropoff'){ checkHotelSurchargeHint(); updateEarlyHint(); }
 }
 function sddAddNew(key, value) {
   if(!value) return;
@@ -2621,27 +2621,26 @@ function updateOTHint(){
 
   let lines = [];
 
-  // ① 오후 8시(20:00) 초과 조건
-  const pm8Min = 20*60; // 20:00 = 1200분
+  const pm8Min      = 20*60;
   const pm8WaiveMin = pm8Min + WAIVE; // 20:15
-  const startMin = sh*60+sm;
-  // OT 발생 시각 (20:15)
-  const pm8OTTime = String(Math.floor(pm8WaiveMin/60)).padStart(2,'0')+':'+String(pm8WaiveMin%60).padStart(2,'0');
-  if(maxH){ lines.push(`🕗 <b>20:00 이후 OT</b> — 20:15 이후부터 적용 (15분 waive)`); }
+  const startMin    = sh*60+sm;
 
-  // ② max_hours 초과 조건
+  // ① 20:00 이후 OT 조건 — 항상 표시 (관광지 무관)
+  lines.push(`🕗 <b>20:00 이후 OT</b> — 20:15 이후부터 적용 (15분 waive, $${otRate}/h)`);
+
+  // ② 코스 기준 max_hours 초과 조건
   if(maxH){
-    const maxMin = startMin + maxH*60;
+    const maxMin  = startMin + maxH*60;
     const waiveMin = maxMin + WAIVE;
-    const hh = String(Math.floor(maxMin/60)%24).padStart(2,'0');
-    const mm = String(maxMin%60).padStart(2,'0');
+    const hh  = String(Math.floor(maxMin/60)%24).padStart(2,'0');
+    const mm  = String(maxMin%60).padStart(2,'0');
     const hwh = String(Math.floor(waiveMin/60)%24).padStart(2,'0');
     const hwm = String(waiveMin%60).padStart(2,'0');
     lines.push(`⏱ <b>${maxH}시간 초과 OT</b> — ${hh}:${mm} 이후, waive 후 <b>${hwh}:${hwm}</b>부터 적용`);
   }
 
-  // ③ 종료 시간 있으면 실제 OT 계산해서 표시
-  if(et && att){
+  // ③ 종료 시간 있으면 실제 OT 계산
+  if(et){
     const [eh,em] = et.split(':').map(Number);
     let totalMin = (eh*60+em) - startMin;
     if(totalMin < 0) totalMin += 24*60;
@@ -2658,9 +2657,9 @@ function updateOTHint(){
     const effOT = Math.max(pm8OT, durOT);
     if(effOT > 0){
       const otAmt = Math.round(effOT * otRate);
-      lines.push(`🔴 <b>OT 발생</b>: ${effOT.toFixed(2)}h × $${otRate}/h = <b>$${otAmt}</b>${seats ? '' : ' (인승 선택 필요)'}`);
+      lines.push(`🔴 <b>OT 발생</b>: ${effOT.toFixed(2)}h × $${otRate}/h = <b>$${otAmt}</b>${seats ? '' : ' (인승 선택 후 재확인)'}`);
     } else if(totalMin > 0){
-      lines.push(`✅ 현재 OT 없음`);
+      lines.push(`✅ 현재 OT 없음 (종료 ${et})`);
     }
   }
 
@@ -2955,18 +2954,37 @@ function selectMeal(amt){
 function updateEarlyHint(){
   const hint = document.getElementById('early-time-hint');
   if(!hint) return;
-  const startVal = document.getElementById('dr-start')?.value; // "HH:MM"
-  if(!startVal){ hint.textContent=''; return; }
+  const startVal = document.getElementById('dr-start')?.value;
+  const pickup   = (document.getElementById('dr-pickup')?.value || '').trim();
+  const dropoff  = (document.getElementById('dr-dropoff')?.value || '').trim();
+  const isAirportTrip = AIRPORT_PATTERN.test(pickup) || AIRPORT_PATTERN.test(dropoff);
+
+  if(!startVal){ hint.textContent = ''; return; }
   const [h, m] = startVal.split(':').map(Number);
   const totalMin = h * 60 + m;
-  const before6  = totalMin < 6 * 60;         // 06:00 이전
-  const after11  = totalMin >= 11 * 60;        // 11:00 이후
-  if(before6 || after11){
-    hint.textContent = '✅ 조기출발 적용 가능 (' + startVal + ')';
+  const before6  = totalMin < 6 * 60;    // 06:00 이전
+  const after23  = totalMin >= 23 * 60;  // 23:00 이후
+
+  // Early surcharge 조건:
+  // ① 출발 06:00 이전 (모든 코스)
+  // ② Airport transfer 에서 픽업/드롭 23:00 이후
+  const earlyByTime    = before6;
+  const earlyByAirport = isAirportTrip && after23;
+  const earlyApplies   = earlyByTime || earlyByAirport;
+
+  if(earlyApplies){
+    let reason = '';
+    if(earlyByTime)    reason = '06:00 이전 출발';
+    if(earlyByAirport) reason = '공항 이동 23:00 이후';
+    hint.innerHTML = '✅ Early Surcharge 적용 — ' + reason;
     hint.style.color = 'var(--green)';
   } else {
-    hint.textContent = '⚠️ 06:00 이전 또는 11:00 이후 출발만 해당 (' + startVal + ')';
-    hint.style.color = 'var(--red,#e02424)';
+    if(isAirportTrip){
+      hint.innerHTML = '⚠️ 공항 이동: 06:00 이전 출발 또는 23:00 이후 시 적용 (현재 ' + startVal + ')';
+    } else {
+      hint.innerHTML = '⚠️ 06:00 이전 출발 시 적용 (현재 ' + startVal + ')';
+    }
+    hint.style.color = 'var(--muted,#94a3b8)';
   }
 }
 
