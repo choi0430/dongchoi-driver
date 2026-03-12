@@ -440,6 +440,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
                 oninput="sddFilter('rego')" onfocus="sddOpen('rego')" onblur="sddBlur('rego')">
               <div class="sdd-dropdown" id="sdd-rego-list"></div>
             </div>
+            <div id="manual-vehicle-hint" style="display:none;margin-top:6px;"></div>
           </div>
           <div class="form-group">
             <label class="form-label">출발 KM<span class="req">*</span></label>
@@ -1428,7 +1429,7 @@ function loadMasterCache() {
 function applyMasterData(data) {
   MASTER.drivers     = (data.M_Drivers   || []);
   MASTER.guides      = (data.M_Guides    || []);
-  MASTER.vehicles    = (data.M_Vehicles  || []);
+  MASTER.vehicles    = (data.M_Vehicles  || []).map(v=>({...v, Transmission: v.Transmission||'Auto'}));
   // M_Clients 시트 없을 경우 M_PriceClient의 Agency 컬럼에서 여행사 목록 구성
   const rawClients = data.M_Clients || data.M_Agencies || [];
   if(rawClients.length > 0){
@@ -1692,7 +1693,7 @@ const SDD_CONFIG = {
       : GUIDE_LIST.map(g=>({name:g.name,sub:g.mobile}));
     return [...none,...base,...getCustomGuides().map(n=>({name:n,sub:''}))];
   }, type:'guide' },
-  rego:       { list: ()=> (MASTER.vehicles||[]).map(v=>({name:v.Rego,sub:v.Seats?v.Seats+'인승':''})), type:'rego' },
+  rego:       { list: ()=> (MASTER.vehicles||[]).map(v=>({name:v.Rego,sub:(v.Seats?v.Seats+'인승':'')+(v.Transmission==='Manual'?' · 🔧 수동':'')})), type:'rego' },
   agency:     { list: ()=> (MASTER.agencies||[]).map(a=>({name:a.Name,sub:a.Mobile||''})),              type:'agency' },
   attraction: { list: ()=>{
     if(MASTER.courses && MASTER.courses.length>0)
@@ -1778,6 +1779,8 @@ function sddSelect(key, value) {
   // 차량 선택 시 인승 자동 설정 + 기존 데미지 로드
   if(key==='rego'){
     const v = MASTER.vehicles?.find(v=>v.Rego===value);
+    // 수동 차량 선택 힌트 업데이트
+    updateManualHint(v);
     const seatsSel = document.getElementById('dr-seats');
     if(v?.Seats && seatsSel) seatsSel.value = v.Seats;
     // Pre-Departure 다이어그램이 이미 마운트됐으면 해당 차량 데미지 로드
@@ -3606,6 +3609,26 @@ function renderHintBox(el, items){
 
 
 
+
+// ──────────────────────────────────────────
+// 수동 차량 선택 시 힌트 표시
+// ──────────────────────────────────────────
+function updateManualHint(veh){
+  const hintEl = document.getElementById('manual-vehicle-hint');
+  if(!hintEl) return;
+  if(!veh){ hintEl.style.display='none'; return; }
+  const isManual = veh.Transmission === 'Manual';
+  if(isManual){
+    renderHintBox(hintEl, [{
+      type: 'warn',
+      title: '🔧 수동 변속기 차량 — ' + veh.Rego,
+      sub: '10HR / 12HR 일정 시 드라이버 추가 수당 $20 자동 포함됩니다'
+    }]);
+  } else {
+    hintEl.style.display = 'none';
+  }
+}
+
 // ──────────────────────────────────────────
 // Distance Surcharge 힌트: 인승 기준 금액 안내
 // ──────────────────────────────────────────
@@ -4171,6 +4194,10 @@ function onSvcSelectChange(){
   if(sel&&wrap) wrap.style.display = sel.value==='OTHER' ? 'block' : 'none';
   calcTotal();
   updateSvcHint();
+  // SVC 변경 시 수동 차량 힌트 금액 조건 재확인
+  const rego = document.getElementById('pre-rego')?.value||'';
+  const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
+  updateManualHint(veh);
 }
 function onHotelSelectChange(){ calcTotal(); }
 function onDistSelectChange(){ calcTotal(); updateDistHint(); }
@@ -4208,7 +4235,15 @@ function calcTotal(){
   const nightDR = (nightType!=='none' && nightRate) ? nightRate.dr : 0;
   // ta(여행사 청구): 톨비는 40/50인승만, 연료비/세차/식비 포함 안 함, 야간투어 별도
   const fixedTA=['f-ot','f-trailer','f-early','f-tip','f-etc'];
-  let ta=getSvcValue()+getHotelValue()+getDistValue();
+  const isManualVehicle = (()=>{
+    const rego = document.getElementById('pre-rego')?.value || '';
+    const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
+    return veh?.Transmission === 'Manual';
+  })();
+  const svcVal = getSvcValue();
+  const isLongRun = svcVal >= 250; // $250 이상 = 10HR/12HR 일정
+  const manualBonus = (isManualVehicle && isLongRun) ? 20 : 0;
+  let ta=svcVal+getHotelValue()+getDistValue();
   fixedTA.forEach(id=>{ta+=parseFloat(document.getElementById(id)?.value||0);});
   if(isLarge) ta += tollVal;
   ta += nightTA;
@@ -4217,6 +4252,7 @@ function calcTotal(){
   let dr=att&&RATES[att]?RATES[att].dr+(parseFloat(document.getElementById('f-ot')?.value||0)):0;
   dr += getHotelValue(); // 호텔 서차지 전액 드라이버 지급
   dr += getDistValue();  // 거리 서차지 전액 드라이버 지급
+  dr += manualBonus;     // 수동 차량 10/12HR 추가 수당 $20
   dr += nightDR + washVal + mealVal;
   const tollPersonal = document.getElementById('toll-personal')?.checked;
   const fuelPersonal = document.getElementById('fuel-personal')?.checked;
