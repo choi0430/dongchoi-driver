@@ -4619,7 +4619,7 @@ async function getGASDRForWeek(driverName, monISO){
 }
 function renderPay(){
   const all = getAllReports();
-  const driverName = localStorage.getItem('driverName') || '';
+  const driverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
 
   // 주별 그룹핑 (월~일)
   const weekMap = {};
@@ -4629,24 +4629,22 @@ function renderPay(){
     if(!weekMap[wk.key]) weekMap[wk.key] = { label:wk.label, mon:wk.mon, reports:[] };
     weekMap[wk.key].reports.push(r);
   });
-  // 최신 주 순 정렬
   const weeks = Object.values(weekMap).sort((a,b)=>b.mon-a.mon);
 
-  // 지급 기록 (admin_wages 기반)
   const driverWages = getDriverWagesFromLocal(driverName);
 
-  // 미지급 배지 계산 (로컬 DR vs 지급 합계)
+  // 미지급 배지
   let totalUnpaid = 0;
   weeks.forEach(wk=>{
-    const drTotal = wk.reports.reduce((s,r)=>s+(r.dr||0),0);
-    const ownerTotal = wk.reports.reduce((s,r)=>s+(r.nightOwner||0),0);
-    const net = drTotal - ownerTotal;
-    const wageEntries = getWageEntriesForWeek(driverWages, wk.key);
-    const paid = wageEntries.reduce((s,e)=>s+(Number(e.amount)||0),0);
+    const net = wk.reports.reduce((s,r)=>s+(r.dr||0)-(r.nightOwner||0),0);
+    const paid = getWageEntriesForWeek(driverWages, wk.key).reduce((s,e)=>s+(Number(e.amount)||0),0);
     totalUnpaid += Math.max(0, net - paid);
   });
   const badge = document.getElementById('pay-unpaid-badge');
-  if(badge) badge.textContent = totalUnpaid>0 ? '미지급 $'+Math.round(totalUnpaid) : '최신';
+  if(badge){
+    badge.textContent = totalUnpaid>0 ? '미지급 $'+Math.round(totalUnpaid) : '✅ 전액지급';
+    badge.style.background = totalUnpaid>0 ? 'var(--orange)' : 'var(--green)';
+  }
 
   const el = document.getElementById('pay-weeks-list');
   if(!el) return;
@@ -4658,18 +4656,58 @@ function renderPay(){
 
   el.innerHTML='';
   weeks.forEach(wk=>{
-    const drTotal = wk.reports.reduce((s,r)=>s+(r.dr||0),0);
-    const days = [...new Set(wk.reports.map(r=>r.date))].length;
-    const trips = wk.reports.length;
-    // 야간투어 회사 납입금 합산
-    const ownerTotal = wk.reports.reduce((s,r)=>s+(r.nightOwner||0),0);
-    const netPay = drTotal - ownerTotal;
+    // ── 항목별 합계 계산
+    const trips   = wk.reports.length;
+    const days    = [...new Set(wk.reports.map(r=>r.date))].length;
+    const drTotal       = wk.reports.reduce((s,r)=>s+(r.dr||0),0);
+    const ownerTotal    = wk.reports.reduce((s,r)=>s+(r.nightOwner||0),0);
+    const netPay        = drTotal - ownerTotal;
+    const otTotal       = wk.reports.reduce((s,r)=>s+(r.ot||0),0);
+    const hotelTotal    = wk.reports.reduce((s,r)=>s+(r.hotelSurcharge||0),0);
+    const distTotal     = wk.reports.reduce((s,r)=>s+(r.distSurcharge||0),0);
+    const earlyTotal    = wk.reports.reduce((s,r)=>s+(r.early||0),0);
+    const washTotal     = wk.reports.reduce((s,r)=>s+(r.wash||0),0);
+    const mealTotal     = wk.reports.reduce((s,r)=>s+(r.meal||0),0);
+    const nightDRTotal  = wk.reports.reduce((s,r)=>s+(r.night||0),0);
 
-    // 지급 기록 (admin_wages 기반 - YYYY-MM-DD 키 변환 포함)
+    // ── 지급 기록
     const weekWageData = getWageEntriesForWeek(driverWages, wk.key);
     const paidAmt = weekWageData.reduce((s,e)=>s+(Number(e.amount)||0),0);
     const balance = netPay - paidAmt;
-    const isPaid = balance <= 0;
+    const isPaid  = balance <= 0;
+
+    // ── 항목 배지 (0인 항목 제외)
+    const items = [
+      {label:'OT', val:otTotal, color:'#3b82f6'},
+      {label:'호텔', val:hotelTotal, color:'#8b5cf6'},
+      {label:'거리', val:distTotal, color:'#0ea5e9'},
+      {label:'조기출발', val:earlyTotal, color:'#f59e0b'},
+      {label:'세차', val:washTotal, color:'#10b981'},
+      {label:'식비', val:mealTotal, color:'#10b981'},
+      {label:'야간', val:nightDRTotal, color:'#6366f1'},
+    ].filter(i=>i.val>0);
+
+    const itemBadges = items.map(i=>
+      `<span style="display:inline-flex;align-items:center;gap:2px;background:${i.color}18;border:1px solid ${i.color}44;border-radius:5px;padding:2px 6px;font-size:10px;font-weight:700;color:${i.color};">${i.label} $${i.val}</span>`
+    ).join('');
+
+    // ── 지급 내역 rows
+    const wageRows = weekWageData.length > 0
+      ? `<div style="border-top:1.5px solid var(--border);margin-top:10px;padding-top:10px;">
+          <div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;">💸 지급 내역</div>
+          ${weekWageData.map(e=>`
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--surface2);">
+              <div>
+                <span style="font-size:12px;font-weight:600;color:var(--text);">${fmtDate(e.date)||'—'}</span>
+                <span style="font-size:11px;color:var(--muted);margin-left:6px;">${e.method||'현금'}${e.note?' · '+e.note:''}</span>
+              </div>
+              <span style="font-size:13px;font-weight:800;color:var(--accent);">$${Number(e.amount||0).toLocaleString()}</span>
+            </div>`).join('')}
+          <div style="display:flex;justify-content:space-between;padding:6px 0 0;">
+            <span style="font-size:11px;color:var(--muted);">지급 합계</span>
+            <span style="font-size:12px;font-weight:700;color:var(--accent);">$${paidAmt.toLocaleString()}</span>
+          </div>
+        </div>` : '';
 
     const card = document.createElement('div');
     card.className = 'pay-week-card';
@@ -4677,22 +4715,38 @@ function renderPay(){
       <div class="pay-week-top">
         <div>
           <div class="pay-week-label">📅 ${wk.label}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px;">${days}일 · ${trips}건</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;">${days}일 근무 · ${trips}건 운행</div>
         </div>
         <div style="text-align:right;">
           <div class="pay-week-total">$${netPay.toLocaleString()}</div>
-          <div style="font-size:11px;font-weight:700;color:${isPaid?'var(--green)':'var(--orange)'};">${isPaid?'✅ 지급완료':'미지급 $'+Math.round(balance)}</div>
+          <div style="font-size:11px;font-weight:700;margin-top:2px;color:${isPaid?'#16a34a':'#ea580c'};">
+            ${isPaid?'✅ 지급완료':'⏳ 미지급 $'+Math.round(balance)}
+          </div>
         </div>
       </div>
-      <div class="pay-week-bar">
-        <div class="pay-week-stat"><div class="pay-week-stat-label">발생 DR</div><div class="pay-week-stat-val" style="color:var(--green);">$${drTotal}</div></div>
-        <div class="pay-week-stat"><div class="pay-week-stat-label">지급됨</div><div class="pay-week-stat-val" style="color:var(--accent);">$${paidAmt}</div></div>
-        <div class="pay-week-stat"><div class="pay-week-stat-label">잔액</div><div class="pay-week-stat-val" style="color:${isPaid?'var(--muted)':'var(--orange)'};">$${Math.max(0,Math.round(balance))}</div></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:${items.length?'10px':'0'};">
+        <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center;">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">발생 수당</div>
+          <div style="font-size:14px;font-weight:800;color:#16a34a;">$${drTotal.toLocaleString()}</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center;">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">지급됨</div>
+          <div style="font-size:14px;font-weight:800;color:var(--accent);">$${paidAmt.toLocaleString()}</div>
+        </div>
+        <div style="background:${isPaid?'var(--surface2)':'#fff7ed'};border-radius:8px;padding:8px;text-align:center;${!isPaid?'border:1.5px solid #fed7aa;':''}">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">잔액</div>
+          <div style="font-size:14px;font-weight:800;color:${isPaid?'var(--muted)':'#ea580c'};">$${Math.max(0,Math.round(balance)).toLocaleString()}</div>
+        </div>
       </div>
-      ${weekWageData.length>0?`<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;">
-        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:700;">💸 지급 내역</div>
-        ${weekWageData.map(e=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;color:var(--muted);"><span>${fmtDate(e.date)||''} · ${e.method||'현금'}</span><span style="font-weight:700;color:var(--accent);">$${Number(e.amount||0).toLocaleString()}</span></div>`).join('')}
-      </div>`:''}`;
+
+      ${items.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">${itemBadges}</div>` : ''}
+
+      ${wageRows}
+      <div style="text-align:center;margin-top:8px;">
+        <span style="font-size:11px;color:var(--muted);">탭하면 상세 내역 →</span>
+      </div>`;
+
     card.dataset.weekKey = wk.key;
     card.addEventListener('click', ()=>showPayDetail(wk));
     el.appendChild(card);
@@ -4728,15 +4782,71 @@ function showPayDetail(wk){
   const ownerGrand = sorted.reduce((s,r)=>s+(r.nightOwner||0),0);
   const netGrand = drGrand - ownerGrand;
 
+  // 항목별 합계
+  const otGrand    = sorted.reduce((s,r)=>s+(r.ot||0),0);
+  const hotelGrand = sorted.reduce((s,r)=>s+(r.hotelSurcharge||0),0);
+  const distGrand  = sorted.reduce((s,r)=>s+(r.distSurcharge||0),0);
+  const earlyGrand = sorted.reduce((s,r)=>s+(r.early||0),0);
+  const washGrand  = sorted.reduce((s,r)=>s+(r.wash||0),0);
+  const mealGrand  = sorted.reduce((s,r)=>s+(r.meal||0),0);
+  const nightDRGrand = sorted.reduce((s,r)=>s+(r.night||0),0);
+
+  // 지급 내역 (admin_wages)
+  const detailDriverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
+  const detailWages = getDriverWagesFromLocal(detailDriverName);
+  const wageEntries = getWageEntriesForWeek(detailWages, wk.key);
+  const totalPaid = wageEntries.reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const finalBalance = netGrand - totalPaid;
+  const isAllPaid = finalBalance <= 0;
+
   // 상단 합계 카드
-  html+=`<div style="background:var(--accent);border-radius:14px;margin:0 12px 14px;padding:16px;">
-    <div style="color:rgba(255,255,255,.7);font-size:11px;font-weight:700;margin-bottom:6px;">이번 주 실수령 합계</div>
-    <div style="color:white;font-size:28px;font-weight:800;">$${netGrand.toLocaleString()}</div>
-    <div style="display:flex;gap:16px;margin-top:10px;">
-      <div><div style="color:rgba(255,255,255,.6);font-size:10px;">드라이버 발생</div><div style="color:white;font-size:13px;font-weight:700;">$${drGrand}</div></div>
-      <div><div style="color:rgba(255,255,255,.6);font-size:10px;">회사 납입</div><div style="color:rgba(255,100,100,.9);font-size:13px;font-weight:700;">-$${ownerGrand}</div></div>
+  const breakItems = [
+    {label:'기본 수당', val: drGrand - otGrand - hotelGrand - distGrand - earlyGrand - washGrand - mealGrand - nightDRGrand, color:'rgba(255,255,255,.9)'},
+    otGrand>0    && {label:'OT', val:otGrand, color:'#93c5fd'},
+    hotelGrand>0 && {label:'호텔 서차지', val:hotelGrand, color:'#c4b5fd'},
+    distGrand>0  && {label:'거리 서차지', val:distGrand, color:'#7dd3fc'},
+    earlyGrand>0 && {label:'조기 출발', val:earlyGrand, color:'#fcd34d'},
+    washGrand>0  && {label:'세차', val:washGrand, color:'#6ee7b7'},
+    mealGrand>0  && {label:'식비', val:mealGrand, color:'#6ee7b7'},
+    nightDRGrand>0 && {label:'야간투어', val:nightDRGrand, color:'#a5b4fc'},
+    ownerGrand>0 && {label:'회사 납입 차감', val:-ownerGrand, color:'rgba(255,150,150,.9)'},
+  ].filter(Boolean).filter(i=>i.val!==0);
+
+  html+=`<div style="background:linear-gradient(135deg,var(--accent),#6d28d9);border-radius:16px;margin:0 12px 14px;padding:18px;">
+    <div style="color:rgba(255,255,255,.7);font-size:11px;font-weight:700;margin-bottom:4px;">이번 주 실수령 합계</div>
+    <div style="color:white;font-size:32px;font-weight:800;letter-spacing:-1px;">$${netGrand.toLocaleString()}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+      <span style="font-size:12px;font-weight:700;color:${isAllPaid?'#86efac':'#fcd34d'};">${isAllPaid?'✅ 전액 지급완료':'⏳ 미지급 $'+Math.round(finalBalance)}</span>
     </div>
-  </div>`;
+    <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:12px;padding-top:10px;display:flex;flex-direction:column;gap:5px;">
+      ${breakItems.map(i=>`
+        <div style="display:flex;justify-content:space-between;">
+          <span style="font-size:11px;color:rgba(255,255,255,.65);">${i.label}</span>
+          <span style="font-size:11px;font-weight:700;color:${i.color};">${i.val>=0?'+':''}\$${Math.abs(i.val)}</span>
+        </div>`).join('')}
+    </div>
+  </div>
+  `;
+
+  // 지급 내역 섹션 별도 렌더링
+  if(wageEntries.length>0){
+    const wageRowsInner = wageEntries.map(e=>{
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);">'
+        + '<div>'
+        + '<div style="font-size:12px;font-weight:600;color:var(--text);">'+(fmtDate(e.date)||'—')+'</div>'
+        + '<div style="font-size:11px;color:var(--muted);">'+(e.method||'현금')+(e.note?' · '+e.note:'')+'</div>'
+        + '</div>'
+        + '<span style="font-size:14px;font-weight:800;color:var(--accent);">$'+Number(e.amount||0).toLocaleString()+'</span>'
+        + '</div>';
+    }).join('');
+    html += '<div style="margin:0 12px 14px;background:var(--surface2);border-radius:12px;padding:14px;">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">💸 지급 내역</div>'
+      + wageRowsInner
+      + '<div style="display:flex;justify-content:space-between;padding:8px 0 0;">'
+      + '<span style="font-size:12px;font-weight:700;color:var(--text);">지급 합계</span>'
+      + '<span style="font-size:13px;font-weight:800;color:var(--accent);">$'+totalPaid.toLocaleString()+'</span>'
+      + '</div></div>';
+  }
 
   Object.entries(byDate).forEach(([date, reports])=>{
     const dayDr = reports.reduce((s,r)=>s+(r.dr||0),0);
@@ -4751,6 +4861,8 @@ function showPayDetail(wk){
       // 기본 수당 (attraction 기반 DR rate)
       const baseRate = (r.dr||0)
         - (r.ot||0)
+        - (r.hotelSurcharge||0)
+        - (r.distSurcharge||0)
         - (r.night||0)
         - (r.wash||0)
         - (r.meal||0)
@@ -4758,6 +4870,8 @@ function showPayDetail(wk){
         - (r.fuelPersonal&&r.fuel>0 ? r.fuel : 0);
       if(baseRate>0) breakdown.push({label:'기본 수당', val:baseRate, color:'var(--text)'});
       if(r.ot>0)      breakdown.push({label:'초과근무 (OT)', val:r.ot, color:'var(--blue)'});
+      if(r.hotelSurcharge>0) breakdown.push({label:'호텔 서차지', val:r.hotelSurcharge, color:'#8b5cf6'});
+      if(r.distSurcharge>0)  breakdown.push({label:'거리 서차지', val:r.distSurcharge, color:'#0ea5e9'});
       if(r.trailer>0) breakdown.push({label:'트레일러', val:r.trailer, color:'var(--blue)'});
       if(r.early>0)   breakdown.push({label:'조기 출발', val:r.early, color:'var(--blue)'});
       if(r.night>0&&r.nightType!=='none') breakdown.push({label:'야간투어 ('+r.nightType+')', val:r.night, color:'var(--purple)'});
@@ -4814,7 +4928,7 @@ function showPayDetail(wk){
 function renderSalary(){
   const el=document.getElementById('salary-list');
   const meEl=document.getElementById('me-salary-detail');
-  const driverName = localStorage.getItem('driverName') || '';
+  const driverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
   const driverWages = getDriverWagesFromLocal(driverName);
 
   // 로컬 DR 리포트 기반 주별 발생 금액
@@ -4828,18 +4942,18 @@ function renderSalary(){
   });
   // 지급 금액 합산 (admin_wages 키 YYYY-MM-DD → wk.key 변환 포함)
   Object.entries(driverWages).forEach(([monISO, wkWages])=>{
-    // monISO: YYYY-MM-DD → 해당 주의 wk.key(dd/mm/yy~dd/mm/yy) 생성
     const d = new Date(monISO+'T00:00:00');
     if(isNaN(d)) return;
     const sun = new Date(d); sun.setDate(d.getDate()+6);
     const fmt = x => String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+String(x.getFullYear()).slice(2);
     const wkKey = fmt(d)+'~'+fmt(sun);
-    const paid = (wkWages.entries||[]).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    const entries = wkWages.entries || [];
+    const paid = entries.reduce((s,e)=>s+(Number(e.amount)||0),0);
     if(weekMap[wkKey]){
       weekMap[wkKey].paid = paid;
+      weekMap[wkKey].wageEntries = entries;
     } else {
-      // 로컬 DR 없는 주간도 지급 기록 표시
-      weekMap[wkKey] = { label:fmt(d)+' — '+fmt(sun), key:wkKey, total:0, paid };
+      weekMap[wkKey] = { label:fmt(d)+' — '+fmt(sun), key:wkKey, total:0, paid, wageEntries:entries };
     }
   });
 
@@ -4848,19 +4962,50 @@ function renderSalary(){
   function salaryCard(s){
     const balance = Math.max(0, Math.round(s.total - s.paid));
     const isPaid = balance<=0;
-    return `<div class="salary-week">
-      <div class="salary-week-head">
-        <span class="salary-week-label">${s.label}</span>
-        <span class="pill ${!isPaid?'pill-orange':'pill-green'}">${!isPaid?'미지급':'완료'}</span>
-      </div>
-      <div class="salary-amounts">
-        <div class="salary-amt"><div class="salary-amt-label">발생</div><div class="salary-amt-val green">$${Math.round(s.total)}</div></div>
-        <div class="salary-amt"><div class="salary-amt-label">지급</div><div class="salary-amt-val accent">$${Math.round(s.paid)}</div></div>
-        <div class="salary-amt"><div class="salary-amt-label">잔액</div><div class="salary-amt-val" style="color:${!isPaid?'var(--orange)':'var(--muted)'};">$${balance}</div></div>
-      </div>
-    </div>`;
-  }
+    const entries = s.wageEntries || [];
 
+    let wageRowsHTML = '';
+    if(entries.length > 0){
+      const rowsInner = entries.map(e=>{
+        const dt   = fmtDate(e.date)||'—';
+        const meth = (e.method||'현금') + (e.note?' · '+e.note:'');
+        const amt  = Number(e.amount||0).toLocaleString();
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--surface2);">'
+          + '<div>'
+          + '<span style="font-size:12px;font-weight:600;color:var(--text);">'+dt+'</span>'
+          + '<span style="font-size:11px;color:var(--muted);margin-left:5px;">'+meth+'</span>'
+          + '</div>'
+          + '<span style="font-size:13px;font-weight:800;color:var(--accent);">$'+amt+'</span>'
+          + '</div>';
+      }).join('');
+      wageRowsHTML = '<div style="border-top:1.5px solid var(--border);margin-top:10px;padding-top:8px;">'
+        + '<div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:6px;">💸 지급 내역</div>'
+        + rowsInner
+        + '<div style="display:flex;justify-content:space-between;padding:6px 0 0;">'
+        + '<span style="font-size:11px;color:var(--muted);">지급 합계</span>'
+        + '<span style="font-size:12px;font-weight:700;color:var(--accent);">$'+Math.round(s.paid).toLocaleString()+'</span>'
+        + '</div></div>';
+    } else if(s.total > 0){
+      wageRowsHTML = '<div style="margin-top:8px;padding:7px 10px;background:#fff7ed;border-radius:8px;border:1px solid #fed7aa;font-size:11px;color:#92400e;text-align:center;">📌 아직 지급 내역 없음</div>';
+    }
+
+    const statusColor  = !isPaid ? '#ea580c' : '#16a34a';
+    const statusText   = !isPaid ? ('⏳ $'+balance+' 미지급') : '✅ 완료';
+    const balColor     = !isPaid ? '#ea580c' : 'var(--muted)';
+
+    return '<div class="salary-week" style="cursor:pointer;" onclick="document.getElementById(\'nav-pay\').click()">'
+      + '<div class="salary-week-head">'
+      + '<span class="salary-week-label">📅 '+s.label+'</span>'
+      + '<span style="font-size:11px;font-weight:700;color:'+statusColor+';">'+statusText+'</span>'
+      + '</div>'
+      + '<div class="salary-amounts">'
+      + '<div class="salary-amt"><div class="salary-amt-label">발생 수당</div><div class="salary-amt-val" style="color:#16a34a;">$'+Math.round(s.total).toLocaleString()+'</div></div>'
+      + '<div class="salary-amt"><div class="salary-amt-label">지급됨</div><div class="salary-amt-val accent">$'+Math.round(s.paid).toLocaleString()+'</div></div>'
+      + '<div class="salary-amt"><div class="salary-amt-label">잔액</div><div class="salary-amt-val" style="color:'+balColor+';">$'+balance.toLocaleString()+'</div></div>'
+      + '</div>'
+      + wageRowsHTML
+      + '</div>';
+  }
   if(el) el.innerHTML = weeks.slice(0,4).map(salaryCard).join('');
 
   // 배지 업데이트
