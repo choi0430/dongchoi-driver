@@ -571,11 +571,11 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
           <div class="form-group">
             <label class="form-label">시작 시간</label>
-            <input type="time" class="form-input" id="dr-start" onchange="calcOT();updateEarlyHint();updateOTHint();">
+            <input type="time" class="form-input" id="dr-start" onchange="calcOT();updateEarlyHint();updateOTHint();" oninput="updateOTHint();updateEarlyHint();">
           </div>
           <div class="form-group">
             <label class="form-label">종료 시간</label>
-            <input type="time" class="form-input" id="dr-end" onchange="calcOT();updateOTHint();">
+            <input type="time" class="form-input" id="dr-end" onchange="calcOT();updateOTHint();" oninput="updateOTHint();">
           </div>
         </div>
 
@@ -591,6 +591,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           <div id="f-svc-custom-wrap" style="display:none;margin-top:6px;">
             <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-svc-custom" placeholder="직접 입력" oninput="calcTotal()"></div>
           </div>
+          <div id="svc-hint-box" style="display:none;margin-top:6px;"></div>
         </div>
 
         <div class="form-row mb14">
@@ -3575,6 +3576,7 @@ function onAttractionChange(){
   hintBox.innerHTML = html;
   hintBox.style.display = html ? 'block' : 'none';
   updateOTHint();
+  updateSvcHint();
 }
 
 // ═══════════════════════════════════════
@@ -3598,6 +3600,68 @@ function renderHintBox(el, items){
       + (item.sub ? '<div style="font-size:11px;opacity:0.85;margin-top:1px;">' + item.sub + '</div>' : '')
       + '</div>';
   }).join('');
+}
+
+
+// ──────────────────────────────────────────
+// SVC 추천 힌트: 어트랙션 + 인승 기반
+// ──────────────────────────────────────────
+function updateSvcHint(){
+  const hintEl = document.getElementById('svc-hint-box');
+  if(!hintEl) return;
+  const att   = document.getElementById('dr-attraction')?.value || '';
+  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+  const curVal = document.getElementById('f-svc-select')?.value || '';
+
+  if(!att || !seats){ hintEl.style.display='none'; return; }
+
+  const opts = SVC_OPTIONS[seats] || [];
+  if(!opts.length){ hintEl.style.display='none'; return; }
+
+  // 어트랙션 → 추천 SVC 키워드 매핑
+  const attU = att.toUpperCase();
+  let recommended = null;
+
+  // 패턴 매칭: 어트랙션 이름에서 SVC 유형 추론
+  if(/AIRPORT|TRANSFER/.test(attU) && !/DINNER/.test(attU)){
+    // TSF: Airport Transfer, Hotel Transfer
+    recommended = opts.find(o => o.label.includes('TSF') && !o.label.includes('DINNER') && !o.label.includes('ONLY'));
+  } else if(/DINNER/.test(attU)){
+    recommended = opts.find(o => o.label.includes('DINNER'));
+  } else if(/CITY.*HALF|HALF.*DAY/.test(attU)){
+    recommended = opts.find(o => o.label.includes('CITY') || o.label.includes('HALF'));
+  } else if(/CITY TOUR/.test(attU) && !/HALF/.test(attU)){
+    // 시티투어 Full: 10HR
+    recommended = opts.find(o => o.label.includes('10HR') && !o.label.includes('MANUAL') && !o.label.includes('BLUE'));
+  } else if(/BLUE MOUNTAINS|HUNTER|CENTRAL COAST|PORT STEPHENS|NEWCASTLE|WOLLONGONG|CANBERRA|JERVIS/.test(attU)){
+    // 지방 투어: 10~12HR
+    const maxH = getMaxHours(att);
+    if(maxH && maxH >= 12){
+      recommended = opts.find(o => o.label.includes('12HR') && !o.label.includes('MANUAL'));
+    } else {
+      // BLUE MOUNTAINS 50S는 BLUE 구분
+      if(seats==='50S' && /BLUE/.test(attU)){
+        recommended = opts.find(o => o.label.includes('BLUE'));
+      } else {
+        recommended = opts.find(o => o.label.includes('10HR') && !o.label.includes('MANUAL') && !o.label.includes('BLUE'));
+      }
+    }
+  } else if(/CHARTER/.test(attU)){
+    recommended = opts.find(o => o.label.includes('10HR') && !o.label.includes('MANUAL'));
+  }
+
+  if(!recommended){ hintEl.style.display='none'; return; }
+
+  const isSelected = (curVal === recommended.val);
+  const items = [];
+
+  if(isSelected){
+    items.push({ type:'apply', title:'✅ 추천 SVC 선택됨', sub:recommended.label+' ('+seats+' · '+att+')' });
+  } else {
+    items.push({ type:'info', title:'💡 추천 SVC: '+recommended.label, sub:att+' + '+seats+' 기준 — 직접 확인 후 선택하세요' });
+  }
+
+  renderHintBox(hintEl, items);
 }
 
 // 실시간 OT 경고 박스 갱신
@@ -4060,6 +4124,7 @@ function updateSurchargeOptions(){
   }
 
   checkHotelSurchargeHint();
+  updateSvcHint();
   calcTotal();
 }
 
@@ -4068,6 +4133,7 @@ function onSvcSelectChange(){
   const wrap = document.getElementById('f-svc-custom-wrap');
   if(sel&&wrap) wrap.style.display = sel.value==='OTHER' ? 'block' : 'none';
   calcTotal();
+  updateSvcHint();
 }
 function onHotelSelectChange(){ calcTotal(); }
 function onDistSelectChange(){ calcTotal(); }
@@ -4109,9 +4175,10 @@ function calcTotal(){
   fixedTA.forEach(id=>{ta+=parseFloat(document.getElementById(id)?.value||0);});
   if(isLarge) ta += tollVal;
   ta += nightTA;
-  // dr(드라이버 지급): 기본 수당 + OT 100% + 야간투어 + 세차 + 식비 + 개인결제 톨/연료
+  // dr(드라이버 지급): 기본 수당 + OT 100% + 호텔서차지 + 야간투어 + 세차 + 식비 + 개인결제 톨/연료
   const att=document.getElementById('dr-attraction')?.value;
   let dr=att&&RATES[att]?RATES[att].dr+(parseFloat(document.getElementById('f-ot')?.value||0)):0;
+  dr += getHotelValue(); // 호텔 서차지 전액 드라이버 지급
   dr += nightDR + washVal + mealVal;
   const tollPersonal = document.getElementById('toll-personal')?.checked;
   const fuelPersonal = document.getElementById('fuel-personal')?.checked;
