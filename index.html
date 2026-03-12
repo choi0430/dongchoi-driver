@@ -596,7 +596,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div class="form-row mb14">
           <div class="form-group" style="flex:1;">
             <label class="form-label">OT 요금 <span style="font-size:11px;color:var(--muted);" id="ot-rate-hint"></span></label>
-            <div style="font-size:10px;color:#f97316;font-weight:600;margin-bottom:4px;">⚠️ OT는 1시간 단위 청구 (예: 30분 → $30~40 / 1h)</div>
+            <div style="font-size:10px;color:#f97316;font-weight:600;margin-bottom:4px;">⚠️ OT는 1시간 단위 올림 청구 (예: 0.5h → 1h로 적용)</div>
             <div id="ot-btn-group" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
             <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-ot" placeholder="0" oninput="onOTInput()"></div>
             <div id="ot-hint-box" style="display:none;margin-top:6px;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.6;"></div>
@@ -1446,8 +1446,24 @@ function applyMasterData(data) {
   MASTER.drivers     = (data.M_Drivers   || []);
   MASTER.guides      = (data.M_Guides    || []);
   MASTER.vehicles    = (data.M_Vehicles  || []);
-  MASTER.agencies    = (data.M_Clients   || data.M_Agencies || []);
+  // M_Clients 시트 없을 경우 M_PriceClient의 Agency 컬럼에서 여행사 목록 구성
+  const rawClients = data.M_Clients || data.M_Agencies || [];
+  if(rawClients.length > 0){
+    MASTER.agencies = rawClients;
+  } else if(data.M_PriceClient && data.M_PriceClient.length > 0){
+    const agencyNames = [...new Set(data.M_PriceClient.map(r=>r.Agency).filter(Boolean))];
+    MASTER.agencies = agencyNames.map(n=>({Name:n, Mobile:'', Address:''}));
+  } else {
+    MASTER.agencies = [];
+  }
   MASTER.courses     = (data.M_Courses   || []);
+  // M_Courses가 get_all_masters에 없으면 별도 로드
+  if(!MASTER.courses.length){
+    fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=M_Courses')
+      .then(r=>r.json()).then(j=>{
+        if(j.ok && j.rows?.length){ MASTER.courses = j.rows; }
+      }).catch(()=>{});
+  }
   MASTER.hotels      = (data.M_Hotels      || []);
   MASTER.priceClient = (data.M_PriceClient || []);
   MASTER.priceDriver = (data.M_PriceDriver || []);
@@ -3655,12 +3671,10 @@ function updateOTHint(){
 
     const effOT = Math.max(pm8OT, durOT);
     if(effOT > 0){
-      // ⚠️ OT는 1시간 단위 청구 — 올림 적용
+      // 1시간 단위 올림 청구
       const effOT_ceil = Math.ceil(effOT);
       const otAmt = effOT_ceil * otRate;
-      const rawAmt = Math.round(effOT * otRate);
-      lines.push(`🔴 <b>OT 발생</b>: ${effOT.toFixed(2)}h → <b>1시간 단위 올림: ${effOT_ceil}h</b> × $${otRate}/h = <b>$${otAmt}</b>${seats ? '' : ' (인승 선택 후 재확인)'}`);
-      lines.push(`⚠️ <b>OT는 1시간 단위</b> — 예: 0.5h도 1h로 청구 ($${otRate})`);
+      lines.push(`🔴 <b>OT 발생</b>: ${effOT.toFixed(2)}h (<b>1h 단위 올림 → ${effOT_ceil}h</b>) × $${otRate}/h = <b>$${otAmt}</b>${seats ? '' : ' (인승 선택 후 재확인)'}`);
     } else if(totalMin > 0){
       lines.push(`✅ 현재 OT 없음 (종료 ${et})`);
     }
@@ -3687,10 +3701,7 @@ function checkHotelSurchargeHint(){
   const pickup  = document.getElementById('dr-pickup')?.value?.trim()  || '';
   const dropoff = document.getElementById('dr-dropoff')?.value?.trim() || '';
 
-  // 구 hint el (hotel-surcharge-hint) 숨기기 — 새 박스로 통합
-  const oldHintEl = document.getElementById('hotel-surcharge-hint');
-  if(oldHintEl) oldHintEl.style.display = 'none';
-
+  // hotel-surcharge-hint: Hotel Surcharge 선택란 위에 표시
   const hintEl = document.getElementById('pickup-drop-hint');
   if(!hintEl) return;
 
