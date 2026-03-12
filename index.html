@@ -443,8 +443,8 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">차량 (Rego)<span class="req">*</span></label>
             <div class="sdd-wrap" id="sdd-rego-wrap">
               <input class="sdd-input" id="pre-rego" placeholder="차량 검색 또는 직접 입력" autocomplete="off"
-                oninput="sddFilter('rego')" onfocus="sddOpen('rego')" onblur="sddBlur('rego')">
-              <div class="sdd-dropdown" id="sdd-rego-list"></div>
+                oninput="sddFilter('prerego')" onfocus="sddOpen('prerego')" onblur="sddBlur('prerego')">
+              <div class="sdd-dropdown" id="sdd-prerego-list"></div>
             </div>
             <div id="manual-vehicle-hint" style="display:none;margin-top:6px;"></div>
           </div>
@@ -1703,6 +1703,7 @@ const SDD_CONFIG = {
     return [...none,...base,...getCustomGuides().map(n=>({name:n,sub:''}))];
   }, type:'guide' },
   rego:       { list: ()=> (MASTER.vehicles||[]).map(v=>({name:v.Rego,sub:(v.Seats?v.Seats+'인승':'')+(v.Transmission==='Manual'?' · 🔧 수동':'')})), type:'rego' },
+  prerego:    { list: ()=> (MASTER.vehicles||[]).map(v=>({name:v.Rego,sub:(v.Seats?v.Seats+'인승':'')+(v.Transmission==='Manual'?' · 🔧 수동':'')})), type:'prerego' },
   agency:     { list: ()=> (MASTER.agencies||[]).map(a=>({name:a.Name,sub:a.Mobile||''})),              type:'agency' },
   attraction: { list: ()=>{
     if(MASTER.courses && MASTER.courses.length>0)
@@ -1720,8 +1721,9 @@ const SDD_CONFIG = {
   }, type:'attraction' }
 };
 
+function sddInputId(key){ return key==='prerego' ? 'pre-rego' : 'dr-'+key; }
 function sddOpen(key) {
-  const input = document.getElementById('dr-'+key);
+  const input = document.getElementById(sddInputId(key));
   const list  = document.getElementById('sdd-'+key+'-list');
   const rect  = input.getBoundingClientRect();
   const visH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
@@ -1737,7 +1739,7 @@ function sddBlur(key) {
   setTimeout(()=>{document.getElementById('sdd-'+key+'-list').classList.remove('open');},200);
 }
 function sddFilter(key) {
-  const input = document.getElementById('dr-'+key);
+  const input = document.getElementById(sddInputId(key));
   const list  = document.getElementById('sdd-'+key+'-list');
   const q     = input.value.trim().toLowerCase();
   const cfg   = SDD_CONFIG[key];
@@ -1776,7 +1778,7 @@ function sddFilter(key) {
   list.classList.add('open');
 }
 function sddSelect(key, value) {
-  document.getElementById('dr-'+key).value = value;
+  document.getElementById(sddInputId(key)).value = value;
   document.getElementById('sdd-'+key+'-list').classList.remove('open');
   if(key==='guide'){
     const found = GUIDE_LIST.find(g=>g.name===value);
@@ -1798,6 +1800,17 @@ function sddSelect(key, value) {
       busLoadRegoMarkers('pre', value);
     }
   }
+  // Pre-Departure 차량 선택 시
+  if(key==='prerego'){
+    const v = MASTER.vehicles?.find(v=>v.Rego===value);
+    // Pre-Departure 차량 데미지 로드
+    const preWrap = document.getElementById('bus-pre-mount');
+    if(preWrap && preWrap.dataset.mounted === 'pre') {
+      busLoadRegoMarkers('pre', value);
+    }
+    // Manual 차량 힌트 (pre 화면에 있는 경우 대비)
+    updateManualHint(v);
+  }
 }
 function sddAddNew(key, value) {
   if(!value) return;
@@ -1806,7 +1819,7 @@ function sddAddNew(key, value) {
 
   if(cfg.type==='hotel')      { saveCustomHotel(v); }
   else if(cfg.type==='guide') { saveCustomGuide(v); }
-  else if(cfg.type==='rego') {
+  else if(cfg.type==='rego'||cfg.type==='prerego') {
     if(!MASTER.vehicles.find(x=>x.Rego===v)){
       MASTER.vehicles.push({Rego:v,Seats:'',Owner:'',Active:'Y'});
       fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
@@ -2946,14 +2959,26 @@ function addDailyReport(shiftId){
   editingShiftId = shiftId;
   showPage('report');
   goStep(2);
-  // Pre Departure 픽업 차량 정보를 초기값으로 세팅
+  // Pre Departure 정보를 초기값으로 세팅
   const shift = activeShifts.find(s=>s.id===shiftId);
-  const drDate = document.getElementById('dr-date');
+  const drDate  = document.getElementById('dr-date');
   const drSeats = document.getElementById('dr-seats');
+  const drRego  = document.getElementById('dr-rego');
   // 날짜: 시프트 날짜 기준 (없으면 오늘)
   if(drDate) drDate.value = (shift?.date) || todayDisplay();
+  // 차량(Rego): Pre-Departure에서 선택한 차량 기본값
+  if(drRego && shift?.rego) {
+    drRego.value = shift.rego;
+    // 수동 차량 힌트 + 인승 자동 설정
+    const v = MASTER.vehicles?.find(v=>v.Rego===shift.rego);
+    if(v?.Seats && drSeats) {
+      drSeats.value = v.Seats;
+      updateSurchargeOptions();
+    }
+    updateManualHint(v);
+  }
   // 인승: 시프트에 저장된 마지막 인승값 (없으면 빈칸)
-  if(drSeats && shift?.seats) {
+  if(drSeats && shift?.seats && !drSeats.value) {
     drSeats.value = shift.seats;
     updateSurchargeOptions();
   }
