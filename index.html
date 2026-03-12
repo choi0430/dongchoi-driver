@@ -2236,7 +2236,7 @@ function showPage(id){
   if(nav) nav.classList.add('active');
   const _s=document.getElementById('screen'); if(_s) _s.scrollTop=0;
   // 연락처 탭 진입 시 최신 데이터로 재렌더링
-  if(id === 'contacts') renderContacts();
+  if(id === 'contacts'){ _activeRegosFetched=false; renderContacts(); }
   if(id === 'me') initMyInfoPage();
 }
 
@@ -3629,6 +3629,8 @@ function calcTotal(){
 // ═══════════════════════════════════════
 function renderContacts(filter,search){
   filter=filter||contactFilter; search=search||'';
+  // 처음 연락처 탭 진입 시 운행 상태 비동기 조회 (결과 오면 재렌더)
+  if(!_activeRegosFetched){ fetchActiveRegosForContacts(); }
   const el=document.getElementById('contact-list');
   const contactData = window.CONTACTS || CONTACTS;
   let list=contactData.filter(c=>(filter==='all'||c.type===filter)&&(c.name.toLowerCase().includes(search.toLowerCase())||c.phone.includes(search)));
@@ -3644,16 +3646,72 @@ function renderContacts(filter,search){
   el.innerHTML=html||`<div style="padding:40px;text-align:center;color:var(--muted);">검색 결과 없음</div>`;
 }
 
+// 다른 드라이버의 현재 운행 rego 캐시 {driverName: rego|null}
+let _otherDriverRegos = {};
+let _activeRegosFetched = false;
+
+async function fetchActiveRegosForContacts(){
+  if(_activeRegosFetched) return;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_active_regos');
+    const json = await res.json();
+    if(json.ok && json.regos){
+      _otherDriverRegos = {};
+      json.regos.forEach(r => { _otherDriverRegos[r.driver] = r.rego; });
+    }
+    _activeRegosFetched = true;
+  } catch(e){ /* 네트워크 오류 무시 */ }
+  renderContacts();
+}
+
 function renderContactItem(c){
-  const isOtherDriver = c.type==='driver' && c.name !== (currentDriver?.name||'');
-  const warn = !isOtherDriver && c.note.includes('만료');
-  // 다른 드라이버는 이름·연락처만 표시 (비용·급여 관련 내용 숨김)
-  const noteText = isOtherDriver ? c.note.replace(/\$[\d,]+/g,'').replace(/급여.*/i,'').trim() : c.note;
+  const myName = currentDriver?.name || '';
+  // 관리자 여부: 앱 내 관리자 모드 OR 현재 드라이버가 관리자(대표)
+  const isAdmin = !!(window.isAdminMode) || (currentDriver?.IsAdmin === 'Y') || (currentDriver?.Name_EN||'').toLowerCase().includes('choi');
+  const isSelf  = c.type==='driver' && c.name === myName;
+  const isOther = c.type==='driver' && !isSelf;
+
+  // ── 자신 또는 관리자: 모두 표시
+  if(isSelf || isAdmin){
+    const warn = c.note.includes('만료');
+    return `<div class="contact-item">
+      <div class="contact-avatar ${c.type}" style="background:${c.type==='driver'?'#eff4ff':'#f0fdf4'};color:${c.color};">${c.initials}</div>
+      <div style="flex:1;min-width:0;">
+        <div class="contact-name">${c.name}${isSelf?' <span style=\"font-size:10px;background:#eff4ff;color:#1a56db;padding:2px 6px;border-radius:10px;font-weight:700;\">나</span>':''}</div>
+        <div class="contact-sub" style="${warn?'color:var(--red);font-weight:600;':''}">
+          ${c.note}${isSelf&&_otherDriverRegos[myName]?' · 🚌 '+_otherDriverRegos[myName]:''}
+        </div>
+      </div>
+      <div class="contact-actions">
+        <button class="contact-btn contact-btn-call" onclick="callContact('${c.phone}')">📞</button>
+        <button class="contact-btn contact-btn-msg" onclick="smsContact('${c.phone}')">💬</button>
+      </div>
+    </div>`;
+  }
+
+  // ── 다른 드라이버: 이름 + 전화번호만 (운행 중이면 차량도)
+  if(isOther){
+    const rego = _otherDriverRegos[c.name];
+    const subLine = rego ? `🚌 운행 중 · ${rego}` : '';
+    return `<div class="contact-item">
+      <div class="contact-avatar ${c.type}" style="background:#eff4ff;color:${c.color};">${c.initials}</div>
+      <div style="flex:1;min-width:0;">
+        <div class="contact-name">${c.name}</div>
+        ${subLine ? `<div class="contact-sub" style="color:var(--accent);font-weight:600;">${subLine}</div>` : ''}
+      </div>
+      <div class="contact-actions">
+        <button class="contact-btn contact-btn-call" onclick="callContact('${c.phone}')">📞</button>
+        <button class="contact-btn contact-btn-msg" onclick="smsContact('${c.phone}')">💬</button>
+      </div>
+    </div>`;
+  }
+
+  // ── 가이드: 이름 + 연락처 + note 그대로
   return `<div class="contact-item">
-    <div class="contact-avatar ${c.type}" style="background:${c.type==='driver'?'#eff4ff':'#f0fdf4'};color:${c.color};">${c.initials}</div>
+    <div class="contact-avatar ${c.type}" style="background:#f0fdf4;color:${c.color};">${c.initials}</div>
     <div style="flex:1;min-width:0;">
       <div class="contact-name">${c.name}</div>
-      <div class="contact-sub" style="${warn?'color:var(--red);font-weight:600;':''}">${noteText}</div>
+      <div class="contact-sub">${c.note}</div>
     </div>
     <div class="contact-actions">
       <button class="contact-btn contact-btn-call" onclick="callContact('${c.phone}')">📞</button>
