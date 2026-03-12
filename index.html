@@ -1102,14 +1102,12 @@ async function loadMasterData() {
 // 전화번호 0 보정 헬퍼 (Google Sheets 숫자 형식 → 앞 0 복원)
 function fixPhone(p) {
   if(p === null || p === undefined || p === '') return '';
-  // Sheets에서 숫자로 저장된 경우 소수점 제거 (예: 430175195.0)
+  // 숫자/텍스트 모두 처리: 소수점, 공백, 특수문자 제거
   let s = String(p).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
   if(!s) return '';
-  // 9자리 숫자 → 0 + 9자리 = 10자리 호주 전화번호
-  if(s.length === 9) return '0' + s;
-  // 이미 10자리면 그대로
-  if(s.length === 10) return s;
-  // 8자리 이하는 원본 유지
+  if(s.length === 9)  return '0' + s;  // 숫자 형식: 앞 0 복원
+  if(s.length === 10) return s;         // 텍스트 형식: 정상 (0으로 시작)
+  if(s.length === 8)  return '0' + s;  // 8자리 예외 처리
   return s;
 }
 
@@ -1996,6 +1994,8 @@ function showPage(id){
   const nav = document.getElementById('nav-'+id);
   if(nav) nav.classList.add('active');
   const _s=document.getElementById('screen'); if(_s) _s.scrollTop=0;
+  // 연락처 탭 진입 시 최신 데이터로 재렌더링
+  if(id === 'contacts') renderContacts();
 }
 
 function startReport(){
