@@ -496,12 +496,8 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">여행사<span class="req">*</span></label>
-            <select class="form-select" id="dr-agency">
+            <select class="form-select" id="dr-agency" onfocus="refreshAgencyList()">
               <option value="">선택</option>
-              <option>HANA TOUR</option><option>JOY TOUR</option><option>TOUR ACE</option>
-              <option>WIN TOUR</option><option>LEE'S TRAVEL</option><option>SUNJIN TOUR</option>
-              <option>GENTRA LINK PTY LTD</option>
-              <option>NOVA</option><option>BRIGHTON</option><option>개인</option>
             </select>
           </div>
           <div class="form-group">
@@ -1126,8 +1122,10 @@ function populateMasterSelects() {
   // 여행사 (dr-agency)
   const agSel = document.getElementById('dr-agency');
   if(agSel && MASTER.agencies.length > 0) {
+    const prevAgency = agSel.value;
     agSel.innerHTML = '<option value="">선택</option>' +
       MASTER.agencies.map(a=>`<option value="${a.Name}">${a.Name}</option>`).join('');
+    if(prevAgency) agSel.value = prevAgency;
   }
   // 코스 (dr-attraction)
   const attSel = document.getElementById('dr-attraction');
@@ -1149,9 +1147,46 @@ function rebuildGuideList() {
   if(MASTER.guides.length > 0) {
     GUIDE_LIST = MASTER.guides.map((g,i) => ({
       id: 'SG' + String(i+1).padStart(3,'0'),
-      name: g.Name,
-      mobile: fixPhone(g.Phone)
+      name: g.Guide_Name || g.Name || g.name || '',
+      mobile: fixPhone(g.Mobile || g.Phone || '')
     }));
+  }
+}
+
+// 여행사 드롭다운 실시간 갱신 (관리자앱에서 추가 후 즉시 반영)
+let _agRefreshing = false;
+async function refreshAgencyList() {
+  if(_agRefreshing) return;
+  const sel = document.getElementById('dr-agency');
+  if(!sel) return;
+
+  // MASTER.agencies가 이미 있으면 일단 그걸로 채운 뒤 GAS 갱신
+  if(MASTER.agencies.length > 0) {
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">선택</option>' +
+      MASTER.agencies.map(a=>`<option value="${a.Name}">${a.Name}</option>`).join('');
+    if(prev) sel.value = prev;
+  }
+
+  // GAS에서 최신 여행사 목록 조회
+  _agRefreshing = true;
+  try {
+    const res  = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters');
+    const data = await res.json();
+    if(data.ok && data.data) {
+      const agencies = data.data.M_Clients || data.data.M_Agencies || [];
+      if(agencies.length > 0) {
+        MASTER.agencies = agencies;
+        const prev = sel.value;
+        sel.innerHTML = '<option value="">선택</option>' +
+          agencies.map(a=>`<option value="${a.Name}">${a.Name}</option>`).join('');
+        if(prev) sel.value = prev;
+      }
+    }
+  } catch(e) {
+    // 실패 시 기존 목록 유지
+  } finally {
+    _agRefreshing = false;
   }
 }
 
@@ -1162,15 +1197,15 @@ function populateContacts() {
         type:'driver',
         name: d.Name_KR || d.Name_EN,
         initials: d.Initials,
-        phone: fixPhone(d.Phone),
+        phone: fixPhone(d.Mobile || d.Phone || ''),
         note: [d.License_Class, d.License_Expiry ? '면허 ' + fmtDate(String(d.License_Expiry)) : ''].filter(Boolean).join(' · ') || '—',
         color: ['#d97706','#1a56db','#0e9f6e','#7e3af2','#e02424','#0891b2','#be185d'][i % 7]
       })),
       ...MASTER.guides.map(g => ({
         type:'guide',
-        name: g.Name,
-        initials: g.Initials || String(g.Name||'').substring(0,2).toUpperCase(),
-        phone: fixPhone(g.Phone),
+        name: g.Guide_Name || g.Name || g.name || '',
+        initials: g.Initials || String(g.Guide_Name||g.Name||'').substring(0,2).toUpperCase(),
+        phone: fixPhone(g.Mobile || g.Phone || ''),
         note: g.Type || '프리랜서',
         color:'#0e9f6e'
       }))
