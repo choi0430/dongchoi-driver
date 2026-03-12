@@ -4556,7 +4556,7 @@ function getAllReports(){
 let _driverWagesLastSync = 0;
 async function loadDriverWagesFromGAS(driverName){
   if(!driverName) return;
-  if(Date.now() - _driverWagesLastSync < 30000) return; // 30초 TTL
+  if(Date.now() - _driverWagesLastSync < 60000) return; // 60초 TTL
   try{
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_wages');
     if(!res.ok) return;
@@ -4654,37 +4654,78 @@ async function getGASDRForWeek(driverName, monISO){
   return total;
 }
 async function renderPay(){
-  const all = getAllReports();
   const driverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
 
-  // 배지 로딩 표시
+  // ── 로딩 표시
   const badge0 = document.getElementById('pay-unpaid-badge');
-  if(badge0 && badge0.textContent==='집계 중...'){
-    badge0.textContent = '⏳ 불러오는 중';
-    badge0.style.background = 'var(--muted)';
-  }
+  const el0 = document.getElementById('pay-weeks-list');
+  if(badge0){ badge0.textContent='⏳ 불러오는 중'; badge0.style.background='var(--muted)'; }
+  if(el0)  { el0.innerHTML='<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">💰 급여 데이터를 불러오는 중...</div>'; }
 
-  // GAS에서 wages 최신 로드 (30초 캐시)
-  await loadDriverWagesFromGAS(driverName);
+  // ── GAS에서 병렬 로드: DR 리포트 + Wages
+  await Promise.all([
+    fetchDRCache(),
+    loadDriverWagesFromGAS(driverName)
+  ]);
 
-  // 주별 그룹핑 (월~일)
+  // ── DR 리포트: GAS 우선, 로컬 fallback 병합
+  const gasReports = (_drReportsCache||[]).filter(r=>{
+    const nm = String(r.Driver||'').trim();
+    if(!driverName) return false;
+    // 한글이름 / 영어이름 모두 매칭
+    const me = currentDriver;
+    return nm===driverName || nm===(me?.englishName||'') || nm===(me?.initials||'');
+  }).map(r=>({
+    date:        fmtDate(r.Date||''),
+    agency:      r.TA_Name||r.Agency||'',
+    attraction:  r.Attraction||'',
+    rego:        r.Rego||'',
+    svc:         parseFloat(r.SVC_Fee||0),
+    dr:          parseFloat(r.DR_Cost||0),
+    ot:          parseFloat(r.OT||0),
+    hotelSurcharge: parseFloat(r.Hotel_Surcharge||0),
+    distSurcharge:  parseFloat(r.Dist_Surcharge||0),
+    early:       parseFloat(r.Early||0),
+    night:       parseFloat(r.Night_DR||0),
+    nightOwner:  parseFloat(r.Night_Owner||0),
+    nightType:   r.Night_Type||'',
+    wash:        parseFloat(r.Wash||0),
+    meal:        parseFloat(r.Meal||0),
+    toll:        parseFloat(r.Toll||0),
+    fuel:        parseFloat(r.Fuel||0),
+    guide:       r.Guide||'',
+    tourcode:    r.Tourcode||r.Tour_Code||'',
+    remarks:     r.Remarks||'',
+    timeStart:   r.Time_Start||r.DR_Start||'',
+    timeEnd:     r.Time_End||r.DR_End||'',
+    id:          r.ID||r.id||''
+  }));
+
+  // 로컬 리포트도 병합 (GAS에 아직 없는 방금 제출한 것)
+  const localReports = getAllReports();
+  const gasIds = new Set(gasReports.map(r=>r.id).filter(Boolean));
+  const mergedReports = [...gasReports];
+  localReports.forEach(r=>{ if(!r.id||!gasIds.has(r.id)) mergedReports.push(r); });
+
+  // ── 주별 그룹핑
   const weekMap = {};
-  all.forEach(r=>{
+  mergedReports.forEach(r=>{
     const wk = getWeekKey(r.date);
     if(!wk) return;
-    if(!weekMap[wk.key]) weekMap[wk.key] = { label:wk.label, mon:wk.mon, reports:[] };
+    if(!weekMap[wk.key]) weekMap[wk.key]={ label:wk.label, mon:wk.mon, reports:[] };
     weekMap[wk.key].reports.push(r);
   });
   const weeks = Object.values(weekMap).sort((a,b)=>b.mon-a.mon);
 
+  // ── Wages (GAS 로드 완료 후 로컬 캐시에서 읽기)
   const driverWages = getDriverWagesFromLocal(driverName);
 
-  // 미지급 배지
-  let totalUnpaid = 0;
+  // ── 미지급 배지 계산
+  let totalUnpaid=0;
   weeks.forEach(wk=>{
-    const net = wk.reports.reduce((s,r)=>s+(r.dr||0)-(r.nightOwner||0),0);
-    const paid = getWageEntriesForWeek(driverWages, wk.key).reduce((s,e)=>s+(Number(e.amount)||0),0);
-    totalUnpaid += Math.max(0, net - paid);
+    const net  = wk.reports.reduce((s,r)=>s+(r.dr||0)-(r.nightOwner||0),0);
+    const paid = getWageEntriesForWeek(driverWages,wk.key).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    totalUnpaid += Math.max(0, net-paid);
   });
   const badge = document.getElementById('pay-unpaid-badge');
   if(badge){
@@ -4696,15 +4737,14 @@ async function renderPay(){
   if(!el) return;
 
   if(weeks.length===0){
-    el.innerHTML = '<div class="pay-empty">📋 아직 저장된 리포트가 없어요.<br>Daily Report를 작성하면 여기에 표시됩니다.</div>';
+    el.innerHTML='<div class="pay-empty">📋 아직 저장된 리포트가 없어요.<br>Daily Report를 작성하면 여기에 표시됩니다.</div>';
     return;
   }
 
   el.innerHTML='';
   weeks.forEach(wk=>{
-    // ── 항목별 합계 계산
-    const trips   = wk.reports.length;
-    const days    = [...new Set(wk.reports.map(r=>r.date))].length;
+    const trips  = wk.reports.length;
+    const days   = [...new Set(wk.reports.map(r=>r.date))].length;
     const drTotal       = wk.reports.reduce((s,r)=>s+(r.dr||0),0);
     const ownerTotal    = wk.reports.reduce((s,r)=>s+(r.nightOwner||0),0);
     const netPay        = drTotal - ownerTotal;
@@ -4716,29 +4756,26 @@ async function renderPay(){
     const mealTotal     = wk.reports.reduce((s,r)=>s+(r.meal||0),0);
     const nightDRTotal  = wk.reports.reduce((s,r)=>s+(r.night||0),0);
 
-    // ── 지급 기록
     const weekWageData = getWageEntriesForWeek(driverWages, wk.key);
     const paidAmt = weekWageData.reduce((s,e)=>s+(Number(e.amount)||0),0);
     const balance = netPay - paidAmt;
     const isPaid  = balance <= 0;
 
-    // ── 항목 배지 (0인 항목 제외)
     const items = [
-      {label:'OT', val:otTotal, color:'#3b82f6'},
-      {label:'호텔', val:hotelTotal, color:'#8b5cf6'},
-      {label:'거리', val:distTotal, color:'#0ea5e9'},
-      {label:'조기출발', val:earlyTotal, color:'#f59e0b'},
-      {label:'세차', val:washTotal, color:'#10b981'},
-      {label:'식비', val:mealTotal, color:'#10b981'},
-      {label:'야간', val:nightDRTotal, color:'#6366f1'},
+      {label:'OT',      val:otTotal,    color:'#3b82f6'},
+      {label:'호텔',    val:hotelTotal, color:'#8b5cf6'},
+      {label:'거리',    val:distTotal,  color:'#0ea5e9'},
+      {label:'조기출발',val:earlyTotal, color:'#f59e0b'},
+      {label:'세차',    val:washTotal,  color:'#10b981'},
+      {label:'식비',    val:mealTotal,  color:'#10b981'},
+      {label:'야간',    val:nightDRTotal,color:'#6366f1'},
     ].filter(i=>i.val>0);
 
     const itemBadges = items.map(i=>
       `<span style="display:inline-flex;align-items:center;gap:2px;background:${i.color}18;border:1px solid ${i.color}44;border-radius:5px;padding:2px 6px;font-size:10px;font-weight:700;color:${i.color};">${i.label} $${i.val}</span>`
     ).join('');
 
-    // ── 지급 내역 rows
-    const wageRows = weekWageData.length > 0
+    const wageRows = weekWageData.length>0
       ? `<div style="border-top:1.5px solid var(--border);margin-top:10px;padding-top:10px;">
           <div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;">💸 지급 내역</div>
           ${weekWageData.map(e=>`
@@ -4770,7 +4807,6 @@ async function renderPay(){
           </div>
         </div>
       </div>
-
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:${items.length?'10px':'0'};">
         <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center;">
           <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">발생 수당</div>
@@ -4785,14 +4821,11 @@ async function renderPay(){
           <div style="font-size:14px;font-weight:800;color:${isPaid?'var(--muted)':'#ea580c'};">$${Math.max(0,Math.round(balance)).toLocaleString()}</div>
         </div>
       </div>
-
-      ${items.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">${itemBadges}</div>` : ''}
-
+      ${items.length?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">${itemBadges}</div>`:''}
       ${wageRows}
       <div style="text-align:center;margin-top:8px;">
         <span style="font-size:11px;color:var(--muted);">탭하면 상세 내역 →</span>
       </div>`;
-
     card.dataset.weekKey = wk.key;
     card.addEventListener('click', ()=>showPayDetail(wk));
     el.appendChild(card);
@@ -4971,19 +5004,30 @@ function showPayDetail(wk){
   el.innerHTML = html;
 }
 
-function renderSalary(){
+async function renderSalary(){
   const el=document.getElementById('salary-list');
   const meEl=document.getElementById('me-salary-detail');
   const driverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
   const driverWages = getDriverWagesFromLocal(driverName);
 
-  // 로컬 DR 리포트 기반 주별 발생 금액
-  const all = getAllReports();
+  // GAS + 로컬 DR 리포트 병합 기반 주별 발생 금액
+  await Promise.all([fetchDRCache(), loadDriverWagesFromGAS(driverName)]);
+  const gasAll = (_drReportsCache||[]).filter(r=>{
+    const nm=String(r.Driver||'').trim();
+    return nm===driverName || nm===(currentDriver?.englishName||'') || nm===(currentDriver?.initials||'');
+  }).map(r=>({
+    date: fmtDate(r.Date||''),
+    dr:   parseFloat(r.DR_Cost||0),
+    nightOwner: parseFloat(r.Night_Owner||0)
+  }));
+  const localAll = getAllReports();
+  const gasIds2 = new Set(gasAll.map(r=>r.id).filter(Boolean));
+  const all = [...gasAll, ...localAll.filter(r=>!r.id||!gasIds2.has(r.id))];
   const weekMap = {};
   all.forEach(r=>{
     const wk = getWeekKey(r.date);
     if(!wk) return;
-    if(!weekMap[wk.key]) weekMap[wk.key]={label:wk.label,key:wk.key,total:0,paid:0};
+    if(!weekMap[wk.key]) weekMap[wk.key]={label:wk.label,key:wk.key,total:0,paid:0,wageEntries:[]};
     weekMap[wk.key].total += (r.dr||0) - (r.nightOwner||0);
   });
   // 지급 금액 합산 (admin_wages 키 YYYY-MM-DD → wk.key 변환 포함)
