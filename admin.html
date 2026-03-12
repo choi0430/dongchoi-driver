@@ -406,6 +406,70 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 </div>
 
 
+<!-- INVOICE PAGE -->
+<div class="pg" id="pinv">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">🧾 Tax Invoice</div><div class="ssb">여행사 청구서 발행</div></div>
+    <button class="btn bgh sm" onclick="toggleInvSettings()">⚙️ 설정</button>
+  </div>
+
+  <!-- 회사 설정 패널 (기본 숨김) -->
+  <div id="inv-settings" style="display:none;background:var(--sf2);margin:8px 14px 0;border-radius:12px;padding:14px;">
+    <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:10px;letter-spacing:.5px;">🏢 Dong Choi Pty Ltd 발행자 정보</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:3px;">ABN</div>
+        <input id="inv-abn" class="profit-finp" style="width:100%;" placeholder="예: 12 345 678 901" oninput="saveInvSettings()">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:3px;">은행명</div>
+        <input id="inv-bank" class="profit-finp" style="width:100%;" placeholder="예: Commonwealth Bank" oninput="saveInvSettings()">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:3px;">BSB</div>
+        <input id="inv-bsb" class="profit-finp" style="width:100%;" placeholder="062-000" oninput="saveInvSettings()">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:3px;">계좌번호</div>
+        <input id="inv-acc" class="profit-finp" style="width:100%;" placeholder="12345678" oninput="saveInvSettings()">
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--t3);">※ 입력 즉시 자동 저장됩니다</div>
+  </div>
+
+  <!-- 필터 섹션 -->
+  <div style="padding:10px 14px 0;">
+    <!-- 여행사 선택 -->
+    <div style="margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px">여행사</div>
+      <select id="inv-agency" class="profit-sel" style="width:100%;" onchange="onInvAgencyChange()">
+        <option value="">-- 여행사 선택 --</option>
+      </select>
+    </div>
+    <!-- 기간 선택 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px">시작일</div>
+        <input type="date" id="inv-from" class="profit-finp" style="width:100%;box-sizing:border-box" onchange="onInvDateChange()">
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px">종료일</div>
+        <input type="date" id="inv-to" class="profit-finp" style="width:100%;box-sizing:border-box" onchange="onInvDateChange()">
+      </div>
+    </div>
+    <!-- 빠른 기간 버튼 -->
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="btn bgh sm" onclick="setInvPeriod('thisweek')">이번 주</button>
+      <button class="btn bgh sm" onclick="setInvPeriod('lastweek')">지난 주</button>
+      <button class="btn bgh sm" onclick="setInvPeriod('thismonth')">이번 달</button>
+      <button class="btn bgh sm" onclick="setInvPeriod('lastmonth')">지난 달</button>
+    </div>
+  </div>
+
+  <!-- 리포트 미리보기 -->
+  <div id="inv-preview" style="padding:0 14px 14px"></div>
+</div>
+
 <!-- WAGE PAGE -->
 <div class="pg" id="pwage">
   <div class="shd" style="padding-top:8px">
@@ -548,6 +612,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div class="ni" id="nhtl" onclick="nv('phtl','nhtl');rH()"><div class="nie">🏨</div><div class="nil">호텔</div></div>
   <div class="ni" id="nsub" onclick="nv('psub','nsub');rSub()"><div class="nie">🤝</div><div class="nil">서브</div></div>
   <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
+  <div class="ni" id="ninv" onclick="nv('pinv','ninv');initInvoice()"><div class="nie">🧾</div><div class="nil">인보이스</div></div>
 </div>
 </div><!-- /sm -->
 
@@ -663,6 +728,7 @@ function nv(pg,ni){
     pprc:  ()=>syncPrices().then(()=>{rP();rPD();}),
     psub:  ()=>syncSub().then(rSub),
     pwage: ()=>loadWagesFromSheet().then(()=>rWage(ST.curWageDriver)),
+    pinv:  ()=>initInvoice(),
   };
   syncMap[pg]?.();
 }
@@ -1986,6 +2052,471 @@ function deleteLedgerEntry(idx){
   renderLedger();
   toast('삭제 완료 ☁️','ok');
   deleteLedgerEntryFromSheet(rowIndex);
+}
+
+
+// ═══════════════════════════════════════
+// INVOICE (Tax Invoice 발행)
+// ═══════════════════════════════════════
+
+// Dong Choi Pty Ltd 발행자 정보
+const DC_COMPANY = {
+  name:    'DONG CHOI PTY LTD',
+  abn:     localStorage.getItem('dc_abn') || '',
+  address: 'Sydney, NSW, Australia',
+  phone:   '0430 175 195',
+  email:   'dongchoicoach@gmail.com',
+};
+
+function saveCompanyInfo() {
+  const abn = document.getElementById('inv-abn')?.value || '';
+  localStorage.setItem('dc_abn', abn);
+  DC_COMPANY.abn = abn;
+}
+
+// ── 날짜 유틸 ──
+function getMonday(d) {
+  const dt = new Date(d);
+  const day = dt.getDay();
+  const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
+  dt.setDate(diff);
+  return dt.toISOString().slice(0, 10);
+}
+
+function setInvPeriod(type) {
+  const today = new Date();
+  let from, to;
+  if (type === 'thisweek') {
+    from = getMonday(today);
+    to   = new Date(from); to.setDate(to.getDate() + 6); to = to.toISOString().slice(0,10);
+  } else if (type === 'lastweek') {
+    const lm = new Date(today); lm.setDate(lm.getDate() - 7);
+    from = getMonday(lm);
+    to   = new Date(from); to.setDate(to.getDate() + 6); to = to.toISOString().slice(0,10);
+  } else if (type === 'thismonth') {
+    from = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0,10);
+    to   = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0,10);
+  } else if (type === 'lastmonth') {
+    from = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().slice(0,10);
+    to   = new Date(today.getFullYear(), today.getMonth(), 0).toISOString().slice(0,10);
+  }
+  document.getElementById('inv-from').value = from;
+  document.getElementById('inv-to').value   = to;
+  loadInvReports();
+}
+
+function onInvAgencyChange() { loadInvReports(); }
+function onInvDateChange()   { loadInvReports(); }
+
+// ── 초기화 ──
+function toggleInvSettings() {
+  const el = document.getElementById('inv-settings');
+  if (!el) return;
+  const showing = el.style.display !== 'none';
+  el.style.display = showing ? 'none' : 'block';
+  if (!showing) {
+    // 저장된 값 로드
+    document.getElementById('inv-abn').value  = localStorage.getItem('dc_abn')  || '';
+    document.getElementById('inv-bank').value = localStorage.getItem('dc_bank') || '';
+    document.getElementById('inv-bsb').value  = localStorage.getItem('dc_bsb')  || '';
+    document.getElementById('inv-acc').value  = localStorage.getItem('dc_acc')  || '';
+  }
+}
+
+function saveInvSettings() {
+  const abn  = document.getElementById('inv-abn')?.value  || '';
+  const bank = document.getElementById('inv-bank')?.value || '';
+  const bsb  = document.getElementById('inv-bsb')?.value  || '';
+  const acc  = document.getElementById('inv-acc')?.value  || '';
+  localStorage.setItem('dc_abn',  abn);
+  localStorage.setItem('dc_bank', bank);
+  localStorage.setItem('dc_bsb',  bsb);
+  localStorage.setItem('dc_acc',  acc);
+  DC_COMPANY.abn = abn;
+}
+
+async function initInvoice() {
+  // 여행사 선택박스 채우기
+  const sel = document.getElementById('inv-agency');
+  if (!sel) return;
+  const agencies = DB.C.map(c => c.Name).filter(Boolean).sort();
+  sel.innerHTML = '<option value="">-- 여행사 선택 --</option>' +
+    agencies.map(a => `<option value="${escH(a)}">${escH(a)}</option>`).join('');
+
+  // 저장된 회사 설정 로드
+  DC_COMPANY.abn = localStorage.getItem('dc_abn') || '';
+
+  // 기본 기간: 이번 달
+  if (!document.getElementById('inv-from').value) setInvPeriod('thismonth');
+  else loadInvReports();
+}
+
+// ── 리포트 로드 & 미리보기 ──
+let _invReports = null;
+
+async function loadInvReports() {
+  const agency = document.getElementById('inv-agency')?.value;
+  const from   = document.getElementById('inv-from')?.value;
+  const to     = document.getElementById('inv-to')?.value;
+  const prev   = document.getElementById('inv-preview');
+  if (!prev) return;
+
+  if (!agency) {
+    prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">여행사를 선택하세요</div>';
+    return;
+  }
+  if (!from || !to) {
+    prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">기간을 선택하세요</div>';
+    return;
+  }
+
+  prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">⏳ 리포트 불러오는 중...</div>';
+
+  // 캐시 or 새 조회
+  if (!_invReports) {
+    try {
+      const res  = await fetch(SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const json = await res.json();
+      if (json.ok) {
+        _invReports = json.rows.map(r => {
+          const ds = String(r.Date || '');
+          let iso = '';
+          if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) iso = ds;
+          else if (/^\d{2}\/\d{2}\/\d{4}$/.test(ds)) {
+            const [dd, mm, yyyy] = ds.split('/');
+            iso = `${yyyy}-${mm}-${dd}`;
+          }
+          return { ...r, _iso: iso };
+        });
+      }
+    } catch(e) {
+      prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--rd)">리포트 로드 실패</div>';
+      return;
+    }
+  }
+
+  // 필터: 여행사 + 기간
+  const rows = (_invReports || []).filter(r =>
+    String(r.Agency || '').trim() === agency &&
+    r._iso >= from && r._iso <= to
+  );
+
+  renderInvPreview(rows, agency, from, to);
+}
+
+function renderInvPreview(rows, agency, from, to) {
+  const prev = document.getElementById('inv-preview');
+
+  if (rows.length === 0) {
+    prev.innerHTML = '<div style="background:var(--sf2);border-radius:12px;padding:30px;text-align:center;color:var(--t3);font-size:13px;">이 기간에 해당 여행사 리포트가 없습니다</div>';
+    return;
+  }
+
+  // 날짜 정렬
+  rows.sort((a, b) => a._iso.localeCompare(b._iso));
+
+  // 금액 집계
+  let totalTA = 0, totalOT = 0, totalHotel = 0, totalDist = 0, totalSVC = 0;
+  rows.forEach(r => {
+    totalTA    += parseFloat(r.Total_TA)         || 0;
+    totalOT    += parseFloat(r.OT)               || 0;
+    totalHotel += parseFloat(r.Hotel_Surcharge)  || 0;
+    totalDist  += parseFloat(r.Dist_Surcharge)   || 0;
+    totalSVC   += parseFloat(r.SVC_Charge)       || 0;
+  });
+
+  const gst     = Math.round(totalTA / 11 * 100) / 100;
+  const exGST   = Math.round((totalTA - gst) * 100) / 100;
+
+  // 여행사 정보
+  const client = DB.C.find(c => c.Name === agency) || {};
+
+  // 인보이스 번호 자동 생성 (INV-YYYYMM-XXX)
+  const invNum = `INV-${from.slice(0,7).replace('-','')}-${String(Math.floor(Math.random()*900)+100)}`;
+
+  prev.innerHTML = `
+    <!-- 요약 카드 -->
+    <div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="font-size:13px;font-weight:700;color:var(--t1);">${escH(agency)}</div>
+        <div style="font-size:11px;color:var(--t3);">${rows.length}건 · ${fmtDate(from)} ~ ${fmtDate(to)}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
+        ${wstat('총 청구액', totalTA, 'var(--gn)')}
+        ${wstat('GST 포함', gst, 'var(--ac)')}
+        ${wstat('GST 제외', exGST, 'var(--t2)')}
+      </div>
+      <button onclick="generateInvoice()" class="btn bac" style="width:100%;font-size:14px;padding:12px;">
+        📄 Tax Invoice 생성 & 출력
+      </button>
+    </div>
+
+    <!-- 리포트 내역 -->
+    <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:6px;padding:0 2px;">리포트 내역</div>
+    ${rows.map(r => `
+      <div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(r.Date||r._iso)} &nbsp;·&nbsp; ${escH(r.Rego||'—')}</div>
+            <div style="font-size:11px;color:var(--t3);margin-top:2px;">${escH(r.Attraction||'—')} · ${escH(r.Seats||'—')} · 드라이버: ${escH(r.Driver||'—')}</div>
+            ${r.Tour_Code ? `<div style="font-size:10px;color:var(--t3);">투어코드: ${escH(r.Tour_Code)}</div>` : ''}
+          </div>
+          <div style="text-align:right;flex-shrink:0;margin-left:8px;">
+            <div style="font-size:14px;font-weight:800;color:var(--gn);">$${(parseFloat(r.Total_TA)||0).toLocaleString()}</div>
+            ${parseFloat(r.OT) ? `<div style="font-size:10px;color:var(--t3);">OT $${parseFloat(r.OT).toLocaleString()}</div>` : ''}
+            ${parseFloat(r.Hotel_Surcharge) ? `<div style="font-size:10px;color:var(--t3);">호텔 $${parseFloat(r.Hotel_Surcharge).toLocaleString()}</div>` : ''}
+          </div>
+        </div>
+      </div>`).join('')}
+  `;
+}
+
+// ── 인보이스 생성 (새 창 프린트) ──
+async function generateInvoice() {
+  const agency = document.getElementById('inv-agency')?.value;
+  const from   = document.getElementById('inv-from')?.value;
+  const to     = document.getElementById('inv-to')?.value;
+
+  if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
+
+  const rows = (_invReports || []).filter(r =>
+    String(r.Agency || '').trim() === agency &&
+    r._iso >= from && r._iso <= to
+  ).sort((a, b) => a._iso.localeCompare(b._iso));
+
+  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
+
+  // 인보이스 내부에서 사용할 날짜 포맷 (dd/mm/yyyy)
+  const fd = ds => {
+    if (!ds) return '—';
+    const p = String(ds).split('-');
+    if (p.length === 3) return `${p[2]}/${p[1]}/${p[0]}`;
+    // dd/mm/yyyy 형식이면 그대로
+    if (/\d{2}\/\d{2}\/\d{4}/.test(ds)) return ds;
+    return ds;
+  };
+
+  const client  = DB.C.find(c => c.Name === agency) || {};
+  const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
+
+  let totalTA = 0;
+  rows.forEach(r => { totalTA += parseFloat(r.Total_TA) || 0; });
+  const gst   = Math.round(totalTA / 11 * 100) / 100;
+  const exGST = Math.round((totalTA - gst) * 100) / 100;
+
+  const invNum  = `INV-${from.slice(0,7).replace('-','')}-${String(Math.floor(Date.now())%1000).padStart(3,'0')}`;
+  const today   = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'long',year:'numeric'});
+  const dueDate = new Date(); dueDate.setDate(dueDate.getDate()+14);
+  const dueDateStr = dueDate.toLocaleDateString('en-AU', {day:'2-digit',month:'long',year:'numeric'});
+
+  // 코스별 집계
+  const byTour = {};
+  rows.forEach(r => {
+    const key = `${r.Attraction||'Unknown'}__${r.Seats||''}`;
+    if (!byTour[key]) byTour[key] = { tour: r.Attraction||'Unknown', seats: r.Seats||'', count:0, total:0, rows:[] };
+    byTour[key].count++;
+    byTour[key].total += parseFloat(r.Total_TA)||0;
+    byTour[key].rows.push(r);
+  });
+
+  const invoiceHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tax Invoice — ${escH(agency)} — ${invNum}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color: #1e293b; background: #fff; padding: 40px; max-width: 800px; margin: 0 auto; }
+  @media print {
+    body { padding: 20px; }
+    .no-print { display: none !important; }
+    @page { margin: 15mm; }
+  }
+
+  /* Header */
+  .inv-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 36px; }
+  .inv-company { flex: 1; }
+  .inv-company-name { font-size: 22px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; }
+  .inv-company-sub  { font-size: 11px; color: #64748b; margin-top: 4px; line-height: 1.6; }
+  .inv-title-box { text-align: right; }
+  .inv-title { font-size: 28px; font-weight: 900; color: #1d4ed8; letter-spacing: 1px; }
+  .inv-num   { font-size: 13px; color: #64748b; margin-top: 4px; }
+  .inv-date  { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+
+  /* Divider */
+  .inv-line { border: none; border-top: 2px solid #e2e8f0; margin: 20px 0; }
+  .inv-line-bold { border-top: 3px solid #1d4ed8; }
+
+  /* Parties */
+  .inv-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 28px; }
+  .inv-party-label { font-size: 10px; font-weight: 800; color: #94a3b8; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+  .inv-party-name  { font-size: 14px; font-weight: 800; color: #0f172a; }
+  .inv-party-sub   { font-size: 11px; color: #64748b; margin-top: 3px; line-height: 1.6; }
+
+  /* Detail Table */
+  .inv-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+  .inv-table th { background: #1e293b; color: #fff; font-size: 11px; font-weight: 700; padding: 10px 12px; text-align: left; letter-spacing: 0.3px; }
+  .inv-table th:last-child { text-align: right; }
+  .inv-table td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; vertical-align: top; }
+  .inv-table td:last-child { text-align: right; font-weight: 700; }
+  .inv-table tr:hover td { background: #f8fafc; }
+  .inv-table .sub-row td { font-size: 11px; color: #64748b; padding: 3px 12px 8px; border-bottom: none; }
+
+  /* Totals */
+  .inv-totals { margin-left: auto; width: 260px; }
+  .inv-total-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
+  .inv-total-row.bold { font-weight: 800; font-size: 14px; border-top: 2px solid #e2e8f0; margin-top: 4px; padding-top: 8px; }
+  .inv-total-row.grand { font-weight: 900; font-size: 18px; color: #1d4ed8; border-top: 3px solid #1d4ed8; margin-top: 8px; padding-top: 10px; }
+
+  /* Payment */
+  .inv-payment { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; margin-top: 28px; }
+  .inv-payment-title { font-size: 11px; font-weight: 800; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; }
+  .inv-payment-row { display: flex; gap: 8px; font-size: 12px; margin-bottom: 4px; }
+  .inv-payment-label { color: #94a3b8; width: 90px; flex-shrink: 0; }
+  .inv-payment-val { color: #0f172a; font-weight: 600; }
+
+  /* Footer */
+  .inv-footer { margin-top: 32px; text-align: center; font-size: 11px; color: #94a3b8; }
+
+  /* Print Button */
+  .print-btn { display: block; margin: 0 auto 24px; padding: 12px 32px; background: #1d4ed8; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  .print-btn:hover { background: #1e40af; }
+</style>
+</head>
+<body>
+
+<button class="print-btn no-print" onclick="window.print()">🖨 Print / Save as PDF</button>
+
+<!-- Header -->
+<div class="inv-header">
+  <div class="inv-company">
+    <div class="inv-company-name">Dong Choi Pty Ltd</div>
+    <div class="inv-company-sub">
+      ${abn ? `ABN: ${abn}<br>` : ''}
+      ${DC_COMPANY.address}<br>
+      ${DC_COMPANY.phone} &nbsp;·&nbsp; ${DC_COMPANY.email}
+    </div>
+  </div>
+  <div class="inv-title-box">
+    <div class="inv-title">TAX INVOICE</div>
+    <div class="inv-num">${invNum}</div>
+    <div class="inv-date">Date: ${today}</div>
+    <div class="inv-date" style="color:#ef4444;font-weight:700;">Due: ${dueDateStr}</div>
+  </div>
+</div>
+
+<hr class="inv-line inv-line-bold">
+
+<!-- Parties -->
+<div class="inv-parties">
+  <div>
+    <div class="inv-party-label">From</div>
+    <div class="inv-party-name">Dong Choi Pty Ltd</div>
+    <div class="inv-party-sub">
+      ${abn ? `ABN: ${abn}<br>` : ''}
+      ${DC_COMPANY.address}<br>
+      ${DC_COMPANY.phone}
+    </div>
+  </div>
+  <div>
+    <div class="inv-party-label">Bill To</div>
+    <div class="inv-party-name">${escH(agency)}</div>
+    <div class="inv-party-sub">
+      ${client.ClientID ? `ID: ${escH(client.ClientID)}<br>` : ''}
+      ${client.Mobile   ? `Tel: ${escH(client.Mobile)}<br>` : ''}
+      ${client.Address  ? escH(client.Address) : ''}
+    </div>
+  </div>
+</div>
+
+<!-- Period -->
+<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 16px;margin-bottom:24px;font-size:12px;color:#1e40af;">
+  <strong>Service Period:</strong> ${fd(from)} — ${fd(to)}
+</div>
+
+<!-- Detail Table: 날짜별 -->
+<table class="inv-table">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Service</th>
+      <th>Vehicle</th>
+      <th>Seats</th>
+      <th>Tour Code</th>
+      <th style="text-align:right">Amount (incl. GST)</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${rows.map(r => {
+      const ta  = parseFloat(r.Total_TA) || 0;
+      const ot  = parseFloat(r.OT) || 0;
+      const hot = parseFloat(r.Hotel_Surcharge) || 0;
+      const dst = parseFloat(r.Dist_Surcharge) || 0;
+      const svc = parseFloat(r.SVC_Charge) || 0;
+      const extras = [
+        ot  ? `OT $${ot.toLocaleString()}` : '',
+        hot ? `Hotel Surcharge $${hot.toLocaleString()}` : '',
+        dst ? `Distance Surcharge $${dst.toLocaleString()}` : '',
+        svc ? `Service Charge $${svc.toLocaleString()}` : '',
+      ].filter(Boolean).join(' · ');
+      return `
+        <tr>
+          <td style="white-space:nowrap">${fd(r.Date||r._iso)}</td>
+          <td>${escH(r.Attraction||'—')}</td>
+          <td>${escH(r.Rego||'—')}</td>
+          <td>${escH(r.Seats||'—')}</td>
+          <td style="color:#64748b">${escH(r.Tour_Code||'—')}</td>
+          <td>$${ta.toLocaleString('en-AU', {minimumFractionDigits:2})}</td>
+        </tr>
+        ${extras ? `<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">${extras}</td></tr>` : ''}
+      `;
+    }).join('')}
+  </tbody>
+</table>
+
+<!-- Totals -->
+<div class="inv-totals">
+  <div class="inv-total-row">
+    <span>Subtotal (excl. GST)</span>
+    <span>$${exGST.toLocaleString('en-AU', {minimumFractionDigits:2})}</span>
+  </div>
+  <div class="inv-total-row">
+    <span>GST (10%)</span>
+    <span>$${gst.toLocaleString('en-AU', {minimumFractionDigits:2})}</span>
+  </div>
+  <div class="inv-total-row grand">
+    <span>Total Due</span>
+    <span>$${totalTA.toLocaleString('en-AU', {minimumFractionDigits:2})}</span>
+  </div>
+</div>
+
+<!-- Payment Details -->
+${(DC_COMPANY.bank || localStorage.getItem('dc_bank')) ? `
+<div class="inv-payment">
+  <div class="inv-payment-title">Payment Details</div>
+  <div class="inv-payment-row"><span class="inv-payment-label">Bank:</span><span class="inv-payment-val">${escH(localStorage.getItem('dc_bank')||'')}</span></div>
+  <div class="inv-payment-row"><span class="inv-payment-label">BSB:</span><span class="inv-payment-val">${escH(localStorage.getItem('dc_bsb')||'')}</span></div>
+  <div class="inv-payment-row"><span class="inv-payment-label">Account:</span><span class="inv-payment-val">${escH(localStorage.getItem('dc_acc')||'')}</span></div>
+  <div class="inv-payment-row"><span class="inv-payment-label">Reference:</span><span class="inv-payment-val">${invNum}</span></div>
+</div>
+` : `
+<div class="inv-payment">
+  <div class="inv-payment-title">Payment Details</div>
+  <div style="font-size:12px;color:#94a3b8;">관리자 설정에서 은행 정보를 입력하세요.</div>
+</div>
+`}
+
+<!-- Footer -->
+<div class="inv-footer">
+  Thank you for your business. &nbsp;·&nbsp; Dong Choi Pty Ltd &nbsp;·&nbsp; ${today}
+</div>
+
+</body>
+</html>`;
+
+  const win = window.open('', '_blank', 'width=900,height=700');
+  win.document.write(invoiceHTML);
+  win.document.close();
 }
 
 // ═══════════════════════════════════════
