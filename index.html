@@ -558,8 +558,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             </div>
           </div>
         </div>
-        <!-- 픽업/드롭 기반 서차지 통합 알림 -->
-        <div id="pickup-drop-hint" style="display:none;margin-bottom:12px;"></div>
+        <!-- pickup-drop-hint: hotel surcharge 란으로 이동됨 -->
 
         <div class="form-row mb14">
           <div class="form-group">
@@ -597,6 +596,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div class="form-row mb14">
           <div class="form-group" style="flex:1;">
             <label class="form-label">OT 요금 <span style="font-size:11px;color:var(--muted);" id="ot-rate-hint"></span></label>
+            <div style="font-size:10px;color:#f97316;font-weight:600;margin-bottom:4px;">⚠️ OT는 1시간 단위 청구 (예: 30분 → $30~40 / 1h)</div>
             <div id="ot-btn-group" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
             <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-ot" placeholder="0" oninput="onOTInput()"></div>
             <div id="ot-hint-box" style="display:none;margin-top:6px;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.6;"></div>
@@ -618,7 +618,8 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         </div>
 
         <!-- Hotel & Distance Surcharge -->
-        <div id="hotel-surcharge-hint" style="display:none;"></div>
+        <div id="hotel-surcharge-hint" style="display:none;margin-bottom:10px;"></div>
+        <div id="pickup-drop-hint" style="display:none;margin-bottom:10px;"></div>
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">Hotel Surcharge 호텔</label>
@@ -1681,14 +1682,35 @@ const SDD_CONFIG = {
     return [...base,...getCustomHotels().map(n=>({name:n,sub:''}))];
   }, type:'hotel' },
   guide:   { list: ()=>{
+    const none = [{name:'(가이드 없음)', sub:''}];
     const base = MASTER.guides?.length
-      ? MASTER.guides.map(g=>({name:g.Guide_Name||g.Name||g.name||'',sub:fixPhone(g.Mobile||g.Phone||'')}))
+      ? MASTER.guides
+          .filter(g => (g.Guide_Name||g.Name||'').trim() && g.Remarks !== '비활성')
+          .map(g=>{
+            const name = g.Guide_Name||g.Name||g.name||'';
+            const phone = fixPhone(g.Mobile||g.Phone||'');
+            const agency = g.Agency||g.Type||'';
+            return {name, sub: [phone, agency].filter(Boolean).join(' · ')};
+          })
       : GUIDE_LIST.map(g=>({name:g.name,sub:g.mobile}));
-    return [...base,...getCustomGuides().map(n=>({name:n,sub:''}))];
+    return [...none,...base,...getCustomGuides().map(n=>({name:n,sub:''}))];
   }, type:'guide' },
   rego:       { list: ()=> (MASTER.vehicles||[]).map(v=>({name:v.Rego,sub:v.Seats?v.Seats+'인승':''})), type:'rego' },
   agency:     { list: ()=> (MASTER.agencies||[]).map(a=>({name:a.Name,sub:a.Mobile||''})),              type:'agency' },
-  attraction: { list: ()=> (MASTER.courses||[]).map(c=>({name:c.Course_Name,sub:c.max_hours?c.max_hours+'h max':''})), type:'attraction' }
+  attraction: { list: ()=>{
+    if(MASTER.courses && MASTER.courses.length>0)
+      return MASTER.courses.map(c=>({name:c.Course_Name,sub:c.max_hours?c.max_hours+'h max':''}));
+    // 마스터 로드 전 fallback
+    return [
+      {name:'BLUE MOUNTAINS',sub:'10h max'},{name:'CITY TOUR',sub:'10h max'},
+      {name:'HUNTER VALLEY',sub:'10h max'},{name:'CENTRAL COAST',sub:'10h max'},
+      {name:'CANBERRA',sub:'12h max'},{name:'JERVIS BAY',sub:'10h max'},
+      {name:'PORT STEPHENS',sub:'10h max'},{name:'NEWCASTLE',sub:'10h max'},
+      {name:'WOLLONGONG',sub:'10h max'},{name:'AIRPORT TRANSFER',sub:''},
+      {name:'DINNER TRANSFER',sub:''},{name:'HOTEL TRANSFER',sub:''},
+      {name:'CHARTER',sub:''},{name:'CITY TOUR / HALF',sub:''}
+    ];
+  }, type:'attraction' }
 };
 
 function sddOpen(key) {
@@ -1703,7 +1725,9 @@ function sddOpen(key) {
   list.style.left  = rect.left + 'px';
   list.style.width = rect.width + 'px';
   // 가이드는 항상 위로, 나머지는 공간 자동 판단
-  const forceUp = (key === 'guide');
+  // (attraction, hotel 등은 화면 하단에 있으므로 위로 열리는 게 유리)
+  const forceUp = (key === 'guide') || 
+                  ((key === 'attraction' || key === 'pickup' || key === 'dropoff') && spaceBelow < dropH);
   if (forceUp || (spaceBelow < dropH && spaceAbove > spaceBelow)) {
     // 위로 펼치기
     list.style.bottom = (visH - rect.top + 4) + 'px';
@@ -3631,8 +3655,12 @@ function updateOTHint(){
 
     const effOT = Math.max(pm8OT, durOT);
     if(effOT > 0){
-      const otAmt = Math.round(effOT * otRate);
-      lines.push(`🔴 <b>OT 발생</b>: ${effOT.toFixed(2)}h × $${otRate}/h = <b>$${otAmt}</b>${seats ? '' : ' (인승 선택 후 재확인)'}`);
+      // ⚠️ OT는 1시간 단위 청구 — 올림 적용
+      const effOT_ceil = Math.ceil(effOT);
+      const otAmt = effOT_ceil * otRate;
+      const rawAmt = Math.round(effOT * otRate);
+      lines.push(`🔴 <b>OT 발생</b>: ${effOT.toFixed(2)}h → <b>1시간 단위 올림: ${effOT_ceil}h</b> × $${otRate}/h = <b>$${otAmt}</b>${seats ? '' : ' (인승 선택 후 재확인)'}`);
+      lines.push(`⚠️ <b>OT는 1시간 단위</b> — 예: 0.5h도 1h로 청구 ($${otRate})`);
     } else if(totalMin > 0){
       lines.push(`✅ 현재 OT 없음 (종료 ${et})`);
     }
