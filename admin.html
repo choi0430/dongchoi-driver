@@ -1385,8 +1385,8 @@ function calcProfit(){
     return;
   }
   const veh = DB.V.find(v=>v.Rego===rego);
-  const cap = String(veh?.Capacity||25);
-  const capKey = cap>'40'?'50':cap>='40'?'40':cap>='25'?'25':'21';
+  const capNum = parseInt(veh?.Capacity||25);
+  const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
 
   // 서브 기본 요금 조회
   const subRates = getSubRates();
@@ -1737,8 +1737,8 @@ function ledgerAutoFill(){
   const tour = document.getElementById('le-tour')?.value;
   if(!rego || !tour){ ledgerPreview(); return; }
   const veh = DB.V.find(v=>v.Rego===rego);
-  const cap = String(veh?.Capacity||25);
-  const capKey = cap>='50'?'50':cap>='40'?'40':cap>='25'?'25':'21';
+  const capNum = parseInt(veh?.Capacity||25);
+  const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
   const subRates = getSubRates();
   const base = parseFloat(subRates[rego]?.[tour]?.[capKey])||0;
   const otH = parseFloat(document.getElementById('le-ot2')?.value)||0;
@@ -1885,39 +1885,51 @@ async function importFromReports(){
     const trailerAmt = parseFloat(r.Trailer)||0;
     const hotelAmt   = parseFloat(r.Hotel_Surcharge)||0;
 
-    // 중복 체크 (날짜+차량+코스 동일한 건 있으면 스킵)
-    const dup = week.entries.find(e=>e.date===isoDate && e.rego===rego && e.tour===attraction);
+    // 중복 체크 (날짜+차량+코스+드라이버 모두 동일한 건만 스킵)
+    const driver = String(r.Driver||'').trim();
+    const dup = week.entries.find(e=>
+      e.date===isoDate && e.rego===rego && e.tour===attraction &&
+      (e.driver||'')===(driver||'')
+    );
     if(dup){ skipped++; return; }
 
-    // 인승 키 (21S→'21', 25S→'25' ...)
-    const capKey = seats.replace('S','') || '25';
+    // 인승 키: Seats='21S' → capNum=21, capKey='21'
+    const capRaw = seats.replace('S','').trim();
+    const capNum = parseInt(capRaw) || 25;
+    const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
 
     // ── TA 금액 ──
-    // 리포트에 Total_TA가 있으면 그걸 사용 (드라이버가 입력한 실제 청구 금액)
     let taAmount = totalTA;
+
+    // ── 서브 여부 판별 ──
+    const vehRecord = DB.V.find(v=>v.Rego===rego);
+    const vehOwner  = vehRecord?.Owner || '';
+    // 차량이 DB에 없으면 경고 (미등록 서브 차량 누락 방지)
+    if(rego && !vehRecord){
+      errors.push(isoDate+' '+rego+' — 차량이 DB에 없습니다. 서브 여부를 직접 확인하세요.');
+    }
+    const isSub = !!rego && !DC_OWNERS.includes(vehOwner);
 
     // ── 서브 비용 계산 ──
     let subTotal = 0;
-    const isSub = rego && !DC_OWNERS.includes(
-      DB.V.find(v=>v.Rego===rego)?.Owner || ''
-    );
     if(isSub){
       const subRates = getSubRates();
       const baseRate = parseFloat(subRates[rego]?.[attraction]?.[capKey])||0;
-      // OT: 금액 기준으로 시간 역산 (PD OT 요율로 나눔)
-      const pdOTRate = DB.PD[attraction]?.[capKey]?.ot || (capKey>='40'?40:30);
-      const otHours = pdOTRate>0 ? otAmt/pdOTRate : 0;
-      subTotal = baseRate + (otHours*pdOTRate) + trailerAmt + hotelAmt;
-      if(baseRate===0 && subTotal===0){
-        errors.push(isoDate+' '+attraction+' — 서브 요금표 없음 (직접 입력 필요)');
+      // OT: 드라이버 OT금액(otAmt)을 드라이버 요율로 역산해 시간 구한 뒤 서브 요율 적용
+      const pdOTRate  = DB.PD[attraction]?.[capKey]?.ot || (capNum>=40?40:30);
+      const otHours   = pdOTRate>0 ? otAmt/pdOTRate : 0;
+      // 서브 요율표에 별도 OT율이 없으면 드라이버 OT금액 그대로 사용
+      const subOTRate = parseFloat(subRates[rego]?.[attraction]?.['ot_'+capKey]) || pdOTRate;
+      const subOT     = otHours * subOTRate;
+      subTotal = baseRate + subOT + trailerAmt + hotelAmt;
+      if(baseRate===0){
+        errors.push(isoDate+' '+attraction+' ('+rego+') — 서브 요금표 없음 (직접 입력 필요)');
       }
     }
 
     // ── 내 차량 드라이버 비용 ──
     let myDr = 0;
-    if(!isSub){
-      myDr = drCost;
-    }
+    if(!isSub) myDr = drCost;
 
     const entry = {
       date:     isoDate,
@@ -1925,6 +1937,7 @@ async function importFromReports(){
       tour:     attraction,
       agency:   agency,
       seats:    seats,
+      driver:   driver,
       ta:       taAmount,
       subTotal: Math.round(subTotal),
       myDr:     Math.round(myDr),
@@ -1932,7 +1945,7 @@ async function importFromReports(){
       ot:       otAmt,
       trailer:  trailerAmt,
       hotel:    hotelAmt,
-      note:     `[리포트 자동생성] ${agency}`,
+      note:     `[리포트 자동생성] ${agency}${driver?' · '+driver:''}`,
     };
     week.entries.push(entry);
     added++;
