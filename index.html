@@ -1731,26 +1731,27 @@ function sddOpen(key) {
   const input = document.getElementById(sddInputId(key));
   const list  = document.getElementById('sdd-'+key+'-list');
   if(!input || !list) return;
+  // 위치 먼저 계산 (open 전에)
+  positionSddList(input, list);
   sddFilter(key);
   list.classList.add('open');
-  // 항상 input 위로 열기 — 위치 계산
-  positionSddList(input, list);
 }
 function positionSddList(input, list) {
-  // 일단 보이게 해서 높이 측정
-  list.style.visibility = 'hidden';
-  list.style.display    = 'block';
-  const rect   = input.getBoundingClientRect();
-  const listH  = Math.min(list.scrollHeight, 240);
-  // position: fixed 기준 — 항상 input 바로 위에 배치
+  // 위치 계산: CSS 클래스로 표시 여부는 제어, 여기선 좌표만 설정
+  const rect  = input.getBoundingClientRect();
+  const listH = Math.min(240, 240); // max-height와 동일
   list.style.left   = rect.left + 'px';
   list.style.width  = rect.width + 'px';
   list.style.top    = (rect.top - listH - 4) + 'px';
   list.style.bottom = 'auto';
-  list.style.visibility = '';
+  // display는 절대 인라인으로 건드리지 않음 → .open 클래스만으로 제어
 }
 function sddBlur(key) {
-  setTimeout(()=>{document.getElementById('sdd-'+key+'-list').classList.remove('open');},200);
+  setTimeout(()=>{
+    const el = document.getElementById('sdd-'+key+'-list');
+    el.classList.remove('open');
+    el.style.display = ''; // 인라인 스타일 초기화
+  },200);
 }
 function sddFilter(key) {
   const input = document.getElementById(sddInputId(key));
@@ -1790,13 +1791,15 @@ function sddFilter(key) {
   if(frag.childNodes.length===0){ list.innerHTML='<div class="sdd-empty">검색 결과 없음</div>'; }
   else { list.appendChild(frag); }
   list.classList.add('open');
-  // 내용 변경 후 위치 재계산 (항상 위로)
+  // 내용 변경 후 위치 재계산
   const inputEl = document.getElementById(sddInputId(key));
-  if(inputEl && list.classList.contains('open')) positionSddList(inputEl, list);
+  if(inputEl) positionSddList(inputEl, list);
 }
 function sddSelect(key, value) {
   document.getElementById(sddInputId(key)).value = value;
-  document.getElementById('sdd-'+key+'-list').classList.remove('open');
+  const _closeList = document.getElementById('sdd-'+key+'-list');
+  _closeList.classList.remove('open');
+  _closeList.style.display = ''; // 혹시 남아있는 인라인 스타일 초기화
   if(key==='guide'){
     const found = GUIDE_LIST.find(g=>g.name===value);
     if(found && window.currentGuidePhone !== undefined) window.currentGuidePhone = found.mobile;
