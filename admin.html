@@ -573,6 +573,52 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </div>
 </div>
 
+<!-- NOTICES MANAGEMENT PAGE -->
+<div class="pg" id="pnotice">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">📢 공지사항 관리</div><div class="ssb">드라이버 앱 공지 등록</div></div>
+    <button class="btn bac sm" onclick="openNoticeModal(null)">+ 공지 추가</button>
+  </div>
+  <div style="padding:10px 14px 80px;" id="admin-notice-list">
+    <div style="text-align:center;color:var(--t3);padding:30px;">불러오는 중...</div>
+  </div>
+</div>
+
+<!-- 공지사항 편집 모달 -->
+<div id="notice-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9100;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:var(--sf);border-radius:16px;padding:18px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto;">
+    <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:14px;" id="notice-modal-title">📝 공지 추가</div>
+
+    <div style="margin-bottom:8px;">
+      <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">유형</div>
+      <div style="display:flex;gap:6px;">
+        <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:8px;border:1.5px solid var(--bd);cursor:pointer;background:var(--sf2);">
+          <input type="radio" name="notice-type" value="urgent" id="nt-urgent" style="accent-color:#ef4444;"> <span style="font-size:12px;font-weight:700;color:#ef4444;">🔴 긴급</span>
+        </label>
+        <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:8px;border:1.5px solid var(--bd);cursor:pointer;background:var(--sf2);">
+          <input type="radio" name="notice-type" value="info" id="nt-info" style="accent-color:#0e9f6e;" checked> <span style="font-size:12px;font-weight:700;color:#0e9f6e;">🟢 안내</span>
+        </label>
+        <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:8px;border:1.5px solid var(--bd);cursor:pointer;background:var(--sf2);">
+          <input type="radio" name="notice-type" value="general" id="nt-general" style="accent-color:var(--ac);"> <span style="font-size:12px;font-weight:700;color:var(--ac);">🔵 공지</span>
+        </label>
+      </div>
+    </div>
+    <div style="margin-bottom:8px;">
+      <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">제목 <span style="color:#ef4444;">*</span></div>
+      <input type="text" id="notice-title" class="profit-finp" style="width:100%;" placeholder="예: ⚠️ 차량 점검 안내">
+    </div>
+    <div style="margin-bottom:12px;">
+      <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">내용 <span style="color:#ef4444;">*</span></div>
+      <textarea id="notice-body" class="profit-finp" rows="6" style="width:100%;resize:vertical;min-height:100px;font-family:sans-serif;line-height:1.6;" placeholder="공지 내용을 입력하세요..."></textarea>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn brd" style="flex:1;" onclick="closeNoticeModal()">취소</button>
+      <button class="btn bac" style="flex:2;" onclick="saveNotice()">💾 저장 & 드라이버 앱 반영</button>
+    </div>
+    <div id="notice-modal-err" style="color:#ef4444;font-size:12px;margin-top:6px;display:none;"></div>
+  </div>
+</div>
+
 <!-- WAGE PAGE -->
 <div class="pg" id="pwage">
   <div class="shd" style="padding-top:8px">
@@ -714,6 +760,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div class="ni" id="nprc" onclick="nv('pprc','nprc');rP()"><div class="nie">💰</div><div class="nil">요금</div></div>
   <div class="ni" id="nhtl" onclick="nv('phtl','nhtl');rH()"><div class="nie">🏨</div><div class="nil">호텔</div></div>
   <div class="ni" id="nsub" onclick="nv('psub','nsub');rSub()"><div class="nie">🤝</div><div class="nil">서브</div></div>
+  <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div></div>
   <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
   <div class="ni" id="ninv" onclick="nv('pinv','ninv');initInvoice()"><div class="nie">🧾</div><div class="nil">인보이스</div></div>
 </div>
@@ -2658,9 +2705,23 @@ function renderInvPreview(rows, agency, from, to) {
         ${totalHotel>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">호텔 합계</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalHotel.toLocaleString()}</div></div>` : ''}
         ${totalDist>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">거리 합계</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
       </div>` : ''}
-      <button onclick="generateInvoice()" class="btn bac" style="width:100%;font-size:14px;padding:12px;">
-        📄 Tax Invoice 생성 & 출력
-      </button>
+      <!-- 그룹 방식 선택 -->
+      <div style="margin-bottom:8px;">
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:5px;letter-spacing:.5px;">📂 인보이스 그룹 방식</div>
+        <div style="display:flex;gap:6px;">
+          <button id="inv-grp-date" class="btn bac sm" style="flex:1;font-size:11px;" onclick="setInvGroupMode('date')">📅 날짜순</button>
+          <button id="inv-grp-week" class="btn bgh sm" style="flex:1;font-size:11px;" onclick="setInvGroupMode('week')">📆 주별</button>
+          <button id="inv-grp-tour" class="btn bgh sm" style="flex:1;font-size:11px;" onclick="setInvGroupMode('tour')">🗺 투어코드</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <button onclick="generateInvoice()" class="btn bac" style="font-size:13px;padding:11px;">
+          📄 Invoice 생성
+        </button>
+        <button onclick="emailInvoice()" class="btn" style="font-size:13px;padding:11px;background:#0ea5e9;color:white;">
+          ✉️ 이메일 발송
+        </button>
+      </div>
     </div>
 
     <!-- 리포트 내역 -->
@@ -2694,55 +2755,142 @@ function renderInvPreview(rows, agency, from, to) {
   `;
 }
 
-// ── 인보이스 생성 (새 창 프린트) ──
+// ═══════════════════════════════════════
+
+// ─────────────────────────────────────────
+// INVOICE 그룹 모드 & 이메일 발송
+// ─────────────────────────────────────────
+let _invGroupMode = 'date'; // 'date' | 'week' | 'tour'
+
+function setInvGroupMode(mode) {
+  _invGroupMode = mode;
+  ['date','week','tour'].forEach(m => {
+    const btn = document.getElementById('inv-grp-' + m);
+    if (!btn) return;
+    btn.className = m === mode ? 'btn bac sm' : 'btn bgh sm';
+    btn.style.flex = '1'; btn.style.fontSize = '11px';
+  });
+  _refreshInvPreview();
+}
+
+// ISO 날짜 → 해당 주 월요일 YYYY-MM-DD
+function _isoToMonday(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  const day = d.getDay(); // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+function _isoToSunday(iso) {
+  const d = new Date(_isoToMonday(iso) + 'T00:00:00');
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0, 10);
+}
+
+// ─── generateInvoice: 그룹 모드 반영 ───
 async function generateInvoice() {
   const agency = document.getElementById('inv-agency')?.value;
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
-
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
 
   const rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
+  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
-  if (rows.length === 0) { toast('해당 기간 리포트 없음 (수동 항목도 없음)', 'er'); return; }
-
-  // 인보이스 내부에서 사용할 날짜 포맷 (dd/mm/yyyy)
   const fd = ds => {
     if (!ds) return '—';
     const p = String(ds).split('-');
     if (p.length === 3) return `${p[2]}/${p[1]}/${p[0]}`;
-    // dd/mm/yyyy 형식이면 그대로
     if (/\d{2}\/\d{2}\/\d{4}/.test(ds)) return ds;
     return ds;
   };
 
   const client  = DB.C.find(c => c.Name === agency) || {};
   const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
-
   let totalTA = 0;
   rows.forEach(r => { totalTA += parseFloat(r.Total_TA) || 0; });
   const gst   = Math.round(totalTA / 11 * 100) / 100;
   const exGST = Math.round((totalTA - gst) * 100) / 100;
 
-  const invNum  = getInvNum(agency, from);
-  // 발행 이력 저장
+  const invNum = getInvNum(agency, from);
   const issuedKey = `dc_inv_issued_${invNum}`;
   const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
   localStorage.setItem(issuedKey, issuedAt);
+
   const _todayD = new Date();
   const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
   const _dueD   = new Date(); _dueD.setDate(_dueD.getDate()+14);
   const dueDateStr = String(_dueD.getDate()).padStart(2,'0')+'/'+String(_dueD.getMonth()+1).padStart(2,'0')+'/'+_dueD.getFullYear();
 
-  // 코스별 집계
-  const byTour = {};
-  rows.forEach(r => {
-    const key = `${r.Attraction||'Unknown'}__${r.Seats||''}`;
-    if (!byTour[key]) byTour[key] = { tour: r.Attraction||'Unknown', seats: r.Seats||'', count:0, total:0, rows:[] };
-    byTour[key].count++;
-    byTour[key].total += parseFloat(r.Total_TA)||0;
-    byTour[key].rows.push(r);
-  });
+  // ─── 그룹 테이블 HTML 생성 ───
+  function buildTableRows() {
+    if (_invGroupMode === 'week') {
+      // 주별 그룹
+      const weeks = {};
+      rows.forEach(r => {
+        const mon = _isoToMonday(r._iso);
+        if (!weeks[mon]) weeks[mon] = [];
+        weeks[mon].push(r);
+      });
+      return Object.keys(weeks).sort().map(mon => {
+        const sun = _isoToSunday(mon);
+        const wrows = weeks[mon];
+        const wTotal = wrows.reduce((s,r)=>s+(parseFloat(r.Total_TA)||0),0);
+        const headerRow = `<tr style="background:#f1f5f9;"><td colspan="6" style="font-weight:800;color:#1e40af;font-size:11px;padding:8px 12px;letter-spacing:.5px;">
+          📆 WEEK: ${fd(mon)} — ${fd(sun)} &nbsp;·&nbsp; ${wrows.length}건 &nbsp;·&nbsp; $${wTotal.toLocaleString('en-AU',{minimumFractionDigits:2})}
+        </td></tr>`;
+        const dataRows = wrows.map(r => _makeTableRow(r, fd)).join('');
+        return headerRow + dataRows;
+      }).join('');
+    } else if (_invGroupMode === 'tour') {
+      // 투어코드 그룹
+      const tours = {};
+      rows.forEach(r => {
+        const key = r.Tour_Code || r.Attraction || 'Other';
+        if (!tours[key]) tours[key] = [];
+        tours[key].push(r);
+      });
+      return Object.keys(tours).sort().map(tc => {
+        const trows = tours[tc];
+        const tTotal = trows.reduce((s,r)=>s+(parseFloat(r.Total_TA)||0),0);
+        const headerRow = `<tr style="background:#f0fdf4;"><td colspan="6" style="font-weight:800;color:#166534;font-size:11px;padding:8px 12px;letter-spacing:.5px;">
+          🗺 TOUR CODE: ${escH(tc)} &nbsp;·&nbsp; ${trows.length}건 &nbsp;·&nbsp; $${tTotal.toLocaleString('en-AU',{minimumFractionDigits:2})}
+        </td></tr>`;
+        const dataRows = trows.map(r => _makeTableRow(r, fd)).join('');
+        return headerRow + dataRows;
+      }).join('');
+    } else {
+      // 날짜순 (기본)
+      return rows.map(r => _makeTableRow(r, fd)).join('');
+    }
+  }
+
+  function _makeTableRow(r, fd) {
+    const ta  = parseFloat(r.Total_TA) || 0;
+    const ot  = parseFloat(r.OT) || 0;
+    const hot = parseFloat(r.Hotel_Surcharge) || 0;
+    const dst = parseFloat(r.Dist_Surcharge) || 0;
+    const extras = [
+      ot  ? `OT $${ot.toLocaleString()}` : '',
+      hot ? `Hotel Surcharge $${hot.toLocaleString()}` : '',
+      dst ? `Distance Surcharge $${dst.toLocaleString()}` : '',
+    ].filter(Boolean).join(' · ');
+    const timeStr = r._timeStart || r._timeEnd ? (r._timeStart||'') + (r._timeEnd ? ' - '+r._timeEnd : '') : '-';
+    const svcLabel = r.SVC_Label ? '<div style="font-size:10px;color:#64748b;margin-top:2px;">'+escH(r.SVC_Label)+'</div>' : '';
+    const seatsStr = r.Seats ? ' ('+escH(r.Seats)+')' : '';
+    const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">'+extras+'</td></tr>' : '';
+    return '<tr>' +
+      '<td style="white-space:nowrap">'+fd(r._iso||r.Date)+'</td>' +
+      '<td>'+escH(r.Attraction||'-')+seatsStr+svcLabel+'</td>' +
+      '<td>'+escH(r.Rego||'-')+'</td>' +
+      '<td style="color:#64748b;white-space:nowrap;font-size:11px;">'+timeStr+'</td>' +
+      '<td style="color:#64748b">'+escH(r.Tour_Code||'-')+'</td>' +
+      '<td>$'+ta.toLocaleString('en-AU',{minimumFractionDigits:2})+'</td>' +
+      '</tr>' + extrasRow;
+  }
+
+  // 그룹 모드 라벨
+  const groupLabel = {date:'날짜순',week:'주별',tour:'투어코드별'}[_invGroupMode];
 
   const invoiceHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -2757,8 +2905,6 @@ async function generateInvoice() {
     .no-print { display: none !important; }
     @page { margin: 15mm; }
   }
-
-  /* Header */
   .inv-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 36px; }
   .inv-company { flex: 1; }
   .inv-company-name { font-size: 22px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; }
@@ -2767,18 +2913,12 @@ async function generateInvoice() {
   .inv-title { font-size: 28px; font-weight: 900; color: #1d4ed8; letter-spacing: 1px; }
   .inv-num   { font-size: 13px; color: #64748b; margin-top: 4px; }
   .inv-date  { font-size: 12px; color: #94a3b8; margin-top: 2px; }
-
-  /* Divider */
   .inv-line { border: none; border-top: 2px solid #e2e8f0; margin: 20px 0; }
   .inv-line-bold { border-top: 3px solid #1d4ed8; }
-
-  /* Parties */
   .inv-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 28px; }
   .inv-party-label { font-size: 10px; font-weight: 800; color: #94a3b8; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
   .inv-party-name  { font-size: 14px; font-weight: 800; color: #0f172a; }
   .inv-party-sub   { font-size: 11px; color: #64748b; margin-top: 3px; line-height: 1.6; }
-
-  /* Detail Table */
   .inv-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
   .inv-table th { background: #1e293b; color: #fff; font-size: 11px; font-weight: 700; padding: 10px 12px; text-align: left; letter-spacing: 0.3px; }
   .inv-table th:last-child { text-align: right; }
@@ -2786,33 +2926,20 @@ async function generateInvoice() {
   .inv-table td:last-child { text-align: right; font-weight: 700; }
   .inv-table tr:hover td { background: #f8fafc; }
   .inv-table .sub-row td { font-size: 11px; color: #64748b; padding: 3px 12px 8px; border-bottom: none; }
-
-  /* Totals */
   .inv-totals { margin-left: auto; width: 260px; }
   .inv-total-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
-  .inv-total-row.bold { font-weight: 800; font-size: 14px; border-top: 2px solid #e2e8f0; margin-top: 4px; padding-top: 8px; }
   .inv-total-row.grand { font-weight: 900; font-size: 18px; color: #1d4ed8; border-top: 3px solid #1d4ed8; margin-top: 8px; padding-top: 10px; }
-
-  /* Payment */
   .inv-payment { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; margin-top: 28px; }
   .inv-payment-title { font-size: 11px; font-weight: 800; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; }
   .inv-payment-row { display: flex; gap: 8px; font-size: 12px; margin-bottom: 4px; }
   .inv-payment-label { color: #94a3b8; width: 90px; flex-shrink: 0; }
   .inv-payment-val { color: #0f172a; font-weight: 600; }
-
-  /* Footer */
   .inv-footer { margin-top: 32px; text-align: center; font-size: 11px; color: #94a3b8; }
-
-  /* Print Button */
   .print-btn { display: block; margin: 0 auto 24px; padding: 12px 32px; background: #1d4ed8; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; }
-  .print-btn:hover { background: #1e40af; }
 </style>
 </head>
 <body>
-
 <button class="print-btn no-print" onclick="window.print()">🖨 Print / Save as PDF</button>
-
-<!-- Header -->
 <div class="inv-header">
   <div class="inv-company">
     <div class="inv-company-name">${escH(DC_COMPANY.name||'DONG CHOI PTY LTD')}</div>
@@ -2829,10 +2956,7 @@ async function generateInvoice() {
     <div class="inv-date" style="color:#ef4444;font-weight:700;">Due: ${dueDateStr}</div>
   </div>
 </div>
-
 <hr class="inv-line inv-line-bold">
-
-<!-- Parties -->
 <div class="inv-parties">
   <div>
     <div class="inv-party-label">From</div>
@@ -2849,17 +2973,14 @@ async function generateInvoice() {
     <div class="inv-party-sub">
       ${client.ClientID ? `ID: ${escH(client.ClientID)}<br>` : ''}
       ${client.Mobile   ? `Tel: ${escH(client.Mobile)}<br>` : ''}
+      ${client.Email    ? `Email: ${escH(client.Email)}<br>` : ''}
       ${client.Address  ? escH(client.Address) : ''}
     </div>
   </div>
 </div>
-
-<!-- Period -->
 <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 16px;margin-bottom:24px;font-size:12px;color:#1e40af;">
-  <strong>Service Period:</strong> ${fd(from)} — ${fd(to)}
+  <strong>Service Period:</strong> ${fd(from)} — ${fd(to)} &nbsp;·&nbsp; <span style="opacity:.7;">정렬: ${groupLabel}</span>
 </div>
-
-<!-- Detail Table: 날짜별 -->
 <table class="inv-table">
   <thead>
     <tr>
@@ -2872,33 +2993,9 @@ async function generateInvoice() {
     </tr>
   </thead>
   <tbody>
-    ${rows.map(r => {
-      const ta  = parseFloat(r.Total_TA) || 0;
-      const ot  = parseFloat(r.OT) || 0;
-      const hot = parseFloat(r.Hotel_Surcharge) || 0;
-      const dst = parseFloat(r.Dist_Surcharge) || 0;
-      const extras = [
-        ot  ? `OT $${ot.toLocaleString()}` : '',
-        hot ? `Hotel Surcharge $${hot.toLocaleString()}` : '',
-        dst ? `Distance Surcharge $${dst.toLocaleString()}` : '',
-      ].filter(Boolean).join(' · ');
-      const timeStr = r._timeStart || r._timeEnd ? (r._timeStart||'') + (r._timeEnd ? ' - '+r._timeEnd : '') : '-';
-      const svcLabel = r.SVC_Label ? '<div style="font-size:10px;color:#64748b;margin-top:2px;">'+escH(r.SVC_Label)+'</div>' : '';
-      const seatsStr = r.Seats ? ' ('+escH(r.Seats)+')' : '';
-      const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">'+extras+'</td></tr>' : '';
-      return '<tr>' +
-        '<td style="white-space:nowrap">'+fd(r._iso||r.Date)+'</td>' +
-        '<td>'+escH(r.Attraction||'-')+seatsStr+svcLabel+'</td>' +
-        '<td>'+escH(r.Rego||'-')+'</td>' +
-        '<td style="color:#64748b;white-space:nowrap;font-size:11px;">'+timeStr+'</td>' +
-        '<td style="color:#64748b">'+escH(r.Tour_Code||'-')+'</td>' +
-        '<td>$'+ta.toLocaleString('en-AU',{minimumFractionDigits:2})+'</td>' +
-        '</tr>' + extrasRow;
-    }).join('')}
+    ${buildTableRows()}
   </tbody>
 </table>
-
-<!-- Totals -->
 <div class="inv-totals">
   <div class="inv-total-row">
     <span>Subtotal (excl. GST)</span>
@@ -2913,8 +3010,6 @@ async function generateInvoice() {
     <span>$${totalTA.toLocaleString('en-AU', {minimumFractionDigits:2})}</span>
   </div>
 </div>
-
-<!-- Payment Details -->
 ${(DC_COMPANY.bank || localStorage.getItem('dc_bank')) ? `
 <div class="inv-payment">
   <div class="inv-payment-title">Payment Details</div>
@@ -2923,28 +3018,190 @@ ${(DC_COMPANY.bank || localStorage.getItem('dc_bank')) ? `
   <div class="inv-payment-row"><span class="inv-payment-label">Account:</span><span class="inv-payment-val">${escH(DC_COMPANY.acc||localStorage.getItem('dc_acc')||'')}</span></div>
   ${DC_COMPANY.accname||localStorage.getItem('dc_accname') ? `<div class="inv-payment-row"><span class="inv-payment-label">Account Name:</span><span class="inv-payment-val">${escH(DC_COMPANY.accname||localStorage.getItem('dc_accname')||'')}</span></div>` : ''}
   <div class="inv-payment-row"><span class="inv-payment-label">Reference:</span><span class="inv-payment-val">${invNum}</span></div>
-</div>
-` : `
-<div class="inv-payment">
-  <div class="inv-payment-title">Payment Details</div>
-  <div style="font-size:12px;color:#94a3b8;">관리자 설정에서 은행 정보를 입력하세요.</div>
-</div>
-`}
-
-<!-- Footer -->
+</div>` : ''}
 <div class="inv-footer">
   Thank you for your business. &nbsp;·&nbsp; ${escH(DC_COMPANY.name||'Dong Choi Pty Ltd')} &nbsp;·&nbsp; ${today}
 </div>
-
-</body>
-</html>`;
+</body></html>`;
 
   const win = window.open('', '_blank', 'width=900,height=700');
   win.document.write(invoiceHTML);
   win.document.close();
 }
 
+// ─── 이메일 발송 ───
+function emailInvoice() {
+  const agency = document.getElementById('inv-agency')?.value;
+  const from   = document.getElementById('inv-from')?.value;
+  const to     = document.getElementById('inv-to')?.value;
+  if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
+
+  const client   = DB.C.find(c => c.Name === agency) || {};
+  const toEmail  = client.Email || '';
+  const invNum   = getInvNum(agency, from);
+
+  const rows = _buildInvRows(agency, from, to);
+  let totalTA = 0;
+  rows.forEach(r => { totalTA += parseFloat(r.Total_TA)||0; });
+
+  const fd = ds => { if(!ds)return'—'; const p=String(ds).split('-'); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:ds; };
+
+  const subject = encodeURIComponent(`Tax Invoice ${invNum} — ${agency} (${fd(from)} – ${fd(to)})`);
+  const body = encodeURIComponent(
+    `Dear ${agency},\n\n` +
+    `Please find enclosed Tax Invoice ${invNum} for services provided during ${fd(from)} – ${fd(to)}.\n\n` +
+    `Invoice Total: $${totalTA.toLocaleString('en-AU',{minimumFractionDigits:2})} (incl. GST)\n` +
+    `Due Date: 14 days from invoice date\n` +
+    `Reference: ${invNum}\n\n` +
+    `Bank: ${DC_COMPANY.bank||''}\n` +
+    `BSB: ${DC_COMPANY.bsb||''}\n` +
+    `Account: ${DC_COMPANY.acc||''}\n` +
+    `Account Name: ${DC_COMPANY.accname||DC_COMPANY.name||''}\n\n` +
+    `Please don't hesitate to contact us if you have any queries.\n\n` +
+    `Kind regards,\n${DC_COMPANY.name||'Dong Choi Pty Ltd'}\n${DC_COMPANY.phone||''}\n${DC_COMPANY.email||''}`
+  );
+
+  if (!toEmail) {
+    // 이메일 없으면 입력 프롬프트
+    const entered = prompt(`${agency}의 이메일 주소를 입력하세요:\n(여행사 정보에서 이메일을 등록하면 자동으로 불러옵니다)`, '');
+    if (!entered) return;
+    window.open(`mailto:${encodeURIComponent(entered)}?subject=${subject}&body=${body}`, '_blank');
+  } else {
+    window.open(`mailto:${encodeURIComponent(toEmail)}?subject=${subject}&body=${body}`, '_blank');
+    toast(`✉️ ${toEmail} 로 이메일 클라이언트 실행됨`, 'ok');
+  }
+}
+
+
+
 // ═══════════════════════════════════════
+// NOTICE MANAGEMENT (공지사항 관리)
+// ═══════════════════════════════════════
+const NOTICE_KEY = 'admin_notices'; // localStorage key (드라이버 앱도 동일 key 사용)
+
+function getAdminNotices() {
+  try { return JSON.parse(localStorage.getItem(NOTICE_KEY) || 'null'); } catch(e) { return null; }
+}
+
+function saveAdminNotices(notices) {
+  localStorage.setItem(NOTICE_KEY, JSON.stringify(notices));
+}
+
+let _noticeEditId = null;
+
+function openNoticeModal(id) {
+  _noticeEditId = id;
+  const modal = document.getElementById('notice-modal');
+  const title = document.getElementById('notice-modal-title');
+  const errEl = document.getElementById('notice-modal-err');
+  modal.style.display = 'flex';
+  title.textContent = id ? '✏️ 공지 편집' : '📝 공지 추가';
+  if (errEl) { errEl.style.display='none'; errEl.textContent=''; }
+
+  if (id) {
+    const notices = getAdminNotices() || [];
+    const n = notices.find(x => x.id === id);
+    if (n) {
+      document.getElementById('notice-title').value = n.title || '';
+      document.getElementById('notice-body').value  = n.body  || '';
+      const typeRadio = document.querySelector(`input[name="notice-type"][value="${n.type||'info'}"]`);
+      if (typeRadio) typeRadio.checked = true;
+    }
+  } else {
+    document.getElementById('notice-title').value = '';
+    document.getElementById('notice-body').value  = '';
+    document.getElementById('nt-info').checked = true;
+  }
+}
+
+function closeNoticeModal() {
+  document.getElementById('notice-modal').style.display = 'none';
+  _noticeEditId = null;
+}
+
+function saveNotice() {
+  const title = document.getElementById('notice-title')?.value?.trim();
+  const body  = document.getElementById('notice-body')?.value?.trim();
+  const type  = document.querySelector('input[name="notice-type"]:checked')?.value || 'info';
+  const errEl = document.getElementById('notice-modal-err');
+
+  if (!title) { errEl.textContent='제목을 입력하세요.'; errEl.style.display='block'; return; }
+  if (!body)  { errEl.textContent='내용을 입력하세요.'; errEl.style.display='block'; return; }
+
+  const now = new Date();
+  const dateStr = String(now.getDate()).padStart(2,'0') + ' ' +
+    ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][now.getMonth()] + ' ' + now.getFullYear();
+
+  const notice = {
+    id:    _noticeEditId || Date.now().toString(),
+    type,
+    title,
+    body,
+    date:  dateStr,
+    updatedAt: now.toISOString(),
+  };
+
+  let notices = getAdminNotices() || [];
+  if (_noticeEditId) {
+    const idx = notices.findIndex(x => x.id === _noticeEditId);
+    if (idx !== -1) notices[idx] = notice; else notices.unshift(notice);
+  } else {
+    notices.unshift(notice); // 최신 글이 맨 위
+  }
+
+  saveAdminNotices(notices);
+  closeNoticeModal();
+  renderAdminNotices();
+  toast('공지 저장 완료 — 드라이버 앱에 즉시 반영됩니다', 'ok');
+}
+
+function deleteNotice(id) {
+  if (!confirm('이 공지를 삭제하시겠습니까?')) return;
+  const notices = (getAdminNotices() || []).filter(x => x.id !== id);
+  saveAdminNotices(notices);
+  renderAdminNotices();
+  toast('공지 삭제됨', 'ok');
+}
+
+function renderAdminNotices() {
+  const el = document.getElementById('admin-notice-list');
+  if (!el) return;
+  const notices = getAdminNotices();
+
+  if (!notices || notices.length === 0) {
+    el.innerHTML = `<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">
+      등록된 공지가 없습니다<br><small style="font-size:11px;margin-top:6px;display:block;">상단 "+ 공지 추가" 버튼으로 추가하세요</small>
+    </div>`;
+    return;
+  }
+
+  const typeStyle = {
+    urgent:  { bg:'#fef2f2', border:'#fecaca', badge:'#ef4444', label:'긴급' },
+    info:    { bg:'#f0fdf4', border:'#bbf7d0', badge:'#0e9f6e', label:'안내' },
+    general: { bg:'#eff6ff', border:'#bfdbfe', badge:'#1d4ed8', label:'공지' },
+  };
+
+  el.innerHTML = notices.map(n => {
+    const s = typeStyle[n.type] || typeStyle.general;
+    return `
+    <div style="background:${s.bg};border:1.5px solid ${s.border};border-radius:12px;padding:12px 14px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+        <div style="flex:1;min-width:0;">
+          <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800;background:${s.badge};color:white;margin-bottom:5px;">${s.label}</span>
+          <div style="font-size:13px;font-weight:700;color:var(--t1);margin-bottom:3px;">${escH(n.title)}</div>
+          <div style="font-size:11px;color:var(--t3);">${n.date||''}</div>
+        </div>
+        <div style="display:flex;gap:6px;margin-left:10px;flex-shrink:0;">
+          <button onclick="openNoticeModal('${n.id}')" style="padding:5px 10px;border-radius:7px;border:1px solid var(--bd);background:var(--sf);font-size:11px;font-weight:700;cursor:pointer;color:var(--ac);">✏️ 편집</button>
+          <button onclick="deleteNotice('${n.id}')" style="padding:5px 10px;border-radius:7px;border:1px solid #fecaca;background:#fef2f2;font-size:11px;font-weight:700;cursor:pointer;color:#ef4444;">🗑</button>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--t2);white-space:pre-line;line-height:1.6;border-top:1px solid ${s.border};padding-top:8px;margin-top:4px;">${escH(n.body).slice(0,120)}${n.body.length>120?'…':''}</div>
+    </div>`;
+  }).join('');
+}
+
+
 // WAGE (드라이버 급여 지급)
 // ═══════════════════════════════════════
 function getWages(){ try{return JSON.parse(localStorage.getItem('admin_wages')||'{}');}catch(e){return {};} }
@@ -3335,7 +3592,10 @@ function openM(type,idx){
   else if(type==='C'){
     h=`<div class="fr"><label class="fl">여행사명*</label><input class="fi" id="f0" value="${d.Name||''}" placeholder="Hana Tour Pty Ltd"></div>
       <div class="fr"><label class="fl">Client ID</label><input class="fi" id="f1" value="${d.ClientID||''}" placeholder="자동생성"></div>
-      <div class="fr"><label class="fl">연락처</label><input class="fi" id="f2" value="${d.Mobile||''}"></div>
+      <div class="fr2">
+        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${d.Mobile||''}"></div>
+        <div><label class="fl">이메일 (Invoice용)</label><input class="fi" id="f2b" value="${d.Email||''}" placeholder="billing@agencyname.com.au"></div>
+      </div>
       <div class="fr"><label class="fl">주소</label><input class="fi" id="f3" value="${d.Address||''}"></div>
       <div class="fr3">
         <div><label class="fl">은행</label><input class="fi" id="f4" value="${d.Bank_Name||''}"></div>
@@ -3485,7 +3745,7 @@ function saveM(){
     if(!gv('f0')){toast('여행사명 필수','er');return}
     sheetName='M_Clients';
     obj={Name:gv('f0'),ClientID:gv('f1')||Date.now().toString(16).slice(-8),
-         Mobile:gv('f2'),Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6')};
+         Mobile:gv('f2'),Email:gv('f2b')||'',Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6')};
     ie?DB.C[idx]=obj:DB.C.push(obj);
     if(obj.Name && !DB.PC[obj.Name]) DB.PC[obj.Name]={};
   } else if(t==='G'){
