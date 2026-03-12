@@ -921,13 +921,27 @@ function nv(pg,ni){
 // ═══════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════
-function fmtDate(ds){
-  if(!ds)return '-';
-  var p=String(ds).split('-');
-  if(p.length===3) return p[2]+'/'+p[1]+'/'+p[0];
-  return ds;
+// 범용 날짜 → ISO(YYYY-MM-DD) 변환 (UTC timestamp 포함)
+function parseToISO(ds){
+  // 내부 날짜 비교/정렬용 YYYY-MM-DD 변환 (표시용 아님)
+  if(!ds) return '';
+  const s = String(ds).trim();
+  if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){
+    const [dd,mm,yyyy]=s.split('/'); return yyyy+'-'+mm+'-'+dd;
+  }
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10); // ISO fallback
+  return '';
 }
-function du(ds){if(!ds)return 9999;const d=new Date(ds),n=new Date();n.setHours(0,0,0,0);return Math.ceil((d-n)/86400000)}
+
+function fmtDate(ds){
+  // dd/mm/yyyy 표시용: dd/mm/yyyy 그대로, YYYY-MM-DD → 변환
+  if(!ds)return '-';
+  const s=String(ds).trim();
+  if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)){const[y,m,d]=s.slice(0,10).split('-');return d+'/'+m+'/'+y;}
+  return s;
+}
+function du(ds){if(!ds)return 9999;const iso=parseToISO(ds);if(!iso)return 9999;const d=new Date(iso),n=new Date();n.setHours(0,0,0,0);return Math.ceil((d-n)/86400000)}
 function etag(ds,lbl){
   if(!ds)return`<span class="tag ty">${lbl}: —</span>`;
   const d=du(ds),c=d<0?'tr':d<30?'tr':d<90?'ty':'tg';
@@ -1003,12 +1017,10 @@ function getHvisSchedule(regoDate){
 }
 function vDaysDiff(dateStr){
   if(!dateStr)return null;
-  return Math.round((new Date(dateStr)-new Date())/86400000);
+  const iso=parseToISO(dateStr);
+  return iso?Math.round((new Date(iso)-new Date())/86400000):null;
 }
-function vFmtD(ds){
-  if(!ds)return '-';
-  var p=ds.split('-');return p[2]+'/'+p[1]+'/'+p[0];
-}
+
 function vDaysLbl(n){
   if(n===null)return '';
   if(n<0)return 'EXPIRED';
@@ -1031,12 +1043,12 @@ function renderHvis(){
 
     if(v.Rego_Date&&regoDays!==null&&regoDays<=30){
       alertHtml+='<div style="background:#fff7ed;border:1.5px solid #fb923c;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
-        +'&#x1F7E0; <b>'+v.Rego+'</b> — Rego expiry: <b style="color:#dc2626">'+vDaysLbl(regoDays)+'</b> ('+vFmtD(v.Rego_Date)+')</div>';
+        +'&#x1F7E0; <b>'+v.Rego+'</b> — Rego expiry: <b style="color:#dc2626">'+vDaysLbl(regoDays)+'</b> ('+fmtDate(v.Rego_Date)+')</div>';
     }
     if(v.HVIS_Date&&hvisDays!==null&&hvisDays<=90){
       var urg=hvisDays<30?'#dc2626':hvisDays<60?'#d97706':'#ca8a04';
       alertHtml+='<div style="background:#fefce8;border:1.5px solid #fde047;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
-        +'&#x26A0;&#xFE0F; <b>'+v.Rego+'</b> — HVIS due: <b style="color:'+urg+'">'+vDaysLbl(hvisDays)+'</b> ('+vFmtD(v.HVIS_Date)+')'
+        +'&#x26A0;&#xFE0F; <b>'+v.Rego+'</b> — HVIS due: <b style="color:'+urg+'">'+vDaysLbl(hvisDays)+'</b> ('+fmtDate(v.HVIS_Date)+')'
         +(hvisDays<=30&&hvisDays>0?'<br><span style="color:#dc2626;font-size:11px;">&#x23F0; Booking required — 1 month before due date</span>':'')
         +'</div>';
     }
@@ -1063,21 +1075,21 @@ function renderHvis(){
       +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">'
       +'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'
       +'<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">Rego Expiry</div>'
-      +'<div style="font-size:12px;font-weight:700;color:'+regoC+';">'+vFmtD(v.Rego_Date)+'</div>'
+      +'<div style="font-size:12px;font-weight:700;color:'+regoC+';">'+fmtDate(v.Rego_Date)+'</div>'
       +(regoDays!==null?'<div style="font-size:10px;color:var(--t3);">'+vDaysLbl(regoDays)+'</div>':'')+'</div>'
       +'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'
       +'<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">HVIS Due</div>'
-      +'<div style="font-size:12px;font-weight:700;color:'+hvisC+';">'+vFmtD(v.HVIS_Date)+'</div>'
+      +'<div style="font-size:12px;font-weight:700;color:'+hvisC+';">'+fmtDate(v.HVIS_Date)+'</div>'
       +(hvisDays!==null?'<div style="font-size:10px;color:var(--t3);">'+vDaysLbl(hvisDays)+'</div>':'')+'</div>'
       +'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'
       +'<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">HVIS @6mo (Rego+6m)</div>'
-      +'<div style="font-size:12px;font-weight:700;color:'+d6C+';">'+vFmtD(sch6)+'</div></div>'
+      +'<div style="font-size:12px;font-weight:700;color:'+d6C+';">'+fmtDate(sch6)+'</div></div>'
       +'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'
       +'<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">HVIS @1yr (Rego+12m)</div>'
-      +'<div style="font-size:12px;font-weight:700;">'+vFmtD(sch12)+'</div></div></div>'
+      +'<div style="font-size:12px;font-weight:700;">'+fmtDate(sch12)+'</div></div></div>'
       +'<div style="font-size:11px;color:var(--t3);margin-bottom:6px;">&#x23F0; Inspection window: within 3 months of due date. Book 1 month before.</div>'
       +(lastB?'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;font-size:11px;">'
-        +'<b>Latest booking:</b> '+vFmtD(lastB.inspDate)+' '+(lastB.inspTime||'')+' — '+(lastB.location||'TBD')
+        +'<b>Latest booking:</b> '+fmtDate(lastB.inspDate)+' '+(lastB.inspTime||'')+' — '+(lastB.location||'TBD')
         +' <span style="color:var(--t3);">Booking# '+(lastB.bookingNo||'-')+'</span>'
         +'<button style="background:none;border:none;color:var(--ac);font-size:10px;cursor:pointer;margin-left:6px;" onclick="openHvisBooking(\''+v.Rego+'\')">View all</button></div>'
         :'<div style="font-size:11px;color:var(--t3);">No booking on record</div>')
@@ -1102,7 +1114,7 @@ function openHvisBooking(rego){
   var bList=sorted.length?sorted.map(function(b){
     return'<div style="background:var(--sf2);border-radius:8px;padding:10px;margin-bottom:6px;font-size:12px;">'
       +'<div style="display:flex;justify-content:space-between;">'
-      +'<div><b>'+vFmtD(b.inspDate)+'</b> '+(b.inspTime||'')+' — '+(b.location||'TBD')+'</div>'
+      +'<div><b>'+fmtDate(b.inspDate)+'</b> '+(b.inspTime||'')+' — '+(b.location||'TBD')+'</div>'
       +'<button onclick="deleteHvisBooking(\''+b.id+'\')" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;">&#x1F5D1;</button></div>'
       +'<div style="color:var(--t3);margin-top:4px;">Booking# '+(b.bookingNo||'-')+' | Customer# '+(b.customerNo||'-')+' | '+(b.ownerName||'-')+'</div></div>';
   }).join(''):'<div style="color:var(--t3);font-size:12px;padding:8px 0;">No records</div>';
@@ -1158,7 +1170,7 @@ function renderMaint(){
   list.innerHTML=records.map(function(r){
     return'<div style="background:var(--sf2);border-radius:10px;padding:12px;margin-bottom:8px;">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
-      +'<div><div style="font-size:13px;font-weight:700;">'+vFmtD(r.date)+' — <span style="color:var(--ac);">'+r.rego+'</span></div>'
+      +'<div><div style="font-size:13px;font-weight:700;">'+fmtDate(r.date)+' — <span style="color:var(--ac);">'+r.rego+'</span></div>'
       +'<div style="font-size:12px;color:var(--t2);margin-top:3px;">'+(r.type||'')+' — '+(r.description||'')+'</div>'
       +'<div style="font-size:11px;color:var(--t3);margin-top:2px;">'+(r.km?Number(r.km).toLocaleString()+'km':'KM N/A')+' | '+(r.workshop||'Workshop N/A')+' | $'+(r.cost||0)+'</div>'
       +(r.nextServiceKM?'<div style="font-size:11px;color:var(--pu);margin-top:2px;">Next service: '+Number(r.nextServiceKM).toLocaleString()+'km</div>':'')
@@ -1186,7 +1198,7 @@ function openMaintEntry(id){
     +'<select id="mt-rego" class="profit-sel" style="width:100%;margin-top:4px;">'+regoOpts+'</select></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'
     +'<div><label style="font-size:11px;font-weight:700;color:var(--t3);">Date</label>'
-    +'<input id="mt-date" type="date" class="profit-finp" style="width:100%;margin-top:4px;" value="'+(r.date||'')+'"></div>'
+    +'<input id="mt-date" type="date" class="profit-finp" style="width:100%;margin-top:4px;" value="'+(parseToISO(r.date)||'')+'"></div>'
     +'<div><label style="font-size:11px;font-weight:700;color:var(--t3);">Current KM</label>'
     +'<input id="mt-km" type="number" class="profit-finp" style="width:100%;margin-top:4px;" value="'+(r.km||'')+'" placeholder="250000"></div></div>'
     +'<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:700;color:var(--t3);">Service Type</label>'
@@ -2106,16 +2118,10 @@ async function importFromReports(){
     return;
   }
 
-  // 해당 주간 리포트만 필터 (Date 필드: 'dd/mm/yyyy' 또는 'YYYY-MM-DD')
+  // 해당 주간 리포트만 필터 (UTC timestamp 포함 모든 형식 지원)
   const inWeek = reports.filter(r => {
-    const ds = String(r.Date||'');
-    let iso;
-    if(/^\d{4}-\d{2}-\d{2}$/.test(ds)) iso = ds;
-    else if(/^\d{2}\/\d{2}\/\d{4}$/.test(ds)){
-      const [dd,mm,yyyy] = ds.split('/');
-      iso = `${yyyy}-${mm}-${dd}`;
-    } else return false;
-    return iso >= weekStart && iso <= weekEnd;
+    const iso = parseToISO(r.Date||'');
+    return iso && iso >= weekStart && iso <= weekEnd;
   });
 
   if(inWeek.length===0){
@@ -2129,11 +2135,8 @@ async function importFromReports(){
   let added=0, skipped=0, errors=[];
 
   inWeek.forEach(r => {
-    // Date 정규화
-    const ds = String(r.Date||'');
-    let isoDate;
-    if(/^\d{4}-\d{2}-\d{2}$/.test(ds)) isoDate = ds;
-    else { const [dd,mm,yyyy]=ds.split('/'); isoDate=`${yyyy}-${mm}-${dd}`; }
+    // Date 정규화 (UTC timestamp 포함)
+    const isoDate = parseToISO(r.Date||'');
 
     const rego       = String(r.Rego||'').trim();
     const agency     = String(r.Agency||'').trim();
@@ -2608,21 +2611,9 @@ async function loadInvReports() {
       const json = await res.json();
       if (json.ok) {
         _invReports = json.rows.map(r => {
-          const ds = String(r.Date || '');
-          let iso = '';
-          if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) {
-            iso = ds;
-          } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(ds)) {
-            const [dd, mm, yyyy] = ds.split('/');
-            iso = `${yyyy}-${mm}-${dd}`;
-          } else if (ds.includes('T') || ds.includes('Z')) {
-            // AEST +11 로 날짜 추출
-            try {
-              const d = new Date(ds);
-              const aest = new Date(d.getTime() + 11*3600*1000);
-              iso = aest.toISOString().slice(0, 10);
-            } catch(e) {}
-          }
+          // UTC timestamp 포함 모든 날짜 형식 지원
+          // GAS Date가 "2026-03-10T13:00:00.000Z" 형식이므로 parseToISO로 처리
+          const iso = parseToISO(r.Date || '');
           // 시간 파싱 (구글시트 1899-12-29T... 형태)
           const parseGSheetTime = ts => {
             if (!ts) return '';
@@ -3330,13 +3321,7 @@ async function ensureReportsCache() {
     if (json.ok && json.rows) {
       // Date를 ISO(YYYY-MM-DD)로 정규화
       _reportsCache = json.rows.map(r => {
-        const ds = String(r.Date || '');
-        let iso = '';
-        if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) iso = ds;
-        else if (/^\d{2}\/\d{2}\/\d{4}$/.test(ds)) {
-          const [dd, mm, yyyy] = ds.split('/');
-          iso = `${yyyy}-${mm}-${dd}`;
-        }
+        const iso = parseToISO(r.Date || '');
         return { ...r, _isoDate: iso };
       });
     }
@@ -3674,8 +3659,8 @@ function openM(type,idx){
         <div><label class="fl">좌석수</label><input class="fi" id="f5" type="number" value="${d.Capacity||''}"></div>
         <div><label class="fl">소유자</label><input class="fi" id="f6" value="${d.Owner||''}"></div></div>
       <div class="fr2">
-        <div><label class="fl">Rego 만료일</label><input class="fi" id="f7" type="date" value="${d.Rego_Date||''}"></div>
-        <div><label class="fl">HVIS 만료일</label><input class="fi" id="f8" type="date" value="${d.HVIS_Date||''}"></div></div>
+        <div><label class="fl">Rego 만료일</label><input class="fi" id="f7" type="date" value="${parseToISO(d.Rego_Date||'')}"></div>
+        <div><label class="fl">HVIS 만료일</label><input class="fi" id="f8" type="date" value="${parseToISO(d.HVIS_Date||'')}"></div></div>
       <div class="fr3">
         <div><label class="fl">현재 KM</label><input class="fi" id="f9" type="number" value="${d.Current_KM||''}"></div>
         <div><label class="fl">마지막 정비 KM</label><input class="fi" id="f10" type="number" value="${d.Last_Service_KM||''}"></div>
@@ -3702,9 +3687,9 @@ function openM(type,idx){
         </select></div></div>
         <div><label class="fl">면허 번호</label><input class="fi" id="f6" value="${d['License_#']||''}"></div></div>
       <div class="fr2">
-        <div><label class="fl">면허 만료일</label><input class="fi" id="f7" type="date" value="${d.License_Expiry||''}"></div>
+        <div><label class="fl">면허 만료일</label><input class="fi" id="f7" type="date" value="${parseToISO(d.License_Expiry||'')}"></div>
         <div><label class="fl">Authority 번호</label><input class="fi" id="f8" value="${d['Authority_#']||''}"></div></div>
-      <div class="fr"><label class="fl">Authority 만료일</label><input class="fi" id="f9" type="date" value="${d.Authority_Expiry||''}"></div>
+      <div class="fr"><label class="fl">Authority 만료일</label><input class="fi" id="f9" type="date" value="${parseToISO(d.Authority_Expiry||'')}"></div>
       <div class="fr2">
         <div><label class="fl">주소</label><input class="fi" id="f10" value="${d.Address||''}"></div>
         <div><label class="fl">Suburb</label><input class="fi" id="f11" value="${d.Suburb||''}"></div></div>
@@ -3850,7 +3835,7 @@ function saveM(){
     if(!gv('f0')){toast('차량번호 필수','er');return}
     sheetName='M_Vehicles';
     obj={Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),Manufacture_Date:gn('f4'),
-         Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:gv('f7'),HVIS_Date:gv('f8'),
+         Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:fmtDate(gv('f7')),HVIS_Date:fmtDate(gv('f8')),
          Current_KM:gn('f9'),Last_Service_KM:gn('f10'),Service_Interval:gn('f11')||10000,
          VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14')};
     ie?DB.V[idx]=obj:DB.V.push(obj);
@@ -3860,8 +3845,8 @@ function saveM(){
     if(!gv('f0')){toast('이름 필수','er');return}
     sheetName='M_Drivers';
     obj={Name_EN:gv('f0'),Name_KR:gv('f1'),DriverID:gv('f2'),Mobile_1:gv('f3'),NEXT_OF_KIN:gv('f4'),
-         License_Class:gv('f5'),License_No:gv('f6'),License_Expiry:gv('f7'),
-         Authority_No:gv('f8'),Authority_Expiry:gv('f9'),
+         License_Class:gv('f5'),License_No:gv('f6'),License_Expiry:fmtDate(gv('f7')),
+         Authority_No:gv('f8'),Authority_Expiry:fmtDate(gv('f9')),
          Address:gv('f10'),Suburb:gv('f11'),Bank_Name:gv('f12'),BSB:gv('f13'),
          Account_Number:gv('f14'),PIN:gv('f15')};
     ie?DB.D[idx]=obj:DB.D.push(obj);
@@ -4111,7 +4096,7 @@ async function syncVehicles(){
   DB.V = rows.map(r=>({
     Rego:r.Rego,Current_Status:r.Active==='Y'?'Active':'Inactive',Make:r.Make,Model:r.Model,
     'Manufacture Date':r.Year?String(r.Year):'',Capacity:r.Seats||0,Owner:r.Owner||'DONG CHOI PTY LTD',
-    Rego_Date:r.Rego_Expiry?r.Rego_Expiry.slice(0,10):'',HVIS_Date:r.HVIS_Expiry?r.HVIS_Expiry.slice(0,10):'',
+    Rego_Date:r.Rego_Expiry||'',HVIS_Date:r.HVIS_Expiry||'',
     Current_KM:0,Last_Service_KM:0,Service_Interval:10000,VIN:'','Engine Number':'',Accreditation:''
   }));
   getSubVehicles().forEach(v=>{ if(v.Owner&&!DB.PS[v.Owner]) DB.PS[v.Owner]={}; });
@@ -4123,8 +4108,8 @@ async function syncDrivers(){
   DB.D = rows.map(r=>({
     Name_EN:r.Name_EN,Name_KR:r.Name_KR,DriverID:r.Name_EN,Mobile_1:r.Phone?String(r.Phone):'',
     'NEXT OF KIN':'',License_Class:r.License_Class,
-    'License_#':'',License_Expiry:r.License_Expiry?r.License_Expiry.slice(0,10):'',
-    'Authority_#':r.Authority_No||'',Authority_Expiry:r.Authority_Expiry?r.Authority_Expiry.slice(0,10):'',
+    'License_#':'',License_Expiry:r.License_Expiry||'',
+    'Authority_#':r.Authority_No||'',Authority_Expiry:r.Authority_Expiry||'',
     Address:'',Suburb:'',Bank_Name:'',BSB:'',Account_Number:'',PIN:r.PIN?String(r.PIN):''
   }));
 }
@@ -4212,7 +4197,7 @@ async function loadAllFromSheets(){
     if(d.M_Vehicles?.length) DB.V = d.M_Vehicles.map(r=>({
       Rego:r.Rego,Current_Status:r.Active==='Y'?'Active':'Inactive',Make:r.Make,Model:r.Model,
       'Manufacture Date':r.Year?String(r.Year):'',Capacity:r.Seats||0,Owner:'DONG CHOI PTY LTD',
-      Rego_Date:r.Rego_Expiry?r.Rego_Expiry.slice(0,10):'',HVIS_Date:r.HVIS_Expiry?r.HVIS_Expiry.slice(0,10):'',
+      Rego_Date:r.Rego_Expiry||'',HVIS_Date:r.HVIS_Expiry||'',
       Current_KM:0,Last_Service_KM:0,Service_Interval:10000,
       VIN:'','Engine Number':'',Accreditation:''
     }));
@@ -4221,8 +4206,8 @@ async function loadAllFromSheets(){
     if(d.M_Drivers?.length) DB.D = d.M_Drivers.map(r=>({
       Name_EN:r.Name_EN,Name_KR:r.Name_KR,DriverID:r.Name_EN,Mobile_1:r.Phone?String(r.Phone):'',
       'NEXT OF KIN':'',License_Class:r.License_Class,
-      'License_#':'',License_Expiry:r.License_Expiry?r.License_Expiry.slice(0,10):'',
-      'Authority_#':r.Authority_No||'',Authority_Expiry:r.Authority_Expiry?r.Authority_Expiry.slice(0,10):'',
+      'License_#':'',License_Expiry:r.License_Expiry||'',
+      'Authority_#':r.Authority_No||'',Authority_Expiry:r.Authority_Expiry||'',
       Address:'',Suburb:'',Bank_Name:'',
       BSB:'',Account_Number:'',PIN:r.PIN?String(r.PIN):''
     }));
