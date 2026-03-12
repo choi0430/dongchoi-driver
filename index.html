@@ -1730,15 +1730,24 @@ function sddInputId(key){ return key==='prerego' ? 'pre-rego' : 'dr-'+key; }
 function sddOpen(key) {
   const input = document.getElementById(sddInputId(key));
   const list  = document.getElementById('sdd-'+key+'-list');
-  const rect  = input.getBoundingClientRect();
-  const visH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-  list.style.left  = rect.left + 'px';
-  list.style.width = rect.width + 'px';
-  // 항상 위로 열기
-  list.style.bottom = (visH - rect.top + 4) + 'px';
-  list.style.top    = 'auto';
+  if(!input || !list) return;
   sddFilter(key);
   list.classList.add('open');
+  // 항상 input 위로 열기 — 위치 계산
+  positionSddList(input, list);
+}
+function positionSddList(input, list) {
+  // 일단 보이게 해서 높이 측정
+  list.style.visibility = 'hidden';
+  list.style.display    = 'block';
+  const rect   = input.getBoundingClientRect();
+  const listH  = Math.min(list.scrollHeight, 240);
+  // position: fixed 기준 — 항상 input 바로 위에 배치
+  list.style.left   = rect.left + 'px';
+  list.style.width  = rect.width + 'px';
+  list.style.top    = (rect.top - listH - 4) + 'px';
+  list.style.bottom = 'auto';
+  list.style.visibility = '';
 }
 function sddBlur(key) {
   setTimeout(()=>{document.getElementById('sdd-'+key+'-list').classList.remove('open');},200);
@@ -1781,6 +1790,9 @@ function sddFilter(key) {
   if(frag.childNodes.length===0){ list.innerHTML='<div class="sdd-empty">검색 결과 없음</div>'; }
   else { list.appendChild(frag); }
   list.classList.add('open');
+  // 내용 변경 후 위치 재계산 (항상 위로)
+  const inputEl = document.getElementById(sddInputId(key));
+  if(inputEl && list.classList.contains('open')) positionSddList(inputEl, list);
 }
 function sddSelect(key, value) {
   document.getElementById(sddInputId(key)).value = value;
@@ -1795,14 +1807,20 @@ function sddSelect(key, value) {
   // 차량 선택 시 실제 인승 힌트 표시 (요청 인승 dr-seats는 건드리지 않음)
   if(key==='rego'){
     const v = MASTER.vehicles?.find(v=>v.Rego===value);
-    // 수동 차량 선택 힌트 업데이트
+    // 수동 차량 힌트 업데이트
     updateManualHint(v);
     // 차량 실제 인승 힌트 표시
     const seatsHint = document.getElementById('seats-hint');
-    if(seatsHint && v?.Seats) {
-      seatsHint.textContent = '🚌 실제 차량: ' + v.Seats + '인승 — 요금은 위 요청 인승 기준';
-      seatsHint.style.display = 'block';
+    if(seatsHint) {
+      if(v?.Seats) {
+        seatsHint.textContent = '🚌 실제 차량: ' + v.Seats + '인승 — 요금은 아래 요청 인승 기준';
+        seatsHint.style.display = 'block';
+      } else {
+        seatsHint.style.display = 'none';
+      }
     }
+    // 요청 인승 이미 선택돼 있으면 비교 힌트 갱신
+    updateSurchargeOptions();
     // Pre-Departure 다이어그램이 이미 마운트됐으면 해당 차량 데미지 로드
     const preWrap = document.getElementById('bus-pre-mount');
     if(preWrap && preWrap.dataset.mounted === 'pre') {
@@ -2993,6 +3011,11 @@ function addDailyReport(shiftId){
     updateSurchargeOptions();
   }
   updateStep2UI();
+  // 차량 세팅 후 힌트 전체 즉시 갱신
+  updateManualHint();
+  updateOTHint();
+  updateSvcHint();
+  updateDistHint();
 }
 
 function startEndShift(shiftId){
@@ -3663,6 +3686,7 @@ function renderHintBox(el, items){
 function updateManualHint(veh){
   const hintEl = document.getElementById('manual-vehicle-hint');
   if(!hintEl) return;
+  if(veh===undefined) veh = getCurrentVehicle(); // 파라미터 없으면 자동 감지
   if(!veh){ hintEl.style.display='none'; return; }
   const isManual = veh.Transmission === 'Manual';
   if(isManual){
@@ -3962,10 +3986,22 @@ const DIST_OPTIONS = {
 };
 
 function getSeatsFromShift(){
-  // 활성 운행에서 먼저 읽기 (step2/3에서)
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(shift?.seats) return shift.seats;
   return document.getElementById('dr-seats')?.value || '';
+}
+// 현재 선택된 차량 rego (SDD input 또는 shift 기준)
+function getCurrentRego(){
+  const drRegoEl = document.getElementById('dr-rego');
+  if(drRegoEl?.value) return drRegoEl.value.trim();
+  const shift = activeShifts.find(s=>s.id===editingShiftId);
+  return shift?.rego || '';
+}
+// 현재 선택된 차량 MASTER 객체
+function getCurrentVehicle(){
+  const rego = getCurrentRego();
+  if(!rego) return null;
+  return (MASTER.vehicles||[]).find(v=>v.Rego===rego) || null;
 }
 
 function renderOTButtons(seats){
@@ -4182,16 +4218,17 @@ function updateSurchargeOptions(){
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   // 요청 인승 선택 시 안내 메시지
   const reqHintEl = document.getElementById('req-seats-hint');
-  if(reqHintEl && seats) {
-    const regoEl = document.getElementById('dr-rego');
-    const regoVal = regoEl?.value || '';
-    const vehicle = MASTER.vehicles?.find(v=>v.Rego===regoVal);
+  if(reqHintEl) {
+    const vehicle = getCurrentVehicle();
     const actualSeats = vehicle?.Seats || '';
     const seatNum = parseInt(seats);
     const actualNum = parseInt(actualSeats);
-    if(actualSeats && actualNum > seatNum) {
-      reqHintEl.innerHTML = `⚠️ 실제 차량 ${actualSeats}인승이지만 <b>${seats} 요금 기준</b>으로 청구`;
+    if(seats && actualSeats && actualNum > seatNum) {
+      reqHintEl.innerHTML = `⚠️ 실제 차량 <b>${actualSeats}인승</b>이지만 여행사 요청 <b>${seats} 요금</b>으로 청구됩니다`;
       reqHintEl.style.display = 'block';
+    } else if(seats && actualSeats && actualNum === seatNum) {
+      reqHintEl.innerHTML = `✅ 요청 인승과 실제 차량 일치 (${actualSeats}인승)`;
+      reqHintEl.style.cssText += ';color:#16a34a;display:block';
     } else {
       reqHintEl.style.display = 'none';
     }
@@ -4258,9 +4295,7 @@ function onSvcSelectChange(){
   calcTotal();
   updateSvcHint();
   // SVC 변경 시 수동 차량 힌트 금액 조건 재확인
-  const rego = document.getElementById('pre-rego')?.value||'';
-  const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
-  updateManualHint(veh);
+  updateManualHint(); // getCurrentVehicle() 자동 사용
 }
 function onHotelSelectChange(){ calcTotal(); }
 function onDistSelectChange(){ calcTotal(); updateDistHint(); }
