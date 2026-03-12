@@ -4431,8 +4431,18 @@ function getAllReports(){
   return all;
 }
 
+function getDriverWagesFromLocal(driverName){
+  // admin_wages에서 현재 드라이버의 지급 기록 반환
+  try{
+    const wages = JSON.parse(localStorage.getItem('admin_wages')||'{}');
+    return wages[driverName] || {};
+  }catch(e){ return {}; }
+}
+
 function renderPay(){
   const all = getAllReports();
+  const driverName = localStorage.getItem('driverName') || '';
+
   // 주별 그룹핑 (월~일)
   const weekMap = {};
   all.forEach(r=>{
@@ -4444,10 +4454,21 @@ function renderPay(){
   // 최신 주 순 정렬
   const weeks = Object.values(weekMap).sort((a,b)=>b.mon-a.mon);
 
-  // 미지급 배지 (SALARY_DATA 기준)
-  const unpaid = SALARY_DATA.reduce((s,w)=>s+(w.balance||0),0);
+  // 지급 기록 (admin_wages 기반)
+  const driverWages = getDriverWagesFromLocal(driverName);
+
+  // 미지급 배지 계산 (로컬 DR vs 지급 합계)
+  let totalUnpaid = 0;
+  weeks.forEach(wk=>{
+    const drTotal = wk.reports.reduce((s,r)=>s+(r.dr||0),0);
+    const ownerTotal = wk.reports.reduce((s,r)=>s+(r.nightOwner||0),0);
+    const net = drTotal - ownerTotal;
+    const weekWages = driverWages[wk.key] || {entries:[]};
+    const paid = (weekWages.entries||[]).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    totalUnpaid += Math.max(0, net - paid);
+  });
   const badge = document.getElementById('pay-unpaid-badge');
-  if(badge) badge.textContent = unpaid>0 ? '미지급 $'+unpaid : '최신';
+  if(badge) badge.textContent = totalUnpaid>0 ? '미지급 $'+Math.round(totalUnpaid) : '최신';
 
   const el = document.getElementById('pay-weeks-list');
   if(!el) return;
@@ -4466,6 +4487,12 @@ function renderPay(){
     const ownerTotal = wk.reports.reduce((s,r)=>s+(r.nightOwner||0),0);
     const netPay = drTotal - ownerTotal;
 
+    // 지급 기록 (admin_wages 기반)
+    const weekWageData = driverWages[wk.key] || {entries:[]};
+    const paidAmt = (weekWageData.entries||[]).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    const balance = netPay - paidAmt;
+    const isPaid = balance <= 0;
+
     const card = document.createElement('div');
     card.className = 'pay-week-card';
     card.innerHTML = `
@@ -4476,14 +4503,18 @@ function renderPay(){
         </div>
         <div style="text-align:right;">
           <div class="pay-week-total">$${netPay.toLocaleString()}</div>
-          ${ownerTotal>0?'<div style="font-size:11px;color:var(--red);font-weight:600;">회사납입 -$'+ownerTotal+'</div>':''}
+          <div style="font-size:11px;font-weight:700;color:${isPaid?'var(--green)':'var(--orange)'};">${isPaid?'✅ 지급완료':'미지급 $'+Math.round(balance)}</div>
         </div>
       </div>
       <div class="pay-week-bar">
-        <div class="pay-week-stat"><div class="pay-week-stat-label">드라이버 발생</div><div class="pay-week-stat-val" style="color:var(--green);">$${drTotal}</div></div>
-        <div class="pay-week-stat"><div class="pay-week-stat-label">회사 납입</div><div class="pay-week-stat-val" style="color:var(--red);">$${ownerTotal}</div></div>
-        <div class="pay-week-stat"><div class="pay-week-stat-label">실수령</div><div class="pay-week-stat-val" style="color:var(--accent);">$${netPay}</div></div>
-      </div>`;
+        <div class="pay-week-stat"><div class="pay-week-stat-label">발생 DR</div><div class="pay-week-stat-val" style="color:var(--green);">$${drTotal}</div></div>
+        <div class="pay-week-stat"><div class="pay-week-stat-label">지급됨</div><div class="pay-week-stat-val" style="color:var(--accent);">$${paidAmt}</div></div>
+        <div class="pay-week-stat"><div class="pay-week-stat-label">잔액</div><div class="pay-week-stat-val" style="color:${isPaid?'var(--muted)':'var(--orange)'};">$${Math.max(0,Math.round(balance))}</div></div>
+      </div>
+      ${(weekWageData.entries||[]).length>0?`<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:700;">💸 지급 내역</div>
+        ${(weekWageData.entries||[]).map(e=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;color:var(--muted);"><span>${e.date||''} · ${e.method||'현금'}</span><span style="font-weight:700;color:var(--accent);">$${Number(e.amount||0).toLocaleString()}</span></div>`).join('')}
+      </div>`:''}`;
     card.dataset.weekKey = wk.key;
     card.addEventListener('click', ()=>showPayDetail(wk));
     el.appendChild(card);
@@ -4605,31 +4636,52 @@ function showPayDetail(wk){
 function renderSalary(){
   const el=document.getElementById('salary-list');
   const meEl=document.getElementById('me-salary-detail');
-  const html=SALARY_DATA.slice(0,4).map(s=>`
-    <div class="salary-week">
+  const driverName = localStorage.getItem('driverName') || '';
+  const driverWages = getDriverWagesFromLocal(driverName);
+
+  // 로컬 DR 리포트 기반 주별 발생 금액
+  const all = getAllReports();
+  const weekMap = {};
+  all.forEach(r=>{
+    const wk = getWeekKey(r.date);
+    if(!wk) return;
+    if(!weekMap[wk.key]) weekMap[wk.key]={label:wk.label,key:wk.key,total:0,paid:0};
+    weekMap[wk.key].total += (r.dr||0) - (r.nightOwner||0);
+  });
+  // 지급 금액 합산
+  Object.entries(driverWages).forEach(([weekKey,wk])=>{
+    if(!weekMap[weekKey]) weekMap[weekKey]={label:weekKey,key:weekKey,total:0,paid:0};
+    weekMap[weekKey].paid = (wk.entries||[]).reduce((s,e)=>s+(Number(e.amount)||0),0);
+  });
+
+  const weeks = Object.values(weekMap).sort((a,b)=>b.key.localeCompare(a.key));
+
+  function salaryCard(s){
+    const balance = Math.max(0, Math.round(s.total - s.paid));
+    const isPaid = balance<=0;
+    return `<div class="salary-week">
       <div class="salary-week-head">
-        <span class="salary-week-label">${s.week}</span>
-        <span class="pill ${s.balance>0?'pill-orange':'pill-green'}">${s.balance>0?'미지급':'완료'}</span>
+        <span class="salary-week-label">${s.label}</span>
+        <span class="pill ${!isPaid?'pill-orange':'pill-green'}">${!isPaid?'미지급':'완료'}</span>
       </div>
       <div class="salary-amounts">
-        <div class="salary-amt"><div class="salary-amt-label">발생</div><div class="salary-amt-val green">$${s.total}</div></div>
-        <div class="salary-amt"><div class="salary-amt-label">지급</div><div class="salary-amt-val accent">$${s.paid}</div></div>
-        <div class="salary-amt"><div class="salary-amt-label">잔액</div><div class="salary-amt-val ${s.balance>0?'':''}" style="color:${s.balance>0?'var(--orange)':'var(--muted)'};">$${s.balance}</div></div>
+        <div class="salary-amt"><div class="salary-amt-label">발생</div><div class="salary-amt-val green">$${Math.round(s.total)}</div></div>
+        <div class="salary-amt"><div class="salary-amt-label">지급</div><div class="salary-amt-val accent">$${Math.round(s.paid)}</div></div>
+        <div class="salary-amt"><div class="salary-amt-label">잔액</div><div class="salary-amt-val" style="color:${!isPaid?'var(--orange)':'var(--muted)'};">$${balance}</div></div>
       </div>
-    </div>`).join('');
-  if(el) el.innerHTML=html;
-  if(meEl) meEl.innerHTML=SALARY_DATA.map(s=>`
-    <div class="salary-week" style="margin:0 12px 8px;">
-      <div class="salary-week-head">
-        <span class="salary-week-label">${s.week}</span>
-        <span class="pill ${s.balance>0?'pill-orange':'pill-green'}">${s.balance>0?'미지급':'완료'}</span>
-      </div>
-      <div class="salary-amounts">
-        <div class="salary-amt"><div class="salary-amt-label">발생</div><div class="salary-amt-val green">$${s.total}</div></div>
-        <div class="salary-amt"><div class="salary-amt-label">지급</div><div class="salary-amt-val accent">$${s.paid}</div></div>
-        <div class="salary-amt"><div class="salary-amt-label">잔액</div><div class="salary-amt-val" style="color:${s.balance>0?'var(--orange)':'var(--muted)'};">$${s.balance}</div></div>
-      </div>
-    </div>`).join('');
+    </div>`;
+  }
+
+  if(el) el.innerHTML = weeks.slice(0,4).map(salaryCard).join('');
+
+  // 배지 업데이트
+  const totalUnpaid = weeks.reduce((s,w)=>s+Math.max(0,Math.round(w.total-w.paid)),0);
+  const badge = document.getElementById('salary-balance');
+  if(badge) badge.textContent = totalUnpaid>0?'미지급 $'+totalUnpaid:'지급완료';
+  const badge2 = document.getElementById('salary-balance2');
+  if(badge2) badge2.textContent = totalUnpaid>0?'미지급 $'+totalUnpaid:'지급완료';
+
+  if(meEl) meEl.innerHTML = weeks.map(s=>`<div style="margin:0 12px 8px;">${salaryCard(s)}</div>`).join('');
 }
 
 // ═══════════════════════════════════════
