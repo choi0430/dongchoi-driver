@@ -491,8 +491,86 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     </div>
   </div>
 
+  <!-- 인보이스 수동 항목 관리 -->
+  <div style="padding:0 14px 10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <div style="font-size:11px;font-weight:700;color:var(--t3);letter-spacing:.5px;">📝 수동 항목 추가 / 편집</div>
+      <button class="btn bac sm" onclick="openInvItemModal(null)" style="font-size:11px;padding:4px 10px;">+ 항목 추가</button>
+    </div>
+    <div id="inv-manual-list" style="display:none;"></div>
+  </div>
+
   <!-- 리포트 미리보기 -->
   <div id="inv-preview" style="padding:0 14px 14px"></div>
+
+  <!-- 인보이스 항목 추가/편집 모달 -->
+  <div id="inv-item-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center;padding:16px;">
+    <div style="background:var(--sf);border-radius:16px;padding:18px;width:100%;max-width:400px;max-height:90vh;overflow-y:auto;">
+      <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:14px;" id="inv-modal-title">📝 항목 추가</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">날짜 <span style="color:#ef4444;">*</span></div>
+          <input type="date" id="iim-date" class="profit-finp" style="width:100%;">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">차량 (Rego)</div>
+          <input type="text" id="iim-rego" class="profit-finp" style="width:100%;" placeholder="예: TV1072">
+        </div>
+      </div>
+      <div style="margin-bottom:8px;">
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">서비스 / 투어명 <span style="color:#ef4444;">*</span></div>
+        <input type="text" id="iim-tour" class="profit-finp" style="width:100%;" placeholder="예: Blue Mountains Day Tour">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">시작 시간</div>
+          <input type="time" id="iim-start" class="profit-finp" style="width:100%;">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">종료 시간</div>
+          <input type="time" id="iim-end" class="profit-finp" style="width:100%;">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">인승 (Seats)</div>
+          <select id="iim-seats" class="profit-sel" style="width:100%;">
+            <option value="">선택</option>
+            <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">Tour Code</div>
+          <input type="text" id="iim-tourcode" class="profit-finp" style="width:100%;" placeholder="예: BM-2024-01">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">청구액 ($) <span style="color:#ef4444;">*</span></div>
+          <input type="number" id="iim-amount" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">OT ($)</div>
+          <input type="number" id="iim-ot" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">호텔 서차지 ($)</div>
+          <input type="number" id="iim-hotel" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+        </div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">비고</div>
+        <input type="text" id="iim-note" class="profit-finp" style="width:100%;" placeholder="메모 (선택)">
+      </div>
+
+      <div style="display:flex;gap:8px;">
+        <button class="btn brd" style="flex:1;" onclick="closeInvItemModal()">취소</button>
+        <button class="btn bac" style="flex:2;" onclick="saveInvItem()">💾 저장</button>
+      </div>
+      <div id="iim-err" style="color:#ef4444;font-size:12px;margin-top:6px;display:none;"></div>
+    </div>
+  </div>
 </div>
 
 <!-- WAGE PAGE -->
@@ -2081,6 +2159,199 @@ function deleteLedgerEntry(idx){
 
 
 // ═══════════════════════════════════════
+
+// ─────────────────────────────────────────
+// INVOICE 수동 항목 관리
+// ─────────────────────────────────────────
+let _invItemEditId = null; // null = 추가, id = 편집
+
+function _invManualKey() {
+  const agency = document.getElementById('inv-agency')?.value || '_manual';
+  const from   = document.getElementById('inv-from')?.value   || '';
+  return 'dc_inv_manual_' + agency + '_' + from.slice(0,7); // 월별
+}
+
+function openInvItemModal(id) {
+  _invItemEditId = id;
+  const modal = document.getElementById('inv-item-modal');
+  const title = document.getElementById('inv-modal-title');
+  modal.style.display = 'flex';
+  title.textContent = id ? '✏️ 항목 편집' : '📝 항목 추가';
+
+  // 에러 초기화
+  const errEl = document.getElementById('iim-err');
+  if (errEl) { errEl.style.display='none'; errEl.textContent=''; }
+
+  if (id) {
+    // 기존 데이터 불러오기
+    const key   = _invManualKey();
+    const items = JSON.parse(localStorage.getItem(key)||'[]');
+    const item  = items.find(x => x.id === id);
+    if (item) {
+      document.getElementById('iim-date').value     = item.date     || '';
+      document.getElementById('iim-rego').value     = item.rego     || '';
+      document.getElementById('iim-tour').value     = item.tour     || '';
+      document.getElementById('iim-start').value    = item.start    || '';
+      document.getElementById('iim-end').value      = item.end      || '';
+      document.getElementById('iim-seats').value    = item.seats    || '';
+      document.getElementById('iim-tourcode').value = item.tourcode || '';
+      document.getElementById('iim-amount').value   = item.amount   || '';
+      document.getElementById('iim-ot').value       = item.ot       || '';
+      document.getElementById('iim-hotel').value    = item.hotel    || '';
+      document.getElementById('iim-note').value     = item.note     || '';
+    }
+  } else {
+    // 폼 초기화
+    ['iim-date','iim-rego','iim-tour','iim-start','iim-end','iim-tourcode','iim-amount','iim-ot','iim-hotel','iim-note'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.value='';
+    });
+    document.getElementById('iim-seats').value = '';
+    // 현재 선택된 기간 첫 날짜 기본값
+    const from = document.getElementById('inv-from')?.value;
+    if (from) document.getElementById('iim-date').value = from;
+  }
+}
+
+function closeInvItemModal() {
+  document.getElementById('inv-item-modal').style.display = 'none';
+  _invItemEditId = null;
+}
+
+function saveInvItem() {
+  const errEl = document.getElementById('iim-err');
+  const date   = document.getElementById('iim-date')?.value;
+  const tour   = document.getElementById('iim-tour')?.value?.trim();
+  const amount = parseFloat(document.getElementById('iim-amount')?.value) || 0;
+
+  if (!date)  { errEl.textContent='날짜를 입력하세요.'; errEl.style.display='block'; return; }
+  if (!tour)  { errEl.textContent='서비스/투어명을 입력하세요.'; errEl.style.display='block'; return; }
+  if (amount <= 0) { errEl.textContent='청구액을 입력하세요.'; errEl.style.display='block'; return; }
+
+  const item = {
+    id:       _invItemEditId || Date.now().toString(),
+    date,
+    rego:     document.getElementById('iim-rego')?.value?.trim()     || '',
+    tour,
+    start:    document.getElementById('iim-start')?.value            || '',
+    end:      document.getElementById('iim-end')?.value              || '',
+    seats:    document.getElementById('iim-seats')?.value            || '',
+    tourcode: document.getElementById('iim-tourcode')?.value?.trim() || '',
+    amount,
+    ot:       parseFloat(document.getElementById('iim-ot')?.value)   || 0,
+    hotel:    parseFloat(document.getElementById('iim-hotel')?.value)|| 0,
+    note:     document.getElementById('iim-note')?.value?.trim()     || '',
+    _manual:  true,
+  };
+
+  const key   = _invManualKey();
+  const items = JSON.parse(localStorage.getItem(key)||'[]');
+
+  if (_invItemEditId) {
+    const idx = items.findIndex(x => x.id === _invItemEditId);
+    if (idx !== -1) items[idx] = item; else items.push(item);
+  } else {
+    items.push(item);
+  }
+
+  // 날짜순 정렬
+  items.sort((a,b)=>a.date.localeCompare(b.date));
+  localStorage.setItem(key, JSON.stringify(items));
+
+  closeInvItemModal();
+  renderInvManualList();
+  // 미리보기 갱신
+  _refreshInvPreview();
+  toast('항목 저장됨', 'ok');
+}
+
+function deleteInvItem(id) {
+  if (!confirm('이 항목을 삭제하시겠습니까?')) return;
+  const key   = _invManualKey();
+  const items = JSON.parse(localStorage.getItem(key)||'[]').filter(x=>x.id!==id);
+  localStorage.setItem(key, JSON.stringify(items));
+  renderInvManualList();
+  _refreshInvPreview();
+  toast('항목 삭제됨', 'ok');
+}
+
+function renderInvManualList() {
+  const el  = document.getElementById('inv-manual-list');
+  if (!el) return;
+  const key   = _invManualKey();
+  const items = JSON.parse(localStorage.getItem(key)||'[]');
+
+  if (items.length === 0) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+
+  const total = items.reduce((s,i)=> s + (i.amount||0) + (i.ot||0) + (i.hotel||0), 0);
+
+  el.innerHTML = `
+    <div style="background:var(--sf2);border-radius:12px;overflow:hidden;margin-bottom:6px;">
+      <div style="padding:8px 12px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:11px;font-weight:700;color:var(--t2);">수동 항목 ${items.length}건</span>
+        <span style="font-size:12px;font-weight:800;color:var(--gn);">합계 $${total.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
+      </div>
+      ${items.map(item => {
+        const sub = (item.amount||0)+(item.ot||0)+(item.hotel||0);
+        const timeStr = item.start||item.end ? (item.start||'') + (item.end ? ' - '+item.end : '') : '';
+        return `<div style="padding:9px 12px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(item.date)} · ${escH(item.rego||'—')}</div>
+            <div style="font-size:11px;color:var(--t2);margin-top:1px;">${escH(item.tour)}</div>
+            ${timeStr?`<div style="font-size:10px;color:var(--t3);">${escH(timeStr)}</div>`:''}
+            ${item.note?`<div style="font-size:10px;color:var(--t3);">${escH(item.note)}</div>`:''}
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="font-size:13px;font-weight:800;color:var(--gn);">$${sub.toLocaleString('en-AU',{minimumFractionDigits:2})}</div>
+            ${item.ot?`<div style="font-size:10px;color:var(--t3);">OT $${item.ot}</div>`:''}
+            ${item.hotel?`<div style="font-size:10px;color:var(--t3);">Hotel $${item.hotel}</div>`:''}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+            <button onclick="openInvItemModal('${item.id}')" style="padding:4px 8px;border-radius:6px;border:1px solid var(--bd);background:var(--sf);font-size:11px;font-weight:700;cursor:pointer;color:var(--ac);">✏️</button>
+            <button onclick="deleteInvItem('${item.id}')" style="padding:4px 8px;border-radius:6px;border:1px solid #fecaca;background:#fef2f2;font-size:11px;font-weight:700;cursor:pointer;color:#ef4444;">🗑</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function _refreshInvPreview() {
+  const agency = document.getElementById('inv-agency')?.value;
+  const from   = document.getElementById('inv-from')?.value;
+  const to     = document.getElementById('inv-to')?.value;
+  if (!agency || !from || !to) return;
+  // generateInvRows 재호출
+  const rows = _buildInvRows(agency, from, to);
+  renderInvPreview(rows, agency, from, to);
+}
+
+// 수동 항목을 report rows 형식으로 변환
+function _manualItemsToRows(agency, from) {
+  const key   = 'dc_inv_manual_' + agency + '_' + (from||'').slice(0,7);
+  const items = JSON.parse(localStorage.getItem(key)||'[]');
+  return items.map(item => ({
+    _iso:           item.date,
+    Date:           item.date,
+    Rego:           item.rego   || '',
+    Attraction:     item.tour   || '',
+    Seats:          item.seats  || '',
+    Tour_Code:      item.tourcode || '',
+    SVC_Label:      item.note   || '',
+    Total_TA:       (item.amount||0) + (item.ot||0) + (item.hotel||0),
+    OT:             item.ot     || 0,
+    Hotel_Surcharge:item.hotel  || 0,
+    Dist_Surcharge: 0,
+    SVC_Charge:     item.amount || 0,
+    _timeStart:     item.start  || '',
+    _timeEnd:       item.end    || '',
+    Driver:         '(수동 입력)',
+    _manual:        true,
+  }));
+}
+
 // INVOICE (Tax Invoice 발행)
 // ═══════════════════════════════════════
 
@@ -2299,12 +2570,30 @@ async function loadInvReports() {
 
   // 필터: 여행사 + 기간 (Agency 필드가 다양한 형식일 수 있으므로 유연하게 매칭)
   const agencyLower = agency.toLowerCase();
-  const rows = (_invReports || []).filter(r => {
+  const sheetRows = (_invReports || []).filter(r => {
     const ra = (r._agency || String(r.Agency||'').trim()).toLowerCase();
     return ra === agencyLower && r._iso >= from && r._iso <= to;
   });
 
+  // 수동 항목 병합
+  const manualRows = _manualItemsToRows(agency, from).filter(r => r._iso >= from && r._iso <= to);
+  const rows = [...sheetRows, ...manualRows];
+
+  // 수동 항목 목록 렌더
+  renderInvManualList();
+
   renderInvPreview(rows, agency, from, to);
+}
+
+// 수동 항목 포함 rows 빌드 (미리보기 갱신용)
+function _buildInvRows(agency, from, to) {
+  const agencyLower = agency.toLowerCase();
+  const sheetRows = (_invReports || []).filter(r => {
+    const ra = (r._agency || String(r.Agency||'').trim()).toLowerCase();
+    return ra === agencyLower && r._iso >= from && r._iso <= to;
+  });
+  const manualRows = _manualItemsToRows(agency, from).filter(r => r._iso >= from && r._iso <= to);
+  return [...sheetRows, ...manualRows];
 }
 
 // ── 인보이스 번호 관리 ──
@@ -2413,13 +2702,9 @@ async function generateInvoice() {
 
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
 
-  const agencyLower = agency.toLowerCase();
-  const rows = (_invReports || []).filter(r => {
-    const ra = (r._agency || String(r.Agency||'').trim()).toLowerCase();
-    return ra === agencyLower && r._iso >= from && r._iso <= to;
-  }).sort((a, b) => a._iso.localeCompare(b._iso));
+  const rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
 
-  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
+  if (rows.length === 0) { toast('해당 기간 리포트 없음 (수동 항목도 없음)', 'er'); return; }
 
   // 인보이스 내부에서 사용할 날짜 포맷 (dd/mm/yyyy)
   const fd = ds => {
@@ -2444,9 +2729,10 @@ async function generateInvoice() {
   const issuedKey = `dc_inv_issued_${invNum}`;
   const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
   localStorage.setItem(issuedKey, issuedAt);
-  const today   = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'long',year:'numeric'});
-  const dueDate = new Date(); dueDate.setDate(dueDate.getDate()+14);
-  const dueDateStr = dueDate.toLocaleDateString('en-AU', {day:'2-digit',month:'long',year:'numeric'});
+  const _todayD = new Date();
+  const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
+  const _dueD   = new Date(); _dueD.setDate(_dueD.getDate()+14);
+  const dueDateStr = String(_dueD.getDate()).padStart(2,'0')+'/'+String(_dueD.getMonth()+1).padStart(2,'0')+'/'+_dueD.getFullYear();
 
   // 코스별 집계
   const byTour = {};
