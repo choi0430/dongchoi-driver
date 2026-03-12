@@ -930,29 +930,242 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 </div>
 
 <div class="page" id="page-me">
-  <div class="sec-head"><div><div class="sec-title">내 정보</div></div></div>
-  <div class="card" style="margin:0 12px 10px;">
+
+  <!-- ── 헤더 카드 ── -->
+  <div class="sec-head"><div><div class="sec-title">내 정보</div></div>
+    <button onclick="toggleMyInfoEdit()" id="myinfo-edit-btn"
+      style="padding:6px 14px;border-radius:20px;background:var(--accent);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;">✏️ 수정</button>
+  </div>
+
+  <!-- 요약 카드 (읽기 전용) -->
+  <div class="card" style="margin:0 12px 10px;" id="myinfo-view-card">
     <div class="card-body">
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
-        <div style="width:56px;height:56px;background:var(--accent-light);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:var(--accent);">DC</div>
-        <div>
-          <div style="font-weight:700;font-size:17px;">최동철 (Dong Cheol Choi)</div>
-          <div style="font-size:12px;color:var(--muted);">드라이버 · HR 면허</div>
+        <div id="me-avatar" style="width:56px;height:56px;background:var(--accent-light);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:var(--accent);">DC</div>
+        <div style="flex:1;">
+          <div id="me-name-display" style="font-weight:700;font-size:17px;">–</div>
+          <div id="me-sub-display" style="font-size:12px;color:var(--muted);">드라이버</div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
         <div style="background:var(--surface2);border-radius:10px;padding:12px;">
           <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-family:'DM Mono',monospace;margin-bottom:4px;">면허 만료</div>
-          <div style="font-weight:700;color:var(--green);">04 Jun 2026</div>
+          <div id="me-lic-exp" style="font-weight:700;color:var(--green);">–</div>
         </div>
         <div style="background:var(--surface2);border-radius:10px;padding:12px;">
           <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-family:'DM Mono',monospace;margin-bottom:4px;">Authority 만료</div>
-          <div style="font-weight:700;color:var(--green);">20 Dec 2028</div>
+          <div id="me-auth-exp" style="font-weight:700;color:var(--green);">–</div>
+        </div>
+      </div>
+      <!-- 연락처 / 주소 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="background:var(--surface2);border-radius:10px;padding:12px;">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-family:'DM Mono',monospace;margin-bottom:4px;">휴대폰</div>
+          <div id="me-mobile-display" style="font-weight:600;font-size:13px;">–</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:10px;padding:12px;">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-family:'DM Mono',monospace;margin-bottom:4px;">비상연락처</div>
+          <div id="me-nok-display" style="font-weight:600;font-size:13px;">–</div>
         </div>
       </div>
     </div>
   </div>
 
+  <!-- ── 수정 폼 (숨김) ── -->
+  <div id="myinfo-edit-card" style="display:none;margin:0 12px 10px;">
+
+    <!-- 기본 정보 -->
+    <div class="card" style="margin-bottom:10px;">
+      <div class="card-body">
+        <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px;letter-spacing:.5px;">👤 기본 정보</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div>
+            <div class="form-label">이름 (영문)</div>
+            <input class="form-input" id="mi-name-en" placeholder="Dong Cheol Choi">
+          </div>
+          <div>
+            <div class="form-label">이름 (한글)</div>
+            <input class="form-input" id="mi-name-kr" placeholder="최동철">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div>
+            <div class="form-label">휴대폰</div>
+            <input class="form-input" id="mi-mobile" placeholder="0400 000 000" inputmode="numeric">
+          </div>
+          <div>
+            <div class="form-label">면허 종류</div>
+            <select class="form-select" id="mi-lic-class">
+              <option value="">선택</option>
+              <option>HR</option><option>HC</option><option>MR</option><option>LR</option><option>C</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <div class="form-label">주소</div>
+          <input class="form-input" id="mi-address" placeholder="54a North Rocks Rd">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div class="form-label">Suburb</div>
+            <input class="form-input" id="mi-suburb" placeholder="North Rocks">
+          </div>
+          <div>
+            <div class="form-label">은행명</div>
+            <input class="form-input" id="mi-bank" placeholder="ANZ">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 비상연락처 -->
+    <div class="card" style="margin-bottom:10px;">
+      <div class="card-body">
+        <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px;letter-spacing:.5px;">🆘 비상연락처</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div class="form-label">성명</div>
+            <input class="form-input" id="mi-nok-name" placeholder="이혜진">
+          </div>
+          <div>
+            <div class="form-label">연락처</div>
+            <input class="form-input" id="mi-nok-phone" placeholder="0435 808 271" inputmode="numeric">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 면허 정보 -->
+    <div class="card" style="margin-bottom:10px;">
+      <div class="card-body">
+        <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px;letter-spacing:.5px;">🪪 면허 / Authority</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div>
+            <div class="form-label">면허 번호</div>
+            <input class="form-input" id="mi-lic-no" placeholder="16064447">
+          </div>
+          <div>
+            <div class="form-label">면허 만료일</div>
+            <input class="form-input" id="mi-lic-exp" placeholder="4-Jun-2026">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div>
+            <div class="form-label">Authority 번호</div>
+            <input class="form-input" id="mi-auth-no" placeholder="GV9025">
+          </div>
+          <div>
+            <div class="form-label">Authority 만료일</div>
+            <input class="form-input" id="mi-auth-exp" placeholder="20-Dec-2028">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div class="form-label">WWC 번호</div>
+            <input class="form-input" id="mi-wwc-no" placeholder="WWC1234567E">
+          </div>
+          <div>
+            <div class="form-label">WWC 만료일</div>
+            <input class="form-input" id="mi-wwc-exp" placeholder="29/10/2029">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 은행 정보 -->
+    <div class="card" style="margin-bottom:10px;">
+      <div class="card-body">
+        <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px;letter-spacing:.5px;">🏦 은행 계좌</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div class="form-label">BSB</div>
+            <input class="form-input" id="mi-bsb" placeholder="062-000" inputmode="numeric">
+          </div>
+          <div>
+            <div class="form-label">계좌번호</div>
+            <input class="form-input" id="mi-account" placeholder="12345678" inputmode="numeric">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 사진 업로드 -->
+    <div class="card" style="margin-bottom:10px;">
+      <div class="card-body">
+        <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px;letter-spacing:.5px;">📷 드라이버 라이센스</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">
+          <div>
+            <div class="form-label" style="margin-bottom:6px;">앞면</div>
+            <div id="mi-lic-front-box" onclick="document.getElementById('mi-lic-front-input').click()"
+              style="height:120px;border:2px dashed var(--border);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:var(--surface2);position:relative;">
+              <img id="mi-lic-front-img" style="width:100%;height:100%;object-fit:cover;display:none;border-radius:10px;">
+              <div id="mi-lic-front-placeholder" style="text-align:center;">
+                <div style="font-size:24px;margin-bottom:4px;">📄</div>
+                <div style="font-size:11px;color:var(--muted);">탭하여 업로드</div>
+              </div>
+            </div>
+            <input type="file" id="mi-lic-front-input" accept="image/*" capture="environment" style="display:none"
+              onchange="previewPhoto(this,'mi-lic-front-img','mi-lic-front-placeholder','licFront')">
+          </div>
+          <div>
+            <div class="form-label" style="margin-bottom:6px;">뒷면</div>
+            <div id="mi-lic-back-box" onclick="document.getElementById('mi-lic-back-input').click()"
+              style="height:120px;border:2px dashed var(--border);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:var(--surface2);position:relative;">
+              <img id="mi-lic-back-img" style="width:100%;height:100%;object-fit:cover;display:none;border-radius:10px;">
+              <div id="mi-lic-back-placeholder" style="text-align:center;">
+                <div style="font-size:24px;margin-bottom:4px;">📄</div>
+                <div style="font-size:11px;color:var(--muted);">탭하여 업로드</div>
+              </div>
+            </div>
+            <input type="file" id="mi-lic-back-input" accept="image/*" capture="environment" style="display:none"
+              onchange="previewPhoto(this,'mi-lic-back-img','mi-lic-back-placeholder','licBack')">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:10px;">
+      <div class="card-body">
+        <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px;letter-spacing:.5px;">🃏 Authority 카드</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div class="form-label" style="margin-bottom:6px;">앞면</div>
+            <div onclick="document.getElementById('mi-auth-front-input').click()"
+              style="height:120px;border:2px dashed var(--border);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:var(--surface2);">
+              <img id="mi-auth-front-img" style="width:100%;height:100%;object-fit:cover;display:none;border-radius:10px;">
+              <div id="mi-auth-front-placeholder" style="text-align:center;">
+                <div style="font-size:24px;margin-bottom:4px;">🃏</div>
+                <div style="font-size:11px;color:var(--muted);">탭하여 업로드</div>
+              </div>
+            </div>
+            <input type="file" id="mi-auth-front-input" accept="image/*" capture="environment" style="display:none"
+              onchange="previewPhoto(this,'mi-auth-front-img','mi-auth-front-placeholder','authFront')">
+          </div>
+          <div>
+            <div class="form-label" style="margin-bottom:6px;">뒷면</div>
+            <div onclick="document.getElementById('mi-auth-back-input').click()"
+              style="height:120px;border:2px dashed var(--border);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:var(--surface2);">
+              <img id="mi-auth-back-img" style="width:100%;height:100%;object-fit:cover;display:none;border-radius:10px;">
+              <div id="mi-auth-back-placeholder" style="text-align:center;">
+                <div style="font-size:24px;margin-bottom:4px;">🃏</div>
+                <div style="font-size:11px;color:var(--muted);">탭하여 업로드</div>
+              </div>
+            </div>
+            <input type="file" id="mi-auth-back-input" accept="image/*" capture="environment" style="display:none"
+              onchange="previewPhoto(this,'mi-auth-back-img','mi-auth-back-placeholder','authBack')">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 저장 버튼 -->
+    <div style="display:flex;gap:10px;padding-bottom:4px;">
+      <button class="btn btn-secondary" style="flex:1;" onclick="toggleMyInfoEdit()">✕ 취소</button>
+      <button class="btn btn-primary" style="flex:2;" onclick="saveMyInfo()">✓ 저장</button>
+    </div>
+  </div>
+
+  <!-- 급여 상세 -->
   <div class="sec-head"><div><div class="sec-title">급여 상세</div></div><span class="pill pill-green" id="salary-balance2">미지급 $0</span></div>
   <div id="me-salary-detail"></div>
 
@@ -1930,6 +2143,7 @@ function doLogin() {
   renderShiftSection();
   renderTodayReports();
   renderSalary();
+  initMyInfoPage();
 }
 
 function showLoginError(msg) {
@@ -2023,6 +2237,7 @@ function showPage(id){
   const _s=document.getElementById('screen'); if(_s) _s.scrollTop=0;
   // 연락처 탭 진입 시 최신 데이터로 재렌더링
   if(id === 'contacts') renderContacts();
+  if(id === 'me') initMyInfoPage();
 }
 
 function startReport(){
@@ -2334,6 +2549,206 @@ function submitDailyReport(){
   {const c=document.getElementById('f-svc-custom'); if(c)c.value='';}
   document.getElementById('t-ta').textContent='$0';
   document.getElementById('t-dr').textContent='$0';
+}
+
+// ═══════════════════════════════════════════════
+// 내 정보 수정 (My Profile Edit)
+// ═══════════════════════════════════════════════
+
+// 임시 사진 저장소 (저장 전)
+let _pendingPhotos = {};
+
+function toggleMyInfoEdit() {
+  const editCard = document.getElementById('myinfo-edit-card');
+  const viewCard = document.getElementById('myinfo-view-card');
+  const btn = document.getElementById('myinfo-edit-btn');
+  const isEditing = editCard.style.display !== 'none';
+
+  if (isEditing) {
+    // 취소 → 수정 폼 닫기
+    editCard.style.display = 'none';
+    viewCard.style.display = 'block';
+    btn.textContent = '✏️ 수정';
+    _pendingPhotos = {};
+  } else {
+    // 수정 모드 열기 → 현재 저장 값으로 폼 채우기
+    loadMyInfoToForm();
+    editCard.style.display = 'block';
+    viewCard.style.display = 'none';
+    btn.textContent = '✕ 닫기';
+  }
+}
+
+function loadMyInfoToForm() {
+  const key = 'myinfo_' + (currentDriver?.name || '');
+  const saved = JSON.parse(localStorage.getItem(key) || '{}');
+
+  // MASTER에서 현재 드라이버 데이터 병합 (저장값 우선)
+  const d = currentDriver || {};
+  const fields = {
+    'mi-name-en':  saved.nameEN   || d.Name_EN  || d.Name || '',
+    'mi-name-kr':  saved.nameKR   || d.Name_KR  || '',
+    'mi-mobile':   saved.mobile   || d.Mobile_1 || d.Mobile || '',
+    'mi-lic-class':saved.licClass || d.License_Class || '',
+    'mi-address':  saved.address  || d.Address  || '',
+    'mi-suburb':   saved.suburb   || d.Suburb   || '',
+    'mi-bank':     saved.bank     || d.Bank_Name || '',
+    'mi-nok-name': saved.nokName  || d.NEXT_OF_KIN || '',
+    'mi-nok-phone':saved.nokPhone || d.Moblie_2  || '',
+    'mi-lic-no':   saved.licNo    || d['License_#']   || '',
+    'mi-lic-exp':  saved.licExp   || d.License_Expiry || '',
+    'mi-auth-no':  saved.authNo   || d['Authority_#'] || '',
+    'mi-auth-exp': saved.authExp  || d.Authority_Expiry || '',
+    'mi-wwc-no':   saved.wwcNo    || d['WWC_#'] || '',
+    'mi-wwc-exp':  saved.wwcExp   || d.WWC_Expiry || '',
+    'mi-bsb':      saved.bsb      || d.BSB || '',
+    'mi-account':  saved.account  || d.Account_Number || '',
+  };
+  Object.entries(fields).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val || '';
+  });
+
+  // 저장된 사진 미리보기
+  ['licFront','licBack','authFront','authBack'].forEach(key => {
+    const data = saved['photo_'+key];
+    const imgId = {
+      licFront:'mi-lic-front-img', licBack:'mi-lic-back-img',
+      authFront:'mi-auth-front-img', authBack:'mi-auth-back-img'
+    }[key];
+    const phId = {
+      licFront:'mi-lic-front-placeholder', licBack:'mi-lic-back-placeholder',
+      authFront:'mi-auth-front-placeholder', authBack:'mi-auth-back-placeholder'
+    }[key];
+    if (data && imgId) {
+      const img = document.getElementById(imgId);
+      const ph  = document.getElementById(phId);
+      if (img) { img.src = data; img.style.display = 'block'; }
+      if (ph)  { ph.style.display = 'none'; }
+    }
+  });
+}
+
+function previewPhoto(input, imgId, phId, photoKey) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const data = e.target.result;
+    _pendingPhotos[photoKey] = data;
+    const img = document.getElementById(imgId);
+    const ph  = document.getElementById(phId);
+    if (img) { img.src = data; img.style.display = 'block'; }
+    if (ph)  { ph.style.display = 'none'; }
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveMyInfo() {
+  const key = 'myinfo_' + (currentDriver?.name || '');
+  const existing = JSON.parse(localStorage.getItem(key) || '{}');
+
+  const data = {
+    ...existing,
+    nameEN:   document.getElementById('mi-name-en').value.trim(),
+    nameKR:   document.getElementById('mi-name-kr').value.trim(),
+    mobile:   document.getElementById('mi-mobile').value.trim(),
+    licClass: document.getElementById('mi-lic-class').value,
+    address:  document.getElementById('mi-address').value.trim(),
+    suburb:   document.getElementById('mi-suburb').value.trim(),
+    bank:     document.getElementById('mi-bank').value.trim(),
+    nokName:  document.getElementById('mi-nok-name').value.trim(),
+    nokPhone: document.getElementById('mi-nok-phone').value.trim(),
+    licNo:    document.getElementById('mi-lic-no').value.trim(),
+    licExp:   document.getElementById('mi-lic-exp').value.trim(),
+    authNo:   document.getElementById('mi-auth-no').value.trim(),
+    authExp:  document.getElementById('mi-auth-exp').value.trim(),
+    wwcNo:    document.getElementById('mi-wwc-no').value.trim(),
+    wwcExp:   document.getElementById('mi-wwc-exp').value.trim(),
+    bsb:      document.getElementById('mi-bsb').value.trim(),
+    account:  document.getElementById('mi-account').value.trim(),
+    savedAt:  new Date().toISOString(),
+  };
+
+  // 사진 병합
+  Object.entries(_pendingPhotos).forEach(([k,v]) => { data['photo_'+k] = v; });
+
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch(e) {
+    showToast('⚠️ 저장 공간 부족 — 사진 용량을 줄여주세요');
+    return;
+  }
+
+  // GAS에 텍스트 데이터만 저장 (사진 제외)
+  const gasData = {...data};
+  ['photo_licFront','photo_licBack','photo_authFront','photo_authBack'].forEach(k => delete gasData[k]);
+  fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: {'Content-Type':'text/plain'},
+    body: JSON.stringify({
+      action: 'update_driver_info',
+      driverName: currentDriver?.name,
+      data: gasData
+    })
+  }).catch(()=>{});
+
+  // 뷰 업데이트
+  updateMyInfoView(data);
+  toggleMyInfoEdit();
+  showToast('✅ 정보가 저장됐어요!');
+}
+
+function updateMyInfoView(data) {
+  if (!data) {
+    const key = 'myinfo_' + (currentDriver?.name || '');
+    data = JSON.parse(localStorage.getItem(key) || '{}');
+  }
+  const d = currentDriver || {};
+  const nameEN = data.nameEN || d.Name_EN || d.Name || currentDriver?.name || '';
+  const nameKR = data.nameKR || d.Name_KR || '';
+  const licClass = data.licClass || d.License_Class || '';
+  const mobile  = data.mobile  || d.Mobile_1 || '';
+  const nokName = data.nokName || d.NEXT_OF_KIN || '';
+  const nokPhone= data.nokPhone|| d.Moblie_2  || '';
+  const licExp  = data.licExp  || d.License_Expiry  || '–';
+  const authExp = data.authExp || d.Authority_Expiry || '–';
+
+  // 이니셜
+  const initials = nameEN.split(' ').map(w=>w[0]||'').slice(0,2).join('').toUpperCase() || 'DC';
+  const avatar = document.getElementById('me-avatar');
+  if (avatar) avatar.textContent = initials;
+
+  const nameEl = document.getElementById('me-name-display');
+  if (nameEl) nameEl.textContent = (nameKR ? nameKR + ' (' + nameEN + ')' : nameEN) || '–';
+
+  const subEl = document.getElementById('me-sub-display');
+  if (subEl) subEl.textContent = '드라이버' + (licClass ? ' · ' + licClass + ' 면허' : '');
+
+  const licExpEl = document.getElementById('me-lic-exp');
+  if (licExpEl) { licExpEl.textContent = licExp; licExpEl.style.color = isExpiringSoon(licExp) ? '#f87171' : 'var(--green)'; }
+
+  const authExpEl = document.getElementById('me-auth-exp');
+  if (authExpEl) { authExpEl.textContent = authExp; authExpEl.style.color = isExpiringSoon(authExp) ? '#f87171' : 'var(--green)'; }
+
+  const mobEl = document.getElementById('me-mobile-display');
+  if (mobEl) mobEl.textContent = mobile || '–';
+
+  const nokEl = document.getElementById('me-nok-display');
+  if (nokEl) nokEl.textContent = (nokName ? nokName + ' ' : '') + (nokPhone || '') || '–';
+}
+
+function isExpiringSoon(dateStr) {
+  if (!dateStr || dateStr === '–') return false;
+  try {
+    const d = new Date(dateStr);
+    const diff = (d - new Date()) / (1000*60*60*24);
+    return diff < 90;
+  } catch { return false; }
+}
+
+function initMyInfoPage() {
+  updateMyInfoView(null);
 }
 
 function changePin() {
