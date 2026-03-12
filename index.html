@@ -406,8 +406,14 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 
   <!-- SALARY SUMMARY -->
   <div class="sec-head">
-    <div><div class="sec-title">급여 현황</div></div>
-    <span class="pill pill-green" id="salary-balance">미지급 $0</span>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div class="sec-title">급여 현황</div>
+      <span id="sync-badge" style="font-size:10px;color:var(--muted);">—</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span class="pill pill-green" id="salary-balance">미지급 $0</span>
+      <button onclick="runSync(false)" style="background:none;border:1px solid var(--border);border-radius:8px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer;">🔄</button>
+    </div>
   </div>
   <div id="salary-list"></div>
 
@@ -1060,7 +1066,10 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 <div class="page" id="page-pay">
   <div class="sec-head">
     <div><div class="sec-title">💰 급여</div></div>
-    <span class="pill pill-green" id="pay-unpaid-badge">집계 중...</span>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span class="pill pill-green" id="pay-unpaid-badge">집계 중...</span>
+      <button onclick="renderPay()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer;">🔄</button>
+    </div>
   </div>
   <!-- 주별 목록 뷰 -->
   <div id="pay-weeks-view">
@@ -3387,8 +3396,10 @@ function submitEndShift(){
   }
   renderShiftSection();
   renderTodayReports();
-  renderPay();
-  showPage('pay');
+  // 로그인 후 즉시 동기화 + 자동폴링 시작
+  runSync(false);
+  startAutoSync();
+  showPage('home');
 }
 
 function renderStep2SavedReports(){
@@ -4554,9 +4565,9 @@ function getAllReports(){
 
 // GAS에서 현재 드라이버 wages 로드 → admin_wages 캐시 갱신
 let _driverWagesLastSync = 0;
-async function loadDriverWagesFromGAS(driverName){
+async function loadDriverWagesFromGAS(driverName, forceRefresh=false){
   if(!driverName) return;
-  if(Date.now() - _driverWagesLastSync < 60000) return; // 60초 TTL
+  if(!forceRefresh && Date.now() - _driverWagesLastSync < 60000) return; // 60초 TTL
   try{
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_wages');
     if(!res.ok) return;
@@ -5114,6 +5125,112 @@ async function renderSalary(){
 function toggleCheck(el){el.classList.toggle('pass');el.classList.toggle('fail');}
 function getCheckResults(gridId){
   return Array.from(document.querySelectorAll('#'+gridId+' .check-item')).map(el=>({name:el.querySelector('.check-name').textContent,kr:el.querySelector('.check-sub-kr')?.textContent||'',pass:el.classList.contains('pass')}));
+}
+
+// ═══════════════════════════════════════════════════
+// AUTO SYNC ENGINE — GAS ↔ 앱 자동 동기화
+// ═══════════════════════════════════════════════════
+const SYNC_INTERVAL = 5 * 60 * 1000; // 5분
+let _syncTimer = null;
+let _lastSyncTime = 0;
+
+// 동기화 상태 표시
+function setSyncBadge(state){ // 'syncing' | 'ok' | 'error'
+  const el = document.getElementById('sync-badge');
+  if(!el) return;
+  if(state==='syncing'){ el.textContent='🔄 동기화 중'; el.style.color='var(--muted)'; }
+  else if(state==='ok'){
+    const now = new Date();
+    el.textContent='✅ '+now.getHours()+':'+String(now.getMinutes()).padStart(2,'0')+' 동기화됨';
+    el.style.color='#16a34a';
+  }
+  else { el.textContent='⚠️ 오프라인'; el.style.color='var(--orange)'; }
+}
+
+// 마스터 데이터 (드라이버/차량/TA/코스) 재로드
+async function syncMaster(){
+  try{
+    const controller = new AbortController();
+    setTimeout(()=>controller.abort(), 8000);
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_all_masters',{signal:controller.signal});
+    const json = await res.json();
+    if(json.ok){
+      if(json.drivers)  MASTER.drivers  = json.drivers;
+      if(json.vehicles) MASTER.vehicles = json.vehicles.map(v=>({...v,Transmission:v.Transmission||'Auto'}));
+      if(json.agencies) MASTER.agencies = json.agencies;
+      if(json.courses)  MASTER.courses  = json.courses;
+      localStorage.setItem(MASTER_CACHE_KEY, JSON.stringify({ts:Date.now(), data:json}));
+    }
+  }catch(e){}
+}
+
+// 공지사항 GAS 로드
+async function syncNotices(){
+  try{
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_notices');
+    if(!res.ok) return;
+    const json = await res.json();
+    if(json.ok && Array.isArray(json.rows)){
+      const notices = json.rows.map(r=>({
+        id:      r.ID||r.id||String(Date.now()),
+        title:   r.Title||r.title||'',
+        content: r.Content||r.content||'',
+        type:    r.Type||r.type||'info',
+        date:    r.Date||r.date||'',
+        active:  String(r.Active||r.active||'true').toLowerCase()!=='false'
+      })).filter(n=>n.active);
+      localStorage.setItem('admin_notices', JSON.stringify(notices));
+      renderNotices();
+    }
+  }catch(e){}
+}
+
+// DR 리포트 캐시 강제 갱신
+async function syncDRReports(){
+  _drReportsCache = null;
+  _drCacheTime    = 0;
+  await fetchDRCache();
+}
+
+// 홈 화면 급여 현황 갱신
+async function syncSalary(){
+  if(typeof renderSalary==='function') await renderSalary();
+}
+
+// ── 전체 동기화 실행
+async function runSync(silent=true){
+  if(!currentDriver) return;
+  if(!silent) setSyncBadge('syncing');
+  try{
+    await Promise.all([
+      syncMaster(),
+      syncNotices(),
+      syncDRReports(),
+      loadDriverWagesFromGAS(currentDriver.name)
+    ]);
+    // 현재 열린 탭에 따라 재렌더링
+    const activePage = document.querySelector('.page.active')?.id;
+    if(activePage==='page-pay')    renderPay();
+    if(activePage==='page-home')   syncSalary();
+    _lastSyncTime = Date.now();
+    if(!silent) setSyncBadge('ok');
+    else setSyncBadge('ok');
+  }catch(e){
+    setSyncBadge('error');
+  }
+}
+
+// ── 자동 폴링 시작
+function startAutoSync(){
+  if(_syncTimer) clearInterval(_syncTimer);
+  _syncTimer = setInterval(()=>runSync(true), SYNC_INTERVAL);
+  // 탭 포커스 시 즉시 동기화
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState==='visible'){
+      const elapsed = Date.now() - _lastSyncTime;
+      if(elapsed > 60000) runSync(true); // 1분 이상 지났으면 즉시 동기화
+    }
+  });
 }
 
 // ─── Signature System ───────────────────────────────
