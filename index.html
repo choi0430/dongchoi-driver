@@ -2629,7 +2629,10 @@ function updateOTHint(){
   const startMin    = sh*60+sm;
 
   // ① 20:00 이후 OT 조건 — 항상 표시 (관광지 무관)
-  lines.push(`🕗 <b>20:00 이후 OT</b> — 20:15 이후부터 적용 (15분 waive, $${otRate}/h)`);
+  const otRateLabel = seats
+    ? `$${otRate}/h (${seats})`
+    : `21/25S $30/h · 40/50S $40/h`;
+  lines.push(`🕗 <b>20:00 이후 OT</b> — 20:15 이후부터 적용 (15분 waive) · ${otRateLabel}`);
 
   // ② 코스 기준 max_hours 초과 조건
   if(maxH){
@@ -3007,32 +3010,34 @@ function updateEarlyHint(){
   const dropoff  = (document.getElementById('dr-dropoff')?.value || '').trim();
   const isAirportTrip = AIRPORT_PATTERN.test(pickup) || AIRPORT_PATTERN.test(dropoff);
 
-  if(!startVal){ hint.textContent = ''; return; }
+  // 인승별 Early Surcharge 금액
+  const seats    = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+  const earlyAmt = (seats==='40S'||seats==='50S') ? 40 : 30;
+  const seatsLabel = seats ? `${seats} · $${earlyAmt}` : `$30/40S $40`;
+
+  if(!startVal){
+    hint.innerHTML = `<span style="color:var(--muted);font-size:10px;">21/25S: $30 · 40/50S: $40</span>`;
+    return;
+  }
   const [h, m] = startVal.split(':').map(Number);
   const totalMin = h * 60 + m;
-  const before6  = totalMin < 6 * 60;    // 06:00 이전
-  const after23  = totalMin >= 23 * 60;  // 23:00 이후
+  const before6  = totalMin < 6 * 60;
+  const after23  = totalMin >= 23 * 60;
 
-  // Early surcharge 조건:
-  // ① 출발 06:00 이전 (모든 코스)
-  // ② Airport transfer 에서 픽업/드롭 23:00 이후
   const earlyByTime    = before6;
   const earlyByAirport = isAirportTrip && after23;
   const earlyApplies   = earlyByTime || earlyByAirport;
 
   if(earlyApplies){
-    let reason = '';
-    if(earlyByTime)    reason = '06:00 이전 출발';
-    if(earlyByAirport) reason = '공항 이동 23:00 이후';
-    hint.innerHTML = '✅ Early Surcharge 적용 — ' + reason;
+    let reason = earlyByTime ? '06:00 이전 출발' : '공항 이동 23:00 이후';
+    hint.innerHTML = `✅ Early Surcharge 적용 <b>$${earlyAmt}</b> — ${reason}`;
     hint.style.color = 'var(--green)';
   } else {
-    if(isAirportTrip){
-      hint.innerHTML = '⚠️ 공항 이동: 06:00 이전 출발 또는 23:00 이후 시 적용 (현재 ' + startVal + ')';
-    } else {
-      hint.innerHTML = '⚠️ 06:00 이전 출발 시 적용 (현재 ' + startVal + ')';
-    }
-    hint.style.color = 'var(--muted,#94a3b8)';
+    const cond = isAirportTrip
+      ? `06:00 이전 또는 23:00 이후 (공항 이동)`
+      : `06:00 이전 출발`;
+    hint.innerHTML = `<span style="color:var(--muted);">⚠️ ${cond} 시 적용 · 21/25S <b>$30</b> / 40/50S <b>$40</b></span>`;
+    hint.style.color = '';
   }
 }
 
