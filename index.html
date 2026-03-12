@@ -3408,30 +3408,64 @@ function showPayDetail(wk){
       <div style="font-size:13px;font-weight:700;color:var(--accent);">$${(dayDr-dayOwner).toLocaleString()}</div>
     </div>`;
     reports.forEach(r=>{
-      const extras=[];
-      if(r.ot>0) extras.push('OT $'+r.ot);
-      if(r.trailer>0) extras.push('트레일러 $'+r.trailer);
-      if(r.early>0) extras.push('조기출발 $'+r.early);
-      if(r.night>0||r.nightType!=='none') extras.push('야간투어');
-      if(r.wash>0) extras.push('세차 $'+r.wash);
-      if(r.meal>0) extras.push('식비 $'+r.meal);
-      if(r.tollPersonal&&r.toll>0) extras.push('톨비 $'+r.toll);
-      if(r.fuelPersonal&&r.fuel>0) extras.push('연료 $'+r.fuel);
-      if(r.tip>0) extras.push('팁 $'+r.tip);
-      const nightOwnerNote = (r.nightOwner||0)>0 ? `<div style="font-size:11px;color:var(--red);font-weight:600;margin-top:4px;">회사납입 -$${r.nightOwner}</div>` : '';
+      // 계산 근거 항목 빌드
+      const breakdown=[];
+      // 기본 수당 (attraction 기반 DR rate)
+      const baseRate = (r.dr||0)
+        - (r.ot||0)
+        - (r.night||0)
+        - (r.wash||0)
+        - (r.meal||0)
+        - (r.tollPersonal&&r.toll>0 ? r.toll : 0)
+        - (r.fuelPersonal&&r.fuel>0 ? r.fuel : 0);
+      if(baseRate>0) breakdown.push({label:'기본 수당', val:baseRate, color:'var(--text)'});
+      if(r.ot>0)      breakdown.push({label:'초과근무 (OT)', val:r.ot, color:'var(--blue)'});
+      if(r.trailer>0) breakdown.push({label:'트레일러', val:r.trailer, color:'var(--blue)'});
+      if(r.early>0)   breakdown.push({label:'조기 출발', val:r.early, color:'var(--blue)'});
+      if(r.night>0&&r.nightType!=='none') breakdown.push({label:'야간투어 ('+r.nightType+')', val:r.night, color:'var(--purple)'});
+      if(r.wash>0)    breakdown.push({label:'세차', val:r.wash, color:'var(--text2)'});
+      if(r.meal>0)    breakdown.push({label:'식비', val:r.meal, color:'var(--text2)'});
+      if(r.tollPersonal&&r.toll>0) breakdown.push({label:'톨비 (개인결제)', val:r.toll, color:'var(--text2)'});
+      if(r.fuelPersonal&&r.fuel>0) breakdown.push({label:'연료비 (개인결제)', val:r.fuel, color:'var(--text2)'});
+      if(r.tip>0)     breakdown.push({label:'팁', val:r.tip, color:'var(--yellow)'});
+
+      const nightOwnerNote = (r.nightOwner||0)>0
+        ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-top:1px dashed rgba(239,68,68,0.3);margin-top:4px;">
+            <span style="font-size:11px;color:var(--red);">회사 납입 (야간투어)</span>
+            <span style="font-size:11px;font-weight:700;color:var(--red);">-$${r.nightOwner}</span>
+           </div>` : '';
+
+      const breakdownHTML = breakdown.map(b=>`
+        <div style="display:flex;justify-content:space-between;padding:3px 0;">
+          <span style="font-size:11px;color:var(--text2);">${b.label}</span>
+          <span style="font-size:11px;font-weight:600;color:${b.color};">+$${b.val}</span>
+        </div>`).join('');
+
+      const netDr = (r.dr||0) - (r.nightOwner||0);
+
       html+=`<div class="pay-report-row">
         <div class="pay-report-row-top">
           <div>
             <div class="pay-report-agency">${r.agency||'—'}</div>
             <div class="pay-report-attr">${r.attraction||''} ${r.rego?'· '+r.rego:''}</div>
+            ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">⏱ '+r.timeStart+' – '+(r.timeEnd||'')+'</div>':''}
+            ${r.tourcode?'<div style="font-size:11px;color:var(--muted);">🏷 '+r.tourcode+'</div>':''}
           </div>
           <div style="text-align:right;">
-            <div class="pay-report-amount">$${(r.dr||0)}</div>
-            ${nightOwnerNote}
+            <div class="pay-report-amount" style="color:${netDr<(r.dr||0)?'var(--orange)':'var(--green)'};">$${netDr}</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:1px;">실수령</div>
           </div>
         </div>
-        ${extras.length?'<div class="pay-report-tags">'+extras.map(e=>'<span class="pay-report-tag">'+e+'</span>').join('')+'</div>':''}
-        ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:4px;">⏱ '+r.timeStart+' – '+(r.timeEnd||'')+'</div>':''}
+        <div style="background:var(--surface2);border-radius:8px;padding:8px 10px;margin-top:8px;">
+          ${breakdownHTML}
+          <div style="display:flex;justify-content:space-between;padding:5px 0 2px;border-top:1px solid var(--border);margin-top:4px;">
+            <span style="font-size:11px;font-weight:700;color:var(--text);">DR 소계</span>
+            <span style="font-size:11px;font-weight:700;color:var(--green);">$${r.dr||0}</span>
+          </div>
+          ${nightOwnerNote}
+        </div>
+        ${r.guide?'<div style="font-size:11px;color:var(--muted);margin-top:6px;">👤 가이드: '+r.guide+'</div>':''}
+        ${r.remarks?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">📝 '+r.remarks+'</div>':''}
       </div>`;
     });
   });
