@@ -1386,28 +1386,17 @@ function fixPhone(p) {
 
 // ── 날짜 포맷 헬퍼 dd/mm/yyyy ──
 function fmtDate(val) {
+  // dd/mm/yyyy 표시용: dd/mm/yyyy 그대로, YYYY-MM-DD → 변환
   if (!val) return '';
   const s = String(val).trim();
-  // 이미 dd/mm/yyyy 형식이면 그대로
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
-  // ISO 형식 (yyyy-mm-dd 또는 yyyy-mm-ddTHH:...) → dd/mm/yyyy
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    const [y, m, d] = s.split('T')[0].split('-');
-    return d + '/' + m + '/' + y;
-  }
-  // yyyy/mm/dd → dd/mm/yyyy
-  if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) {
-    const [y, m, d] = s.split('/');
+    const [y, m, d] = s.slice(0,10).split('-');
     return d + '/' + m + '/' + y;
   }
   return s;
 }
-function todayISO() {
-  const n = new Date();
-  return n.getFullYear() + '-' +
-    String(n.getMonth()+1).padStart(2,'0') + '-' +
-    String(n.getDate()).padStart(2,'0');
-}
+
 function todayDisplay() {
   const n = new Date();
   return String(n.getDate()).padStart(2,'0') + '/' +
@@ -3295,11 +3284,9 @@ function updateMyInfoView(data) {
 
 function isExpiringSoon(dateStr) {
   if (!dateStr || dateStr === '–') return false;
-  try {
-    const d = new Date(dateStr);
-    const diff = (d - new Date()) / (1000*60*60*24);
-    return diff < 90;
-  } catch { return false; }
+  const iso = parseToISO(dateStr);
+  if (!iso) return false;
+  return (new Date(iso) - new Date()) / (1000*60*60*24) < 90;
 }
 
 function initMyInfoPage() {
@@ -4398,24 +4385,35 @@ function renderMyDefects(){
     </div>`).join('');
 }
 
+// 범용 날짜 → ISO(YYYY-MM-DD) 변환 (UTC timestamp 포함)
+function parseToISO(ds){
+  // 내부 날짜 비교/정렬용 YYYY-MM-DD 변환 (표시용 아님)
+  if(!ds) return '';
+  const s = String(ds).trim();
+  if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){
+    const [dd,mm,yyyy]=s.split('/'); return yyyy+'-'+mm+'-'+dd;
+  }
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10); // ISO fallback
+  return '';
+}
+
+
 function toLocalISO(d){
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+dd;
 }
 function getWeekKey(dateStr){
-  // dateStr: "dd/mm/yy" or "dd/mm/yyyy"
+  // dateStr: "dd/mm/yyyy"
   const parts = dateStr.split('/');
   if(parts.length!==3) return null;
-  const d = parseInt(parts[0]), mo = parseInt(parts[1])-1;
-  const yr = parseInt(parts[2])<100 ? 2000+parseInt(parts[2]) : parseInt(parts[2]);
+  const d = parseInt(parts[0]), mo = parseInt(parts[1])-1, yr = parseInt(parts[2]);
   const dt = new Date(yr, mo, d);
   if(isNaN(dt)) return null;
-  // 월요일 기준 주 시작일 계산
-  const day = dt.getDay(); // 0=Sun
-  const diff = (day===0) ? -6 : 1-day; // Mon offset
+  const day = dt.getDay();
+  const diff = (day===0) ? -6 : 1-day;
   const mon = new Date(dt); mon.setDate(dt.getDate()+diff);
   const sun = new Date(mon); sun.setDate(mon.getDate()+6);
-  const fmt = d => String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getFullYear()).slice(2);
+  const fmt = x => String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+x.getFullYear();
   return { key: fmt(mon)+'~'+fmt(sun), label: fmt(mon)+' — '+fmt(sun), mon, sun };
 }
 
@@ -4432,12 +4430,71 @@ function getAllReports(){
 
 function getDriverWagesFromLocal(driverName){
   // admin_wages에서 현재 드라이버의 지급 기록 반환
+  // admin_wages 키: "YYYY-MM-DD" (월요일)
   try{
     const wages = JSON.parse(localStorage.getItem('admin_wages')||'{}');
     return wages[driverName] || {};
   }catch(e){ return {}; }
 }
 
+// wk.key("dd/mm/yy~dd/mm/yy") → YYYY-MM-DD (월요일) 변환
+// admin_wages의 키 형식과 맞추기 위해 사용
+function wkKeyToMonISO(wkKey){
+  // wkKey 예: "09/03/26~15/03/26"
+  const monPart = wkKey.split('~')[0]; // "09/03/26"
+  if(!monPart) return null;
+  const [dd, mm, yy] = monPart.split('/');
+  if(!dd||!mm||!yy) return null;
+  const yyyy = parseInt(yy) < 100 ? 2000+parseInt(yy) : parseInt(yy);
+  return yyyy+'-'+String(mm).padStart(2,'0')+'-'+String(dd).padStart(2,'0');
+}
+
+// admin_wages에서 특정 주(wk.key 기준)의 지급 기록 조회
+function getWageEntriesForWeek(driverWages, wkKey){
+  // ① wk.key → YYYY-MM-DD 변환 후 직접 조회
+  const monISO = wkKeyToMonISO(wkKey);
+  if(monISO && driverWages[monISO]) return driverWages[monISO].entries || [];
+  // ② fallback: wk.key 직접 조회 (이전 방식 호환)
+  if(driverWages[wkKey]) return driverWages[wkKey].entries || [];
+  return [];
+}
+
+
+// GAS Daily_Report에서 드라이버 주간 DR_Cost 조회 (캐시 사용)
+let _drReportsCache = null;
+let _drCacheTime = 0;
+const DR_CACHE_TTL = 5 * 60 * 1000; // 5분
+
+async function fetchDRCache(){
+  if(_drReportsCache && Date.now()-_drCacheTime < DR_CACHE_TTL) return _drReportsCache;
+  try{
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+    const json = await res.json();
+    if(json.ok && json.rows){
+      _drReportsCache = json.rows.map(r=>({...r, _isoDate:parseToISO(r.Date||'')}));
+      _drCacheTime = Date.now();
+    }
+  }catch(e){ console.warn('DR 캐시 로드 실패:',e); }
+  return _drReportsCache||[];
+}
+
+// 드라이버 주간 DR_Cost 합산 (GAS 기준)
+async function getGASDRForWeek(driverName, monISO){
+  const rows = await fetchDRCache();
+  const sun = (()=>{const d=new Date(monISO+'T00:00:00');d.setDate(d.getDate()+6);return toLocalISO(d);})();
+  const matchNames = new Set([driverName]);
+  // Name_KR/Name_EN 매칭을 위해 MASTER에서 추가
+  if(typeof MASTER!=='undefined'&&MASTER.drivers){
+    const dr=MASTER.drivers.find(d=>(d.Name_KR||'')==driverName||(d.Name_EN||'')==driverName);
+    if(dr){matchNames.add(dr.Name_KR||'');matchNames.add(dr.Name_EN||'');}
+  }
+  let total=0;
+  rows.forEach(r=>{
+    if(!matchNames.has(String(r.Driver||'').trim())) return;
+    if(r._isoDate>=monISO&&r._isoDate<=sun) total+=(parseFloat(r.DR_Cost)||0);
+  });
+  return total;
+}
 function renderPay(){
   const all = getAllReports();
   const driverName = localStorage.getItem('driverName') || '';
@@ -4462,8 +4519,8 @@ function renderPay(){
     const drTotal = wk.reports.reduce((s,r)=>s+(r.dr||0),0);
     const ownerTotal = wk.reports.reduce((s,r)=>s+(r.nightOwner||0),0);
     const net = drTotal - ownerTotal;
-    const weekWages = driverWages[wk.key] || {entries:[]};
-    const paid = (weekWages.entries||[]).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    const wageEntries = getWageEntriesForWeek(driverWages, wk.key);
+    const paid = wageEntries.reduce((s,e)=>s+(Number(e.amount)||0),0);
     totalUnpaid += Math.max(0, net - paid);
   });
   const badge = document.getElementById('pay-unpaid-badge');
@@ -4486,9 +4543,9 @@ function renderPay(){
     const ownerTotal = wk.reports.reduce((s,r)=>s+(r.nightOwner||0),0);
     const netPay = drTotal - ownerTotal;
 
-    // 지급 기록 (admin_wages 기반)
-    const weekWageData = driverWages[wk.key] || {entries:[]};
-    const paidAmt = (weekWageData.entries||[]).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    // 지급 기록 (admin_wages 기반 - YYYY-MM-DD 키 변환 포함)
+    const weekWageData = getWageEntriesForWeek(driverWages, wk.key);
+    const paidAmt = weekWageData.reduce((s,e)=>s+(Number(e.amount)||0),0);
     const balance = netPay - paidAmt;
     const isPaid = balance <= 0;
 
@@ -4510,9 +4567,9 @@ function renderPay(){
         <div class="pay-week-stat"><div class="pay-week-stat-label">지급됨</div><div class="pay-week-stat-val" style="color:var(--accent);">$${paidAmt}</div></div>
         <div class="pay-week-stat"><div class="pay-week-stat-label">잔액</div><div class="pay-week-stat-val" style="color:${isPaid?'var(--muted)':'var(--orange)'};">$${Math.max(0,Math.round(balance))}</div></div>
       </div>
-      ${(weekWageData.entries||[]).length>0?`<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;">
+      ${weekWageData.length>0?`<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;">
         <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:700;">💸 지급 내역</div>
-        ${(weekWageData.entries||[]).map(e=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;color:var(--muted);"><span>${e.date||''} · ${e.method||'현금'}</span><span style="font-weight:700;color:var(--accent);">$${Number(e.amount||0).toLocaleString()}</span></div>`).join('')}
+        ${weekWageData.map(e=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;color:var(--muted);"><span>${e.date||''} · ${e.method||'현금'}</span><span style="font-weight:700;color:var(--accent);">$${Number(e.amount||0).toLocaleString()}</span></div>`).join('')}
       </div>`:''}`;
     card.dataset.weekKey = wk.key;
     card.addEventListener('click', ()=>showPayDetail(wk));
@@ -4647,10 +4704,21 @@ function renderSalary(){
     if(!weekMap[wk.key]) weekMap[wk.key]={label:wk.label,key:wk.key,total:0,paid:0};
     weekMap[wk.key].total += (r.dr||0) - (r.nightOwner||0);
   });
-  // 지급 금액 합산
-  Object.entries(driverWages).forEach(([weekKey,wk])=>{
-    if(!weekMap[weekKey]) weekMap[weekKey]={label:weekKey,key:weekKey,total:0,paid:0};
-    weekMap[weekKey].paid = (wk.entries||[]).reduce((s,e)=>s+(Number(e.amount)||0),0);
+  // 지급 금액 합산 (admin_wages 키 YYYY-MM-DD → wk.key 변환 포함)
+  Object.entries(driverWages).forEach(([monISO, wkWages])=>{
+    // monISO: YYYY-MM-DD → 해당 주의 wk.key(dd/mm/yy~dd/mm/yy) 생성
+    const d = new Date(monISO+'T00:00:00');
+    if(isNaN(d)) return;
+    const sun = new Date(d); sun.setDate(d.getDate()+6);
+    const fmt = x => String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+String(x.getFullYear()).slice(2);
+    const wkKey = fmt(d)+'~'+fmt(sun);
+    const paid = (wkWages.entries||[]).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    if(weekMap[wkKey]){
+      weekMap[wkKey].paid = paid;
+    } else {
+      // 로컬 DR 없는 주간도 지급 기록 표시
+      weekMap[wkKey] = { label:fmt(d)+' — '+fmt(sun), key:wkKey, total:0, paid };
+    }
   });
 
   const weeks = Object.values(weekMap).sort((a,b)=>b.key.localeCompare(a.key));
