@@ -435,9 +435,25 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">차량 (Rego)<span class="req">*</span></label>
-            <select class="form-select" id="pre-rego" onfocus="refreshDropdown('pre-rego','vehicles')">
+            <select onchange="onDropdownAdd('pre-rego','M_Vehicles','vehicles')" class="form-select" id="pre-rego" onfocus="refreshDropdown('pre-rego','vehicles')">
               <option value="">선택</option>
             </select>
+          <div id="pre-rego-add-box" style="display:none;margin-top:6px;animation:fadeIn .15s;">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="pre-rego-add-input"
+                class="form-input" style="flex:1;font-size:13px;"
+                placeholder="예: TV1073"
+                onkeydown="if(event.key==='Enter')confirmDropdownAdd('pre-rego','M_Vehicles','vehicles')">
+              <button type="button" onclick="confirmDropdownAdd('pre-rego','M_Vehicles','vehicles')"
+                style="padding:7px 12px;border-radius:8px;background:var(--accent);color:white;border:none;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
+                추가
+              </button>
+              <button type="button" onclick="cancelDropdownAdd('pre-rego')"
+                style="padding:7px 10px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);font-size:12px;cursor:pointer;">
+                ✕
+              </button>
+            </div>
+          </div>
           </div>
           <div class="form-group">
             <label class="form-label">출발 KM<span class="req">*</span></label>
@@ -494,9 +510,25 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">여행사<span class="req">*</span></label>
-            <select class="form-select" id="dr-agency" onfocus="refreshAgencyList()">
+            <select onchange="onDropdownAdd('dr-agency','M_Clients','agencies')" class="form-select" id="dr-agency" onfocus="refreshAgencyList()">
               <option value="">선택</option>
             </select>
+          <div id="dr-agency-add-box" style="display:none;margin-top:6px;animation:fadeIn .15s;">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="dr-agency-add-input"
+                class="form-input" style="flex:1;font-size:13px;"
+                placeholder="예: HANA TOUR"
+                onkeydown="if(event.key==='Enter')confirmDropdownAdd('dr-agency','M_Clients','agencies')">
+              <button type="button" onclick="confirmDropdownAdd('dr-agency','M_Clients','agencies')"
+                style="padding:7px 12px;border-radius:8px;background:var(--accent);color:white;border:none;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
+                추가
+              </button>
+              <button type="button" onclick="cancelDropdownAdd('dr-agency')"
+                style="padding:7px 10px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);font-size:12px;cursor:pointer;">
+                ✕
+              </button>
+            </div>
+          </div>
           </div>
           <div class="form-group">
             <label class="form-label">날짜</label>
@@ -513,9 +545,25 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
           <div class="form-group">
             <label class="form-label">관광지<span class="req">*</span></label>
-            <select onfocus="refreshDropdown('dr-attraction','courses')" class="form-select" id="dr-attraction" onchange="autoRate();onAttractionChange()">
+            <select onfocus="refreshDropdown('dr-attraction','courses')" class="form-select" id="dr-attraction" onchange="onDropdownAdd('dr-attraction','M_Courses','courses');autoRate();onAttractionChange()">
               <option value="">선택</option>
             </select>
+          <div id="dr-attraction-add-box" style="display:none;margin-top:6px;animation:fadeIn .15s;">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="dr-attraction-add-input"
+                class="form-input" style="flex:1;font-size:13px;"
+                placeholder="예: BLUE MOUNTAINS 2"
+                onkeydown="if(event.key==='Enter')confirmDropdownAdd('dr-attraction','M_Courses','courses')">
+              <button type="button" onclick="confirmDropdownAdd('dr-attraction','M_Courses','courses')"
+                style="padding:7px 12px;border-radius:8px;background:var(--accent);color:white;border:none;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
+                추가
+              </button>
+              <button type="button" onclick="cancelDropdownAdd('dr-attraction')"
+                style="padding:7px 10px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);font-size:12px;cursor:pointer;">
+                ✕
+              </button>
+            </div>
+          </div>
           </div>
         </div>
         <div class="form-row mb14">
@@ -1111,29 +1159,21 @@ function populateMasterSelects() {
   // 차량 (pre-rego)
   const regoSel = document.getElementById('pre-rego');
   if(regoSel && MASTER.vehicles.length > 0) {
-    regoSel.innerHTML = '<option value="">선택</option>' +
-      MASTER.vehicles.map(v=>`<option value="${v.Rego}">${v.Rego}</option>`).join('');
+    buildSelectOptions(regoSel, 'vehicles');
+    const defRegoSel2 = document.getElementById('def-rego');
+    if(defRegoSel2) buildSelectOptions(defRegoSel2, 'vehicles');
   }
   // 여행사 (dr-agency)
   const agSel = document.getElementById('dr-agency');
   if(agSel && MASTER.agencies.length > 0) {
-    const prevAgency = agSel.value;
-    agSel.innerHTML = '<option value="">선택</option>' +
-      MASTER.agencies.map(a=>`<option value="${a.Name}">${a.Name}</option>`).join('');
-    if(prevAgency) agSel.value = prevAgency;
+    buildSelectOptions(agSel, 'agencies');
   }
   // 코스 (dr-attraction)
   const attSel = document.getElementById('dr-attraction');
   if(attSel && MASTER.courses.length > 0) {
-    attSel.innerHTML = '<option value="">선택</option>' +
-      MASTER.courses.map(c=>`<option value="${c.Course_Name}">${c.Course_Name}</option>`).join('');
+    buildSelectOptions(attSel, 'courses');
   }
-  // 결함 리포트 차량 드롭다운
-  const defRegoSel = document.getElementById('def-rego');
-  if(defRegoSel && MASTER.vehicles.length > 0) {
-    defRegoSel.innerHTML = '<option value="">선택</option>' +
-      MASTER.vehicles.map(v=>`<option value="${v.Rego}">${v.Rego}</option>`).join('');
-  }
+  // 결함 리포트 차량 드롭다운 — pre-rego에서 이미 처리됨
   // 가이드 GUIDE_LIST 갱신
   rebuildGuideList();
 }
@@ -1148,6 +1188,113 @@ function rebuildGuideList() {
   }
 }
 
+// ─── 드롭다운 직접 추가 기능 ───────────────────────────────────────
+// MASTER 키 → 옵션 빌드 함수
+function buildSelectOptions(sel, masterKey, keepValue) {
+  const prev = keepValue !== undefined ? keepValue : sel.value;
+  let opts = '<option value="">선택</option>';
+  if(masterKey === 'vehicles') {
+    opts += (MASTER.vehicles||[]).map(v=>`<option value="${v.Rego}">${v.Rego}</option>`).join('');
+  } else if(masterKey === 'agencies') {
+    opts += (MASTER.agencies||[]).map(a=>`<option value="${a.Name}">${a.Name}</option>`).join('');
+  } else if(masterKey === 'courses') {
+    opts += (MASTER.courses||[]).map(c=>`<option value="${c.Course_Name}">${c.Course_Name}</option>`).join('');
+  }
+  opts += '<option value="__add__">＋ 직접 추가...</option>';
+  sel.innerHTML = opts;
+  if(prev && prev !== '__add__') sel.value = prev;
+}
+
+// 드롭다운에 __add__ 옵션 주입 (populateMasterSelects 완료 후 호출)
+function injectAddOptions() {
+  [
+    {id:'pre-rego',    key:'vehicles'},
+    {id:'def-rego',    key:'vehicles'},
+    {id:'dr-agency',   key:'agencies'},
+    {id:'dr-attraction',key:'courses'},
+  ].forEach(({id, key}) => {
+    const sel = document.getElementById(id);
+    if(!sel) return;
+    if(!sel.querySelector('option[value="__add__"]')) {
+      sel.insertAdjacentHTML('beforeend', '<option value="__add__">＋ 직접 추가...</option>');
+    }
+  });
+}
+
+// 드롭다운에서 __add__ 선택 시
+function onDropdownAdd(selId, sheet, masterKey) {
+  const sel = document.getElementById(selId);
+  if(!sel || sel.value !== '__add__') return;
+  sel.value = '';                          // 선택 초기화
+  const box = document.getElementById(selId + '-add-box');
+  const inp = document.getElementById(selId + '-add-input');
+  if(!box || !inp) return;
+  box.style.display = 'block';
+  inp.value = '';
+  inp.focus();
+}
+
+// 추가 확인 → GAS 저장 → MASTER 갱신 → 드롭다운 재빌드
+async function confirmDropdownAdd(selId, sheet, masterKey) {
+  const inp = document.getElementById(selId + '-add-input');
+  const val = (inp?.value || '').trim().toUpperCase();
+  if(!val) { showToast('내용을 입력해주세요', 'er'); inp?.focus(); return; }
+
+  // 중복 체크
+  const dupes = {
+    vehicles: MASTER.vehicles.map(v=>v.Rego),
+    agencies: MASTER.agencies.map(a=>a.Name),
+    courses:  MASTER.courses.map(c=>c.Course_Name),
+  };
+  if(dupes[masterKey]?.includes(val)) {
+    showToast(`"${val}" 이미 존재합니다`, 'er'); return;
+  }
+
+  // 데이터 구성
+  let data = {};
+  if(masterKey === 'vehicles') data = {Rego: val, Seats:'', Owner:'', Active:'Y'};
+  if(masterKey === 'agencies') data = {Name: val, ClientID: Date.now().toString(16).slice(-8), Mobile:'', Address:''};
+  if(masterKey === 'courses')  data = {Course_Name: val, max_hours:'', Active:'Y'};
+
+  // MASTER 즉시 반영
+  if(masterKey === 'vehicles') MASTER.vehicles.push({Rego: val});
+  if(masterKey === 'agencies') MASTER.agencies.push({Name: val});
+  if(masterKey === 'courses')  MASTER.courses.push({Course_Name: val});
+
+  // 드롭다운 재빌드 후 새 값 선택
+  const sel = document.getElementById(selId);
+  if(sel) {
+    buildSelectOptions(sel, masterKey, val);
+    sel.value = val;
+    sel.dispatchEvent(new Event('change'));
+  }
+  // def-rego & pre-rego는 같은 vehicles
+  if(masterKey === 'vehicles') {
+    ['pre-rego','def-rego'].forEach(id => {
+      if(id === selId) return;
+      const s = document.getElementById(id);
+      if(s) buildSelectOptions(s, 'vehicles');
+    });
+  }
+
+  cancelDropdownAdd(selId);
+  showToast(`"${val}" 추가됨 ✓`, 'ok');
+
+  // GAS 백그라운드 저장
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({action: 'add_master', sheet, data})
+    });
+  } catch(e) { showToast('서버 저장 실패 (앱 재시작 시 반영)', 'er'); }
+}
+
+function cancelDropdownAdd(selId) {
+  const box = document.getElementById(selId + '-add-box');
+  if(box) box.style.display = 'none';
+}
+
 // ─── 드롭다운 실시간 갱신 (관리자앱에서 추가/수정 후 즉시 반영) ───
 // 공통 함수: 포커스 시 GAS에서 최신 마스터 데이터 재조회 후 드롭다운 갱신
 const _refreshState = {};
@@ -1157,20 +1304,8 @@ async function refreshDropdown(selId, masterKey) {
   if(!sel) return;
 
   // 일단 MASTER 캐시로 즉시 채움
-  const buildOpts = (items) => {
-    if(!items || items.length === 0) return;
-    const prev = sel.value;
-    if(masterKey === 'vehicles') {
-      sel.innerHTML = '<option value="">선택</option>' +
-        items.map(v => `<option value="${v.Rego}">${v.Rego}</option>`).join('');
-    } else if(masterKey === 'courses') {
-      sel.innerHTML = '<option value="">선택</option>' +
-        items.map(c => `<option value="${c.Course_Name}">${c.Course_Name}</option>`).join('');
-    }
-    if(prev) sel.value = prev;
-  };
-
-  buildOpts(MASTER[masterKey]);
+  // buildSelectOptions가 __add__ 포함해서 처리
+  if(MASTER[masterKey]?.length > 0) buildSelectOptions(sel, masterKey);
 
   // GAS에서 최신 데이터 재조회
   _refreshState[selId] = true;
@@ -1180,19 +1315,13 @@ async function refreshDropdown(selId, masterKey) {
     if(data.ok && data.data) {
       if(masterKey === 'vehicles') {
         MASTER.vehicles = data.data.M_Vehicles || MASTER.vehicles;
-        buildOpts(MASTER.vehicles);
-        // def-rego와 pre-rego 동시 갱신
         ['pre-rego','def-rego'].forEach(id => {
           const s = document.getElementById(id);
-          if(!s) return;
-          const pv = s.value;
-          s.innerHTML = '<option value="">선택</option>' +
-            MASTER.vehicles.map(v=>`<option value="${v.Rego}">${v.Rego}</option>`).join('');
-          if(pv) s.value = pv;
+          if(s) buildSelectOptions(s, 'vehicles');
         });
       } else if(masterKey === 'courses') {
         MASTER.courses = data.data.M_Courses || MASTER.courses;
-        buildOpts(MASTER.courses);
+        buildSelectOptions(sel, 'courses');
       }
     }
   } catch(e) { /* 실패 시 캐시 유지 */ }
@@ -1205,12 +1334,7 @@ async function refreshAgencyList() {
   if(!sel) return;
 
   // 캐시로 즉시 채움
-  if(MASTER.agencies.length > 0) {
-    const prev = sel.value;
-    sel.innerHTML = '<option value="">선택</option>' +
-      MASTER.agencies.map(a=>`<option value="${a.Name}">${a.Name}</option>`).join('');
-    if(prev) sel.value = prev;
-  }
+  if(MASTER.agencies.length > 0) buildSelectOptions(sel, 'agencies');
 
   // GAS 최신 조회
   _refreshState['dr-agency'] = true;
@@ -1221,10 +1345,7 @@ async function refreshAgencyList() {
       const agencies = data.data.M_Clients || data.data.M_Agencies || [];
       if(agencies.length > 0) {
         MASTER.agencies = agencies;
-        const prev = sel.value;
-        sel.innerHTML = '<option value="">선택</option>' +
-          agencies.map(a=>`<option value="${a.Name}">${a.Name}</option>`).join('');
-        if(prev) sel.value = prev;
+        buildSelectOptions(sel, 'agencies');
       }
     }
   } catch(e) { /* 실패 시 캐시 유지 */ }
