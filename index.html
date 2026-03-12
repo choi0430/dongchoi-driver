@@ -2050,7 +2050,7 @@ function renderShiftSection(){
   }
 }
 
-function completePre(){
+async function completePre(){
   const rego = document.getElementById('pre-rego').value;
   const km = document.getElementById('pre-km').value;
   if(!rego||!km){showToast('차량(Rego)과 출발 KM을 입력하세요. Please enter Rego & KM.','error');return;}
@@ -2059,6 +2059,36 @@ function completePre(){
   if(!declChecked){showToast('⚖️ Safety Declaration을 먼저 확인하세요. Please confirm the Safety Declaration.','error');return;}
   // 서명 확인
   if(isSigEmpty('pre-sig-canvas')){showToast('✏️ 드라이버 서명을 해주세요. Driver signature required.','error');return;}
+
+  // ── 차량 중복 운행 체크 ──
+  // 1) 같은 드라이버가 이미 해당 차량으로 운행 중인지 (로컬 체크)
+  const alreadyMine = activeShifts.some(s => s.rego === rego);
+  if(alreadyMine){
+    showToast(`🚫 ${rego} 차량은 이미 운행 중입니다. End of Shift를 먼저 완료하세요.\n${rego} is already in use. Please complete End of Shift first.`,'error');
+    return;
+  }
+  // 2) 다른 드라이버가 운행 중인지 (GAS 서버 체크)
+  showToast('🔍 차량 상태 확인 중... Checking vehicle status...','info');
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_active_regos');
+    const json = await res.json();
+    if(json.ok && json.regos){
+      const conflict = json.regos.find(r => r.rego === rego);
+      if(conflict){
+        const isMine = conflict.driver === (currentDriver?.name || '');
+        if(isMine){
+          showToast(`🚫 ${rego} 차량은 이미 운행 중입니다. End of Shift를 먼저 완료하세요.\n${rego} is already in use. Please complete End of Shift first.`,'error');
+        } else {
+          showToast(`🚫 ${rego} 차량은 현재 ${conflict.driver} 드라이버가 운행 중입니다.\n${rego} is currently being used by ${conflict.driver}.`,'error');
+        }
+        return;
+      }
+    }
+  } catch(err){
+    // 서버 조회 실패 시 경고만 표시하고 진행 허용 (네트워크 오류 대비)
+    console.warn('Active regos check failed:', err);
+  }
+
   const id = 'shift_'+Date.now();
   const shift = {
     id, rego,
