@@ -600,6 +600,7 @@ const DB = {
 // ═══════════════════════════════════════
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
 let ST = {pin:'',mt:null,mi:null,dt:null,di:null,ptype:'client',curAg:null,curSub:null,curSubVeh:null,subTab:'rates'};
+let _adminReady = false; // 데이터 준비 완료 플래그
 
 // ═══════════════════════════════════════
 // LOGIN
@@ -614,7 +615,32 @@ function doLogin(){
   document.getElementById('sl').classList.remove('on');
   document.getElementById('sm').classList.add('on');
   document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
+  // 세션 저장 (자동 복원용)
+  const acct = document.getElementById('la').value;
+  localStorage.setItem('dc_admin_session', acct);
   toast('데이터 로딩 중...','ok');
+  loadAllFromSheets();
+}
+
+function doAdminLogout(){
+  localStorage.removeItem('dc_admin_session');
+  ST.pin=''; upP();
+  document.getElementById('sm').classList.remove('on');
+  document.getElementById('sl').classList.add('on');
+}
+
+function autoRestoreAdminSession(){
+  const acct = localStorage.getItem('dc_admin_session');
+  if(!acct) return;
+  const laEl = document.getElementById('la');
+  if(laEl){
+    const found = [...laEl.options].find(o=>o.value===acct);
+    if(found) laEl.value = acct;
+  }
+  // PIN 없이 바로 복원
+  document.getElementById('sl').classList.remove('on');
+  document.getElementById('sm').classList.add('on');
+  document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
   loadAllFromSheets();
 }
 
@@ -2953,14 +2979,18 @@ async function savePDToSheets(){
   </div>
 </div>
 <script>
-// 마지막 로그인 계정 자동 선택
+// 세션 자동 복원
 (function(){
-  const last = localStorage.getItem('admin_last_account');
-  if(!last) return;
-  const sel = document.getElementById('la');
-  if(!sel) return;
-  const found = [...sel.options].find(o => o.value === last);
-  if(found) sel.value = last;
+  // 기존 계정 선택 복원
+  const last = localStorage.getItem('admin_last_account') || localStorage.getItem('dc_admin_session');
+  if(last){
+    const sel = document.getElementById('la');
+    if(sel){ const found=[...sel.options].find(o=>o.value===last); if(found) sel.value=last; }
+  }
+  // 로그인 세션이 있으면 자동 복원
+  window.addEventListener('DOMContentLoaded', () => {
+    if(localStorage.getItem('dc_admin_session')) autoRestoreAdminSession();
+  });
 })();
 </script>
 </body>
