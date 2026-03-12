@@ -2555,7 +2555,7 @@ function initMotForm() {
   const now = new Date();
   const dateEl = document.getElementById('mot-date');
   const timeEl = document.getElementById('mot-time');
-  if (dateEl && !dateEl.value) dateEl.value = now.toISOString().slice(0,10);
+  if (dateEl && !dateEl.value) dateEl.value = toLocalISO(now);
   if (timeEl && !timeEl.value) timeEl.value = now.toTimeString().slice(0,5);
   // 드라이버 자동 입력
   const driverEl = document.getElementById('mot-driver');
@@ -4398,6 +4398,10 @@ function renderMyDefects(){
     </div>`).join('');
 }
 
+function toLocalISO(d){
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+  return y+'-'+m+'-'+dd;
+}
 function getWeekKey(dateStr){
   // dateStr: "dd/mm/yy" or "dd/mm/yyyy"
   const parts = dateStr.split('/');
@@ -4934,7 +4938,7 @@ function busShowMarkerPopup(prefix, markerIdx) {
   const sevOpts = BUS_DAMAGE_SEVERITY.map(s =>
     `<option value="${s}" ${m.severity===s?'selected':''}>${s}</option>`).join('');
 
-  const isOld = !!m.fromPre || (m.date && m.date < new Date().toISOString().slice(0,10));
+  const isOld = !!m.fromPre || (m.date && m.date < toLocalISO(new Date()));
   const oldBadge = m.fromPre ? '<span style="font-size:11px;background:#fef3c7;color:#b45309;padding:2px 8px;border-radius:6px;margin-left:6px;">기존 손상</span>' : '';
 
   popup.innerHTML = `
@@ -4999,7 +5003,7 @@ function busAddMarker(e, prefix, view) {
   const n = BUS_MARKERS[prefix].length + 1;
   const idx = BUS_MARKERS[prefix].length;
   const rego = busGetCurrentRego(prefix);
-  const today = new Date().toISOString().slice(0,10);
+  const today = toLocalISO(new Date());
   BUS_MARKERS[prefix].push({
     view, x: parseFloat(xPct), y: parseFloat(yPct), n,
     type:'', severity:'', note:'',
@@ -5179,7 +5183,7 @@ function busMount(prefix, targetId) {
       const y = ((clientY - r.top)  / r.height * 100).toFixed(1);
       const n = BUS_MARKERS[prefix].length + 1;
       const rego = busGetCurrentRego(prefix);
-      const today = new Date().toISOString().slice(0,10);
+      const today = toLocalISO(new Date());
       const idx = BUS_MARKERS[prefix].length;
       BUS_MARKERS[prefix].push({ view, x: parseFloat(x), y: parseFloat(y), n,
         type:'', severity:'', note:'', date: today, driver: currentDriver?.name||'', rego });
