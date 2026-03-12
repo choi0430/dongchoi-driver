@@ -563,6 +563,9 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             </div>
           </div>
         </div>
+        <!-- 픽업/드롭 기반 서차지 통합 알림 -->
+        <div id="pickup-drop-hint" style="display:none;margin-bottom:12px;"></div>
+
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">시작 KM</label>
@@ -2679,57 +2682,102 @@ function isSurchargeHotel(name){
   return h?.Surcharge_Area ? h.Surcharge_Area.trim()!=='' : false;
 }
 
-// 픽업/드롭 변경될 때마다 호출 — 알림만 표시
+// 픽업/드롭 변경될 때마다 호출 — 호텔 서차지 + Early 통합 알림
 function checkHotelSurchargeHint(){
   const pickup  = document.getElementById('dr-pickup')?.value?.trim()  || '';
   const dropoff = document.getElementById('dr-dropoff')?.value?.trim() || '';
-  const hintEl  = document.getElementById('hotel-surcharge-hint');
+
+  // 구 hint el (hotel-surcharge-hint) 숨기기 — 새 박스로 통합
+  const oldHintEl = document.getElementById('hotel-surcharge-hint');
+  if(oldHintEl) oldHintEl.style.display = 'none';
+
+  const hintEl = document.getElementById('pickup-drop-hint');
   if(!hintEl) return;
 
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   const att   = document.getElementById('dr-attraction')?.value || '';
   const d     = getCourseData(att);
   const k     = seatKey(seats);
-  // 인승별 full 서차지
-  const fullFee = (d && d[k]?.hotel_fee) ? d[k].hotel_fee : ((seats==='40S'||seats==='50S') ? 30 : 10);
+
+  // ── 인승별 호텔 서차지 금액 ──
+  // HOTEL_OPTIONS 기준: 21S/25S → max $20 (full $10 or $20), 40S/50S → max $30 (full $15 or $30)
+  // 풀 서차지 = 인승 옵션의 최댓값
+  const hotelOpts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
+  const fullFee = hotelOpts.length > 0 ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 10;
   const halfFee = Math.round(fullFee / 2);
 
-  const pickupSurcharge  = isSurchargeHotel(pickup);
-  const dropoffSurcharge = isSurchargeHotel(dropoff);
-  const pickupAirport    = AIRPORT_PATTERN.test(pickup);
-  const dropoffAirport   = AIRPORT_PATTERN.test(dropoff);
+  // 인승 표기
+  const seatsLabel = seats ? `(${seats})` : '';
 
-  let msg = '', color = '';
-
-  if(pickupSurcharge && dropoffSurcharge){
-    // 서차지 호텔 → 서차지 호텔 : 100%
-    msg = `🏨 호텔 서차지 <b>전액 적용</b> 대상 — $${fullFee}<br><span style="color:#6b7280;font-size:10px;">픽업·드롭 모두 서차지 호텔</span>`;
-    color = 'orange';
-  } else if(pickupSurcharge && dropoffAirport){
-    // 서차지 호텔 → 공항 : 50%
-    msg = `🏨 호텔 서차지 <b>50% 적용</b> 대상 — $${halfFee}<br><span style="color:#6b7280;font-size:10px;">서차지 호텔 픽업 → 공항 드롭</span>`;
-    color = 'blue';
-  } else if(pickupAirport && dropoffSurcharge){
-    // 공항 → 서차지 호텔 : 50%
-    msg = `🏨 호텔 서차지 <b>50% 적용</b> 대상 — $${halfFee}<br><span style="color:#6b7280;font-size:10px;">공항 픽업 → 서차지 호텔 드롭</span>`;
-    color = 'blue';
-  } else if(pickupSurcharge || dropoffSurcharge){
-    // 한쪽만 서차지 호텔 (일반 → 서차지 또는 서차지 → 일반)
-    const which = pickupSurcharge ? `${pickup} (픽업)` : `${dropoff} (드롭)`;
-    msg = `🏨 서차지 호텔 포함 — ${which}<br><span style="color:#6b7280;font-size:10px;">픽업·드롭 상황에 따라 요금 확인 필요</span>`;
-    color = 'gray';
-  } else {
-    hintEl.style.display = 'none';
-    return;
+  // ── 서차지 호텔 판별 ──
+  // MASTER 로드 전이면 이름 패턴으로 폴백
+  function isSurch(name){
+    if(!name) return false;
+    if(MASTER.hotels && MASTER.hotels.length > 0){
+      const h = MASTER.hotels.find(h => h.Hotel_Name === name);
+      if(h) return h.Surcharge_Area ? h.Surcharge_Area.trim() !== '' : false;
+    }
+    // MASTER 없을 때: 알려진 서차지 구역 패턴 (Manly, North Shore, CBD 외곽 등)
+    // → 판별 불가이므로 false (힌트 못 줌, 선택 섹션에서 드라이버가 직접 판단)
+    return false;
   }
 
-  const styles = {
-    orange:'background:#fff7ed;border:1.5px solid #fb923c;',
-    blue:  'background:#eff6ff;border:1.5px solid #60a5fa;',
-    gray:  'background:#f9fafb;border:1.5px solid #d1d5db;'
+  const pickupSurcharge  = isSurch(pickup);
+  const dropoffSurcharge = isSurch(dropoff);
+  const pickupAirport    = AIRPORT_PATTERN.test(pickup);
+  const dropoffAirport   = AIRPORT_PATTERN.test(dropoff);
+  const isAirportTrip    = pickupAirport || dropoffAirport;
+
+  const alerts = [];
+
+  // ── 호텔 서차지 알림 ──
+  if(pickupSurcharge && dropoffSurcharge){
+    alerts.push({
+      icon:'🏨',
+      title:`호텔 서차지 전액 — $${fullFee} ${seatsLabel}`,
+      sub:'픽업·드롭 모두 서차지 호텔',
+      color:'orange'
+    });
+  } else if(pickupSurcharge && dropoffAirport){
+    alerts.push({
+      icon:'🏨',
+      title:`호텔 서차지 50% — $${halfFee} ${seatsLabel}`,
+      sub:`서차지 호텔 픽업 → 공항 드롭 (전액 $${fullFee}의 50%)`,
+      color:'blue'
+    });
+  } else if(pickupAirport && dropoffSurcharge){
+    alerts.push({
+      icon:'🏨',
+      title:`호텔 서차지 50% — $${halfFee} ${seatsLabel}`,
+      sub:`공항 픽업 → 서차지 호텔 드롭 (전액 $${fullFee}의 50%)`,
+      color:'blue'
+    });
+  } else if(pickupSurcharge || dropoffSurcharge){
+    const which = pickupSurcharge ? pickup : dropoff;
+    alerts.push({
+      icon:'🏨',
+      title:`호텔 서차지 해당 — ${which}`,
+      sub:`픽업·드롭 방향 확인 후 금액 선택 (최대 $${fullFee} ${seatsLabel})`,
+      color:'gray'
+    });
+  }
+
+  if(alerts.length === 0){ hintEl.style.display = 'none'; return; }
+
+  const styleMap = {
+    orange: 'background:#fff7ed;border:1.5px solid #fb923c;color:#92400e;',
+    blue:   'background:#eff6ff;border:1.5px solid #60a5fa;color:#1e40af;',
+    red:    'background:#fff1f2;border:1.5px solid #fca5a5;color:#be123c;',
+    gray:   'background:#f9fafb;border:1.5px solid #d1d5db;color:#374151;'
   };
-  hintEl.style.cssText = `display:block;border-radius:9px;padding:9px 12px;margin-bottom:12px;font-size:12px;line-height:1.7;${styles[color]}`;
-  hintEl.innerHTML = msg + `<br><span style="color:#9ca3af;font-size:10px;">※ 서차지 적용 여부는 드라이버가 확인 후 직접 선택하세요</span>`;
+
+  hintEl.style.cssText = 'display:block;border-radius:10px;overflow:hidden;margin-bottom:12px;';
+  hintEl.innerHTML = alerts.map(a => `
+    <div style="${styleMap[a.color]}padding:9px 12px;font-size:12px;line-height:1.7;border-radius:10px;margin-bottom:6px;">
+      <div style="font-weight:700;">${a.icon} ${a.title}</div>
+      <div style="font-size:11px;opacity:0.8;margin-top:1px;">${a.sub}</div>
+    </div>`).join('') +
+    `<div style="font-size:10px;color:#9ca3af;padding:2px 2px 0;">※ 서차지 적용 여부는 드라이버가 직접 확인 후 선택하세요</div>`;
 }
 
 function calcOT(){
