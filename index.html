@@ -618,8 +618,6 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         </div>
 
         <!-- Hotel & Distance Surcharge -->
-        <div id="hotel-surcharge-hint" style="display:none;margin-bottom:10px;"></div>
-        <div id="pickup-drop-hint" style="display:none;margin-bottom:10px;"></div>
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">Hotel Surcharge 호텔</label>
@@ -634,6 +632,8 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             </select>
           </div>
         </div>
+        <!-- 호텔 서차지 알림 — 선택란 아래 -->
+        <div id="pickup-drop-hint" style="display:none;margin-bottom:12px;"></div>
         <div class="form-row mb14">
           <div class="form-group" id="early-group">
             <label class="form-label">Early / Late Surcharge <span id="early-time-hint" style="font-size:11px;font-weight:500;display:block;margin-top:2px;"></span></label>
@@ -647,6 +647,8 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
           <div class="form-group"><label class="form-label">팁</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-tip" placeholder="0" oninput="calcTotal()"></div></div>
         </div>
+        <!-- Early/Late 서차지 알림 — 버튼 아래 -->
+        <div id="early-hint-box" style="display:none;margin-bottom:12px;"></div>
         <div class="form-group mb14">
           <label class="form-label">야간투어</label>
           <select class="form-select" id="f-night-type" onchange="onNightChange()" style="margin-bottom:6px;">
@@ -1733,26 +1735,12 @@ function sddOpen(key) {
   const input = document.getElementById('dr-'+key);
   const list  = document.getElementById('sdd-'+key+'-list');
   const rect  = input.getBoundingClientRect();
-  const dropH = 260; // max-height + 여유
-  // 모바일 실제 가시 영역 (주소창 제외)
   const visH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-  const spaceBelow = visH - rect.bottom;
-  const spaceAbove = rect.top;
   list.style.left  = rect.left + 'px';
   list.style.width = rect.width + 'px';
-  // 가이드는 항상 위로, 나머지는 공간 자동 판단
-  // (attraction, hotel 등은 화면 하단에 있으므로 위로 열리는 게 유리)
-  const forceUp = (key === 'guide') || 
-                  ((key === 'attraction' || key === 'pickup' || key === 'dropoff') && spaceBelow < dropH);
-  if (forceUp || (spaceBelow < dropH && spaceAbove > spaceBelow)) {
-    // 위로 펼치기
-    list.style.bottom = (visH - rect.top + 4) + 'px';
-    list.style.top    = 'auto';
-  } else {
-    // 아래로 펼치기
-    list.style.top    = (rect.bottom + 4) + 'px';
-    list.style.bottom = 'auto';
-  }
+  // 항상 위로 열기
+  list.style.bottom = (visH - rect.top + 4) + 'px';
+  list.style.top    = 'auto';
   sddFilter(key);
   list.classList.add('open');
 }
@@ -3615,43 +3603,65 @@ function onAttractionChange(){
   updateOTHint();
 }
 
+// ═══════════════════════════════════════
+// 공통 힌트 카드 렌더러
+// ═══════════════════════════════════════
+// status: 'apply' | 'no' | 'info' | 'warn'
+function renderHintBox(el, items){
+  if(!el) return;
+  if(!items || items.length===0){ el.style.display='none'; el.innerHTML=''; return; }
+  const colorMap = {
+    apply: { bg:'#f0fdf4', border:'#4ade80', textColor:'#166534' },
+    no:    { bg:'#f9fafb', border:'#d1d5db', textColor:'#6b7280' },
+    info:  { bg:'#eff6ff', border:'#60a5fa', textColor:'#1e40af' },
+    warn:  { bg:'#fff7ed', border:'#fb923c', textColor:'#92400e' },
+  };
+  el.style.display = 'block';
+  el.innerHTML = items.map(item=>{
+    const s = colorMap[item.type] || colorMap['info'];
+    return '<div style="background:'+s.bg+';border:1.5px solid '+s.border+';border-radius:10px;padding:9px 12px;margin-bottom:6px;font-size:12px;line-height:1.7;color:'+s.textColor+';">'
+      + '<div style="font-weight:700;">' + item.title + '</div>'
+      + (item.sub ? '<div style="font-size:11px;opacity:0.85;margin-top:1px;">' + item.sub + '</div>' : '')
+      + '</div>';
+  }).join('');
+}
+
 // 실시간 OT 경고 박스 갱신
 function updateOTHint(){
   const hintBox = document.getElementById('ot-hint-box');
   if(!hintBox) return;
-  const st = document.getElementById('dr-start')?.value;
-  const et = document.getElementById('dr-end')?.value;
-  const att = document.getElementById('dr-attraction')?.value;
+  const st   = document.getElementById('dr-start')?.value;
+  const et   = document.getElementById('dr-end')?.value;
+  const att  = document.getElementById('dr-attraction')?.value;
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
 
-  if(!st){ hintBox.style.display='none'; return; }
+  if(!st){ renderHintBox(hintBox, []); return; }
 
   const [sh,sm] = st.split(':').map(Number);
-  const maxH = getMaxHours(att);
-  const otRate = getOTRate(att, seats);
-  const WAIVE = 15; // minutes
+  const maxH    = getMaxHours(att);
+  const otRate  = seats ? getOTRate(att, seats) : null;
+  const WAIVE   = 15;
+  const startMin = sh*60+sm;
+  const pm8WaiveMin = 20*60 + WAIVE; // 20:15
 
-  let lines = [];
+  const items = [];
 
-  const pm8Min      = 20*60;
-  const pm8WaiveMin = pm8Min + WAIVE; // 20:15
-  const startMin    = sh*60+sm;
-
-  // ① 20:00 이후 OT 조건 — 항상 표시 (관광지 무관)
-  const otRateLabel = seats
-    ? `$${otRate}/h (${seats})`
-    : `21/25S $30/h · 40/50S $40/h`;
-  lines.push(`🕗 <b>20:00 이후 OT</b> — 20:15 이후부터 적용 (15분 waive) · ${otRateLabel}`);
+  // ① 20:00 이후 OT 조건 안내
+  if(!seats){
+    items.push({ type:'info', title:'🕗 20:15 이후 OT 적용 (15분 waive)', sub:'인승 선택 시 정확한 요율 표시 — 21/25S $30/h · 40/50S $40/h' });
+  } else {
+    items.push({ type:'info', title:'🕗 20:15 이후 OT 적용 (15분 waive)', sub:seats+' 요율: $'+otRate+'/h (1시간 단위 올림 청구)' });
+  }
 
   // ② 코스 기준 max_hours 초과 조건
   if(maxH){
-    const maxMin  = startMin + maxH*60;
+    const maxMin   = startMin + maxH*60;
     const waiveMin = maxMin + WAIVE;
     const hh  = String(Math.floor(maxMin/60)%24).padStart(2,'0');
     const mm  = String(maxMin%60).padStart(2,'0');
     const hwh = String(Math.floor(waiveMin/60)%24).padStart(2,'0');
     const hwm = String(waiveMin%60).padStart(2,'0');
-    lines.push(`⏱ <b>${maxH}시간 초과 OT</b> — ${hh}:${mm} 이후, waive 후 <b>${hwh}:${hwm}</b>부터 적용`);
+    items.push({ type:'info', title:'⏱ 코스 '+maxH+'h 초과 OT 기준: '+hh+':'+mm, sub:'15분 waive 후 '+hwh+':'+hwm+'부터 OT 적용' });
   }
 
   // ③ 종료 시간 있으면 실제 OT 계산
@@ -3660,30 +3670,26 @@ function updateOTHint(){
     let totalMin = (eh*60+em) - startMin;
     if(totalMin < 0) totalMin += 24*60;
 
-    // 20:00 기준 OT
     let pm8OT = 0;
     const endAbsMin = startMin + totalMin;
-    if(endAbsMin > pm8WaiveMin){ pm8OT = (endAbsMin - pm8WaiveMin)/60; }
+    if(endAbsMin > pm8WaiveMin) pm8OT = (endAbsMin - pm8WaiveMin)/60;
 
-    // max_hours 기준 OT
     let durOT = 0;
-    if(maxH){ const waiveMin2 = maxH*60+WAIVE; if(totalMin > waiveMin2) durOT = (totalMin-waiveMin2)/60; }
+    if(maxH){ const wm2 = maxH*60+WAIVE; if(totalMin > wm2) durOT = (totalMin-wm2)/60; }
 
     const effOT = Math.max(pm8OT, durOT);
-    if(effOT > 0){
-      // 1시간 단위 올림 청구
+    if(effOT > 0 && otRate){
       const effOT_ceil = Math.ceil(effOT);
       const otAmt = effOT_ceil * otRate;
-      lines.push(`🔴 <b>OT 발생</b>: ${effOT.toFixed(2)}h (<b>1h 단위 올림 → ${effOT_ceil}h</b>) × $${otRate}/h = <b>$${otAmt}</b>${seats ? '' : ' (인승 선택 후 재확인)'}`);
+      items.push({ type:'warn', title:'⚠️ OT 발생 — $'+otAmt+' 청구 ('+seats+')', sub:effOT.toFixed(2)+'h → 1h 단위 올림 '+effOT_ceil+'h × $'+otRate+'/h' });
+    } else if(effOT > 0 && !otRate){
+      items.push({ type:'warn', title:'⚠️ OT 발생', sub:effOT.toFixed(2)+'h ('+Math.ceil(effOT)+'h 올림) — 인승 선택 후 금액 확인' });
     } else if(totalMin > 0){
-      lines.push(`✅ 현재 OT 없음 (종료 ${et})`);
+      items.push({ type:'apply', title:'✅ OT 없음 (종료 '+et+')', sub:maxH ? '코스 '+maxH+'h 이내, 20:15 이전 종료' : '20:15 이전 종료' });
     }
   }
 
-  if(!lines.length){ hintBox.style.display='none'; return; }
-  const isOT = lines.some(l=>l.includes('OT 발생'));
-  hintBox.style.cssText = `display:block;margin-top:6px;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.8;background:${isOT?'#fff7ed':'#f0f9ff'};border:1px solid ${isOT?'#fed7aa':'#bae6fd'};`;
-  hintBox.innerHTML = lines.join('<br>');
+  renderHintBox(hintBox, items);
 }
 
 // 호텔 선택 시 서차지 자동 적용
@@ -3698,38 +3704,23 @@ function isSurchargeHotel(name){
 
 // 픽업/드롭 변경될 때마다 호출 — 호텔 서차지 + Early 통합 알림
 function checkHotelSurchargeHint(){
-  const pickup  = document.getElementById('dr-pickup')?.value?.trim()  || '';
-  const dropoff = document.getElementById('dr-dropoff')?.value?.trim() || '';
-
-  // hotel-surcharge-hint: Hotel Surcharge 선택란 위에 표시
-  const hintEl = document.getElementById('pickup-drop-hint');
+  const pickup  = (document.getElementById('dr-pickup')?.value  || '').trim();
+  const dropoff = (document.getElementById('dr-dropoff')?.value || '').trim();
+  const hintEl  = document.getElementById('pickup-drop-hint');
   if(!hintEl) return;
 
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
-  const att   = document.getElementById('dr-attraction')?.value || '';
-  const d     = getCourseData(att);
-  const k     = seatKey(seats);
-
-  // ── 인승별 호텔 서차지 금액 ──
-  // HOTEL_OPTIONS 기준: 21S/25S → max $20 (full $10 or $20), 40S/50S → max $30 (full $15 or $30)
-  // 풀 서차지 = 인승 옵션의 최댓값
   const hotelOpts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
-  const fullFee = hotelOpts.length > 0 ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 10;
-  const halfFee = Math.round(fullFee / 2);
+  const fullFee   = hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 10;
+  const halfFee   = Math.round(fullFee/2);
+  const seatsLabel = seats ? seats : '인승 미선택';
 
-  // 인승 표기
-  const seatsLabel = seats ? `(${seats})` : '';
-
-  // ── 서차지 호텔 판별 ──
-  // MASTER 로드 전이면 이름 패턴으로 폴백
   function isSurch(name){
     if(!name) return false;
-    if(MASTER.hotels && MASTER.hotels.length > 0){
-      const h = MASTER.hotels.find(h => h.Hotel_Name === name);
-      if(h) return h.Surcharge_Area ? h.Surcharge_Area.trim() !== '' : false;
+    if(MASTER.hotels && MASTER.hotels.length){
+      const h = MASTER.hotels.find(h=>h.Hotel_Name===name);
+      if(h) return h.Surcharge_Area ? h.Surcharge_Area.trim()!=='' : false;
     }
-    // MASTER 없을 때: 알려진 서차지 구역 패턴 (Manly, North Shore, CBD 외곽 등)
-    // → 판별 불가이므로 false (힌트 못 줌, 선택 섹션에서 드라이버가 직접 판단)
     return false;
   }
 
@@ -3737,58 +3728,28 @@ function checkHotelSurchargeHint(){
   const dropoffSurcharge = isSurch(dropoff);
   const pickupAirport    = AIRPORT_PATTERN.test(pickup);
   const dropoffAirport   = AIRPORT_PATTERN.test(dropoff);
-  const isAirportTrip    = pickupAirport || dropoffAirport;
 
-  const alerts = [];
+  // 픽업/드롭 미입력 시
+  if(!pickup && !dropoff){ renderHintBox(hintEl, []); return; }
 
-  // ── 호텔 서차지 알림 ──
+  // 서차지 호텔 없으면 숨기기
+  if(!pickupSurcharge && !dropoffSurcharge){ renderHintBox(hintEl, []); return; }
+
+  const items = [];
+
   if(pickupSurcharge && dropoffSurcharge){
-    alerts.push({
-      icon:'🏨',
-      title:`호텔 서차지 전액 — $${fullFee} ${seatsLabel}`,
-      sub:'픽업·드롭 모두 서차지 호텔',
-      color:'orange'
-    });
+    items.push({ type:'warn', title:'🏨 호텔 서차지 전액 적용 — $'+fullFee+' ('+seatsLabel+')', sub:'픽업·드롭 모두 서차지 구역 호텔' });
   } else if(pickupSurcharge && dropoffAirport){
-    alerts.push({
-      icon:'🏨',
-      title:`호텔 서차지 50% — $${halfFee} ${seatsLabel}`,
-      sub:`서차지 호텔 픽업 → 공항 드롭 (전액 $${fullFee}의 50%)`,
-      color:'blue'
-    });
+    items.push({ type:'info', title:'🏨 호텔 서차지 50% — $'+halfFee+' ('+seatsLabel+')', sub:'서차지 호텔 픽업 → 공항 드롭 (전액 $'+fullFee+'의 50%)' });
   } else if(pickupAirport && dropoffSurcharge){
-    alerts.push({
-      icon:'🏨',
-      title:`호텔 서차지 50% — $${halfFee} ${seatsLabel}`,
-      sub:`공항 픽업 → 서차지 호텔 드롭 (전액 $${fullFee}의 50%)`,
-      color:'blue'
-    });
-  } else if(pickupSurcharge || dropoffSurcharge){
-    const which = pickupSurcharge ? pickup : dropoff;
-    alerts.push({
-      icon:'🏨',
-      title:`호텔 서차지 해당 — ${which}`,
-      sub:`픽업·드롭 방향 확인 후 금액 선택 (최대 $${fullFee} ${seatsLabel})`,
-      color:'gray'
-    });
+    items.push({ type:'info', title:'🏨 호텔 서차지 50% — $'+halfFee+' ('+seatsLabel+')', sub:'공항 픽업 → 서차지 호텔 드롭 (전액 $'+fullFee+'의 50%)' });
+  } else if(pickupSurcharge){
+    items.push({ type:'warn', title:'🏨 호텔 서차지 해당 — '+pickup, sub:'서차지 구역 호텔 픽업 · 최대 $'+fullFee+' ('+seatsLabel+') · 방향 확인 후 선택' });
+  } else if(dropoffSurcharge){
+    items.push({ type:'warn', title:'🏨 호텔 서차지 해당 — '+dropoff, sub:'서차지 구역 호텔 드롭 · 최대 $'+fullFee+' ('+seatsLabel+') · 방향 확인 후 선택' });
   }
 
-  if(alerts.length === 0){ hintEl.style.display = 'none'; return; }
-
-  const styleMap = {
-    orange: 'background:#fff7ed;border:1.5px solid #fb923c;color:#92400e;',
-    blue:   'background:#eff6ff;border:1.5px solid #60a5fa;color:#1e40af;',
-    red:    'background:#fff1f2;border:1.5px solid #fca5a5;color:#be123c;',
-    gray:   'background:#f9fafb;border:1.5px solid #d1d5db;color:#374151;'
-  };
-
-  hintEl.style.cssText = 'display:block;border-radius:10px;overflow:hidden;margin-bottom:12px;';
-  hintEl.innerHTML = alerts.map(a => `
-    <div style="${styleMap[a.color]}padding:9px 12px;font-size:12px;line-height:1.7;border-radius:10px;margin-bottom:6px;">
-      <div style="font-weight:700;">${a.icon} ${a.title}</div>
-      <div style="font-size:11px;opacity:0.8;margin-top:1px;">${a.sub}</div>
-    </div>`).join('') +
-    `<div style="font-size:10px;color:#9ca3af;padding:2px 2px 0;">※ 서차지 적용 여부는 드라이버가 직접 확인 후 선택하세요</div>`;
+  renderHintBox(hintEl, items);
 }
 
 function calcOT(){
@@ -4011,73 +3972,68 @@ function selectMeal(amt){
   calcTotal();
 }
 function updateEarlyHint(){
-  const hint = document.getElementById('early-time-hint');
-  if(!hint) return;
+  const hintLabel = document.getElementById('early-time-hint');
+  const hintBox   = document.getElementById('early-hint-box');
 
   const startVal = document.getElementById('dr-start')?.value;
-  const pickup   = (document.getElementById('dr-pickup')?.value || '').trim();
+  const pickup   = (document.getElementById('dr-pickup')?.value  || '').trim();
   const dropoff  = (document.getElementById('dr-dropoff')?.value || '').trim();
+  const seats    = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
 
-  // 방향 판별
   const pickupIsAirport  = AIRPORT_PATTERN.test(pickup);
   const dropoffIsAirport = AIRPORT_PATTERN.test(dropoff);
-  const hotelToAirport   = !pickupIsAirport && dropoffIsAirport;  // 호텔→공항
-  const airportToHotel   = pickupIsAirport && !dropoffIsAirport;  // 공항→호텔
+  const hotelToAirport   = !pickupIsAirport && dropoffIsAirport;
+  const airportToHotel   = pickupIsAirport  && !dropoffIsAirport;
 
-  // 인승별 금액
-  const seats    = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
-  const earlyAmt = (seats==='40S'||seats==='50S') ? 40 : 30;
-  const amtLabel = seats ? `$${earlyAmt}` : `$30 / 40·50S $40`;
+  // 인승별 금액 (인승 미선택 시 안내)
+  const earlyAmt  = (seats==='40S'||seats==='50S') ? 40 : 30;
+  const seatsLabel = seats ? seats : '인승 미선택';
 
-  if(!startVal){
-    hint.innerHTML = `<span style="font-size:10px;color:var(--muted);">21/25S: $30 · 40/50S: $40</span>`;
-    return;
-  }
-
-  const [h, m] = startVal.split(':').map(Number);
-  const totalMin = h * 60 + m;
-  const before6  = totalMin < 6 * 60;   // 06:00 이전
-  const after23  = totalMin >= 23 * 60; // 23:00 이후
-
-  const alerts = [];
-
-  // ① Early Surcharge: 호텔→공항, 출발 06:00 이전
-  if(hotelToAirport){
-    if(before6){
-      alerts.push({ ok:true,  text:`🌅 <b>Early Surcharge ${amtLabel}</b> 적용 — 호텔 픽업 → 공항, 06:00 이전 출발 (${startVal})` });
+  // 라벨 옆 인라인: 간단 요율만 표시
+  if(hintLabel){
+    if(!seats){
+      hintLabel.innerHTML = '<span style="font-size:10px;color:var(--muted);">21/25S: $30 · 40/50S: $40</span>';
     } else {
-      alerts.push({ ok:false, text:`호텔 픽업 → 공항: <b>06:00 이전 출발</b> 시 Early Surcharge ${amtLabel} 적용 (현재 ${startVal})` });
+      hintLabel.innerHTML = '<span style="font-size:10px;color:var(--muted);">'+seats+': $'+earlyAmt+'</span>';
     }
   }
 
-  // ② Late Surcharge: 공항→호텔, 출발(픽업) 23:00 이후
-  if(airportToHotel){
-    if(after23){
-      alerts.push({ ok:true,  text:`🌙 <b>Late Surcharge ${amtLabel}</b> 적용 — 공항 픽업 → 호텔, 23:00 이후 (${startVal})` });
-    } else {
-      alerts.push({ ok:false, text:`공항 픽업 → 호텔: <b>23:00 이후</b> 시 Late Surcharge ${amtLabel} 적용 (현재 ${startVal})` });
-    }
-  }
+  if(!hintBox) return;
 
   // 픽업/드롭 미입력 시
-  if(!pickup && !dropoff){
-    hint.innerHTML = `<span style="font-size:10px;color:var(--muted);">픽업/드롭 입력 후 서차지 조건 확인 · 21/25S $30 · 40/50S $40</span>`;
-    hint.style.color = '';
-    return;
+  if(!pickup && !dropoff){ renderHintBox(hintBox, []); return; }
+  // 공항 이동 아닌 경우
+  if(!hotelToAirport && !airportToHotel){ renderHintBox(hintBox, []); return; }
+
+  const [h, m] = (startVal||'').split(':').map(Number);
+  const totalMin = startVal ? h*60+m : null;
+  const before6  = totalMin !== null && totalMin < 6*60;
+  const after23  = totalMin !== null && totalMin >= 23*60;
+
+  const items = [];
+
+  if(hotelToAirport){
+    if(!startVal){
+      items.push({ type:'info', title:'🌅 Early Surcharge 조건: 호텔 → 공항', sub:'출발 시간 06:00 이전 시 $'+earlyAmt+' 적용 ('+seatsLabel+')' });
+    } else if(before6){
+      items.push({ type:'apply', title:'✅ Early Surcharge 적용 — $'+earlyAmt+' ('+seatsLabel+')', sub:'호텔 픽업 → 공항 드롭 · 출발 '+startVal+' (06:00 이전)' });
+    } else {
+      items.push({ type:'no', title:'❌ Early Surcharge 미적용 (현재 '+startVal+')', sub:'호텔 → 공항 출발 06:00 이전 시 $'+earlyAmt+' 적용 ('+seatsLabel+')' });
+    }
   }
 
-  // 공항 이동이 아닌 경우 (Early/Late 해당 없음)
-  if(alerts.length === 0){
-    hint.innerHTML = '';
-    return;
+  if(airportToHotel){
+    if(!startVal){
+      items.push({ type:'info', title:'🌙 Late Surcharge 조건: 공항 → 호텔', sub:'픽업 시간 23:00 이후 시 $'+earlyAmt+' 적용 ('+seatsLabel+')' });
+    } else if(after23){
+      items.push({ type:'apply', title:'✅ Late Surcharge 적용 — $'+earlyAmt+' ('+seatsLabel+')', sub:'공항 픽업 → 호텔 드롭 · 출발 '+startVal+' (23:00 이후)' });
+    } else {
+      items.push({ type:'no', title:'❌ Late Surcharge 미적용 (현재 '+startVal+')', sub:'공항 → 호텔 픽업 23:00 이후 시 $'+earlyAmt+' 적용 ('+seatsLabel+')' });
+    }
   }
 
-  hint.style.color = '';
-  hint.innerHTML = alerts.map(a =>
-    `<span style="color:${a.ok ? 'var(--green)' : 'var(--muted)'};">${a.text}</span>`
-  ).join('<br>');
+  renderHintBox(hintBox, items);
 }
-
 function updateSurchargeOptions(){
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   const isLarge = seats==='40S'||seats==='50S';
