@@ -1331,10 +1331,12 @@ async function loadMasterData() {
   const cached = loadMasterCache();
   if (cached) {
     applyMasterData(cached);
+    _masterReady = true;
     setMsg('캐시 데이터 적용 중...');
     setBar(40);
     populateMasterSelects();
     populateContacts();
+    buildLoginSelect(); // ← MASTER 로드 후 드라이버 목록 갱신
   }
 
   // ② 백그라운드 최신 데이터 조회
@@ -1352,11 +1354,13 @@ async function loadMasterData() {
     if (data.ok && data.data) {
       applyMasterData(data.data);
       saveMasterCache(data.data);           // 캐시 저장
+      _masterReady = true;
       setMsg('✅ 데이터 로드 완료 (가이드 ' + MASTER.guides.length + '명)');
       populateMasterSelects();
       populateContacts();
+      buildLoginSelect(); // ← MASTER 최신 데이터로 드라이버 목록 갱신
     } else {
-      if (!cached) { setMsg('⚠️ 시트 연결 실패 — 기본 데이터 사용'); useFallbackMaster(); }
+      if (!cached) { setMsg('⚠️ 시트 연결 실패 — 기본 데이터 사용'); useFallbackMaster(); _masterReady = true; buildLoginSelect(); }
       else { setMsg('⚠️ 최신 데이터 조회 실패 — 캐시 사용 중'); }
     }
   } catch(e) {
@@ -1364,6 +1368,8 @@ async function loadMasterData() {
     if (!cached) {
       // 캐시도 없으면 fallback + 재시도 버튼
       useFallbackMaster();
+      _masterReady = true;
+      buildLoginSelect();
       showMasterRetryBtn();
     } else {
       setMsg('⚠️ 오프라인 — 캐시 데이터 사용 중');
@@ -2123,6 +2129,7 @@ let todayReports = [];
 let currentStep = 1;
 let editingShiftId = null;
 let contactFilter = 'all';
+let _masterReady = false; // MASTER 데이터 준비 완료 플래그
 
 // ═══════════════════════════════════════
 // LOGIN / LOGOUT
@@ -2165,19 +2172,19 @@ function doLogin() {
   const pin = [0,1,2,3].map(i => document.getElementById('pin-'+i).value).join('');
   if(pin.length < 4){ showLoginError('PIN 4자리를 입력하세요'); return; }
 
-  // MASTER 데이터 아직 로드 중이면 최대 3초 대기 후 재시도
-  if(MASTER.drivers.length === 0) {
+  // MASTER 데이터 아직 로드 중이면 최대 5초 대기 후 재시도
+  if(!_masterReady) {
     const loginBtn = document.querySelector('#login-screen button[onclick="doLogin()"]');
     if(loginBtn) { loginBtn.disabled = true; loginBtn.textContent = '⏳ 데이터 로드 중...'; }
     let waited = 0;
     const wait = setInterval(function(){
-      waited += 200;
-      if(MASTER.drivers.length > 0 || waited >= 3000) {
+      waited += 100;
+      if(_masterReady || waited >= 5000) {
         clearInterval(wait);
         if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = '🔐 로그인'; }
-        doLogin();
+        doLogin(); // 준비 완료 후 자동 재시도
       }
-    }, 200);
+    }, 100);
     return;
   }
 
@@ -2187,6 +2194,7 @@ function doLogin() {
   currentDriver = { name, initials, englishName: englishName || name };
   // 마지막 로그인 드라이버 저장
   localStorage.setItem('dc_last_driver', sel);
+  localStorage.setItem('dc_session_' + name, '1'); // 세션 활성 마킹
 
   // ── 드라이버별 localStorage 데이터 로드 ──
   try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
@@ -2234,6 +2242,8 @@ function doLogout() {
     localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
     localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
   }
+  // 세션 삭제 (다음 시작 시 자동 로그인 안 됨)
+  if(currentDriver?.name) localStorage.removeItem('dc_session_' + currentDriver.name);
   currentDriver = null;
   // 상태 초기화
   activeShifts = [];
@@ -2285,6 +2295,51 @@ renderContacts();
 renderAttractions();
 renderNotices();
 renderSalary();
+
+// ── 마지막 로그인 세션 자동 복원 ──────────────────────────────────
+function autoRestoreSession() {
+  const lastSel = localStorage.getItem('dc_last_driver');
+  if (!lastSel) return;
+
+  function tryRestore() {
+    if (!_masterReady) { setTimeout(tryRestore, 150); return; }
+    const [name, initials, englishName] = lastSel.split('|');
+    if (!name) return;
+
+    // 로그인 세션 유효 확인 (명시적 로그아웃 했으면 복원 안 함)
+    const savedSession = localStorage.getItem('dc_session_' + name);
+    if (!savedSession) return;
+
+    // 드라이버 목록에 옵션 설정
+    const sel = document.getElementById('login-driver-select');
+    if (sel) {
+      const found = [...sel.options].find(o => o.value === lastSel);
+      if (found) sel.value = lastSel;
+    }
+
+    currentDriver = { name, initials: initials||'??', englishName: englishName||name };
+    try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
+    try { todayReports = JSON.parse(localStorage.getItem('reports_'+name)||'[]'); } catch(e){ todayReports=[]; }
+    if(activeShifts.length > 0) editingShiftId = activeShifts[activeShifts.length-1].id;
+
+    document.getElementById('driver-name-pill').textContent = name + ' ▾';
+    document.getElementById('logout-menu-name').textContent = '👤 ' + name;
+    const meAvatar = document.querySelector('#page-me [style*="56px"]');
+    if(meAvatar) meAvatar.textContent = initials||'??';
+    const meName = document.querySelector('#page-me [style*="font-size:17px"]');
+    if(meName) meName.textContent = name;
+
+    injectDeclName(name, englishName);
+    renderShiftSection();
+    renderTodayReports();
+    renderSalary();
+    initMyInfoPage();
+
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+  }
+  tryRestore();
+}
 
 function initChecks(){
   ['pre-checks','end-checks'].forEach(id=>{
@@ -3651,6 +3706,7 @@ function onDistSelectChange(){ calcTotal(); }
 // Pre-seats 변경 시 surcharge 옵션 업데이트
 document.addEventListener('DOMContentLoaded', ()=>{
   buildLoginSelect(); // CONTACTS 기반 드라이버 로그인 목록 자동 생성
+  autoRestoreSession(); // 마지막 로그인 세션 복원
   const drSeatsEl = document.getElementById('dr-seats');
   if(drSeatsEl) drSeatsEl.addEventListener('change', updateSurchargeOptions);
 });
@@ -4578,17 +4634,67 @@ function busEditMarker(prefix, idx) {
 function busMarkRepaired(prefix, idx) {
   const m = BUS_MARKERS[prefix][idx];
   if (!m) return;
-  const rego = m.rego || busGetCurrentRego(prefix);
-  // 팝업 닫기
   document.querySelectorAll('.bus-marker-popup, .bus-popup-backdrop').forEach(el => el.remove());
-  // 확인
-  if (!confirm(`#${m.n} 손상을 수리 완료로 처리하고 기록에서 삭제할까요?\n(이 차량의 영구 기록에서 제거됩니다)`)) return;
+
+  // ── 관리자 PIN 확인 팝업 ──
+  const adminPin = (() => {
+    const adminDriver = MASTER.drivers?.find(d =>
+      (d.Name_EN||'').toLowerCase().includes('choi') || d.IsAdmin === 'Y');
+    return adminDriver?.PIN ? String(adminDriver.PIN).trim() : '1234';
+  })();
+
+  // 기존 팝업 제거
+  document.querySelectorAll('.bus-repair-popup, .bus-popup-backdrop').forEach(el => el.remove());
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'bus-popup-backdrop';
+  backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9998;';
+
+  const popup = document.createElement('div');
+  popup.className = 'bus-repair-popup';
+  popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;background:#fff;border-radius:16px;padding:22px 20px;box-shadow:0 8px 40px rgba(0,0,0,0.28);width:300px;max-width:90vw;';
+  popup.innerHTML = `
+    <div style="font-weight:700;font-size:15px;margin-bottom:6px;">🔧 수리 완료 처리</div>
+    <div style="font-size:13px;color:#64748b;margin-bottom:16px;">
+      <b>#${m.n}</b> ${m.view?.toUpperCase()||''} ${m.type?'· '+m.type:''} 손상을 수리 완료로 삭제합니다.<br>
+      <span style="color:#f59e0b;font-size:12px;">⚠️ 관리자(대표) PIN이 필요합니다.</span>
+    </div>
+    <div style="font-size:12px;color:#64748b;font-weight:600;margin-bottom:6px;">관리자 PIN</div>
+    <input id="repair-admin-pin" type="password" maxlength="4" inputmode="numeric" placeholder="● ● ● ●"
+      style="width:100%;padding:12px;border-radius:10px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:20px;text-align:center;letter-spacing:8px;box-sizing:border-box;margin-bottom:6px;font-family:'DM Mono',monospace;">
+    <div id="repair-pin-error" style="color:#ef4444;font-size:12px;min-height:18px;margin-bottom:10px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="document.querySelectorAll('.bus-repair-popup,.bus-popup-backdrop').forEach(e=>e.remove())"
+        style="flex:1;padding:10px;border-radius:10px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:14px;cursor:pointer;font-weight:600;">취소</button>
+      <button onclick="busConfirmRepair('${prefix}',${idx},'${adminPin}')"
+        style="flex:2;padding:10px;border-radius:10px;border:none;background:#10b981;color:#fff;font-size:14px;cursor:pointer;font-weight:700;">✓ 승인 & 삭제</button>
+    </div>
+  `;
+
+  backdrop.onclick = () => { popup.remove(); backdrop.remove(); };
+  document.body.appendChild(backdrop);
+  document.body.appendChild(popup);
+  setTimeout(() => document.getElementById('repair-admin-pin')?.focus(), 100);
+}
+
+function busConfirmRepair(prefix, idx, adminPin) {
+  const inputPin = document.getElementById('repair-admin-pin')?.value || '';
+  const errEl = document.getElementById('repair-pin-error');
+  if (inputPin !== adminPin) {
+    if(errEl) errEl.textContent = '❌ PIN이 틀렸습니다. 관리자(대표)에게 문의하세요.';
+    document.getElementById('repair-admin-pin').value = '';
+    document.getElementById('repair-admin-pin').focus();
+    return;
+  }
+  const m = BUS_MARKERS[prefix][idx];
+  const rego = m?.rego || busGetCurrentRego(prefix);
+  document.querySelectorAll('.bus-repair-popup, .bus-popup-backdrop').forEach(el => el.remove());
   BUS_MARKERS[prefix].splice(idx, 1);
   BUS_MARKERS[prefix].forEach((mk,i) => mk.n = i+1);
   if (rego) busSavePerma(rego, BUS_MARKERS[prefix]);
   ['front','back','left','right'].forEach(v => busRenderMarkers(prefix, v));
   busRenderList(prefix);
-  showToast(`🔧 #${m.n} 수리 완료 처리됨`, 'success');
+  showToast('🔧 수리 완료 처리됨 (관리자 승인)', 'success');
 }
 
 function busDeleteMarker(prefix, idx) {
