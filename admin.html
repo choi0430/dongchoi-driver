@@ -1291,8 +1291,8 @@ async function rV(q=''){
     const i=DB.V.indexOf(v);
     return`<div class="mrow">
       <div class="mav" style="color:var(--ac);font-size:10px">${v.Rego}</div>
-      <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}</div>
-        <div class="msb">${v['Manufacture Date']||''}년 · ${v.Capacity||'?'}인승 · ${v.Owner||v.Accreditation||'?'}</div>
+      <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}</div>
+        <div class="msb">${v['Manufacture Date']||''}년 · ${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
         <div class="mtg">${etag(v.Rego_Date,'Rego')}${etag(v.HVIS_Date,'HVIS')}${v.Last_Service_KM?`<span class="tag tb">정비: ${Number(v.Last_Service_KM).toLocaleString()}km</span>`:''}</div>
       </div>
       <div class="mac"><button class="btn bgh xs" onclick="openM('V',${i})">수정</button><button class="btn brd xs" onclick="cDel('V',${i},'${esc(v.Rego)}')">삭제</button></div>
@@ -3659,7 +3659,12 @@ function openM(type,idx){
       <div class="fr2">
         <div><label class="fl">VIN</label><input class="fi" id="f12" value="${d.VIN||''}"></div>
         <div><label class="fl">Engine No.</label><input class="fi" id="f13" value="${d['Engine Number']||''}"></div></div>
-      <div class="fr"><label class="fl">Accreditation</label><input class="fi" id="f14" value="${d.Accreditation||''}"></div>`;
+      <div class="fr2">
+        <div><label class="fl">Accreditation</label><input class="fi" id="f14" value="${d.Accreditation||''}"></div>
+        <div><label class="fl">변속기 (Transmission)</label><div class="fsw"><select class="fs" id="f15">
+          <option value="Auto"${(d.Transmission||'Auto')==='Auto'?' selected':''}>🔄 Auto (자동)</option>
+          <option value="Manual"${d.Transmission==='Manual'?' selected':''}>🔧 Manual (수동)</option>
+        </select></div></div></div>`;
   }
   else if(type==='D'){
     h=`<div class="fr2">
@@ -3828,7 +3833,7 @@ function saveM(){
     obj={Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),Manufacture_Date:gn('f4'),
          Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:fmtDate(gv('f7')),HVIS_Date:fmtDate(gv('f8')),
          Current_KM:gn('f9'),Last_Service_KM:gn('f10'),Service_Interval:gn('f11')||10000,
-         VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14')};
+         VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14'),Transmission:gv('f15')||'Auto'};
     ie?DB.V[idx]=obj:DB.V.push(obj);
     // 서브 차량이면 DB.PS에 슬롯 보장
     if(obj.Owner && !DC_OWNERS.includes(obj.Owner) && !DB.PS[obj.Owner]) DB.PS[obj.Owner]={};
@@ -4190,7 +4195,7 @@ async function loadAllFromSheets(){
       'Manufacture Date':r.Year?String(r.Year):'',Capacity:r.Seats||0,Owner:'DONG CHOI PTY LTD',
       Rego_Date:fmtDate(r.Rego_Expiry||''),HVIS_Date:fmtDate(r.HVIS_Expiry||''),
       Current_KM:0,Last_Service_KM:0,Service_Interval:10000,
-      VIN:'','Engine Number':'',Accreditation:''
+      VIN:'','Engine Number':'',Accreditation:'',Transmission:r.Transmission||'Auto'
     }));
 
     // M_Drivers → DB.D
