@@ -640,7 +640,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         </div>
         <div class="form-row mb14">
           <div class="form-group" id="early-group">
-            <label class="form-label">조기출발 <span id="early-time-hint" style="font-size:11px;font-weight:600;"></span></label>
+            <label class="form-label">Early / Late Surcharge <span id="early-time-hint" style="font-size:11px;font-weight:500;display:block;margin-top:2px;"></span></label>
             <div id="early-btn-group" style="display:flex;gap:6px;margin-bottom:4px;">
               <button type="button" id="early-btn-0" onclick="selectEarly(0)"
                 style="flex:1;padding:8px 0;border-radius:8px;border:1.5px solid var(--accent);background:var(--accent);color:white;font-size:13px;font-weight:700;cursor:pointer;font-family:sans-serif;">$0</button>
@@ -3005,40 +3005,69 @@ function selectMeal(amt){
 function updateEarlyHint(){
   const hint = document.getElementById('early-time-hint');
   if(!hint) return;
+
   const startVal = document.getElementById('dr-start')?.value;
   const pickup   = (document.getElementById('dr-pickup')?.value || '').trim();
   const dropoff  = (document.getElementById('dr-dropoff')?.value || '').trim();
-  const isAirportTrip = AIRPORT_PATTERN.test(pickup) || AIRPORT_PATTERN.test(dropoff);
 
-  // 인승별 Early Surcharge 금액
+  // 방향 판별
+  const pickupIsAirport  = AIRPORT_PATTERN.test(pickup);
+  const dropoffIsAirport = AIRPORT_PATTERN.test(dropoff);
+  const hotelToAirport   = !pickupIsAirport && dropoffIsAirport;  // 호텔→공항
+  const airportToHotel   = pickupIsAirport && !dropoffIsAirport;  // 공항→호텔
+
+  // 인승별 금액
   const seats    = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   const earlyAmt = (seats==='40S'||seats==='50S') ? 40 : 30;
-  const seatsLabel = seats ? `${seats} · $${earlyAmt}` : `$30/40S $40`;
+  const amtLabel = seats ? `$${earlyAmt}` : `$30 / 40·50S $40`;
 
   if(!startVal){
-    hint.innerHTML = `<span style="color:var(--muted);font-size:10px;">21/25S: $30 · 40/50S: $40</span>`;
+    hint.innerHTML = `<span style="font-size:10px;color:var(--muted);">21/25S: $30 · 40/50S: $40</span>`;
     return;
   }
+
   const [h, m] = startVal.split(':').map(Number);
   const totalMin = h * 60 + m;
-  const before6  = totalMin < 6 * 60;
-  const after23  = totalMin >= 23 * 60;
+  const before6  = totalMin < 6 * 60;   // 06:00 이전
+  const after23  = totalMin >= 23 * 60; // 23:00 이후
 
-  const earlyByTime    = before6;
-  const earlyByAirport = isAirportTrip && after23;
-  const earlyApplies   = earlyByTime || earlyByAirport;
+  const alerts = [];
 
-  if(earlyApplies){
-    let reason = earlyByTime ? '06:00 이전 출발' : '공항 이동 23:00 이후';
-    hint.innerHTML = `✅ Early Surcharge 적용 <b>$${earlyAmt}</b> — ${reason}`;
-    hint.style.color = 'var(--green)';
-  } else {
-    const cond = isAirportTrip
-      ? `06:00 이전 또는 23:00 이후 (공항 이동)`
-      : `06:00 이전 출발`;
-    hint.innerHTML = `<span style="color:var(--muted);">⚠️ ${cond} 시 적용 · 21/25S <b>$30</b> / 40/50S <b>$40</b></span>`;
-    hint.style.color = '';
+  // ① Early Surcharge: 호텔→공항, 출발 06:00 이전
+  if(hotelToAirport){
+    if(before6){
+      alerts.push({ ok:true,  text:`🌅 <b>Early Surcharge ${amtLabel}</b> 적용 — 호텔 픽업 → 공항, 06:00 이전 출발 (${startVal})` });
+    } else {
+      alerts.push({ ok:false, text:`호텔 픽업 → 공항: <b>06:00 이전 출발</b> 시 Early Surcharge ${amtLabel} 적용 (현재 ${startVal})` });
+    }
   }
+
+  // ② Late Surcharge: 공항→호텔, 출발(픽업) 23:00 이후
+  if(airportToHotel){
+    if(after23){
+      alerts.push({ ok:true,  text:`🌙 <b>Late Surcharge ${amtLabel}</b> 적용 — 공항 픽업 → 호텔, 23:00 이후 (${startVal})` });
+    } else {
+      alerts.push({ ok:false, text:`공항 픽업 → 호텔: <b>23:00 이후</b> 시 Late Surcharge ${amtLabel} 적용 (현재 ${startVal})` });
+    }
+  }
+
+  // 픽업/드롭 미입력 시
+  if(!pickup && !dropoff){
+    hint.innerHTML = `<span style="font-size:10px;color:var(--muted);">픽업/드롭 입력 후 서차지 조건 확인 · 21/25S $30 · 40/50S $40</span>`;
+    hint.style.color = '';
+    return;
+  }
+
+  // 공항 이동이 아닌 경우 (Early/Late 해당 없음)
+  if(alerts.length === 0){
+    hint.innerHTML = '';
+    return;
+  }
+
+  hint.style.color = '';
+  hint.innerHTML = alerts.map(a =>
+    `<span style="color:${a.ok ? 'var(--green)' : 'var(--muted)'};">${a.text}</span>`
+  ).join('<br>');
 }
 
 function updateSurchargeOptions(){
