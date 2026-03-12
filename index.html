@@ -1817,13 +1817,17 @@ let contactFilter = 'all';
 let currentDriver = null;
 
 function pinNext(el, idx) {
-  el.value = el.value.replace(/[^0-9]/g,'').slice(0,1);
-  if(el.value.length === 1) {
+  const clean = el.value.replace(/[^0-9]/g,'').slice(0,1);
+  el.value = clean;
+  if(clean.length === 1) {
     if(idx < 3) {
       const next = document.getElementById('pin-'+(idx+1));
       if(next) { next.focus(); next.select(); }
     } else {
-      setTimeout(doLogin, 0);
+      setTimeout(function(){
+        const pin = [0,1,2,3].map(i => document.getElementById('pin-'+i).value).join('');
+        if(pin.length === 4) doLogin();
+      }, 50);
     }
   }
 }
@@ -1847,6 +1851,23 @@ function doLogin() {
   const [name, initials, englishName] = sel.split('|');
   const pin = [0,1,2,3].map(i => document.getElementById('pin-'+i).value).join('');
   if(pin.length < 4){ showLoginError('PIN 4자리를 입력하세요'); return; }
+
+  // MASTER 데이터 아직 로드 중이면 최대 3초 대기 후 재시도
+  if(MASTER.drivers.length === 0) {
+    const loginBtn = document.querySelector('#login-screen button[onclick="doLogin()"]');
+    if(loginBtn) { loginBtn.disabled = true; loginBtn.textContent = '⏳ 데이터 로드 중...'; }
+    let waited = 0;
+    const wait = setInterval(function(){
+      waited += 200;
+      if(MASTER.drivers.length > 0 || waited >= 3000) {
+        clearInterval(wait);
+        if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = '🔐 로그인'; }
+        doLogin();
+      }
+    }, 200);
+    return;
+  }
+
   const correctPin = getDriverPin(name);
   if(pin !== correctPin){ showLoginError('PIN 번호가 틀렸습니다'); return; }
 
