@@ -1372,17 +1372,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 <script>
 
 // ── 전화번호 앞 0 복원 ──
-function fixPhone(p) {
-  // Google Sheets에서 숫자로 저장된 전화번호 앞 0 복원
-  // 예: 430175195 (9자리) → 0430175195 (10자리)
-  if(p === null || p === undefined || p === '') return '';
-  let s = String(p).replace(/\.0+$/, '').replace(/\s/g, '').replace(/[^0-9]/g, '');
-  if(!s) return '';
-  if(s.length === 9) return '0' + s;   // 04xxxxxxxx 형식
-  if(s.length === 10) return s;         // 이미 정상
-  // 비정상 길이도 원본 숫자 그대로
-  return String(p).replace(/\.0+$/, '').trim();
-}
+// (함수 정의는 아래 useFallbackMaster 앞에 위치)
 
 // ── 날짜 포맷 헬퍼 dd/mm/yyyy ──
 function fmtDate(val) {
@@ -1537,14 +1527,14 @@ async function loadMasterData() {
 }
 
 // 전화번호 0 보정 헬퍼 (Google Sheets 숫자 형식 → 앞 0 복원)
+// ── 전화번호 앞 0 복원 (Google Sheets 숫자 형식 보정) ──
 function fixPhone(p) {
   if(p === null || p === undefined || p === '') return '';
-  // 숫자/텍스트 모두 처리: 소수점, 공백, 특수문자 제거
   let s = String(p).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
   if(!s) return '';
-  if(s.length === 9)  return '0' + s;  // 숫자 형식: 앞 0 복원
-  if(s.length === 10) return s;         // 텍스트 형식: 정상 (0으로 시작)
-  if(s.length === 8)  return '0' + s;  // 8자리 예외 처리
+  if(s.length === 9)  return '0' + s;  // 04xxxxxxxx → 0 복원
+  if(s.length === 8)  return '0' + s;  // 8자리 예외
+  if(s.length === 10) return s;         // 정상
   return s;
 }
 
@@ -1634,8 +1624,6 @@ function rebuildDriverList() {
     </button>`;
   }).join('');
 }
-
-
 
 
 // ═══════════════════════════════════════
@@ -2440,7 +2428,6 @@ document.addEventListener('click', (e) => {
 });
 
 
-
 // ═══════════════════════════════════════
 // MOT (Transport for NSW) 검사 기록
 // ═══════════════════════════════════════
@@ -2681,7 +2668,7 @@ function renderMotHistory() {
     <div style="background:${rs.bg};border:1.5px solid ${rs.border};border-radius:12px;padding:12px 14px;margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
         <div>
-          <div style="font-size:13px;font-weight:700;color:var(--text);">${r.date}${r.time?' · '+r.time:''} &nbsp;·&nbsp; ${r.rego||'—'}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--text);">${fmtDate(r.date)}${r.time?' · '+r.time:''} &nbsp;·&nbsp; ${r.rego||'—'}</div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px;">${typeLabel[r.type]||r.type||'—'}${r.location?' · '+r.location:''}</div>
         </div>
         <span style="font-size:12px;font-weight:700;color:${rs.color};white-space:nowrap;margin-left:8px;">${rs.label}</span>
@@ -3327,7 +3314,7 @@ function changePin() {
   showToast('✅ PIN이 변경됐어요!', 'success');
 }
 
-const SHEET_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
+const SHEET_URL = APPS_SCRIPT_URL; // alias
 
 function submitEndShift(){
   const km = document.getElementById('end-km').value;
@@ -4298,13 +4285,7 @@ function renderNotices(){
 }
 
 // ═══════════════════════════════════════
-// SALARY
-// ═══════════════════════════════════════
-// ═══════════════════════════════════════
-// PAY PAGE
-// ═══════════════════════════════════════
-// ═══════════════════════════════════════
-// DEFECT REPORT
+// PAY / DEFECT REPORT
 // ═══════════════════════════════════════
 function getDefectReports(){ try{return JSON.parse(localStorage.getItem('defect_reports')||'[]');}catch(e){return[];} }
 function saveDefectReports(d){ localStorage.setItem('defect_reports',JSON.stringify(d)); }
@@ -4569,7 +4550,7 @@ function renderPay(){
       </div>
       ${weekWageData.length>0?`<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;">
         <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:700;">💸 지급 내역</div>
-        ${weekWageData.map(e=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;color:var(--muted);"><span>${e.date||''} · ${e.method||'현금'}</span><span style="font-weight:700;color:var(--accent);">$${Number(e.amount||0).toLocaleString()}</span></div>`).join('')}
+        ${weekWageData.map(e=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;color:var(--muted);"><span>${fmtDate(e.date)||''} · ${e.method||'현금'}</span><span style="font-weight:700;color:var(--accent);">$${Number(e.amount||0).toLocaleString()}</span></div>`).join('')}
       </div>`:''}`;
     card.dataset.weekKey = wk.key;
     card.addEventListener('click', ()=>showPayDetail(wk));
