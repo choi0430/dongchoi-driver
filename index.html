@@ -1616,11 +1616,16 @@ function sddSelect(key, value) {
   if(key==='pickup'||key==='dropoff'){ checkHotelSurchargeHint(); updateEarlyHint(); }
   // 코스 선택 시 요금/OT 자동 계산
   if(key==='attraction'){ autoRate(); onAttractionChange(); }
-  // 차량 선택 시 인승 자동 설정
+  // 차량 선택 시 인승 자동 설정 + 기존 데미지 로드
   if(key==='rego'){
     const v = MASTER.vehicles?.find(v=>v.Rego===value);
     const seatsSel = document.getElementById('dr-seats');
     if(v?.Seats && seatsSel) seatsSel.value = v.Seats;
+    // Pre-Departure 다이어그램이 이미 마운트됐으면 해당 차량 데미지 로드
+    const preWrap = document.getElementById('bus-pre-mount');
+    if(preWrap && preWrap.dataset.mounted === 'pre') {
+      busLoadRegoMarkers('pre', value);
+    }
   }
 }
 function sddAddNew(key, value) {
@@ -4318,6 +4323,65 @@ const BUS_IMGS = {
 };
 const BUS_MARKERS = { pre: [], end: [] };
 
+// ─── 차량 데미지 영구 저장 ──────────────────────────────────────────
+// 저장 키: dc_bus_dmg_{rego}  (차량번호별)
+// 마커 구조: { view, x, y, n, type, severity, note, date, driver, permanent:true }
+
+function busDmgKey(rego) {
+  return 'dc_bus_dmg_' + (rego || '').replace(/\s/g,'_');
+}
+
+function busLoadPerma(rego) {
+  if (!rego) return [];
+  try {
+    const raw = localStorage.getItem(busDmgKey(rego));
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+
+function busSavePerma(rego, markers) {
+  if (!rego) return;
+  try {
+    // permanent 플래그가 있는 것만 저장 (신규 추가된 것도 포함)
+    localStorage.setItem(busDmgKey(rego), JSON.stringify(markers));
+  } catch(e) { console.warn('데미지 저장 실패:', e); }
+}
+
+function busDeletePerma(rego) {
+  if (!rego) return;
+  localStorage.removeItem(busDmgKey(rego));
+}
+
+// 현재 Pre shift의 rego 가져오기
+function busGetCurrentRego(prefix) {
+  if (prefix === 'pre') {
+    return document.getElementById('pre-rego')?.value || '';
+  } else {
+    const shift = activeShifts.find(s => s.id === editingShiftId);
+    return shift?.rego || '';
+  }
+}
+
+// 차량 전환 시 또는 마운트 시 기존 데미지 로드
+function busLoadRegoMarkers(prefix, rego) {
+  const perma = busLoadPerma(rego);
+  // permanent 마커는 항상 로드, 신규 추가 분은 BUS_MARKERS에만 있음
+  BUS_MARKERS[prefix] = perma.map((m, i) => ({ ...m, n: i + 1 }));
+  ['front','back','left','right'].forEach(v => busRenderMarkers(prefix, v));
+  busRenderList(prefix);
+}
+
+// End of Shift에 Pre 데미지 자동 복사
+function busCopyPreToEnd(rego) {
+  const perma = busLoadPerma(rego);
+  if (!perma.length) return;
+  // 이미 end에 데미지가 있으면 덮어쓰지 않음
+  if (BUS_MARKERS['end'].length > 0) return;
+  BUS_MARKERS['end'] = perma.map((m, i) => ({ ...m, n: i + 1, fromPre: true }));
+  ['front','back','left','right'].forEach(v => busRenderMarkers('end', v));
+  busRenderList('end');
+}
+
 function busDiagramHTML(prefix) {
   return `<div class="bus-diagram-wrap" id="bus-wrap-${prefix}">
     <div class="bus-diagram-tabs">
@@ -4366,8 +4430,11 @@ function busShowMarkerPopup(prefix, markerIdx) {
   const sevOpts = BUS_DAMAGE_SEVERITY.map(s =>
     `<option value="${s}" ${m.severity===s?'selected':''}>${s}</option>`).join('');
 
+  const isOld = !!m.fromPre || (m.date && m.date < new Date().toISOString().slice(0,10));
+  const oldBadge = m.fromPre ? '<span style="font-size:11px;background:#fef3c7;color:#b45309;padding:2px 8px;border-radius:6px;margin-left:6px;">기존 손상</span>' : '';
+
   popup.innerHTML = `
-    <div style="font-weight:700;font-size:15px;margin-bottom:14px;">🔴 #${m.n} 손상 상세</div>
+    <div style="font-weight:700;font-size:15px;margin-bottom:14px;">🔴 #${m.n} 손상 상세${oldBadge}</div>
     <div style="font-size:12px;color:#64748b;margin-bottom:4px;font-weight:600;">손상 종류</div>
     <select id="bmp-type" style="width:100%;padding:9px 12px;border-radius:10px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:14px;margin-bottom:10px;box-sizing:border-box;">
       <option value="">선택하세요</option>${typeOpts}
@@ -4383,11 +4450,13 @@ function busShowMarkerPopup(prefix, markerIdx) {
     <div style="font-size:12px;color:#64748b;margin-bottom:4px;font-weight:600;">메모 (선택)</div>
     <input id="bmp-note" type="text" value="${m.note||''}" placeholder="상세 내용 입력..." maxlength="60"
       style="width:100%;padding:9px 12px;border-radius:10px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:14px;box-sizing:border-box;margin-bottom:14px;">
-    <div style="display:flex;gap:8px;">
-      <button onclick="document.querySelectorAll('.bus-marker-popup').forEach(el=>el.remove());document.querySelector('.bus-popup-backdrop')?.remove();"
-        style="flex:1;padding:10px;border-radius:10px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:14px;cursor:pointer;font-weight:600;">취소</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button onclick="document.querySelectorAll('.bus-marker-popup, .bus-popup-backdrop').forEach(el=>el.remove());"
+        style="flex:1;min-width:70px;padding:10px;border-radius:10px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:14px;cursor:pointer;font-weight:600;">취소</button>
+      <button onclick="busMarkRepaired('${prefix}',${markerIdx})"
+        style="flex:1;min-width:80px;padding:10px;border-radius:10px;border:1.5px solid #10b981;background:#f0fdf4;color:#059669;font-size:13px;cursor:pointer;font-weight:700;">🔧 수리 완료</button>
       <button onclick="busSaveMarkerDetail('${prefix}',${markerIdx})"
-        style="flex:2;padding:10px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:14px;cursor:pointer;font-weight:700;">✓ 저장</button>
+        style="flex:2;min-width:90px;padding:10px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:14px;cursor:pointer;font-weight:700;">✓ 저장</button>
     </div>
   `;
 
@@ -4411,6 +4480,9 @@ function busSaveMarkerDetail(prefix, markerIdx) {
   m.severity = sevEl?.value  || '';
   m.note     = noteEl?.value || '';
   document.querySelectorAll('.bus-marker-popup, .bus-popup-backdrop').forEach(el => el.remove());
+  // 영구 저장 (차량별)
+  const rego = m.rego || busGetCurrentRego(prefix);
+  if (rego) busSavePerma(rego, BUS_MARKERS[prefix]);
   busRenderMarkers(prefix, m.view);
   busRenderList(prefix);
 }
@@ -4422,7 +4494,15 @@ function busAddMarker(e, prefix, view) {
   const yPct = ((e.clientY - rect.top)  / rect.height * 100).toFixed(1);
   const n = BUS_MARKERS[prefix].length + 1;
   const idx = BUS_MARKERS[prefix].length;
-  BUS_MARKERS[prefix].push({view, x: parseFloat(xPct), y: parseFloat(yPct), n, type:'', severity:'', note:''});
+  const rego = busGetCurrentRego(prefix);
+  const today = new Date().toISOString().slice(0,10);
+  BUS_MARKERS[prefix].push({
+    view, x: parseFloat(xPct), y: parseFloat(yPct), n,
+    type:'', severity:'', note:'',
+    date: today,
+    driver: currentDriver?.name || '',
+    rego
+  });
   busRenderMarkers(prefix, view);
   busRenderList(prefix);
   // 마커 찍고 즉시 상세 팝업 열기
@@ -4459,25 +4539,64 @@ function busRenderList(prefix) {
   const list = document.getElementById('bus-' + prefix + '-list');
   if (!list) return;
   const markers = BUS_MARKERS[prefix];
-  list.innerHTML = markers.length === 0 ? '' : markers.map((m,i) => `
-    <div class="dmk-item">
-      <div class="dmk-dot" style="background:${m.severity==='심각'?'#ef4444':m.severity==='보통'?'#f97316':m.severity==='경미'?'#eab308':'#e11d48'};"></div>
-      <div style="flex:1;min-width:0;">
-        <div><b>#${m.n}</b> ${m.view.toUpperCase()} ${m.type?'· '+m.type:''} ${m.severity?'['+m.severity+']':''}</div>
-        ${m.note?`<div style="font-size:11px;color:#64748b;margin-top:2px;">${m.note}</div>`:''}
+  if (markers.length === 0) { list.innerHTML = ''; return; }
+
+  const sevColor = s => s==='심각'?'#ef4444':s==='보통'?'#f97316':s==='경미'?'#eab308':'#94a3b8';
+
+  list.innerHTML = `
+    <div style="font-size:11px;font-weight:700;color:#64748b;padding:6px 2px 4px;letter-spacing:0.5px;">
+      손상 기록 (${markers.length}건)
+    </div>` +
+  markers.map((m,i) => {
+    const isOld = !!m.fromPre; // End of Shift에서 Pre 복사된 마커
+    const needsDetail = !m.type && !m.severity;
+    return `
+    <div class="dmk-item" style="${isOld?'background:#fef9ec;border-left:3px solid #f59e0b;':''}${needsDetail?'border-left:3px solid #ef4444;':''}">
+      <div class="dmk-dot" style="background:${sevColor(m.severity)};flex-shrink:0;"></div>
+      <div style="flex:1;min-width:0;overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+          <b>#${m.n}</b>
+          <span style="font-size:11px;color:#64748b;">${m.view.toUpperCase()}</span>
+          ${m.type?`<span style="font-size:11px;background:#f1f5f9;padding:1px 6px;border-radius:6px;">${m.type}</span>`:''}
+          ${m.severity?`<span style="font-size:11px;color:${sevColor(m.severity)};font-weight:700;">[${m.severity}]</span>`:''}
+          ${isOld?`<span style="font-size:10px;color:#b45309;background:#fef3c7;padding:1px 5px;border-radius:4px;">기존</span>`:''}
+          ${needsDetail?`<span style="font-size:10px;color:#ef4444;">⚠ 상세 미입력</span>`:''}
+        </div>
+        ${m.note?`<div style="font-size:11px;color:#64748b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.note}</div>`:''}
+        ${m.date?`<div style="font-size:10px;color:#94a3b8;margin-top:1px;">${m.date}${m.driver?' · '+m.driver:''}</div>`:''}
       </div>
-      <span class="dmk-del" onclick="busEditMarker('${prefix}',${i})" style="margin-right:6px;color:#3b82f6;font-size:16px;">✎</span>
-      <span class="dmk-del" onclick="busDeleteMarker('${prefix}',${i})">✕</span>
-    </div>`).join('');
+      <span onclick="busEditMarker('${prefix}',${i})" style="padding:4px 6px;color:#3b82f6;font-size:15px;cursor:pointer;flex-shrink:0;">✎</span>
+      <span class="dmk-del" onclick="busDeleteMarker('${prefix}',${i})" style="flex-shrink:0;">✕</span>
+    </div>`;
+  }).join('');
 }
 
 function busEditMarker(prefix, idx) {
   busShowMarkerPopup(prefix, idx);
 }
 
-function busDeleteMarker(prefix, idx) {
+function busMarkRepaired(prefix, idx) {
+  const m = BUS_MARKERS[prefix][idx];
+  if (!m) return;
+  const rego = m.rego || busGetCurrentRego(prefix);
+  // 팝업 닫기
+  document.querySelectorAll('.bus-marker-popup, .bus-popup-backdrop').forEach(el => el.remove());
+  // 확인
+  if (!confirm(`#${m.n} 손상을 수리 완료로 처리하고 기록에서 삭제할까요?\n(이 차량의 영구 기록에서 제거됩니다)`)) return;
   BUS_MARKERS[prefix].splice(idx, 1);
   BUS_MARKERS[prefix].forEach((mk,i) => mk.n = i+1);
+  if (rego) busSavePerma(rego, BUS_MARKERS[prefix]);
+  ['front','back','left','right'].forEach(v => busRenderMarkers(prefix, v));
+  busRenderList(prefix);
+  showToast(`🔧 #${m.n} 수리 완료 처리됨`, 'success');
+}
+
+function busDeleteMarker(prefix, idx) {
+  const m = BUS_MARKERS[prefix][idx];
+  const rego = m?.rego || busGetCurrentRego(prefix);
+  BUS_MARKERS[prefix].splice(idx, 1);
+  BUS_MARKERS[prefix].forEach((mk,i) => mk.n = i+1);
+  if (rego) busSavePerma(rego, BUS_MARKERS[prefix]);
   ['front','back','left','right'].forEach(v => busRenderMarkers(prefix, v));
   busRenderList(prefix);
 }
@@ -4505,9 +4624,14 @@ function busMount(prefix, targetId) {
       const x = ((clientX - r.left) / r.width  * 100).toFixed(1);
       const y = ((clientY - r.top)  / r.height * 100).toFixed(1);
       const n = BUS_MARKERS[prefix].length + 1;
-      BUS_MARKERS[prefix].push({ view, x: parseFloat(x), y: parseFloat(y), n });
+      const rego = busGetCurrentRego(prefix);
+      const today = new Date().toISOString().slice(0,10);
+      const idx = BUS_MARKERS[prefix].length;
+      BUS_MARKERS[prefix].push({ view, x: parseFloat(x), y: parseFloat(y), n,
+        type:'', severity:'', note:'', date: today, driver: currentDriver?.name||'', rego });
       busRenderMarkers(prefix, view);
       busRenderList(prefix);
+      busShowMarkerPopup(prefix, idx);
     }
 
     // 터치 (모바일)
@@ -4522,6 +4646,34 @@ function busMount(prefix, targetId) {
       handleMark(e.clientX, e.clientY);
     });
   });
+
+  // ── 차량 기존 데미지 자동 로드 ──
+  const rego = busGetCurrentRego(prefix);
+  if (rego) busLoadRegoMarkers(prefix, rego);
+
+  // Pre: rego 입력 변경 감지 (차량 바꾸면 데미지도 교체)
+  if (prefix === 'pre') {
+    const regoInput = document.getElementById('pre-rego');
+    if (regoInput && !regoInput._dmgWatcher) {
+      regoInput._dmgWatcher = true;
+      let _lastRego = rego;
+      regoInput.addEventListener('change', () => {
+        const newRego = regoInput.value.trim();
+        if (newRego && newRego !== _lastRego) {
+          _lastRego = newRego;
+          busLoadRegoMarkers('pre', newRego);
+        }
+      });
+    }
+  }
+
+  // End of Shift: Pre 데미지 자동 복사
+  if (prefix === 'end') {
+    const shift = activeShifts.find(s => s.id === editingShiftId);
+    if (shift?.rego) {
+      busLoadRegoMarkers('end', shift.rego);
+    }
+  }
 }
 
 </script>
