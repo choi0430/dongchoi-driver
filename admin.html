@@ -623,7 +623,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 <div class="pg" id="pwage">
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">💵 드라이버 급여</div><div class="ssb">지급 기록 관리</div></div>
-    <button class="btn bac sm" onclick="openWageEntry(null)">+ 지급 추가</button>
+    <div style="display:flex;gap:6px;">
+      <button class="btn bgh sm" onclick="syncWagesNow()" title="구글 시트와 동기화">🔄 동기화</button>
+      <button class="btn bac sm" onclick="openWageEntry(null)">+ 지급 추가</button>
+    </div>
   </div>
   <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;">
     <select id="wage-driver-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
@@ -3207,25 +3210,70 @@ function renderAdminNotices() {
 function getWages(){ try{return JSON.parse(localStorage.getItem('admin_wages')||'{}');}catch(e){return {};} }
 function saveWages(d){ localStorage.setItem('admin_wages',JSON.stringify(d)); }
 
-async function loadWagesFromSheet(){
+// ── 급여 양방향 동기화 상태 ──
+let _wagesSyncing = false;
+let _wagesLastSync = 0;
+
+async function loadWagesFromSheet(forceRefresh){
+  // 5초 이내 재호출 방지
+  if(!forceRefresh && Date.now() - _wagesLastSync < 5000) return;
+  if(_wagesSyncing) return;
+  _wagesSyncing = true;
   try{
     const res = await fetch(SCRIPT_URL+'?action=get_wages');
     const json = await res.json();
-    if(!json.ok||!json.rows?.length) return;
-    // rows → { 드라이버: { weekStart: { entries:[] } } } 구조
-    const wages={};
-    json.rows.forEach((r,i)=>{
-      const drv=r.Driver||''; const ws=r.WeekStart||'';
+    if(!json.ok) {
+      console.warn('급여 로드 실패:', json.msg);
+      _wagesSyncing = false; return;
+    }
+    // GAS rows → { 드라이버: { weekStart: { entries:[] } } }
+    const sheetWages={};
+    (json.rows||[]).forEach(r=>{
+      const drv=String(r.Driver||'').trim();
+      const ws=String(r.WeekStart||'').trim();
       if(!drv||!ws) return;
-      if(!wages[drv]) wages[drv]={};
-      if(!wages[drv][ws]) wages[drv][ws]={entries:[]};
-      wages[drv][ws].entries.push({
-        _rowIndex:i+2,
-        date:r.Date||'',amount:Number(r.Amount)||0,method:r.Method||'현금',note:r.Note||''
+      if(!sheetWages[drv]) sheetWages[drv]={};
+      if(!sheetWages[drv][ws]) sheetWages[drv][ws]={entries:[]};
+      sheetWages[drv][ws].entries.push({
+        _rowIndex: parseInt(r._rowIndex)||null,
+        date:   r.Date    ||'',
+        amount: Number(r.Amount)||0,
+        method: r.Method  ||'현금',
+        note:   r.Note    ||'',
       });
     });
-    localStorage.setItem('admin_wages',JSON.stringify(wages));
+    // 날짜순 정렬
+    Object.values(sheetWages).forEach(drvData=>
+      Object.values(drvData).forEach(wk=>
+        wk.entries.sort((a,b)=>a.date.localeCompare(b.date))
+      )
+    );
+    // 로컬과 머지: GAS가 항상 master (GAS 데이터로 덮어씀)
+    localStorage.setItem('admin_wages', JSON.stringify(sheetWages));
+    _wagesLastSync = Date.now();
   }catch(e){console.warn('급여 로드 실패:',e);}
+  _wagesSyncing = false;
+}
+
+// GAS에 전체 wages 재업로드 (로컬 → 시트)
+async function pushWagesToSheet(){
+  const wages = getWages();
+  const rows = [];
+  Object.entries(wages).forEach(([drv,weeks])=>
+    Object.entries(weeks).forEach(([ws,wk])=>
+      (wk.entries||[]).forEach(e=> rows.push({
+        Driver:drv, WeekStart:ws, Date:e.date,
+        Amount:e.amount, Method:e.method||'현금', Note:e.note||''
+      }))
+    )
+  );
+  try{
+    const res = await fetch(SCRIPT_URL,{method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'replace_wages',rows})});
+    const j = await res.json();
+    return j.ok;
+  }catch(e){ console.warn('wages push 실패:',e); return false; }
 }
 // wages 구조: { "드라이버명": { "YYYY-MM-DD(월요일)": { total:0, paid:0, entries:[] } } }
 // entry: { date, amount, method, note }
@@ -3438,38 +3486,53 @@ async function saveWageEntry(){
   const note   = document.getElementById('we-note')?.value||'';
   if(!date){toast('날짜를 입력하세요','er');return;}
   if(amount<=0){toast('금액을 입력하세요','er');return;}
+
+  // 1) 로컬 먼저 저장
   const wages = getWages();
   if(!wages[ST.wageDriver]) wages[ST.wageDriver]={};
   if(!wages[ST.wageDriver][ST.wageWeek]) wages[ST.wageDriver][ST.wageWeek]={entries:[]};
   const entries = wages[ST.wageDriver][ST.wageWeek].entries;
   const isEdit = ST.wageEditIdx!==null;
-  const existingRow = isEdit ? entries[ST.wageEditIdx]?._rowIndex : null;
-  const entry = {date,amount,method,note};
+  const existingRowIndex = isEdit ? entries[ST.wageEditIdx]?._rowIndex : null;
+  const entry = {date,amount,method,note,_rowIndex:existingRowIndex||null};
   if(isEdit) entries[ST.wageEditIdx]=entry;
   else entries.push(entry);
   entries.sort((a,b)=>a.date.localeCompare(b.date));
   saveWages(wages);
   document.getElementById('wage-modal-overlay')?.remove();
   renderWage();
-  toast(isEdit?'수정 완료 ☁️':'지급 기록 추가 ☁️','ok');
-  // 시트 sync
+
+  // 2) GAS 시트 sync
   const row={Driver:ST.wageDriver,WeekStart:ST.wageWeek,Date:date,Amount:amount,Method:method,Note:note};
   try{
-    if(isEdit && existingRow){
-      await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-        body:JSON.stringify({action:'update_wage',rowIndex:existingRow,data:row})});
+    if(isEdit && existingRowIndex){
+      // 기존 행 업데이트
+      const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({action:'update_wage',rowIndex:existingRowIndex,data:row})});
+      const json=await res.json();
+      toast(json.ok?'✅ 수정 & 시트 저장':'⚠️ 수정됨 (시트 sync 실패)','ok');
     } else {
+      // 새 행 추가
       const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({action:'add_wage',data:row})});
       const json=await res.json();
-      if(json.row){
-        // rowIndex 저장
+      if(json.ok && json.row){
+        // _rowIndex 업데이트
         const w2=getWages();
-        const e2=w2[ST.wageDriver]?.[ST.wageWeek]?.entries?.find(e=>e.date===date&&e.amount===amount);
-        if(e2){e2._rowIndex=json.row;saveWages(w2);}
+        const drvEntries=w2[ST.wageDriver]?.[ST.wageWeek]?.entries||[];
+        const e2=drvEntries.find(e=>e.date===date&&e.amount===amount&&!e._rowIndex);
+        if(e2){ e2._rowIndex=json.row; saveWages(w2); }
       }
+      toast(json.ok?'✅ 추가 & 시트 저장':'⚠️ 추가됨 (시트 sync 실패)','ok');
     }
-  }catch(e){console.warn('급여 시트 sync 실패:',e);}
+    // 동기화 완료 후 시트에서 재로드
+    _wagesLastSync = 0; // 강제 재조회
+    await loadWagesFromSheet(true);
+    renderWage();
+  }catch(e){
+    console.warn('급여 시트 sync 실패:',e);
+    toast('저장됨 (오프라인 — 나중에 동기화)','ok');
+  }
 }
 
 async function deleteWageEntry(idx){
@@ -3480,11 +3543,22 @@ async function deleteWageEntry(idx){
   entries?.splice(idx,1);
   saveWages(wages);
   renderWage();
-  toast('삭제 완료 ☁️','ok');
-  if(rowIndex){
-    try{await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'delete_wage',rowIndex})});}
-    catch(e){console.warn('급여 삭제 sync 실패:',e);}
+  try{
+    if(rowIndex){
+      const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({action:'delete_wage',rowIndex})});
+      const j=await res.json();
+      toast(j.ok?'✅ 삭제 & 시트 반영':'⚠️ 삭제됨 (시트 sync 실패)','ok');
+    } else {
+      const ok = await pushWagesToSheet();
+      toast(ok?'✅ 삭제 & 시트 반영':'⚠️ 삭제됨 (시트 sync 실패)','ok');
+    }
+    _wagesLastSync=0;
+    await loadWagesFromSheet(true);
+    renderWage();
+  }catch(e){
+    console.warn('급여 삭제 sync 실패:',e);
+    toast('삭제됨 (오프라인)','ok');
   }
 }
 
@@ -3497,20 +3571,17 @@ async function deleteWageWeek(){
   saveWages(wages);
   ST.wageWeek = null;
   initWageWeeks();
-  toast('주간 삭제 완료 ☁️','ok');
-  try{
-    const allWages = getWages();
-    const rows=[];
-    Object.entries(allWages).forEach(([drv,weeks])=>
-      Object.entries(weeks).forEach(([ws,wk])=>
-        (wk.entries||[]).forEach(e=>rows.push({
-          Driver:drv,WeekStart:ws,Date:e.date,Amount:e.amount,Method:e.method,Note:e.note
-        }))
-      )
-    );
-    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'replace_wages',rows})});
-  }catch(e){console.warn('급여 주간 삭제 sync:',e);}
+  const ok = await pushWagesToSheet();
+  toast(ok?'✅ 주간 삭제 & 시트 반영':'⚠️ 삭제됨 (시트 sync 실패)','ok');
+  _wagesLastSync=0;
+}
+
+async function syncWagesNow(){
+  toast('⏳ 시트에서 급여 데이터 불러오는 중...','ok');
+  _wagesLastSync=0;
+  await loadWagesFromSheet(true);
+  await rWage();
+  toast('✅ 동기화 완료','ok');
 }
 
 // ═══════════════════════════════════════
