@@ -516,11 +516,16 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         </div>
         <div class="form-row mb14">
           <div class="form-group">
-            <label class="form-label">인승 <span style="font-size:10px;color:var(--muted);">Seats</span></label>
+            <label class="form-label">요청 인승 <span style="font-size:10px;color:var(--muted);">Requested Seats (요금 기준)</span></label>
             <select class="form-select" id="dr-seats" onchange="updateSurchargeOptions()">
               <option value="">선택</option>
-              <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
+              <option value="21S">21인승 요청</option>
+              <option value="25S">25인승 요청</option>
+              <option value="40S">40인승 요청</option>
+              <option value="50S">50인승 요청</option>
             </select>
+            <div id="seats-hint" style="font-size:11px;color:var(--muted);margin-top:4px;display:none;"></div>
+            <div id="req-seats-hint" style="font-size:11px;color:var(--orange,#f59e0b);margin-top:4px;display:none;"></div>
           </div>
           <div class="form-group">
             <label class="form-label">관광지<span class="req">*</span></label>
@@ -1787,13 +1792,17 @@ function sddSelect(key, value) {
   if(key==='pickup'||key==='dropoff'){ checkHotelSurchargeHint(); updateEarlyHint(); }
   // 코스 선택 시 요금/OT 자동 계산
   if(key==='attraction'){ autoRate(); onAttractionChange(); }
-  // 차량 선택 시 인승 자동 설정 + 기존 데미지 로드
+  // 차량 선택 시 실제 인승 힌트 표시 (요청 인승 dr-seats는 건드리지 않음)
   if(key==='rego'){
     const v = MASTER.vehicles?.find(v=>v.Rego===value);
     // 수동 차량 선택 힌트 업데이트
     updateManualHint(v);
-    const seatsSel = document.getElementById('dr-seats');
-    if(v?.Seats && seatsSel) seatsSel.value = v.Seats;
+    // 차량 실제 인승 힌트 표시
+    const seatsHint = document.getElementById('seats-hint');
+    if(seatsHint && v?.Seats) {
+      seatsHint.textContent = '🚌 실제 차량: ' + v.Seats + '인승 — 요금은 위 요청 인승 기준';
+      seatsHint.style.display = 'block';
+    }
     // Pre-Departure 다이어그램이 이미 마운트됐으면 해당 차량 데미지 로드
     const preWrap = document.getElementById('bus-pre-mount');
     if(preWrap && preWrap.dataset.mounted === 'pre') {
@@ -2969,16 +2978,17 @@ function addDailyReport(shiftId){
   // 차량(Rego): Pre-Departure에서 선택한 차량 기본값
   if(drRego && shift?.rego) {
     drRego.value = shift.rego;
-    // 수동 차량 힌트 + 인승 자동 설정
+    // 차량 실제 인승 힌트 표시
     const v = MASTER.vehicles?.find(v=>v.Rego===shift.rego);
-    if(v?.Seats && drSeats) {
-      drSeats.value = v.Seats;
-      updateSurchargeOptions();
+    const seatsHint = document.getElementById('seats-hint');
+    if(seatsHint && v?.Seats) {
+      seatsHint.textContent = '🚌 실제 차량: ' + v.Seats + '인승 — 요금은 아래 요청 인승 기준';
+      seatsHint.style.display = 'block';
     }
     updateManualHint(v);
   }
-  // 인승: 시프트에 저장된 마지막 인승값 (없으면 빈칸)
-  if(drSeats && shift?.seats && !drSeats.value) {
+  // 이전 리포트에서 쓴 요청 인승 유지 (있으면)
+  if(drSeats && shift?.seats) {
     drSeats.value = shift.seats;
     updateSurchargeOptions();
   }
@@ -3899,40 +3909,40 @@ function calcOT(){
 
 const SVC_OPTIONS = {
   '21S': [
-    {val:'90',  label:'$90 — 21/25S TSF'},
-    {val:'100', label:'$100 — 21/25S TSF ONLY'},
-    {val:'150', label:'$150 — 21/25S DINNER TSF'},
-    {val:'180', label:'$180 — 21/25S CITY/HALF'},
-    {val:'250', label:'$250 — 21/25S 10HR'},
-    {val:'260', label:'$260 — 21/25S 10HR/MANUAL'},
-    {val:'280', label:'$280 — 21/25S 12HR'},
-    {val:'290', label:'$290 — 21/25S 12HR/MANUAL'},
+    {val:'90',  label:'$90 — TSF (21인승 요금)'},
+    {val:'100', label:'$100 — TSF ONLY (21인승 요금)'},
+    {val:'150', label:'$150 — DINNER TSF (21인승 요금)'},
+    {val:'180', label:'$180 — CITY/HALF (21인승 요금)'},
+    {val:'250', label:'$250 — 10HR (21인승 요금)'},
+    {val:'260', label:'$260 — 10HR/MANUAL (21인승 요금)'},
+    {val:'280', label:'$280 — 12HR (21인승 요금)'},
+    {val:'290', label:'$290 — 12HR/MANUAL (21인승 요금)'},
     {val:'OTHER', label:'직접 입력 (OTHER)'},
   ],
   '25S': [
-    {val:'90',  label:'$90 — 21/25S TSF'},
-    {val:'100', label:'$100 — 21/25S TSF ONLY'},
-    {val:'150', label:'$150 — 21/25S DINNER TSF'},
-    {val:'180', label:'$180 — 21/25S CITY/HALF'},
-    {val:'250', label:'$250 — 21/25S 10HR'},
-    {val:'260', label:'$260 — 21/25S 10HR/MANUAL'},
-    {val:'280', label:'$280 — 21/25S 12HR'},
-    {val:'290', label:'$290 — 21/25S 12HR/MANUAL'},
+    {val:'90',  label:'$90 — TSF (25인승 요금)'},
+    {val:'100', label:'$100 — TSF ONLY (25인승 요금)'},
+    {val:'150', label:'$150 — DINNER TSF (25인승 요금)'},
+    {val:'180', label:'$180 — CITY/HALF (25인승 요금)'},
+    {val:'250', label:'$250 — 10HR (25인승 요금)'},
+    {val:'260', label:'$260 — 10HR/MANUAL (25인승 요금)'},
+    {val:'280', label:'$280 — 12HR (25인승 요금)'},
+    {val:'290', label:'$290 — 12HR/MANUAL (25인승 요금)'},
     {val:'OTHER', label:'직접 입력 (OTHER)'},
   ],
   '40S': [
-    {val:'120', label:'$120 — 40S TSF'},
-    {val:'170', label:'$170 — 40S DINNER TSF'},
-    {val:'310', label:'$310 — 40S 10HR'},
-    {val:'360', label:'$360 — 40S 12HR'},
+    {val:'120', label:'$120 — TSF (40인승 요금)'},
+    {val:'170', label:'$170 — DINNER TSF (40인승 요금)'},
+    {val:'310', label:'$310 — 10HR (40인승 요금)'},
+    {val:'360', label:'$360 — 12HR (40인승 요금)'},
     {val:'OTHER', label:'직접 입력 (OTHER)'},
   ],
   '50S': [
-    {val:'150', label:'$150 — 50S TSF'},
-    {val:'180', label:'$180 — 50S DINNER TSF'},
-    {val:'320', label:'$320 — 50S 10HR CITY'},
-    {val:'340', label:'$340 — 50S 10HR BLUE'},
-    {val:'380', label:'$380 — 50S 12HR'},
+    {val:'150', label:'$150 — TSF (50인승 요금)'},
+    {val:'180', label:'$180 — DINNER TSF (50인승 요금)'},
+    {val:'320', label:'$320 — 10HR CITY (50인승 요금)'},
+    {val:'340', label:'$340 — 10HR BLUE (50인승 요금)'},
+    {val:'380', label:'$380 — 12HR (50인승 요금)'},
     {val:'OTHER', label:'직접 입력 (OTHER)'},
   ],
 };
@@ -4170,6 +4180,22 @@ function updateEarlyHint(){
 }
 function updateSurchargeOptions(){
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+  // 요청 인승 선택 시 안내 메시지
+  const reqHintEl = document.getElementById('req-seats-hint');
+  if(reqHintEl && seats) {
+    const regoEl = document.getElementById('dr-rego');
+    const regoVal = regoEl?.value || '';
+    const vehicle = MASTER.vehicles?.find(v=>v.Rego===regoVal);
+    const actualSeats = vehicle?.Seats || '';
+    const seatNum = parseInt(seats);
+    const actualNum = parseInt(actualSeats);
+    if(actualSeats && actualNum > seatNum) {
+      reqHintEl.innerHTML = `⚠️ 실제 차량 ${actualSeats}인승이지만 <b>${seats} 요금 기준</b>으로 청구`;
+      reqHintEl.style.display = 'block';
+    } else {
+      reqHintEl.style.display = 'none';
+    }
+  }
   const isLarge = seats==='40S'||seats==='50S';
   const isSmall = seats==='21S'||seats==='25S';
 
