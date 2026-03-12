@@ -2004,7 +2004,52 @@ async function loadWagesFromSheet(){
 // wages 구조: { "드라이버명": { "YYYY-MM-DD(월요일)": { total:0, paid:0, entries:[] } } }
 // entry: { date, amount, method, note }
 
+// ── GAS Daily_Report 캐시 (관리자용 dr 계산) ──────────────────────
+let _reportsCache = null; // [{ Driver, Date(iso), DR_Cost, ... }]
+
+async function ensureReportsCache() {
+  if (_reportsCache) return _reportsCache;
+  try {
+    const res  = await fetch(SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+    const json = await res.json();
+    if (json.ok && json.rows) {
+      // Date를 ISO(YYYY-MM-DD)로 정규화
+      _reportsCache = json.rows.map(r => {
+        const ds = String(r.Date || '');
+        let iso = '';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) iso = ds;
+        else if (/^\d{2}\/\d{2}\/\d{4}$/.test(ds)) {
+          const [dd, mm, yyyy] = ds.split('/');
+          iso = `${yyyy}-${mm}-${dd}`;
+        }
+        return { ...r, _isoDate: iso };
+      });
+    }
+  } catch(e) { console.warn('리포트 캐시 로드 실패:', e); }
+  return _reportsCache || [];
+}
+
+// 드라이버·주간별 DR 합계 (GAS 기준)
+async function getEarnedFromSheets(driverName, weekStart) {
+  const rows = await ensureReportsCache();
+  const mon  = weekStart;
+  const sun  = (() => { const d = new Date(weekStart); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10); })();
+
+  // 드라이버명 매칭: Name_KR 또는 Name_EN 또는 Driver 컬럼 직접
+  const drRow = DB.D.find(d => (d.Name_KR||'')===driverName || (d.Name_EN||'')===driverName);
+  const matchNames = new Set([driverName]);
+  if (drRow) { matchNames.add(drRow.Name_KR||''); matchNames.add(drRow.Name_EN||''); }
+
+  let total = 0;
+  rows.forEach(r => {
+    if (!matchNames.has(String(r.Driver||'').trim())) return;
+    if (r._isoDate >= mon && r._isoDate <= sun) total += (parseFloat(r.DR_Cost) || 0);
+  });
+  return total;
+}
+
 async function rWage(){
+  _reportsCache = null; // 최신 리포트 다시 조회
   await loadWagesFromSheet();
   const dSel = document.getElementById('wage-driver-sel');
   if(!dSel) return;
@@ -2038,59 +2083,77 @@ function initWageWeeks(){
   renderWage();
 }
 
-function renderWage(){
+async function renderWage(){
   ST.wageDriver = document.getElementById('wage-driver-sel')?.value || ST.wageDriver;
   ST.wageWeek   = document.getElementById('wage-week-sel')?.value   || ST.wageWeek;
+  if(!ST.wageDriver || !ST.wageWeek) return;
+
   const wages   = getWages();
   const week    = wages[ST.wageDriver]?.[ST.wageWeek] || {entries:[]};
   const entries = week.entries || [];
 
-  // 드라이버 앱 리포트에서 해당 주 dr 합산
-  const drvName = DB.D.find(d=>(d.Name_KR||d.Name_EN)===ST.wageDriver)?.Name_EN || ST.wageDriver;
-  let earned = 0;
-  try {
-    const rpts = JSON.parse(localStorage.getItem('reports_'+drvName)||'[]');
-    rpts.forEach(r=>{
-      const wk = getWeekKey(r.date);
-      if(wk && wk.key.replace('~','—')===getWeekLabel(ST.wageWeek).replace(' ','')) {
-        // 간단히 weekStart 비교
-      }
-      // 날짜로 주간 비교
-      if(r.date && ST.wageWeek){
-        const rDate = new Date(r.date.split('/').reverse().map((v,i)=>i===2?'20'+v:v).join('-'));
-        const mon = new Date(ST.wageWeek);
-        const sun = new Date(ST.wageWeek); sun.setDate(mon.getDate()+6);
-        if(rDate>=mon && rDate<=sun) earned += (r.dr||0);
-      }
-    });
-  } catch(e){}
+  // 요약 로딩 표시
+  const sumEl = document.getElementById('wage-summary');
+  if(sumEl) sumEl.innerHTML =
+    '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:4px;text-align:center;color:var(--t3);font-size:13px;">⏳ DR 금액 조회 중...</div>';
+
+  // ── GAS Daily_Report 시트에서 드라이버 해당 주 DR_Cost 합산 ──
+  const earned = await getEarnedFromSheets(ST.wageDriver, ST.wageWeek);
 
   const totalPaid = entries.reduce((s,e)=>s+(e.amount||0),0);
   const balance   = earned - totalPaid;
 
+  // 리포트 건수도 표시
+  const rows = _reportsCache || [];
+  const mon  = ST.wageWeek;
+  const sun  = (() => { const d=new Date(mon); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10); })();
+  const drRow = DB.D.find(d=>(d.Name_KR||'')===ST.wageDriver||(d.Name_EN||'')===ST.wageDriver);
+  const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+  const weekReports = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
+
   // 요약 카드
-  const sumEl = document.getElementById('wage-summary');
   if(sumEl) sumEl.innerHTML =
     '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:4px;">'+
-      '<div style="font-size:11px;color:var(--t3);font-weight:700;margin-bottom:10px;">'+escH(ST.wageDriver)+' — '+getWeekLabel(ST.wageWeek)+'</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
-        wstat('리포트 발생', earned, 'var(--gn)')+
-        wstat('지급 합계',   totalPaid, 'var(--ac)')+
-        wstat('잔액',        balance,   balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)')+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
+        '<div style="font-size:11px;color:var(--t3);font-weight:700;">'+escH(ST.wageDriver)+' — '+getWeekLabel(ST.wageWeek)+'</div>'+
+        '<div style="font-size:11px;color:var(--t3);">리포트 '+weekReports.length+'건</div>'+
       '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
+        wstat('발생 DR', earned, 'var(--gn)')+
+        wstat('지급 합계', totalPaid, 'var(--ac)')+
+        wstat('잔액', balance, balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)')+
+      '</div>'+
+      (weekReports.length>0 ?
+        '<div style="margin-top:10px;border-top:1px solid var(--b2);padding-top:10px;">'+
+          '<div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:6px;">리포트 내역</div>'+
+          weekReports.map(r=>
+            '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--b2);">'+
+              '<span style="color:var(--t2);">'+fmtDate(r.Date||r._isoDate)+' '+escH(r.Rego||'')+'</span>'+
+              '<span style="color:var(--t2);">'+escH(r.Attraction||r.Agency||'')+'</span>'+
+              '<span style="color:var(--gn);font-weight:700;">$'+(parseFloat(r.DR_Cost)||0).toLocaleString()+'</span>'+
+            '</div>'
+          ).join('')+
+        '</div>' : '')+
     '</div>';
 
   // 지급 내역 목록
   const listEl = document.getElementById('wage-list');
   if(!listEl) return;
+
+  // 탭 헤더
+  const tabHtml =
+    '<div style="display:flex;gap:8px;margin-bottom:10px;">'+
+      '<div style="font-size:12px;font-weight:700;color:var(--t1);">💸 지급 내역</div>'+
+    '</div>';
+
   if(entries.length===0){
-    listEl.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">지급 내역이 없습니다.<br>+ 지급 추가 버튼으로 기록하세요.</div>';
+    listEl.innerHTML=tabHtml+'<div style="text-align:center;padding:24px;color:var(--t3);font-size:13px;">지급 내역이 없습니다.<br><span style="font-size:11px;">아래 + 버튼으로 지급 기록을 추가하세요.</span></div>';
     return;
   }
-  listEl.innerHTML = entries.map((e,i)=>
+  listEl.innerHTML = tabHtml + entries.map((e,i)=>
     '<div style="background:var(--sf2);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">'+
       '<div>'+
-        '<div style="font-size:13px;font-weight:700;color:var(--t1);">'+fmtDate(e.date)||''+'</div>'+
+        '<div style="font-size:13px;font-weight:700;color:var(--t1);">'+fmtDate(e.date)+'</div>'+
         '<div style="font-size:11px;color:var(--t3);margin-top:2px;">'+escH(e.method||'현금')+(e.note?' · '+escH(e.note):'')+'</div>'+
       '</div>'+
       '<div style="display:flex;gap:8px;align-items:center;">'+
