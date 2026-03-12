@@ -2774,6 +2774,7 @@ function showPage(id){
   // 연락처 탭 진입 시 최신 데이터로 재렌더링
   if(id === 'contacts'){ _activeRegosFetched=false; renderContacts(); }
   if(id === 'me') initMyInfoPage();
+  if(id === 'pay') renderPay();
 }
 
 function startReport(){
@@ -4550,6 +4551,41 @@ function getAllReports(){
   return all;
 }
 
+
+// GAS에서 현재 드라이버 wages 로드 → admin_wages 캐시 갱신
+let _driverWagesLastSync = 0;
+async function loadDriverWagesFromGAS(driverName){
+  if(!driverName) return;
+  if(Date.now() - _driverWagesLastSync < 30000) return; // 30초 TTL
+  try{
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_wages');
+    if(!res.ok) return;
+    const data = await res.json();
+    if(!Array.isArray(data)) return;
+    // 전체 wages → admin_wages 형식으로 변환
+    const wagesMap = {};
+    data.forEach(row=>{
+      const driver  = row.Driver || row.driver || '';
+      const monISO  = row.WeekStart || row.weekstart || '';
+      if(!driver || !monISO) return;
+      if(!wagesMap[driver]) wagesMap[driver] = {};
+      if(!wagesMap[driver][monISO]) wagesMap[driver][monISO] = { entries:[] };
+      wagesMap[driver][monISO].entries.push({
+        date:   row.Date   || row.date   || monISO,
+        amount: Number(row.Amount || row.amount || 0),
+        method: row.Method || row.method || '현금',
+        note:   row.Note   || row.note   || ''
+      });
+    });
+    // admin_wages 전체 갱신 (기존 로컬 유지하면서 머지)
+    const existing = JSON.parse(localStorage.getItem('admin_wages')||'{}');
+    // GAS 데이터 우선 (최신)
+    Object.assign(existing, wagesMap);
+    localStorage.setItem('admin_wages', JSON.stringify(existing));
+    _driverWagesLastSync = Date.now();
+  }catch(e){ /* 네트워크 실패 시 로컬 캐시 사용 */ }
+}
+
 function getDriverWagesFromLocal(driverName){
   // admin_wages에서 현재 드라이버의 지급 기록 반환
   // admin_wages 키: "YYYY-MM-DD" (월요일)
@@ -4617,9 +4653,19 @@ async function getGASDRForWeek(driverName, monISO){
   });
   return total;
 }
-function renderPay(){
+async function renderPay(){
   const all = getAllReports();
   const driverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
+
+  // 배지 로딩 표시
+  const badge0 = document.getElementById('pay-unpaid-badge');
+  if(badge0 && badge0.textContent==='집계 중...'){
+    badge0.textContent = '⏳ 불러오는 중';
+    badge0.style.background = 'var(--muted)';
+  }
+
+  // GAS에서 wages 최신 로드 (30초 캐시)
+  await loadDriverWagesFromGAS(driverName);
 
   // 주별 그룹핑 (월~일)
   const weekMap = {};
