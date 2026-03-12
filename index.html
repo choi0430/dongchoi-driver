@@ -4299,14 +4299,19 @@ function openMap(url){window.open(url,'_blank');}
 // ═══════════════════════════════════════
 function renderNotices(){
   const el=document.getElementById('notice-list');
-  el.innerHTML=NOTICES.map(n=>`
+  // admin_notices (관리자 앱에서 등록한 공지) 우선, 없으면 기본 NOTICES 사용
+  let notices;
+  try { notices = JSON.parse(localStorage.getItem('admin_notices') || 'null'); } catch(e) { notices = null; }
+  if (!notices || !notices.length) notices = NOTICES;
+
+  el.innerHTML=notices.map(n=>`
     <div class="notice-item ${n.type}">
       <div class="notice-badge badge-${n.type==='urgent'?'urgent':n.type==='info'?'info':'general'}">${n.type==='urgent'?'긴급':n.type==='info'?'안내':'공지'}</div>
-      <div class="notice-date">${n.date}</div>
-      <div class="notice-title">${n.title}</div>
-      <div class="notice-body">${n.body}</div>
+      <div class="notice-date">${n.date||''}</div>
+      <div class="notice-title">${n.title||''}</div>
+      <div class="notice-body">${n.body||''}</div>
     </div>`).join('');
-  const hasUrgent=NOTICES.some(n=>n.type==='urgent');
+  const hasUrgent=notices.some(n=>n.type==='urgent');
   document.getElementById('notif-dot').style.display=hasUrgent?'block':'none';
 }
 
