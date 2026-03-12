@@ -2062,10 +2062,13 @@ function deleteLedgerEntry(idx){
 // Dong Choi Pty Ltd 발행자 정보
 const DC_COMPANY = {
   name:    'DONG CHOI PTY LTD',
-  abn:     localStorage.getItem('dc_abn') || '',
+  abn:     localStorage.getItem('dc_abn')  || '',
   address: 'Sydney, NSW, Australia',
   phone:   '0430 175 195',
   email:   'dongchoicoach@gmail.com',
+  bank:    localStorage.getItem('dc_bank') || '',
+  bsb:     localStorage.getItem('dc_bsb')  || '',
+  acc:     localStorage.getItem('dc_acc')  || '',
 };
 
 function saveCompanyInfo() {
@@ -2132,26 +2135,34 @@ function saveInvSettings() {
   localStorage.setItem('dc_bank', bank);
   localStorage.setItem('dc_bsb',  bsb);
   localStorage.setItem('dc_acc',  acc);
-  DC_COMPANY.abn = abn;
+  DC_COMPANY.abn  = abn;
+  DC_COMPANY.bank = bank;
+  DC_COMPANY.bsb  = bsb;
+  DC_COMPANY.acc  = acc;
 }
 
 async function initInvoice() {
-  // 여행사 선택박스 채우기
-  const sel = document.getElementById('inv-agency');
-  if (!sel) return;
-  // DB.C 여행사 + 실제 리포트에 등장한 여행사명 합집합 (시트의 Agency 필드 대응)
-  const dbAgencies = DB.C.map(c => c.Name).filter(Boolean);
-  const reportAgencies = (_invReports||[]).map(r=>(r._agency||String(r.Agency||'').trim())).filter(Boolean);
-  const allAgencies = [...new Set([...dbAgencies, ...reportAgencies])].sort();
-  sel.innerHTML = '<option value="">-- 여행사 선택 --</option>' +
-    allAgencies.map(a => `<option value="${escH(a)}">${escH(a)}</option>`).join('');
-
+  _invReports = null; // 항상 최신 리포트 재로드
   // 저장된 회사 설정 로드
-  DC_COMPANY.abn = localStorage.getItem('dc_abn') || '';
+  DC_COMPANY.abn  = localStorage.getItem('dc_abn')  || '';
+  DC_COMPANY.bank = localStorage.getItem('dc_bank') || '';
+  DC_COMPANY.bsb  = localStorage.getItem('dc_bsb')  || '';
+  DC_COMPANY.acc  = localStorage.getItem('dc_acc')  || '';
 
   // 기본 기간: 이번 달
   if (!document.getElementById('inv-from').value) setInvPeriod('thismonth');
   else loadInvReports();
+}
+
+async function populateInvAgency() {
+  const sel = document.getElementById('inv-agency');
+  if (!sel) return;
+  // 리포트가 로드된 후 여행사 목록 채우기
+  const reportAgencies = (_invReports||[]).map(r=>(r._agency||String(r.Agency||'').trim())).filter(Boolean);
+  const allAgencies = [...new Set(reportAgencies)].sort();
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">-- 여행사 선택 --</option>' +
+    allAgencies.map(a => `<option value="${escH(a)}"${a===cur?' selected':''}>${escH(a)}</option>`).join('');
 }
 
 // ── 리포트 로드 & 미리보기 ──
@@ -2185,17 +2196,47 @@ async function loadInvReports() {
           const ds = String(r.Date || '');
           let iso = '';
           if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) {
-            iso = ds; // YYYY-MM-DD
+            iso = ds;
           } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(ds)) {
             const [dd, mm, yyyy] = ds.split('/');
-            iso = `${yyyy}-${mm}-${dd}`; // dd/mm/yyyy
+            iso = `${yyyy}-${mm}-${dd}`;
           } else if (ds.includes('T') || ds.includes('Z')) {
-            // ISO 8601 timestamp: 2026-03-10T13:00:00.000Z → AEST +11 → 날짜 추출
-            try { iso = new Date(ds).toISOString().slice(0, 10); } catch(e) {}
+            // AEST +11 로 날짜 추출
+            try {
+              const d = new Date(ds);
+              const aest = new Date(d.getTime() + 11*3600*1000);
+              iso = aest.toISOString().slice(0, 10);
+            } catch(e) {}
           }
-          // Agency 필드 정규화 (trim)
-          return { ...r, _iso: iso, _agency: String(r.Agency||'').trim() };
+          // 시간 파싱 (구글시트 1899-12-29T... 형태)
+          const parseGSheetTime = ts => {
+            if (!ts) return '';
+            const s = String(ts);
+            if (s.includes('T')) {
+              const m = s.match(/T(\d{2}):(\d{2})/);
+              if (m) {
+                let h = parseInt(m[1]), mn = m[2];
+                // 구글시트 시간은 UTC, +11 해서 AEST
+                const d = new Date(ts);
+                if (!isNaN(d)) {
+                  const local = new Date(d.getTime() + 11*3600*1000);
+                  h = local.getUTCHours(); mn = String(local.getUTCMinutes()).padStart(2,'0');
+                }
+                const ampm = h >= 12 ? 'PM' : 'AM';
+                return `${h===0?12:h>12?h-12:h}:${mn} ${ampm}`;
+              }
+            }
+            return s.length <= 5 ? s : '';
+          };
+          return {
+            ...r,
+            _iso: iso,
+            _agency: String(r.Agency||'').trim(),
+            _timeStart: parseGSheetTime(r.Time_Start),
+            _timeEnd:   parseGSheetTime(r.Time_End),
+          };
         });
+        await populateInvAgency();
       }
     } catch(e) {
       prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--rd)">리포트 로드 실패</div>';
@@ -2213,6 +2254,21 @@ async function loadInvReports() {
   renderInvPreview(rows, agency, from, to);
 }
 
+// ── 인보이스 번호 관리 ──
+function getInvNum(agency, from) {
+  const key = `dc_inv_num_${agency}_${from.slice(0,7)}`;
+  let num = localStorage.getItem(key);
+  if (!num) {
+    // INV-YYYYMM-NNN (NNN은 저장된 카운터)
+    const cntKey = 'dc_inv_counter';
+    const cnt = (parseInt(localStorage.getItem(cntKey)||'0') + 1);
+    localStorage.setItem(cntKey, cnt);
+    num = `INV-${from.slice(0,7).replace('-','')}-${String(cnt).padStart(3,'0')}`;
+    localStorage.setItem(key, num);
+  }
+  return num;
+}
+
 function renderInvPreview(rows, agency, from, to) {
   const prev = document.getElementById('inv-preview');
 
@@ -2221,10 +2277,8 @@ function renderInvPreview(rows, agency, from, to) {
     return;
   }
 
-  // 날짜 정렬
   rows.sort((a, b) => a._iso.localeCompare(b._iso));
 
-  // 금액 집계
   let totalTA = 0, totalOT = 0, totalHotel = 0, totalDist = 0, totalSVC = 0;
   rows.forEach(r => {
     totalTA    += parseFloat(r.Total_TA)         || 0;
@@ -2234,27 +2288,34 @@ function renderInvPreview(rows, agency, from, to) {
     totalSVC   += parseFloat(r.SVC_Charge)       || 0;
   });
 
-  const gst     = Math.round(totalTA / 11 * 100) / 100;
-  const exGST   = Math.round((totalTA - gst) * 100) / 100;
+  const gst   = Math.round(totalTA / 11 * 100) / 100;
+  const exGST = Math.round((totalTA - gst) * 100) / 100;
+  const invNum = getInvNum(agency, from);
 
-  // 여행사 정보
-  const client = DB.C.find(c => c.Name === agency) || {};
-
-  // 인보이스 번호 자동 생성 (INV-YYYYMM-XXX)
-  const invNum = `INV-${from.slice(0,7).replace('-','')}-${String(Math.floor(Math.random()*900)+100)}`;
+  // 발행 이력 확인
+  const histKey = `dc_inv_issued_${invNum}`;
+  const issuedAt = localStorage.getItem(histKey);
 
   prev.innerHTML = `
     <!-- 요약 카드 -->
     <div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:10px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <div style="font-size:13px;font-weight:700;color:var(--t1);">${escH(agency)}</div>
-        <div style="font-size:11px;color:var(--t3);">${rows.length}건 · ${fmtDate(from)} ~ ${fmtDate(to)}</div>
+        <div style="font-size:11px;font-weight:700;color:var(--ac);">${invNum}</div>
       </div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:10px;">${rows.length}건 · ${fmtDate(from)} ~ ${fmtDate(to)}</div>
+      ${issuedAt ? `<div style="font-size:11px;color:var(--gn);margin-bottom:8px;">✅ 발행 완료: ${issuedAt}</div>` : ''}
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
         ${wstat('총 청구액', totalTA, 'var(--gn)')}
         ${wstat('GST 포함', gst, 'var(--ac)')}
         ${wstat('GST 제외', exGST, 'var(--t2)')}
       </div>
+      ${totalOT>0||totalHotel>0||totalDist>0 ? `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;">
+        ${totalOT>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">OT 합계</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalOT.toLocaleString()}</div></div>` : ''}
+        ${totalHotel>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">호텔 합계</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalHotel.toLocaleString()}</div></div>` : ''}
+        ${totalDist>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">거리 합계</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
+      </div>` : ''}
       <button onclick="generateInvoice()" class="btn bac" style="width:100%;font-size:14px;padding:12px;">
         📄 Tax Invoice 생성 & 출력
       </button>
@@ -2262,21 +2323,32 @@ function renderInvPreview(rows, agency, from, to) {
 
     <!-- 리포트 내역 -->
     <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:6px;padding:0 2px;">리포트 내역</div>
-    ${rows.map(r => `
+    ${rows.map(r => {
+      const ta  = parseFloat(r.Total_TA)||0;
+      const ot  = parseFloat(r.OT)||0;
+      const hot = parseFloat(r.Hotel_Surcharge)||0;
+      const dst = parseFloat(r.Dist_Surcharge)||0;
+      const km  = (r.KM_Start && r.KM_End) ? Math.abs((parseInt(r.KM_End)||0)-(parseInt(r.KM_Start)||0)) : 0;
+      return `
       <div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:6px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(r.Date||r._iso)} &nbsp;·&nbsp; ${escH(r.Rego||'—')}</div>
-            <div style="font-size:11px;color:var(--t3);margin-top:2px;">${escH(r.Attraction||'—')} · ${escH(r.Seats||'—')} · 드라이버: ${escH(r.Driver||'—')}</div>
-            ${r.Tour_Code ? `<div style="font-size:10px;color:var(--t3);">투어코드: ${escH(r.Tour_Code)}</div>` : ''}
+            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(r._iso)} &nbsp;·&nbsp; ${escH(r.Rego||'—')}${r.Seats?` <span style="font-size:10px;color:var(--t3);">(${escH(r.Seats)})</span>`:''}</div>
+            <div style="font-size:11px;color:var(--t2);margin-top:2px;">${escH(r.Attraction||'—')}</div>
+            <div style="font-size:10px;color:var(--t3);margin-top:2px;">${r.SVC_Label?escH(r.SVC_Label)+'&nbsp;·&nbsp;':''} 드라이버: ${escH(r.Driver||'—')}</div>
+            ${r.Tour_Code ? `<div style="font-size:10px;color:var(--t3);">코드: ${escH(r.Tour_Code)}</div>` : ''}
+            ${r._timeStart||r._timeEnd ? `<div style="font-size:10px;color:var(--t3);">${r._timeStart||''} → ${r._timeEnd||''}</div>` : ''}
           </div>
           <div style="text-align:right;flex-shrink:0;margin-left:8px;">
-            <div style="font-size:14px;font-weight:800;color:var(--gn);">$${(parseFloat(r.Total_TA)||0).toLocaleString()}</div>
-            ${parseFloat(r.OT) ? `<div style="font-size:10px;color:var(--t3);">OT $${parseFloat(r.OT).toLocaleString()}</div>` : ''}
-            ${parseFloat(r.Hotel_Surcharge) ? `<div style="font-size:10px;color:var(--t3);">호텔 $${parseFloat(r.Hotel_Surcharge).toLocaleString()}</div>` : ''}
+            <div style="font-size:14px;font-weight:800;color:var(--gn);">$${ta.toLocaleString()}</div>
+            ${ot  ? `<div style="font-size:10px;color:var(--t3);">OT $${ot}</div>` : ''}
+            ${hot ? `<div style="font-size:10px;color:var(--t3);">호텔 $${hot}</div>` : ''}
+            ${dst ? `<div style="font-size:10px;color:var(--t3);">거리 $${dst}</div>` : ''}
+            ${km  ? `<div style="font-size:10px;color:var(--t3);">${km}km</div>` : ''}
           </div>
         </div>
-      </div>`).join('')}
+      </div>`;
+    }).join('')}
   `;
 }
 
@@ -2314,7 +2386,11 @@ async function generateInvoice() {
   const gst   = Math.round(totalTA / 11 * 100) / 100;
   const exGST = Math.round((totalTA - gst) * 100) / 100;
 
-  const invNum  = `INV-${from.slice(0,7).replace('-','')}-${String(Math.floor(Date.now())%1000).padStart(3,'0')}`;
+  const invNum  = getInvNum(agency, from);
+  // 발행 이력 저장
+  const issuedKey = `dc_inv_issued_${invNum}`;
+  const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  localStorage.setItem(issuedKey, issuedAt);
   const today   = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'long',year:'numeric'});
   const dueDate = new Date(); dueDate.setDate(dueDate.getDate()+14);
   const dueDateStr = dueDate.toLocaleDateString('en-AU', {day:'2-digit',month:'long',year:'numeric'});
@@ -2449,9 +2525,9 @@ async function generateInvoice() {
   <thead>
     <tr>
       <th>Date</th>
-      <th>Service</th>
+      <th>Service / Tour</th>
       <th>Vehicle</th>
-      <th>Seats</th>
+      <th>Time</th>
       <th>Tour Code</th>
       <th style="text-align:right">Amount (incl. GST)</th>
     </tr>
@@ -2462,24 +2538,23 @@ async function generateInvoice() {
       const ot  = parseFloat(r.OT) || 0;
       const hot = parseFloat(r.Hotel_Surcharge) || 0;
       const dst = parseFloat(r.Dist_Surcharge) || 0;
-      const svc = parseFloat(r.SVC_Charge) || 0;
       const extras = [
         ot  ? `OT $${ot.toLocaleString()}` : '',
         hot ? `Hotel Surcharge $${hot.toLocaleString()}` : '',
         dst ? `Distance Surcharge $${dst.toLocaleString()}` : '',
-        svc ? `Service Charge $${svc.toLocaleString()}` : '',
       ].filter(Boolean).join(' · ');
-      return `
-        <tr>
-          <td style="white-space:nowrap">${fd(r.Date||r._iso)}</td>
-          <td>${escH(r.Attraction||'—')}</td>
-          <td>${escH(r.Rego||'—')}</td>
-          <td>${escH(r.Seats||'—')}</td>
-          <td style="color:#64748b">${escH(r.Tour_Code||'—')}</td>
-          <td>$${ta.toLocaleString('en-AU', {minimumFractionDigits:2})}</td>
-        </tr>
-        ${extras ? `<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">${extras}</td></tr>` : ''}
-      `;
+      const timeStr = r._timeStart || r._timeEnd ? (r._timeStart||'') + (r._timeEnd ? ' - '+r._timeEnd : '') : '-';
+      const svcLabel = r.SVC_Label ? '<div style="font-size:10px;color:#64748b;margin-top:2px;">'+escH(r.SVC_Label)+'</div>' : '';
+      const seatsStr = r.Seats ? ' ('+escH(r.Seats)+')' : '';
+      const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">'+extras+'</td></tr>' : '';
+      return '<tr>' +
+        '<td style="white-space:nowrap">'+fd(r._iso||r.Date)+'</td>' +
+        '<td>'+escH(r.Attraction||'-')+seatsStr+svcLabel+'</td>' +
+        '<td>'+escH(r.Rego||'-')+'</td>' +
+        '<td style="color:#64748b;white-space:nowrap;font-size:11px;">'+timeStr+'</td>' +
+        '<td style="color:#64748b">'+escH(r.Tour_Code||'-')+'</td>' +
+        '<td>$'+ta.toLocaleString('en-AU',{minimumFractionDigits:2})+'</td>' +
+        '</tr>' + extrasRow;
     }).join('')}
   </tbody>
 </table>
