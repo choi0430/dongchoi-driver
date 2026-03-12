@@ -2139,9 +2139,12 @@ async function initInvoice() {
   // 여행사 선택박스 채우기
   const sel = document.getElementById('inv-agency');
   if (!sel) return;
-  const agencies = DB.C.map(c => c.Name).filter(Boolean).sort();
+  // DB.C 여행사 + 실제 리포트에 등장한 여행사명 합집합 (시트의 Agency 필드 대응)
+  const dbAgencies = DB.C.map(c => c.Name).filter(Boolean);
+  const reportAgencies = (_invReports||[]).map(r=>(r._agency||String(r.Agency||'').trim())).filter(Boolean);
+  const allAgencies = [...new Set([...dbAgencies, ...reportAgencies])].sort();
   sel.innerHTML = '<option value="">-- 여행사 선택 --</option>' +
-    agencies.map(a => `<option value="${escH(a)}">${escH(a)}</option>`).join('');
+    allAgencies.map(a => `<option value="${escH(a)}">${escH(a)}</option>`).join('');
 
   // 저장된 회사 설정 로드
   DC_COMPANY.abn = localStorage.getItem('dc_abn') || '';
@@ -2181,12 +2184,17 @@ async function loadInvReports() {
         _invReports = json.rows.map(r => {
           const ds = String(r.Date || '');
           let iso = '';
-          if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) iso = ds;
-          else if (/^\d{2}\/\d{2}\/\d{4}$/.test(ds)) {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) {
+            iso = ds; // YYYY-MM-DD
+          } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(ds)) {
             const [dd, mm, yyyy] = ds.split('/');
-            iso = `${yyyy}-${mm}-${dd}`;
+            iso = `${yyyy}-${mm}-${dd}`; // dd/mm/yyyy
+          } else if (ds.includes('T') || ds.includes('Z')) {
+            // ISO 8601 timestamp: 2026-03-10T13:00:00.000Z → AEST +11 → 날짜 추출
+            try { iso = new Date(ds).toISOString().slice(0, 10); } catch(e) {}
           }
-          return { ...r, _iso: iso };
+          // Agency 필드 정규화 (trim)
+          return { ...r, _iso: iso, _agency: String(r.Agency||'').trim() };
         });
       }
     } catch(e) {
@@ -2195,11 +2203,12 @@ async function loadInvReports() {
     }
   }
 
-  // 필터: 여행사 + 기간
-  const rows = (_invReports || []).filter(r =>
-    String(r.Agency || '').trim() === agency &&
-    r._iso >= from && r._iso <= to
-  );
+  // 필터: 여행사 + 기간 (Agency 필드가 다양한 형식일 수 있으므로 유연하게 매칭)
+  const agencyLower = agency.toLowerCase();
+  const rows = (_invReports || []).filter(r => {
+    const ra = (r._agency || String(r.Agency||'').trim()).toLowerCase();
+    return ra === agencyLower && r._iso >= from && r._iso <= to;
+  });
 
   renderInvPreview(rows, agency, from, to);
 }
@@ -2279,10 +2288,11 @@ async function generateInvoice() {
 
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
 
-  const rows = (_invReports || []).filter(r =>
-    String(r.Agency || '').trim() === agency &&
-    r._iso >= from && r._iso <= to
-  ).sort((a, b) => a._iso.localeCompare(b._iso));
+  const agencyLower = agency.toLowerCase();
+  const rows = (_invReports || []).filter(r => {
+    const ra = (r._agency || String(r.Agency||'').trim()).toLowerCase();
+    return ra === agencyLower && r._iso >= from && r._iso <= to;
+  }).sort((a, b) => a._iso.localeCompare(b._iso));
 
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
