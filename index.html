@@ -612,11 +612,11 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
           <div class="form-group">
             <label class="form-label">시작 시간</label>
-            <input type="time" class="form-input" id="dr-start" onchange="calcOT();updateEarlyHint();updateOTHint();" oninput="updateOTHint();updateEarlyHint();">
+            <input type="time" class="form-input" id="dr-start" onchange="_lastOTToastKey='';calcOT();updateEarlyHint();updateOTHint();" oninput="_lastOTToastKey='';updateOTHint();updateEarlyHint();">
           </div>
           <div class="form-group">
             <label class="form-label">종료 시간</label>
-            <input type="time" class="form-input" id="dr-end" onchange="calcOT();updateOTHint();" oninput="updateOTHint();">
+            <input type="time" class="form-input" id="dr-end" onchange="calcOT();updateOTHint(true);" oninput="updateOTHint(true);">
           </div>
         </div>
 
@@ -4033,7 +4033,9 @@ function updateSvcHint(){
 }
 
 // 실시간 OT 경고 박스 갱신
-function updateOTHint(){
+let _lastOTToastKey = '';  // 중복 알림 방지
+
+function updateOTHint(fromEndTime){
   const hintBox = document.getElementById('ot-hint-box');
   if(!hintBox) return;
   const st   = document.getElementById('dr-start')?.value;
@@ -4114,11 +4116,38 @@ function updateOTHint(){
           sub: effOT.toFixed(2)+'h → 올림 '+effOT_ceil+'h × $'+otRate+'/h | 위 $'+otAmt+' 버튼을 눌러주세요 ↑'
         });
       }
+      // ── 종료 시간 입력 시 toast 알림 (중복 방지)
+      if(fromEndTime){
+        const toastKey = et+'|'+otAmt;
+        if(_lastOTToastKey !== toastKey){
+          _lastOTToastKey = toastKey;
+          if(navigator.vibrate) navigator.vibrate([100,50,100]);
+          showToast('🚨 OT 발생! $'+otAmt+' 입력 필요 ('+seats+' · '+effOT_ceil+'h)', 'error');
+        }
+      }
     } else if(effOT > 0 && !otRate){
       items.push({ type:'warn', title:'⚠️ OT 발생', sub:effOT.toFixed(2)+'h ('+Math.ceil(effOT)+'h 올림) — 인승 선택 후 금액 확인' });
+      if(fromEndTime){
+        const toastKey = et+'|no-rate';
+        if(_lastOTToastKey !== toastKey){
+          _lastOTToastKey = toastKey;
+          if(navigator.vibrate) navigator.vibrate([100,50,100]);
+          showToast('⚠️ OT 발생 — 인승 선택 후 금액 확인', 'error');
+        }
+      }
     } else if(totalMin > 0){
       items.push({ type:'apply', title:'✅ OT 없음 (종료 '+et+')', sub:maxH ? '코스 '+maxH+'h 이내, 20:15 이전 종료' : '20:15 이전 종료' });
+      // OT 없음 확인 toast (종료 시간 입력 시)
+      if(fromEndTime){
+        const toastKey = et+'|no-ot';
+        if(_lastOTToastKey !== toastKey){
+          _lastOTToastKey = toastKey;
+          showToast('✅ OT 없음', 'success');
+        }
+      }
     }
+    // 종료 시간 바뀌면 key 리셋 준비 (시작 시간 변경 시)
+    if(!fromEndTime) _lastOTToastKey = '';
   }
 
   renderHintBox(hintBox, items);
