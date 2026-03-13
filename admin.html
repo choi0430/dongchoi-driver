@@ -970,10 +970,22 @@ function parseToISO(ds){
   // 내부 날짜 비교/정렬용 YYYY-MM-DD 변환 (표시용 아님)
   if(!ds) return '';
   const s = String(ds).trim();
+  // dd/mm/yyyy
   if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){
     const [dd,mm,yyyy]=s.split('/'); return yyyy+'-'+mm+'-'+dd;
   }
-  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10); // ISO fallback
+  // YYYY-MM-DD (ISO)
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  // GAS Date 오브젝트가 JSON 직렬화된 UTC ISO (e.g. "2026-03-10T13:00:00.000Z") — AEST +10
+  if(/^\d{4}-\d{2}-\d{2}T/.test(s)){
+    const d = new Date(s);
+    if(!isNaN(d)){
+      const local = new Date(d.getTime() + 10*3600*1000);
+      const dd2=String(local.getUTCDate()).padStart(2,'0');
+      const mm2=String(local.getUTCMonth()+1).padStart(2,'0');
+      return local.getUTCFullYear()+'-'+mm2+'-'+dd2;
+    }
+  }
   return '';
 }
 
