@@ -2999,17 +2999,44 @@ function goStep(n){
   const _scr=document.getElementById('screen');
   if(_scr){_scr.scrollTop=0;_scr.scrollLeft=0;}
   setTimeout(()=>{const s=document.getElementById('screen');if(s){s.scrollTop=0;s.scrollTo({top:0,behavior:'instant'});}},50);
+  if(n===1){
+    // Pre Departure draft 복원 + 자동저장 리스너
+    setTimeout(()=>{
+      const restored = restorePreDraft();
+      if(restored) showToast('📝 Pre Departure 작성 중이던 내용을 복원했습니다','success');
+      // 자동저장 리스너 (한 번만 등록)
+      const step1 = document.getElementById('step-1');
+      if(step1 && !step1.dataset.draftListener){
+        step1.addEventListener('input',  ()=>savePreDraft(), { passive:true });
+        step1.addEventListener('change', ()=>savePreDraft(), { passive:true });
+        step1.dataset.draftListener = '1';
+      }
+    }, 150);
+  }
   if(n===2){
     renderStep2SavedReports();
     updateSurchargeOptions();
-    // draft 복원 시도
+    // Daily Report draft 복원 — DOM 렌더 후 충분한 시간 확보
     setTimeout(()=>{
+      _attachDraftListeners();
       const restored = restoreDailyDraft();
       if(restored) showToast('📝 작성 중이던 내용을 복원했습니다','success');
-      _attachDraftListeners();
-    }, 100);
+    }, 250);
   }
-  if(n===3) renderShiftSummary();
+  if(n===3){
+    renderShiftSummary();
+    // EOS draft 복원 + 자동저장 리스너
+    setTimeout(()=>{
+      const restored = restoreEosDraft();
+      if(restored) showToast('📝 End of Shift 작성 중이던 내용을 복원했습니다','success');
+      const step3 = document.getElementById('step-3');
+      if(step3 && !step3.dataset.draftListener){
+        step3.addEventListener('input',  ()=>saveEosDraft(), { passive:true });
+        step3.addEventListener('change', ()=>saveEosDraft(), { passive:true });
+        step3.dataset.draftListener = '1';
+      }
+    }, 150);
+  }
 }
 
 // step2 폼 전체에 input/change 이벤트 위임 — 자동 draft 저장
@@ -3696,7 +3723,9 @@ function submitEndShift(){
 // DAILY REPORT DRAFT — 자동 저장 / 복원
 // ═══════════════════════════════════════════════
 function _draftKey(){
-  return 'dr_draft_' + (currentDriver?.name || 'guest') + '_' + (editingShiftId || '');
+  // editingShiftId 없이 드라이버별 단일 draft
+  // (shiftId는 draft 저장 시 함께 기록해서 복원 시 검증)
+  return 'dr_draft_' + (currentDriver?.name || 'guest');
 }
 
 function saveDailyDraft(){
@@ -3732,6 +3761,7 @@ function saveDailyDraft(){
       svcCustom:   document.getElementById('f-svc-custom')?.value || '',
       hotelSelect: document.getElementById('f-hotel-select')?.value || '0',
       distSelect:  document.getElementById('f-dist-select')?.value || '0',
+      _shiftId: editingShiftId || '',
       _ts: Date.now()
     };
     localStorage.setItem(_draftKey(), JSON.stringify(draft));
@@ -3741,6 +3771,83 @@ function saveDailyDraft(){
 function clearDailyDraft(){
   try { localStorage.removeItem(_draftKey()); } catch(e) {}
 }
+// ═══════════════════════════════════════════════════════
+// PRE DEPARTURE DRAFT
+// ═══════════════════════════════════════════════════════
+function _preDraftKey(){
+  return 'pre_draft_' + (currentDriver?.name || 'guest');
+}
+function savePreDraft(){
+  try {
+    const draft = {
+      rego:  document.getElementById('pre-rego')?.value || '',
+      km:    document.getElementById('pre-km')?.value || '',
+      date:  document.getElementById('pre-date')?.value || '',
+      time:  document.getElementById('pre-time')?.value || '',
+      _ts: Date.now()
+    };
+    localStorage.setItem(_preDraftKey(), JSON.stringify(draft));
+  } catch(e) {}
+}
+function clearPreDraft(){
+  try { localStorage.removeItem(_preDraftKey()); } catch(e) {}
+}
+function restorePreDraft(){
+  try {
+    const raw = localStorage.getItem(_preDraftKey());
+    if(!raw) return false;
+    const d = JSON.parse(raw);
+    // 48시간 이상 지난 draft는 무시
+    if(Date.now() - (d._ts||0) > 48*60*60*1000){ clearPreDraft(); return false; }
+    if(d.rego){ document.getElementById('pre-rego').value = d.rego; }
+    if(d.km)  { document.getElementById('pre-km').value   = d.km;   }
+    if(d.date){ document.getElementById('pre-date').value = d.date; }
+    if(d.time){ document.getElementById('pre-time').value = d.time; }
+    return !!(d.rego || d.km);
+  } catch(e) { return false; }
+}
+
+// ═══════════════════════════════════════════════════════
+// END OF SHIFT DRAFT
+// ═══════════════════════════════════════════════════════
+function _eosDraftKey(){
+  return 'eos_draft_' + (currentDriver?.name || 'guest') + '_' + (editingShiftId || '');
+}
+function saveEosDraft(){
+  try {
+    const draft = {
+      endKm:   document.getElementById('end-km')?.value || '',
+      endTime: document.getElementById('end-time')?.value || '',
+      endDate: document.getElementById('end-date')?.value || '',
+      damage:  document.getElementById('end-damage')?.value || '',
+      paxCheck:  document.getElementById('eos-pax-check')?.checked || false,
+      lostCheck: document.getElementById('eos-lost-check')?.checked || false,
+      fuelChk:   document.getElementById('eos-fuel-chk')?.checked || false,
+      _ts: Date.now()
+    };
+    localStorage.setItem(_eosDraftKey(), JSON.stringify(draft));
+  } catch(e) {}
+}
+function clearEosDraft(){
+  try { localStorage.removeItem(_eosDraftKey()); } catch(e) {}
+}
+function restoreEosDraft(){
+  try {
+    const raw = localStorage.getItem(_eosDraftKey());
+    if(!raw) return false;
+    const d = JSON.parse(raw);
+    // 48시간 이상 지난 draft는 무시
+    if(Date.now() - (d._ts||0) > 48*60*60*1000){ clearEosDraft(); return false; }
+    if(d.endKm)  { const el=document.getElementById('end-km');   if(el) el.value=d.endKm;   }
+    if(d.endTime){ const el=document.getElementById('end-time'); if(el) el.value=d.endTime; }
+    if(d.endDate){ const el=document.getElementById('end-date'); if(el) el.value=d.endDate; }
+    if(d.damage) { const el=document.getElementById('end-damage'); if(el) el.value=d.damage; }
+    if(d.paxCheck)  { const el=document.getElementById('eos-pax-check');  if(el){ el.checked=true;  onEosCheckChange('eos-pax-item','eos-pax-check');   } }
+    if(d.lostCheck) { const el=document.getElementById('eos-lost-check'); if(el){ el.checked=true;  onEosCheckChange('eos-lost-item','eos-lost-check');  } }
+    if(d.fuelChk)   { const el=document.getElementById('eos-fuel-chk');   if(el){ el.checked=true;  onEosCheckChange('eos-fuel-item','eos-fuel-chk');    } }
+    return !!(d.endKm || d.endTime);
+  } catch(e) { return false; }
+}
 
 function restoreDailyDraft(){
   try {
@@ -3748,7 +3855,13 @@ function restoreDailyDraft(){
     if(!raw) return false;
     const d = JSON.parse(raw);
     // 24시간 이상 지난 draft는 무시
-    if(Date.now() - (d._ts || 0) > 86400000){ clearDailyDraft(); return false; }
+    if(Date.now() - (d._ts || 0) > 48*60*60*1000){ clearDailyDraft(); return false; }
+    // shiftId가 다르면 editingShiftId를 맞춰줌 (같은 드라이버의 이어쓰기)
+    if(d._shiftId && d._shiftId !== editingShiftId){
+      const matchShift = activeShifts.find(s=>s.id===d._shiftId);
+      if(matchShift) editingShiftId = d._shiftId;
+      else { clearDailyDraft(); return false; } // 해당 shift가 없으면 draft 무효
+    }
 
     // 텍스트 / 숫자 필드
     const textFields = ['dr-agency','dr-attraction','dr-pickup','dr-dropoff',
