@@ -3242,7 +3242,100 @@ function emailInvoice() {
 // ═══════════════════════════════════════
 // NOTICE MANAGEMENT (공지사항 관리)
 // ═══════════════════════════════════════
-const NOTICE_KEY = 'admin_notices'; // localStorage key (드라이버 앱도 동일 key 사용)
+const NOTICE_KEY = 'admin_notices';
+
+const NOTICES = [
+  {
+    type:'urgent',
+    date:'09/03/2026',
+    title:'⚠️ TV1072 HVIS 점검 만료 — 즉시 관리자 확인',
+    body:'TV1072 차량의 HVIS 점검이 10 Jan 2026에 만료되었습니다. 이 차량 운행 전 반드시 관리자에게 확인하세요.'
+  },
+  {
+    type:'urgent',
+    date:'09/03/2026',
+    title:'📋 드라이버 필독 — 통합 운행 안내자료',
+    body:'【1. 기본 규정】\n• 차량 전달 시 기름·청소·커튼·외관 점검 및 사진 촬영\n• 아침 시동 후 3분 예열, 외부 점검 및 타이어 공기압 확인\n• 가이드가 일정 외 추가 요청 시 수락 전 반드시 사무실 보고\n• 주유카드/ETAG은 차량에 배정된 것만 사용\n• 운행 종료 시: 기름 넣기 → 청소 → 커튼 정리 → 에어컨/히터 OFF → 시동 OFF\n• Daily Report 당일 제출 필수 (다음날 10시 이후 제출 시 급여 지연)\n• Pre Departure Check & End of Shift Report 반드시 작성\n• 주차 시 타이어가 보도블럭에 닿지 않도록 주의'
+  },
+  {
+    type:'urgent',
+    date:'09/03/2026',
+    title:'✈️ 공항 픽업 규정 (Airport Meeting)',
+    body:'• 항공 도착 예정 시간 확인 후 공항 대기 (가이드와 미팅 시간·장소 재확인)\n• 롱텀 주차 1시간 제한 / 게이트 진입 시 꼬리물기 금지\n• 인터폰 연결 후 주차장 출입 시 사무실 보고 (입·출차 시간 기록 필수)\n• 일정 시작 기준: 일정표 부킹 시간 기준 (실시간 아님)\n  - 국제선: ETA + 1시간 / 국내선: ETA + 30분\n  - 예정보다 일찍 시작 시 실제 시작 시간 적용\n• 23시 이후 픽업 → Night Owl $30 청구\n• 국제선 20분 / 국내선 15분 이상 주차 대기 시 Report에 기록\n• 주차 후 Bay Number 가이드와 공유, 짐 적재 시 천으로 시트 보호'
+  },
+  {
+    type:'info',
+    date:'09/03/2026',
+    title:'🚌 공항 이동 (Airport Transfer)',
+    body:'• 전날 가이드와 미팅 시간 확인\n• 가이드 미출현 시 즉시 사무실 보고\n• 가이드의 호텔→공항 개인 차량 이동은 허용\n• 가이드가 출발 시간 변경 요청 시 사무실에 연락\n• 06:00 이전 출발 → Night Owl $30 청구'
+  },
+  {
+    type:'urgent',
+    date:'09/03/2026',
+    title:'🔺 차량 높이 제한 구역 — 필독',
+    body:'차량 높이: Mitsubishi Rosa 2,740mm / Toyota Coaster 2,635mm\n\n⛔ 진입 금지 구역:\n• Bankstown 터널 West Tce (North Terrace ~ South Terrace 사이)\n• Royal Pacific Hotel Reception 앞 지붕\n• Holiday Inn Warwick Farm Hotel Reception 앞 지붕\n\n반드시 사전에 루트 확인 후 운행하세요.'
+  },
+  {
+    type:'info',
+    date:'09/03/2026',
+    title:'🏙️ City 운행 규정',
+    body:'• 쇼핑 장소 가이드와 Double Confirm 필수\n• 쇼핑 입점 시 손님을 멀리 내려줘서 걷게 하는 행위 금지\n• 오페라하우스·성당 앞 주차 시 도로에 너무 붙지 않기 (옆문 보도블럭 끼임 위험)\n• A3 Ryde Rd – Pymble 구간 버스차선 및 속도 준수'
+  },
+  {
+    type:'info',
+    date:'09/03/2026',
+    title:'🏔️ Blue Mountains 운행 규정',
+    body:'• 하산 시 Wentworth Falls / Glenbrook 버스차선·속도 준수\n• King\'s Tableland / Wentworth Falls Parking 진입 금지 (입구 P/D만 가능)\n• BM 일정 후 City 일정 추가 시 Distance Surcharge $30 청구'
+  },
+  {
+    type:'info',
+    date:'09/03/2026',
+    title:'🌊 Port Stephens 운행 규정',
+    body:'• Wyong 휴게소 15분 이상 휴식 필수\n• Anna Bay 아래쪽 주차장 진입 금지 (모래 빠짐 위험 — 가이드 책임 아님)\n• Nelson Bay Double Parking 주의\n• 일정 중 중간 주유 필수\n• Tomago Rd 60km 제한 준수'
+  },
+  {
+    type:'info',
+    date:'09/03/2026',
+    title:'🏖️ Wollongong / Kiama / Jervis Bay 운행 규정',
+    body:'• Jervis Bay 일정 시 중간 주유 필수, 휴식 15분 이상\n• 석식이 호텔인 경우 식사 불포함 / 하루 운행 기준 11시간 적용\n• Wollongong 일정 내리막길 버스차선·속도 준수\n• Cyrus St → National Park 아님 (Echo Pass 불필요)\n• Aster St North → National Park (Echo Pass 필요)\n• ⚠️ Hyams Beach 진입로 Booderee Ave 6톤 제한:\n  - Rosa 25S: 6,300kg → 진입 불가\n  - Rosa 22S: 5,900kg → 가능\n  - Coaster 22S: 5,400kg → 가능\n  → Hyams Beach 일정은 가이드와 상의 후 변경 여부 결정'
+  },
+  {
+    type:'general',
+    date:'09/03/2026',
+    title:'🚛 트레일러 사용 규정',
+    body:'• 사용 시 건당 $30 청구\n• 사용 후 Silverwater 사무실 반납 필수\n• 잠금 비밀번호: 4233 또는 423\n\n연결 전 점검 항목:\n• Hitch · Chain · 전기 커넥터 · 타이어 · 라이트\n\n사용 중 주의:\n• 회전 반경 충분히 확보\n• 경사·비포장·모래길 주의\n• 이상 발생 시 즉시 사무실 보고'
+  },
+  {
+    type:'general',
+    date:'09/03/2026',
+    title:'🌙 Overnight 운행 규정',
+    body:'• 독방 미제공 시 즉시 사무실 보고\n• 1박 2일 일정 — 1일 최대 운행 10시간 (초과 시 OT 처리)'
+  },
+  {
+    type:'urgent',
+    date:'09/03/2026',
+    title:'🚨 운행 중 반드시 지켜야 할 사항',
+    body:'• 아침 3분 워밍업 필수\n• 행사 중 정차 1분 후 시동 OFF\n• 종료 시 에어컨/히터 OFF → 시동 OFF\n• 완전 정차 후 기어 변경 (미션 보호)\n• 버스는 승용차가 아님 → 천천히 가속 / 저속 코너링\n• 타이어 옆면이 보도에 닿지 않도록 주의 (Sidewall 손상)\n• 제동거리 충분히 확보 / 급정거 금지\n• 주요 과속·단속 구간 숙지\n• 블라인드 스팟 → 안전하게 확인 후 차선 변경\n• U-turn 금지 구간 준수 (가이드 요청이라도 불가)'
+  },
+  {
+    type:'urgent',
+    date:'09/03/2026',
+    title:'🔧 DPF 안내 (중요 — 반드시 숙지)',
+    body:'【자동 재생】\n• DPF 노란불 깜박 → 50km 이내 반드시 재생\n• 잔디·주유소 등 화재 위험 지역 정차 금지\n\n【수동 재생 — 가능한 시간마다 실시】\n• 아침 출발 전 워밍업 후\n• 행사 중 20분 여유시간\n• 행사 종료 후\n\n【작동법】\n① 시동 ON / PARK BRAKE ON\n② 기어 N 또는 P\n③ DPF 버튼 5초 누름 → RPM 상승\n④ 불 꺼질 때까지 대기 (절대 시동 끄지 말 것!)\n\n⚠️ 작동 중 시동 끄면 → 엔진 경고등 + Limp Mode (50km 제한)\n⚠️ DPF 작동 20분 이상 소요 시 즉시 사무실 보고\n\n참고 영상: https://www.youtube.com/watch?v=BtDj_a4S8hg\n\n차량 배정 후 DPF 작동 필요 차량인지 반드시 사전 확인!'
+  },
+  {
+    type:'info',
+    date:'09/03/2026',
+    title:'💡 경고등 & 조치 방법',
+    body:'🔴 즉시 정차 후 보고:\n• Check Engine RED — 즉시 정차 / 보고\n• 엔진 과열 — 즉시 정차 / 냉각 후 점검\n• 냉각수 온도 게이지 빨간 구간 — 즉시 정차\n• 연료필터 경고 — 즉시 보고 (시동 꺼짐 위험)\n\n🟡 감속·주의 후 보고:\n• Check Engine YELLOW — 감속 운행 가능 / 보고\n• 배터리 경고 — 전기 소모 줄이고 보고\n• 브레이크 경고 — 오일·패드 이상 → 보고\n• 엔진오일 경고 — 오일 확인·보충 후 보고\n• 자동기어 과열 — 정차 후 식힘 → 보고\n• ABS 경고 — 주행 가능하나 즉시 보고\n• DPF 경고 — 재생 필요\n• TPMS — 공기압 확인 / 이상 시 보고\n• 미션 경고 — 저속 이동 후 정차 / 보고\n• Door Warning — 문 완전 잠김 확인 (미해제 시 출발 금지)'
+  },
+  {
+    type:'urgent',
+    date:'09/03/2026',
+    title:'📌 최종 안내 — 드라이버 책임',
+    body:'모든 규정은 안전운행 · 차량 보호 · 승객 보호를 위해 반드시 준수해야 합니다.\n\n위반 또는 미보고 시 발생한 모든 문제는 드라이버 책임으로 처리될 수 있습니다.'
+  },
+]; // localStorage key (드라이버 앱도 동일 key 사용)
 
 // 공지사항 GAS 저장 (M_Notices 시트)
 async function saveNoticesToGAS(notices){
@@ -3277,6 +3370,41 @@ async function loadNoticesFromGAS(){
   }catch(e){}
 }
 
+
+// Sheets Notices가 비어 있으면 NOTICES 상수를 초기 데이터로 push
+async function initNoticesIfEmpty(){
+  try{
+    const res = await fetch(SCRIPT_URL+'?action=get_notices');
+    if(!res.ok) return;
+    const json = await res.json();
+    if(json.ok && Array.isArray(json.rows) && json.rows.length === 0){
+      // Sheets 비어 있음 → NOTICES 상수를 변환해서 저장
+      const now = new Date();
+      const rows = NOTICES.map((n,i)=>({
+        ID: String(Date.now() + i),
+        Title: n.title||'',
+        Content: n.body||'',
+        Type: n.type||'info',
+        Date: n.date||'',
+        Active: 'true'
+      }));
+      await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({action:'save_notices', rows})});
+      // localStorage에도 저장
+      const notices = NOTICES.map((n,i)=>({
+        id: String(Date.now() + i),
+        title: n.title||'',
+        body: n.body||'',
+        type: n.type||'info',
+        date: n.date||'',
+        active: true
+      }));
+      localStorage.setItem(NOTICE_KEY, JSON.stringify(notices));
+      if(typeof renderAdminNotices==='function') renderAdminNotices();
+      console.log('Notices initialized from NOTICES constant:', rows.length, 'items');
+    }
+  }catch(e){ console.warn('initNoticesIfEmpty 실패:', e); }
+}
 
 function getAdminNotices() {
   try { return JSON.parse(localStorage.getItem(NOTICE_KEY) || 'null'); } catch(e) { return null; }
@@ -3329,8 +3457,8 @@ function saveNotice() {
   if (!body)  { errEl.textContent='내용을 입력하세요.'; errEl.style.display='block'; return; }
 
   const now = new Date();
-  const dateStr = String(now.getDate()).padStart(2,'0') + ' ' +
-    ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][now.getMonth()] + ' ' + now.getFullYear();
+  const dateStr = String(now.getDate()).padStart(2,'0') + '/' +
+    String(now.getMonth()+1).padStart(2,'0') + '/' + now.getFullYear();
 
   const notice = {
     id:    _noticeEditId || Date.now().toString(),
@@ -4744,7 +4872,8 @@ async function loadAllFromSheets(){
     rDash();
     toast('✅ 데이터 로드 완료','ok');
     startAdminAutoSync();
-    loadNoticesFromGAS();
+    await loadNoticesFromGAS();
+    await initNoticesIfEmpty();
   } catch(e){
     console.error(e);
     document.getElementById('sl').classList.remove('on');
