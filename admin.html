@@ -3542,7 +3542,7 @@ async function renderWageAll() {
       const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
       const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
       const weekRows = rows.filter(r => matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
-      earned = weekRows.reduce((s,r) => s+(parseFloat(r.DR_Cost)||0), 0);
+      earned = weekRows.reduce((s,r) => s+(parseFloat(r.DR_Cost)||0)-(parseFloat(r.Night_Owner)||0), 0); // 야경 납입금 차감
       const week = drvWages[mon] || {entries:[]};
       paid = (week.entries||[]).reduce((s,e) => s+(e.amount||0), 0);
     } else {
@@ -3554,7 +3554,7 @@ async function renderWageAll() {
         const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
         const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
         return matchNames.has(String(r.Driver||'').trim());
-      }).reduce((s,r) => s+(parseFloat(r.DR_Cost)||0), 0);
+      }).reduce((s,r) => s+(parseFloat(r.DR_Cost)||0)-(parseFloat(r.Night_Owner)||0), 0); // 야경 납입금 차감
     }
 
     if (earned > 0 || paid > 0) {
@@ -3715,7 +3715,10 @@ async function getEarnedFromSheets(driverName, weekStart) {
   let total = 0;
   rows.forEach(r => {
     if (!matchNames.has(String(r.Driver||'').trim())) return;
-    if (r._isoDate >= mon && r._isoDate <= sun) total += (parseFloat(r.DR_Cost) || 0);
+    if (r._isoDate >= mon && r._isoDate <= sun) {
+      total += (parseFloat(r.DR_Cost) || 0);
+      total -= (parseFloat(r.Night_Owner) || 0); // 야경 회사 납입금 차감
+    }
   });
   return total;
 }
@@ -3783,18 +3786,33 @@ async function renderWage(){
   const drRow = DB.D.find(d=>(d.Name_KR||'')===ST.wageDriver||(d.Name_EN||'')===ST.wageDriver);
   const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
   const weekReports = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
+  const nightOwnerTotal = weekReports.reduce((s,r)=>s+(parseFloat(r.Night_Owner)||0),0);
+  const grossDR = weekReports.reduce((s,r)=>s+(parseFloat(r.DR_Cost)||0),0);
 
   // 요약 카드
+  const summaryGrid = nightOwnerTotal > 0
+    ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
+        wstat('발생 DR (총)', grossDR, 'var(--gn)')+
+        wstat('야경 납입 차감', -nightOwnerTotal, 'var(--rd)')+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
+        wstat('실 수령 DR', earned, 'var(--gn)')+
+        wstat('지급 합계', totalPaid, 'var(--ac)')+
+        wstat('잔액', balance, balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)')+
+      '</div>'
+    : '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
+        wstat('발생 DR', earned, 'var(--gn)')+
+        wstat('지급 합계', totalPaid, 'var(--ac)')+
+        wstat('잔액', balance, balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)')+
+      '</div>';
+
   if(sumEl) sumEl.innerHTML =
     '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:4px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
         '<div style="font-size:11px;color:var(--t3);font-weight:700;">'+escH(ST.wageDriver)+' — '+getWeekLabel(ST.wageWeek)+'</div>'+
         '<div style="font-size:11px;color:var(--t3);">리포트 '+weekReports.length+'건</div>'+
       '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
-        wstat('발생 DR', earned, 'var(--gn)')+
-        wstat('지급 합계', totalPaid, 'var(--ac)')+
-        wstat('잔액', balance, balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)')+
+      summaryGrid+
       '</div>'+
       (weekReports.length>0 ?
         '<div style="margin-top:10px;border-top:1px solid var(--b2);padding-top:10px;">'+
@@ -3804,6 +3822,7 @@ async function renderWage(){
               '<span style="color:var(--t2);">'+fmtDate(r.Date||r._isoDate)+' '+escH(r.Rego||'')+'</span>'+
               '<span style="color:var(--t2);">'+escH(r.Attraction||r.Agency||'')+'</span>'+
               '<span style="color:var(--gn);font-weight:700;">$'+(parseFloat(r.DR_Cost)||0).toLocaleString()+'</span>'+
+              ((parseFloat(r.Night_Owner)||0)>0 ? '<span style="color:var(--rd);font-size:11px;font-weight:700;"> -$'+(parseFloat(r.Night_Owner)||0).toLocaleString()+'</span>' : '')+
             '</div>'
           ).join('')+
         '</div>' : '')+
