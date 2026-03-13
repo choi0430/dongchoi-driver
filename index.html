@@ -3863,41 +3863,22 @@ function restoreDailyDraft(){
       else { clearDailyDraft(); return false; } // 해당 shift가 없으면 draft 무효
     }
 
-    // 텍스트 / 숫자 필드
-    const textFields = ['dr-agency','dr-attraction','dr-pickup','dr-dropoff',
-      'dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'];
+    // 1) 텍스트 / 숫자 필드
     const valMap = { 'dr-agency':d.agency,'dr-attraction':d.attraction,'dr-pickup':d.pickup,
       'dr-dropoff':d.dropoff,'dr-km-start':d.kmStart,'dr-km-end':d.kmEnd,
       'dr-start':d.timeStart,'dr-end':d.timeEnd,'dr-guide':d.guide,
       'dr-tourcode':d.tourcode,'dr-remarks':d.remarks };
-    textFields.forEach(id=>{ const el=document.getElementById(id); if(el&&valMap[id]) el.value=valMap[id]; });
+    Object.entries(valMap).forEach(([id,v])=>{ const el=document.getElementById(id); if(el&&v) el.value=v; });
 
-    // 숫자 입력 필드
-    [['f-ot',d.ot],['f-toll',d.toll],['f-toll-detail',d.tollDetail],
-     ['f-fuel',d.fuel],['f-tip',d.tip],['f-etc',d.etc]].forEach(([id,v])=>{
-      const el=document.getElementById(id); if(el&&v) el.value=v;
-    });
-
-    // 체크박스
+    // 2) 체크박스
     const tp=document.getElementById('toll-personal'); if(tp) tp.checked=!!d.tollPersonal;
     const fp=document.getElementById('fuel-personal'); if(fp) fp.checked=!!d.fuelPersonal;
 
-    // 인승 select (먼저 세팅해야 svc 옵션이 빌드됨)
+    // 3) 인승 select 먼저 세팅 → updateSurchargeOptions() 로 csel 옵션 빌드
     const seatsEl=document.getElementById('dr-seats');
     if(seatsEl && d.seats){ seatsEl.value=d.seats; updateSurchargeOptions(); }
 
-    // 버튼형 선택 값들 (hidden input 값 + 버튼 UI)
-    if(d.wash)    selectWash(parseFloat(d.wash)||0);
-    if(d.meal)    selectMeal(parseFloat(d.meal)||0);
-    if(d.trailer) selectTrailer(parseFloat(d.trailer)||0);
-    if(d.early)   selectEarly(parseFloat(d.early)||0);
-
-    // csel (커스텀 셀렉트) 값 복원
-    if(d.nightType && d.nightType !== 'none') cselSetValue('f-night-type', d.nightType);
-    if(d.night && parseFloat(d.night)){
-      const nf=document.getElementById('f-night'); if(nf) nf.value=d.night;
-      const ni=document.getElementById('night-info'); if(ni) ni.style.display='block';
-    }
+    // 4) updateSurchargeOptions()가 csel을 리셋하므로 그 이후에 csel 값 복원
     if(d.svcSelect) cselSetValue('f-svc-select', d.svcSelect);
     if(d.svcCustom){
       const sc=document.getElementById('f-svc-custom'); if(sc) sc.value=d.svcCustom;
@@ -3907,8 +3888,34 @@ function restoreDailyDraft(){
     if(d.hotelSelect) cselSetValue('f-hotel-select', d.hotelSelect);
     if(d.distSelect)  cselSetValue('f-dist-select',  d.distSelect);
 
+    // 5) 야간투어
+    if(d.nightType && d.nightType !== 'none') cselSetValue('f-night-type', d.nightType);
+    if(d.night && parseFloat(d.night)){
+      const nf=document.getElementById('f-night'); if(nf) nf.value=d.night;
+      const ni=document.getElementById('night-info'); if(ni) ni.style.display='block';
+    }
+
+    // 6) 버튼형 선택값 복원
+    if(d.wash  !== undefined) selectWash(parseFloat(d.wash)||0);
+    if(d.meal  !== undefined) selectMeal(parseFloat(d.meal)||0);
+    if(d.trailer !== undefined) selectTrailer(parseFloat(d.trailer)||0);
+    if(d.early !== undefined) selectEarly(parseFloat(d.early)||0);
+
+    // 7) OT — input 값 + 버튼 UI 동기화 (selectOTAmount 사용)
+    if(d.ot !== undefined && d.ot !== ''){
+      const otAmt = parseFloat(d.ot) || 0;
+      selectOTAmount(otAmt);
+    }
+
+    // 8) 나머지 숫자 입력 필드
+    [['f-toll',d.toll],['f-toll-detail',d.tollDetail],
+     ['f-fuel',d.fuel],['f-tip',d.tip],['f-etc',d.etc]].forEach(([id,v])=>{
+      const el=document.getElementById(id); if(el&&v) el.value=v;
+    });
+
     calcTotal();
     updateOTHint();
+    updateSvcHint();
     return true;
   } catch(e) { return false; }
 }
