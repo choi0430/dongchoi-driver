@@ -4346,10 +4346,18 @@ function updateOTHint(fromEndTime){
             sub: effOT.toFixed(2)+'h → 올림 '+effOT_ceil+'h × $'+otRate+'/h'
           });
         } else {
-          // 야경: OT 자동선택 제외, 힌트만 표시
-          items.push({ type:'info',
-            title: '🌃 야경 일정 — OT 자동선택 제외',
-            sub: '계산된 OT: $'+otAmt+' ('+effOT_ceil+'h × $'+otRate+'/h) · 필요시 수동 입력'
+          // 야경: OT 자동선택 안 함, 힌트 + 버튼 강조로 드라이버가 직접 선택 가능하게
+          items.push({ type:'warn',
+            title: '🌃 야경 — OT 미적용 (야경 수당에 포함)',
+            sub: '추가 운행 발생 시 $'+otAmt+' 신청 가능 ('+effOT_ceil+'h × $'+otRate+'/h) · 아래 버튼에서 선택하세요'
+          });
+          // 해당 금액 버튼을 강조 표시 (선택은 안 하되 눈에 띄게)
+          document.querySelectorAll('[id^="ot-btn-"]').forEach(b=>{
+            const btnAmt = parseInt(b.id.replace('ot-btn-',''));
+            if(btnAmt === otAmt){
+              b.style.borderColor = '#f59e0b';
+              b.style.boxShadow   = '0 0 0 2px #fde68a';
+            }
           });
         }
       }
@@ -4363,7 +4371,8 @@ function updateOTHint(fromEndTime){
             if(navigator.vibrate) navigator.vibrate([100,50,100]);
             showToast('✅ OT $'+otAmt+' 자동 선택됨 ('+seats+' · '+effOT_ceil+'h)', 'success');
           } else {
-            showToast('🌃 야경 — OT $'+otAmt+' 참고 (자동선택 제외)', 'info');
+            if(navigator.vibrate) navigator.vibrate([80]);
+            showToast('🌃 야경 — 추가 OT $'+otAmt+' 신청 가능 (필요시 버튼 선택)', 'info');
           }
         }
       }
@@ -4960,13 +4969,24 @@ function onNightChange(){
   const input = document.getElementById('f-night');
   if(type==='none'){
     info.style.display='none'; input.value=0; calcTotal();
-    // 야경 해제 시 종료시간 기반으로 OT 재계산
-    updateOTHint(false);
+    // 버튼 강조 초기화
+    document.querySelectorAll('[id^="ot-btn-"]').forEach(b=>{
+      b.style.borderColor = '';
+      b.style.boxShadow   = '';
+    });
+    // 야경 해제 시 OT 재계산 (자동선택 포함)
+    _lastOTToastKey = '';
+    updateOTHint(true);
     return;
   }
   // 야경 선택 시 자동선택된 OT 초기화 (야경은 OT 별도 처리)
   selectOTAmount(0);
-  showToast('🌃 야경 선택 — OT 초기화됨 (필요시 수동 입력)', 'info');
+  // 버튼 강조 초기화
+  document.querySelectorAll('[id^="ot-btn-"]').forEach(b=>{
+    b.style.borderColor = '';
+    b.style.boxShadow   = '';
+  });
+  showToast('🌃 야경 선택 — OT $0 적용 (추가 운행 시 버튼으로 신청 가능)', 'info');
   const r = getNightRate();
   if(!r){ info.style.display='none'; calcTotal(); return; }
   const typeLabel = {guide_opt:'가이드 옵션 (현장 수령)', agency_incl:'여행사 포함 약식', prepaid_opt:'옵션 — 한국 선결제'}[type];
