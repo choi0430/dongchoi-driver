@@ -4042,14 +4042,12 @@ function updateOTHint(){
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
 
   if(!st){
-    // 시작 시간 없어도 OT 기준 안내는 표시
-    const otRate0 = seats ? getOTRate(null, seats) : null;
+    // 인승 미선택 시 힌트 숨김
+    if(!seats){ renderHintBox(hintBox, []); return; }
+    // 인승 선택 시 해당 인승 요율만 표시
+    const otRate0 = getOTRate(null, seats);
     const items0 = [];
-    if(!seats){
-      items0.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:'21/25S $30/h · 40/50S $40/h | 1시간 단위 올림 · 15분 waive' });
-    } else {
-      items0.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:seats+' 요율: $'+otRate0+'/h · 1시간 단위 올림 · 15분 waive' });
-    }
+    items0.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:seats+' 요율: $'+otRate0+'/h · 1시간 단위 올림 · 15분 waive' });
     const maxH0 = att ? getMaxHours(att) : null;
     if(maxH0) items0.push({ type:'info', title:'⏱ 코스 기준 시간: '+maxH0+'시간', sub:'출발 시간 입력 시 OT 적용 여부 자동 계산' });
     renderHintBox(hintBox, items0);
@@ -4065,12 +4063,12 @@ function updateOTHint(){
 
   const items = [];
 
-  // ① 20:00 이후 OT 조건 안내
+  // ① OT 조건 안내 — 인승 미선택 시 숨김
   if(!seats){
-    items.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:'21/25S $30/h · 40/50S $40/h | 1시간 단위 올림 | 인승 선택 시 정확한 요율 표시' });
-  } else {
-    items.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:seats+' 드라이버 OT 요율: $'+otRate+'/h · 1시간 단위 올림 · 15분 waive 적용' });
+    renderHintBox(hintBox, []);
+    return;
   }
+  items.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:seats+' 드라이버 OT 요율: $'+otRate+'/h · 1시간 단위 올림 · 15분 waive 적용' });
 
   // ② 코스 기준 max_hours 초과 조건
   if(maxH){
