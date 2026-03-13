@@ -4234,7 +4234,9 @@ function saveM(){
     obj={Name:gv('f0'),ClientID:gv('f1')||Date.now().toString(16).slice(-8),
          Mobile:gv('f2'),Email:gv('f2b')||'',Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6')};
     ie?DB.C[idx]=obj:DB.C.push(obj);
-    if(obj.Name && !DB.PC[obj.Name]) DB.PC[obj.Name]={};
+    if(obj.Name && !DB.PC[obj.Name]) {
+      initPriceClientForAgency(obj.Name); // M_PriceClient에 모든 Course 빈 행 자동 생성
+    }
   } else if(t==='G'){
     if(!gv('f1')){toast('가이드명 필수','er');return}
     sheetName='M_Guides';
@@ -4250,9 +4252,11 @@ function saveM(){
     let agName=gv('fagname');
     if(agName==='__new__') agName=gv('fnewname');
     if(!agName){toast('여행사를 선택하세요','er');return}
+    const isNewAg = !DB.PC[agName] || Object.keys(DB.PC[agName]).length === 0;
     if(!DB.PC[agName])DB.PC[agName]={};
     if(!DB.C.find(c=>c.Name===agName))
       DB.C.push({Name:agName,ClientID:Date.now().toString(16).slice(-8),Mobile:'',Address:'',Bank_Name:'',BSB:'',Account_Number:''});
+    if(isNewAg) initPriceClientForAgency(agName); // Course 빈 행 자동 생성
     closeM();rP();selAg(agName);toast(`${agName} 요금표 생성됨`,'ok');
     return;
   } else if(t==='SG_SUB'){
@@ -4410,7 +4414,50 @@ function rPS(sub){
     </tr>`}).join('')||`<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--t3)">요금이 없습니다. 코스를 추가하세요.</td></tr>`;
 }
 
-async function savePSToSheets(){
+async 
+// ═══════════════════════════════════════════════════════
+// 새 여행사 추가 시 M_PriceClient에 모든 Course 빈 행 자동 생성
+// ═══════════════════════════════════════════════════════
+function initPriceClientForAgency(agencyName) {
+  // 기존 여행사에서 사용 중인 Course 목록 수집 (DB.PC 기준)
+  const existingCourses = new Set();
+  Object.values(DB.PC).forEach(courseMap => {
+    Object.keys(courseMap).forEach(c => existingCourses.add(c));
+  });
+  const courses = [...existingCourses].sort();
+  if (courses.length === 0) return; // 요금표 자체가 없으면 스킵
+
+  // DB.PC에 빈 슬롯 생성
+  if (!DB.PC[agencyName]) DB.PC[agencyName] = {};
+  courses.forEach(course => {
+    if (!DB.PC[agencyName][course]) {
+      DB.PC[agencyName][course] = {
+        max_hours: '',
+        '21': {rate:0, ot:0}, '25': {rate:0, ot:0},
+        '40': {rate:0, ot:0}, '50': {rate:0, ot:0}
+      };
+    }
+  });
+
+  // GAS M_PriceClient 시트에 빈 행 일괄 추가
+  const rows = courses.map(course => ({
+    Agency: agencyName, Course: course, max_hours: '',
+    seats_21_rate: 0, seats_21_ot: 0,
+    seats_25_rate: 0, seats_25_ot: 0,
+    seats_40_rate: 0, seats_40_ot: 0,
+    seats_50_rate: 0, seats_50_ot: 0,
+  }));
+
+  fetch(SCRIPT_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'text/plain'},
+    body: JSON.stringify({action: 'add_price_client_agency', agency: agencyName, rows})
+  }).then(r => r.json()).then(r => {
+    if (r.ok) toast(`✅ ${agencyName} 요금표 ${courses.length}개 코스 생성됨`, 'ok');
+    else toast('요금표 GAS 생성 실패', 'er');
+  }).catch(() => toast('요금표 GAS 연결 오류', 'er'));
+}
+function savePSToSheets(){
   try {
     const rows=[];
     Object.entries(DB.PS).forEach(([sub,courses])=>{
