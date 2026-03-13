@@ -109,6 +109,7 @@ function doPost(e) {
 
     // 마스터 CRUD
     if (action === 'add_master')         return cors(addMasterRow(payload.sheet, payload.data));
+    if (action === 'add_price_client_agency') return cors(addPriceClientAgency(payload.agency, payload.rows));
     if (action === 'update_master')      return cors(updateMasterRow(payload.sheet, payload.rowIndex, payload.data));
     if (action === 'delete_master')      return cors(deleteMasterRow(payload.sheet, payload.rowIndex));
     if (action === 'replace_master')     return cors(replaceMasterSheet(payload.sheet, payload.rows));
@@ -230,6 +231,29 @@ function ensureSheet(ss, sheetName) {
     }
   }
   return sheet;
+}
+
+
+// ── 새 여행사 M_PriceClient 일괄 생성 ──
+function addPriceClientAgency(agencyName, rows) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ensureSheet(ss, 'M_PriceClient');
+  const headers = MASTER_HEADERS['M_PriceClient'];
+
+  // 기존 Agency+Course 중복 체크
+  const lastRow = sheet.getLastRow();
+  const existing = new Set();
+  if (lastRow > 1) {
+    const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+    data.forEach(r => { if (r[0] && r[1]) existing.add(r[0] + '||' + r[1]); });
+  }
+
+  const newRows = (rows || []).filter(r => !existing.has(r.Agency + '||' + r.Course));
+  if (newRows.length === 0) return {ok: true, added: 0, msg: '중복 없음'};
+
+  const values = newRows.map(r => headers.map(h => r[h] !== undefined ? r[h] : ''));
+  sheet.getRange(lastRow + 1, 1, values.length, headers.length).setValues(values);
+  return {ok: true, added: newRows.length};
 }
 
 function addMasterRow(sheetName, data) {
