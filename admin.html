@@ -2635,10 +2635,6 @@ async function loadInvReports() {
   const prev   = document.getElementById('inv-preview');
   if (!prev) return;
 
-  if (!agency) {
-    prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">여행사를 선택하세요</div>';
-    return;
-  }
   if (!from || !to) {
     prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">기간을 선택하세요</div>';
     return;
@@ -2646,7 +2642,7 @@ async function loadInvReports() {
 
   prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">⏳ 리포트 불러오는 중...</div>';
 
-  // 캐시 or 새 조회
+  // 캐시 or 새 조회 — agency 선택 전에도 리포트 로드해서 드롭다운 채우기
   if (!_invReports) {
     try {
       const res  = await fetch(SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
@@ -2690,6 +2686,12 @@ async function loadInvReports() {
       prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--rd)">리포트 로드 실패</div>';
       return;
     }
+  }
+
+  // 여행사 미선택이면 드롭다운 채운 후 안내 메시지만 표시
+  if (!agency) {
+    prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">여행사를 선택하세요</div>';
+    return;
   }
 
   // 필터: 여행사 + 기간 (Agency 필드가 다양한 형식일 수 있으므로 유연하게 매칭)
@@ -3152,8 +3154,13 @@ const NOTICE_KEY = 'admin_notices'; // localStorage key (드라이버 앱도 동
 // 공지사항 GAS 저장 (M_Notices 시트)
 async function saveNoticesToGAS(notices){
   try{
+    // GAS Notices 시트 컬럼명(Content)에 맞게 매핑
+    const rows = notices.map(n=>({
+      ID: n.id, Title: n.title, Content: n.body||'',
+      Type: n.type||'info', Date: n.date||'', Active: n.active!==false?'true':'false'
+    }));
     await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'save_notices',rows:notices})});
+      body:JSON.stringify({action:'save_notices',rows})});
   }catch(e){ console.warn('공지 GAS 저장 실패:',e); }
 }
 // 공지사항 GAS 로드
@@ -3166,7 +3173,7 @@ async function loadNoticesFromGAS(){
       const notices=json.rows.map(r=>({
         id:r.ID||r.id||String(Date.now()),
         title:r.Title||r.title||'',
-        content:r.Content||r.content||'',
+        body:r.Content||r.content||r.body||r.Body||'',
         type:r.Type||r.type||'info',
         date:r.Date||r.date||'',
         active:String(r.Active||r.active||'true').toLowerCase()!=='false'
