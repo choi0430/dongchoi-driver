@@ -4100,7 +4100,22 @@ function updateOTHint(){
     if(effOT > 0 && otRate){
       const effOT_ceil = Math.ceil(effOT);
       const otAmt = effOT_ceil * otRate;
-      items.push({ type:'warn', title:'⚠️ OT 발생 — $'+otAmt+' 드라이버 지급 ('+seats+')', sub:effOT.toFixed(2)+'h → 1h 단위 올림 '+effOT_ceil+'h × $'+otRate+'/h' });
+      const curOT = parseFloat(document.getElementById('f-ot')?.value || 0);
+      if(curOT > 0){
+        // 이미 입력된 경우 — 확인 힌트
+        items.push({ type: curOT === otAmt ? 'apply' : 'warn',
+          title: curOT === otAmt
+            ? '✅ OT $'+curOT+' 입력됨 ('+seats+')'
+            : '⚠️ OT 계산 $'+otAmt+' — 현재 입력 $'+curOT,
+          sub: effOT.toFixed(2)+'h → 올림 '+effOT_ceil+'h × $'+otRate+'/h = $'+otAmt
+        });
+      } else {
+        // 미입력 — 강조 경고 + 버튼 안내
+        items.push({ type:'warn',
+          title: '🚨 OT 발생! $'+otAmt+' 입력 필요 ('+seats+')',
+          sub: effOT.toFixed(2)+'h → 올림 '+effOT_ceil+'h × $'+otRate+'/h | 위 $'+otAmt+' 버튼을 눌러주세요 ↑'
+        });
+      }
     } else if(effOT > 0 && !otRate){
       items.push({ type:'warn', title:'⚠️ OT 발생', sub:effOT.toFixed(2)+'h ('+Math.ceil(effOT)+'h 올림) — 인승 선택 후 금액 확인' });
     } else if(totalMin > 0){
@@ -4397,9 +4412,7 @@ const SVC_OPTIONS = {
     {val:'150', label:'$150 — DINNER TSF (21인승 요금)'},
     {val:'180', label:'$180 — CITY/HALF (21인승 요금)'},
     {val:'250', label:'$250 — 10HR (21인승 요금)'},
-    {val:'270', label:'$270 — 10HR/MANUAL (21인승 요금)'},
     {val:'280', label:'$280 — 12HR (21인승 요금)'},
-    {val:'300', label:'$300 — 12HR/MANUAL (21인승 요금)'},
     {val:'OTHER', label:'직접 입력 (OTHER)'},
   ],
   '25S': [
@@ -4408,9 +4421,7 @@ const SVC_OPTIONS = {
     {val:'150', label:'$150 — DINNER TSF (25인승 요금)'},
     {val:'180', label:'$180 — CITY/HALF (25인승 요금)'},
     {val:'250', label:'$250 — 10HR (25인승 요금)'},
-    {val:'270', label:'$270 — 10HR/MANUAL (25인승 요금)'},
     {val:'280', label:'$280 — 12HR (25인승 요금)'},
-    {val:'300', label:'$300 — 12HR/MANUAL (25인승 요금)'},
     {val:'OTHER', label:'직접 입력 (OTHER)'},
   ],
   '40S': [
@@ -4565,6 +4576,7 @@ function renderOTButtons(seats){
 }
 function onOTInput(){
   calcTotal();
+  updateOTHint();
   document.querySelectorAll('[id^="ot-btn-"]').forEach(function(b){
     b.style.background='var(--surface2)';
     b.style.color='var(--text)';
@@ -4581,6 +4593,7 @@ function selectOTAmount(amt){
     b.style.borderColor= selected ? 'var(--accent)' : 'var(--border)';
   });
   calcTotal();
+  updateOTHint();
 }
 function selectTrailer(amt){
   document.getElementById('f-trailer').value = amt;
