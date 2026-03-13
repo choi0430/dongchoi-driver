@@ -1484,16 +1484,16 @@ function applyMasterData(data) {
   MASTER.drivers     = (data.M_Drivers   || []);
   MASTER.guides      = (data.M_Guides    || []);
   MASTER.vehicles    = (data.M_Vehicles  || []).map(v=>({...v, Transmission: v.Transmission||'Auto'}));
-  // M_Clients 시트 없을 경우 M_PriceClient의 Agency 컬럼에서 여행사 목록 구성
-  const rawClients = data.M_Clients || data.M_Agencies || [];
-  if(rawClients.length > 0){
-    MASTER.agencies = rawClients;
-  } else if(data.M_PriceClient && data.M_PriceClient.length > 0){
-    const agencyNames = [...new Set(data.M_PriceClient.map(r=>r.Agency).filter(Boolean))];
-    MASTER.agencies = agencyNames.map(n=>({Name:n, Mobile:'', Address:''}));
-  } else {
-    MASTER.agencies = [];
-  }
+  // 여행사 목록 = M_Clients + M_PriceClient Agency 합집합
+  // M_Clients에 없는 여행사도 요금표(M_PriceClient)에 있으면 포함
+  const rawClients = data.M_Clients || data.M_Agencies || data.agencies || [];
+  const fromClients = rawClients.filter(c => c.Name);
+  const fromPrice = (data.M_PriceClient || [])
+    .map(r => r.Agency).filter(Boolean)
+    .filter(n => !fromClients.find(c => c.Name === n))
+    .filter((n, i, arr) => arr.indexOf(n) === i)
+    .map(n => ({Name:n, Mobile:'', Address:''}));
+  MASTER.agencies = [...fromClients, ...fromPrice];
   MASTER.courses     = (data.M_Courses   || []);
   // M_Courses가 get_all_masters에 없으면 별도 로드
   if(!MASTER.courses.length){
