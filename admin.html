@@ -2608,6 +2608,51 @@ function saveInvSettings() {
   DC_COMPANY.accname = accname || DC_COMPANY.accname;
 }
 
+
+// ═══════════════════════════════════════════════════════
+// 인보이스 요금 계산 헬퍼
+// 여행사 청구액 = M_PriceClient 기본요금 + OT + Hotel_Surcharge + Dist_Surcharge
+// M_PriceClient에 없는 여행사는 SVC_Charge 폴백
+// ═══════════════════════════════════════════════════════
+function calcInvRow(r) {
+  const agency     = (r._agency || String(r.Agency||'')).trim();
+  const attraction = String(r.Attraction||'').trim();
+  const seats      = String(r.Seats||'').trim();          // e.g. "21S","25S","40S","50S"
+  const ot         = parseFloat(r.OT)              || 0;
+  const hotel      = parseFloat(r.Hotel_Surcharge) || 0;
+  const dist       = parseFloat(r.Dist_Surcharge)  || 0;
+
+  // seats 숫자 추출: "21S" → "21"
+  const seatKey = seats.replace(/[^0-9]/g,'') || '21';
+
+  // M_PriceClient 조회 (대소문자 무시)
+  let baseRate = 0;
+  let rateSource = 'svc'; // 'price_table' | 'svc'
+  const agPC = DB.PC[agency];
+  if (agPC) {
+    // 정확 매칭 먼저
+    let courseEntry = agPC[attraction];
+    // 대소문자 무시 매칭
+    if (!courseEntry) {
+      const attLower = attraction.toLowerCase();
+      const foundKey = Object.keys(agPC).find(k => k.toLowerCase() === attLower);
+      if (foundKey) courseEntry = agPC[foundKey];
+    }
+    if (courseEntry) {
+      const seatData = courseEntry[seatKey] || courseEntry['21'];
+      baseRate = parseFloat(seatData?.rate) || 0;
+      if (baseRate > 0) rateSource = 'price_table';
+    }
+  }
+
+  // 요금표에 없으면 SVC_Charge 폴백
+  if (rateSource === 'svc') {
+    baseRate = parseFloat(r.SVC_Charge) || 0;
+  }
+
+  const total = baseRate + ot + hotel + dist;
+  return { baseRate, ot, hotel, dist, total, rateSource };
+}
 async function initInvoice() {
   _invReports = null; // 항상 최신 리포트 재로드
   // 저장된 회사 설정 로드
@@ -2759,17 +2804,22 @@ function renderInvPreview(rows, agency, from, to) {
 
   rows.sort((a, b) => a._iso.localeCompare(b._iso));
 
-  let totalTA = 0, totalOT = 0, totalHotel = 0, totalDist = 0, totalSVC = 0;
+  // calcInvRow로 각 행 청구액 계산 (M_PriceClient 요금표 기준)
+  let grandTotal = 0, totalBase = 0, totalOT = 0, totalHotel = 0, totalDist = 0;
+  let hasPriceTable = false, hasFallback = false;
   rows.forEach(r => {
-    totalTA    += parseFloat(r.Total_TA)         || 0;
-    totalOT    += parseFloat(r.OT)               || 0;
-    totalHotel += parseFloat(r.Hotel_Surcharge)  || 0;
-    totalDist  += parseFloat(r.Dist_Surcharge)   || 0;
-    totalSVC   += parseFloat(r.SVC_Charge)       || 0;
+    const c = calcInvRow(r);
+    grandTotal += c.total;
+    totalBase  += c.baseRate;
+    totalOT    += c.ot;
+    totalHotel += c.hotel;
+    totalDist  += c.dist;
+    if (c.rateSource === 'price_table') hasPriceTable = true;
+    else hasFallback = true;
   });
 
-  const gst   = Math.round(totalTA / 11 * 100) / 100;
-  const exGST = Math.round((totalTA - gst) * 100) / 100;
+  const gst   = Math.round(grandTotal / 11 * 100) / 100;
+  const exGST = Math.round((grandTotal - gst) * 100) / 100;
   const invNum = getInvNum(agency, from);
 
   // 발행 이력 확인
@@ -2785,16 +2835,19 @@ function renderInvPreview(rows, agency, from, to) {
       </div>
       <div style="font-size:11px;color:var(--t3);margin-bottom:10px;">${rows.length}건 · ${fmtDate(from)} ~ ${fmtDate(to)}</div>
       ${issuedAt ? `<div style="font-size:11px;color:var(--gn);margin-bottom:8px;">✅ 발행 완료: ${issuedAt}</div>` : ''}
+      ${hasFallback && !hasPriceTable ? `<div style="font-size:11px;background:#fef3c7;border-radius:8px;padding:6px 10px;margin-bottom:8px;color:#92400e;">⚠️ 요금표 없음 — SVC_Charge 기준으로 청구</div>` : ''}
+      ${hasFallback && hasPriceTable ? `<div style="font-size:11px;background:#fef3c7;border-radius:8px;padding:6px 10px;margin-bottom:8px;color:#92400e;">⚠️ 일부 항목 요금표 없음 — SVC_Charge 기준 폴백</div>` : ''}
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
-        ${wstat('총 청구액', totalTA, 'var(--gn)')}
-        ${wstat('GST 포함', gst, 'var(--ac)')}
+        ${wstat('총 청구액', grandTotal, 'var(--gn)')}
+        ${wstat('GST (1/11)', gst, 'var(--ac)')}
         ${wstat('GST 제외', exGST, 'var(--t2)')}
       </div>
       ${totalOT>0||totalHotel>0||totalDist>0 ? `
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;">
-        ${totalOT>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">OT 합계</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalOT.toLocaleString()}</div></div>` : ''}
-        ${totalHotel>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">호텔 합계</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalHotel.toLocaleString()}</div></div>` : ''}
-        ${totalDist>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">거리 합계</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
+        ${totalBase>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">기본요금</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalBase.toLocaleString()}</div></div>` : ''}
+        ${totalOT>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">OT</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalOT.toLocaleString()}</div></div>` : ''}
+        ${totalHotel>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">호텔</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalHotel.toLocaleString()}</div></div>` : ''}
+        ${totalDist>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">거리</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
       </div>` : ''}
       <!-- 그룹 방식 선택 -->
       <div style="margin-bottom:8px;">
@@ -2818,27 +2871,27 @@ function renderInvPreview(rows, agency, from, to) {
     <!-- 리포트 내역 -->
     <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:6px;padding:0 2px;">리포트 내역</div>
     ${rows.map(r => {
-      const ta  = parseFloat(r.Total_TA)||0;
-      const ot  = parseFloat(r.OT)||0;
-      const hot = parseFloat(r.Hotel_Surcharge)||0;
-      const dst = parseFloat(r.Dist_Surcharge)||0;
+      const c   = calcInvRow(r);
       const km  = (r.KM_Start && r.KM_End) ? Math.abs((parseInt(r.KM_End)||0)-(parseInt(r.KM_Start)||0)) : 0;
+      const srcBadge = c.rateSource === 'price_table'
+        ? `<span style="font-size:9px;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 5px;margin-left:4px;">요금표</span>`
+        : `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;">SVC</span>`;
       return `
       <div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:6px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(r._iso)} &nbsp;·&nbsp; ${escH(r.Rego||'—')}${r.Seats?` <span style="font-size:10px;color:var(--t3);">(${escH(r.Seats)})</span>`:''}</div>
+            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(r._iso)} &nbsp;·&nbsp; ${escH(r.Rego||'—')}${r.Seats?` <span style="font-size:10px;color:var(--t3);">(${escH(r.Seats)})</span>`:''}${srcBadge}</div>
             <div style="font-size:11px;color:var(--t2);margin-top:2px;">${escH(r.Attraction||'—')}</div>
-            <div style="font-size:10px;color:var(--t3);margin-top:2px;">${r.SVC_Label?escH(r.SVC_Label)+'&nbsp;·&nbsp;':''} 드라이버: ${escH(r.Driver||'—')}</div>
+            <div style="font-size:10px;color:var(--t3);margin-top:2px;">기본: $${c.baseRate.toLocaleString()} &nbsp;·&nbsp; 드라이버: ${escH(r.Driver||'—')}</div>
             ${r.Tour_Code ? `<div style="font-size:10px;color:var(--t3);">코드: ${escH(r.Tour_Code)}</div>` : ''}
             ${r._timeStart||r._timeEnd ? `<div style="font-size:10px;color:var(--t3);">${r._timeStart||''} → ${r._timeEnd||''}</div>` : ''}
           </div>
           <div style="text-align:right;flex-shrink:0;margin-left:8px;">
-            <div style="font-size:14px;font-weight:800;color:var(--gn);">$${ta.toLocaleString()}</div>
-            ${ot  ? `<div style="font-size:10px;color:var(--t3);">OT $${ot}</div>` : ''}
-            ${hot ? `<div style="font-size:10px;color:var(--t3);">호텔 $${hot}</div>` : ''}
-            ${dst ? `<div style="font-size:10px;color:var(--t3);">거리 $${dst}</div>` : ''}
-            ${km  ? `<div style="font-size:10px;color:var(--t3);">${km}km</div>` : ''}
+            <div style="font-size:14px;font-weight:800;color:var(--gn);">$${c.total.toLocaleString()}</div>
+            ${c.ot    ? `<div style="font-size:10px;color:var(--or);">+OT $${c.ot}</div>` : ''}
+            ${c.hotel ? `<div style="font-size:10px;color:var(--ac);">+호텔 $${c.hotel}</div>` : ''}
+            ${c.dist  ? `<div style="font-size:10px;color:var(--ac);">+거리 $${c.dist}</div>` : ''}
+            ${km      ? `<div style="font-size:10px;color:var(--t3);">${km}km</div>` : ''}
           </div>
         </div>
       </div>`;
@@ -2892,10 +2945,10 @@ async function generateInvoice() {
 
   const client  = DB.C.find(c => c.Name === agency) || {};
   const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
-  let totalTA = 0;
-  rows.forEach(r => { totalTA += parseFloat(r.Total_TA) || 0; });
-  const gst   = Math.round(totalTA / 11 * 100) / 100;
-  const exGST = Math.round((totalTA - gst) * 100) / 100;
+  let grandTotal = 0;
+  rows.forEach(r => { grandTotal += calcInvRow(r).total; });
+  const gst   = Math.round(grandTotal / 11 * 100) / 100;
+  const exGST = Math.round((grandTotal - gst) * 100) / 100;
 
   const invNum = getInvNum(agency, from);
   const issuedKey = `dc_inv_issued_${invNum}`;
@@ -2920,7 +2973,7 @@ async function generateInvoice() {
       return Object.keys(weeks).sort().map(mon => {
         const sun = _isoToSunday(mon);
         const wrows = weeks[mon];
-        const wTotal = wrows.reduce((s,r)=>s+(parseFloat(r.Total_TA)||0),0);
+        const wTotal = wrows.reduce((s,r)=>s+calcInvRow(r).total,0);
         const headerRow = `<tr style="background:#f1f5f9;"><td colspan="6" style="font-weight:800;color:#1e40af;font-size:11px;padding:8px 12px;letter-spacing:.5px;">
           📆 WEEK: ${fd(mon)} — ${fd(sun)} &nbsp;·&nbsp; ${wrows.length}건 &nbsp;·&nbsp; $${wTotal.toLocaleString('en-AU',{minimumFractionDigits:2})}
         </td></tr>`;
@@ -2937,7 +2990,7 @@ async function generateInvoice() {
       });
       return Object.keys(tours).sort().map(tc => {
         const trows = tours[tc];
-        const tTotal = trows.reduce((s,r)=>s+(parseFloat(r.Total_TA)||0),0);
+        const tTotal = trows.reduce((s,r)=>s+calcInvRow(r).total,0);
         const headerRow = `<tr style="background:#f0fdf4;"><td colspan="6" style="font-weight:800;color:#166534;font-size:11px;padding:8px 12px;letter-spacing:.5px;">
           🗺 TOUR CODE: ${escH(tc)} &nbsp;·&nbsp; ${trows.length}건 &nbsp;·&nbsp; $${tTotal.toLocaleString('en-AU',{minimumFractionDigits:2})}
         </td></tr>`;
@@ -2951,26 +3004,25 @@ async function generateInvoice() {
   }
 
   function _makeTableRow(r, fd) {
-    const ta  = parseFloat(r.Total_TA) || 0;
-    const ot  = parseFloat(r.OT) || 0;
-    const hot = parseFloat(r.Hotel_Surcharge) || 0;
-    const dst = parseFloat(r.Dist_Surcharge) || 0;
+    const c   = calcInvRow(r);
     const extras = [
-      ot  ? `OT $${ot.toLocaleString()}` : '',
-      hot ? `Hotel Surcharge $${hot.toLocaleString()}` : '',
-      dst ? `Distance Surcharge $${dst.toLocaleString()}` : '',
+      c.ot    ? `OT $${c.ot.toLocaleString()}` : '',
+      c.hotel ? `Hotel Surcharge $${c.hotel.toLocaleString()}` : '',
+      c.dist  ? `Distance Surcharge $${c.dist.toLocaleString()}` : '',
     ].filter(Boolean).join(' · ');
     const timeStr = r._timeStart || r._timeEnd ? (r._timeStart||'') + (r._timeEnd ? ' - '+r._timeEnd : '') : '-';
-    const svcLabel = r.SVC_Label ? '<div style="font-size:10px;color:#64748b;margin-top:2px;">'+escH(r.SVC_Label)+'</div>' : '';
+    const baseLabel = c.rateSource === 'price_table'
+      ? '<div style="font-size:10px;color:#166534;margin-top:2px;">Rate Table $'+c.baseRate.toLocaleString()+'</div>'
+      : '<div style="font-size:10px;color:#92400e;margin-top:2px;">SVC $'+c.baseRate.toLocaleString()+'</div>';
     const seatsStr = r.Seats ? ' ('+escH(r.Seats)+')' : '';
     const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">'+extras+'</td></tr>' : '';
     return '<tr>' +
       '<td style="white-space:nowrap">'+fd(r._iso||r.Date)+'</td>' +
-      '<td>'+escH(r.Attraction||'-')+seatsStr+svcLabel+'</td>' +
+      '<td>'+escH(r.Attraction||'-')+seatsStr+baseLabel+'</td>' +
       '<td>'+escH(r.Rego||'-')+'</td>' +
       '<td style="color:#64748b;white-space:nowrap;font-size:11px;">'+timeStr+'</td>' +
       '<td style="color:#64748b">'+escH(r.Tour_Code||'-')+'</td>' +
-      '<td>$'+ta.toLocaleString('en-AU',{minimumFractionDigits:2})+'</td>' +
+      '<td style="font-weight:700">$'+c.total.toLocaleString('en-AU',{minimumFractionDigits:2})+'</td>' +
       '</tr>' + extrasRow;
   }
 
@@ -3126,8 +3178,8 @@ function emailInvoice() {
   const invNum   = getInvNum(agency, from);
 
   const rows = _buildInvRows(agency, from, to);
-  let totalTA = 0;
-  rows.forEach(r => { totalTA += parseFloat(r.Total_TA)||0; });
+  let grandTotal = 0;
+  rows.forEach(r => { grandTotal += calcInvRow(r).total; });
 
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
 
@@ -3135,7 +3187,7 @@ function emailInvoice() {
   const body = encodeURIComponent(
     `Dear ${agency},\n\n` +
     `Please find enclosed Tax Invoice ${invNum} for services provided during ${fd(from)} – ${fd(to)}.\n\n` +
-    `Invoice Total: $${totalTA.toLocaleString('en-AU',{minimumFractionDigits:2})} (incl. GST)\n` +
+    `Invoice Total: $${grandTotal.toLocaleString('en-AU',{minimumFractionDigits:2})} (incl. GST)\n` +
     `Due Date: 14 days from invoice date\n` +
     `Reference: ${invNum}\n\n` +
     `Bank: ${DC_COMPANY.bank||''}\n` +
