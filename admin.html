@@ -2621,28 +2621,32 @@ function calcInvRow(r) {
   const ot         = parseFloat(r.OT)              || 0;
   const hotel      = parseFloat(r.Hotel_Surcharge) || 0;
   const dist       = parseFloat(r.Dist_Surcharge)  || 0;
+  const earlyDR    = parseFloat(r.Early)           || 0;  // DR 금액($20/$30) — TA는 별도계산
 
   // seats 숫자 추출: "21S" → "21"
   const seatKey = seats.replace(/[^0-9]/g,'') || '21';
 
-  // M_PriceClient 조회 (대소문자 무시)
+  // ── 헬퍼: DB.PC에서 코스 엔트리 찾기 (대소문자 무시) ──
+  function findCourse(pc, courseName) {
+    if (!pc || !courseName) return null;
+    let entry = pc[courseName];
+    if (!entry) {
+      const lower = courseName.toLowerCase();
+      const key = Object.keys(pc).find(k => k.toLowerCase() === lower);
+      if (key) entry = pc[key];
+    }
+    return entry || null;
+  }
+
+  // ── M_PriceClient 기본요금 조회 ──
   let baseRate = 0;
   let rateSource = 'svc'; // 'price_table' | 'svc'
   const agPC = DB.PC[agency];
-  if (agPC) {
-    // 정확 매칭 먼저
-    let courseEntry = agPC[attraction];
-    // 대소문자 무시 매칭
-    if (!courseEntry) {
-      const attLower = attraction.toLowerCase();
-      const foundKey = Object.keys(agPC).find(k => k.toLowerCase() === attLower);
-      if (foundKey) courseEntry = agPC[foundKey];
-    }
-    if (courseEntry) {
-      const seatData = courseEntry[seatKey] || courseEntry['21'];
-      baseRate = parseFloat(seatData?.rate) || 0;
-      if (baseRate > 0) rateSource = 'price_table';
-    }
+  const courseEntry = agPC ? findCourse(agPC, attraction) : null;
+  if (courseEntry) {
+    const seatData = courseEntry[seatKey] || courseEntry['21'];
+    baseRate = parseFloat(seatData?.rate) || 0;
+    if (baseRate > 0) rateSource = 'price_table';
   }
 
   // 요금표에 없으면 SVC_Charge 폴백
@@ -2650,8 +2654,29 @@ function calcInvRow(r) {
     baseRate = parseFloat(r.SVC_Charge) || 0;
   }
 
-  const total = baseRate + ot + hotel + dist;
-  return { baseRate, ot, hotel, dist, total, rateSource };
+  // ── Early/Late Surcharge TA = Airport Transfer 요금 × 30% ──
+  // Early 필드가 0보다 크면 (드라이버가 early surcharge 적용한 경우)
+  let earlyTA = 0;
+  if (earlyDR > 0) {
+    // 해당 여행사의 Airport Transfer 요금 조회 (없으면 모든 여행사에서 fallback)
+    const allPC = DB.PC;
+    let atEntry = agPC ? findCourse(agPC, 'Airport Transfer') : null;
+    if (!atEntry) {
+      // 어떤 여행사든 Airport Transfer 요금이 있으면 사용
+      for (const ag of Object.keys(allPC)) {
+        atEntry = findCourse(allPC[ag], 'Airport Transfer');
+        if (atEntry) break;
+      }
+    }
+    if (atEntry) {
+      const seatData = atEntry[seatKey] || atEntry['21'];
+      const airportRate = parseFloat(seatData?.rate) || 0;
+      earlyTA = Math.round(airportRate * 0.3);
+    }
+  }
+
+  const total = baseRate + ot + hotel + dist + earlyTA;
+  return { baseRate, ot, hotel, dist, earlyTA, total, rateSource };
 }
 async function initInvoice() {
   _invReports = null; // 항상 최신 리포트 재로드
@@ -2805,7 +2830,7 @@ function renderInvPreview(rows, agency, from, to) {
   rows.sort((a, b) => a._iso.localeCompare(b._iso));
 
   // calcInvRow로 각 행 청구액 계산 (M_PriceClient 요금표 기준)
-  let grandTotal = 0, totalBase = 0, totalOT = 0, totalHotel = 0, totalDist = 0;
+  let grandTotal = 0, totalBase = 0, totalOT = 0, totalHotel = 0, totalDist = 0, totalEarly = 0;
   let hasPriceTable = false, hasFallback = false;
   rows.forEach(r => {
     const c = calcInvRow(r);
@@ -2814,6 +2839,7 @@ function renderInvPreview(rows, agency, from, to) {
     totalOT    += c.ot;
     totalHotel += c.hotel;
     totalDist  += c.dist;
+    totalEarly += c.earlyTA;
     if (c.rateSource === 'price_table') hasPriceTable = true;
     else hasFallback = true;
   });
@@ -2845,6 +2871,7 @@ function renderInvPreview(rows, agency, from, to) {
       ${totalOT>0||totalHotel>0||totalDist>0 ? `
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;">
         ${totalBase>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">기본요금</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalBase.toLocaleString()}</div></div>` : ''}
+        ${totalEarly>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Early/Late</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalEarly.toLocaleString()}</div></div>` : ''}
         ${totalOT>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">OT</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalOT.toLocaleString()}</div></div>` : ''}
         ${totalHotel>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">호텔</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalHotel.toLocaleString()}</div></div>` : ''}
         ${totalDist>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">거리</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
@@ -2888,6 +2915,7 @@ function renderInvPreview(rows, agency, from, to) {
           </div>
           <div style="text-align:right;flex-shrink:0;margin-left:8px;">
             <div style="font-size:14px;font-weight:800;color:var(--gn);">$${c.total.toLocaleString()}</div>
+            ${c.earlyTA? `<div style="font-size:10px;color:var(--or);">+Early $${c.earlyTA}</div>` : ''}
             ${c.ot    ? `<div style="font-size:10px;color:var(--or);">+OT $${c.ot}</div>` : ''}
             ${c.hotel ? `<div style="font-size:10px;color:var(--ac);">+호텔 $${c.hotel}</div>` : ''}
             ${c.dist  ? `<div style="font-size:10px;color:var(--ac);">+거리 $${c.dist}</div>` : ''}
@@ -3006,9 +3034,10 @@ async function generateInvoice() {
   function _makeTableRow(r, fd) {
     const c   = calcInvRow(r);
     const extras = [
-      c.ot    ? `OT $${c.ot.toLocaleString()}` : '',
-      c.hotel ? `Hotel Surcharge $${c.hotel.toLocaleString()}` : '',
-      c.dist  ? `Distance Surcharge $${c.dist.toLocaleString()}` : '',
+      c.earlyTA ? `Early/Late Surcharge $${c.earlyTA.toLocaleString()}` : '',
+      c.ot      ? `OT $${c.ot.toLocaleString()}` : '',
+      c.hotel   ? `Hotel Surcharge $${c.hotel.toLocaleString()}` : '',
+      c.dist    ? `Distance Surcharge $${c.dist.toLocaleString()}` : '',
     ].filter(Boolean).join(' · ');
     const timeStr = r._timeStart || r._timeEnd ? (r._timeStart||'') + (r._timeEnd ? ' - '+r._timeEnd : '') : '-';
     const baseLabel = c.rateSource === 'price_table'
