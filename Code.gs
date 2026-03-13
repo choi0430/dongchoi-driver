@@ -81,11 +81,6 @@ function doGet(e) {
     if (action === 'get_mot_reports') return cors(getReports('MOT_Report', e.parameter.driver));
     if (action === 'get_notices')     return cors(getNoticesSheet());
     if (action === 'get_active_regos') return cors(getActiveRegos());
-    if (action === 'save_notices')       return cors(replaceMasterSheet('Notices', payload.rows));
-
-    // ── 드라이버 정보 수정 ──
-    if (action === 'update_driver_pin')  return cors(updateDriverPin(payload.driverName, payload.pin));
-    if (action === 'update_driver_info') return cors(updateDriverInfo(payload.driverName, payload.data));
 
     return cors({ok:false, msg:'Unknown action: ' + action});
   } catch(err) {
