@@ -2125,6 +2125,76 @@ async function submitToSheets(action, data) {
   }
 }
 
+
+// ═══════════════════════════════════════════════
+// 재시도 큐 — 전송 실패 시 localStorage에 보관 후 온라인 복귀 시 자동 재전송
+// ═══════════════════════════════════════════════
+const RETRY_QUEUE_KEY = 'dc_retry_queue';
+
+function getRetryQueue() {
+  try { return JSON.parse(localStorage.getItem(RETRY_QUEUE_KEY) || '[]'); } catch(e) { return []; }
+}
+function saveRetryQueue(q) {
+  try { localStorage.setItem(RETRY_QUEUE_KEY, JSON.stringify(q)); } catch(e) {}
+}
+function addToRetryQueue(action, data) {
+  const q = getRetryQueue();
+  q.push({ action, data, addedAt: new Date().toISOString(), attempts: 0 });
+  saveRetryQueue(q);
+  console.warn('📥 재시도 큐에 추가:', action, '(총', q.length, '건)');
+}
+
+async function flushRetryQueue() {
+  const q = getRetryQueue();
+  if(!q.length) return;
+  console.log('🔄 재시도 큐 처리 중... 총', q.length, '건');
+  const failed = [];
+  for(const item of q) {
+    try {
+      const r = await submitToSheets(item.action, item.data);
+      if(r?.ok) {
+        console.log('✅ 재전송 성공:', item.action);
+      } else {
+        item.attempts = (item.attempts||0) + 1;
+        if(item.attempts < 5) failed.push(item); // 5회 초과 시 폐기
+        else console.warn('❌ 재전송 5회 초과, 폐기:', item.action);
+      }
+    } catch(e) {
+      item.attempts = (item.attempts||0) + 1;
+      if(item.attempts < 5) failed.push(item);
+    }
+  }
+  saveRetryQueue(failed);
+  if(failed.length === 0 && q.length > 0) showToast('☁️ 미전송 리포트 ' + q.length + '건 전송 완료', 'success');
+}
+
+// 실패 시 재시도 큐에 넣는 postToSheets 래퍼
+function postToSheetsWithRetry(action, data) {
+  const _syd = new Date(new Date().toLocaleString('en-US',{timeZone:'Australia/Sydney'}));
+  data.Submitted = todayDisplay() + ' ' + _syd.toTimeString().slice(0,5);
+  submitToSheets(action, data)
+    .then(r => {
+      if(r?.ok) {
+        showToast('☁️ Google Sheets 저장됨', 'success');
+      } else {
+        console.warn('Sheets 저장 실패, 큐에 추가:', r);
+        addToRetryQueue(action, data);
+        showToast('⚠️ 전송 실패 — 온라인 복귀 시 자동 재전송됩니다', 'error');
+      }
+    })
+    .catch(e => {
+      console.warn('Sheets 오류, 큐에 추가:', e);
+      addToRetryQueue(action, data);
+      showToast('⚠️ 전송 실패 — 온라인 복귀 시 자동 재전송됩니다', 'error');
+    });
+}
+
+// 온라인 복귀 시 자동 flush
+window.addEventListener('online', () => {
+  console.log('🌐 온라인 복귀 — 재시도 큐 처리');
+  setTimeout(flushRetryQueue, 2000);
+});
+
 // postToSheets — 비동기 전송 (실패해도 앱 동작에 영향 없음)
 function postToSheets(action, data) {
   const _syd = new Date(new Date().toLocaleString('en-US',{timeZone:'Australia/Sydney'})); data.Submitted = todayDisplay() + ' ' + _syd.toTimeString().slice(0,5);
@@ -3119,7 +3189,7 @@ function submitDailyReport(){
     localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
   }
   // ── Google Sheets 자동 전송 ──
-  postToSheets('save_report', {
+  postToSheetsWithRetry('save_report', {
     Driver: currentDriver?.name || '',
     Date: fmtDate(report.date),
     Rego: shift.rego,
@@ -3140,6 +3210,15 @@ function submitDailyReport(){
     Dist_Surcharge: report.distSurcharge,
     OT: report.ot,
     Trailer: report.trailer,
+    Toll: report.toll,
+    Toll_Personal: report.tollPersonal ? 'Y' : '',
+    Fuel: report.fuel,
+    Fuel_Personal: report.fuelPersonal ? 'Y' : '',
+    Early: report.early,
+    Night: report.night,
+    Night_Type: report.nightType || '',
+    Night_Owner: report.nightOwner || 0,
+    Tip: report.tip,
     Total_TA: report.total,
     DR_Cost: report.dr,
     Remarks: report.remarks
@@ -5377,6 +5456,7 @@ async function syncSalary(){
 
 // ── 전체 동기화 실행
 async function runSync(silent=true){
+  await flushRetryQueue(); // 미전송 큐 먼저 처리
   if(!currentDriver) return;
   if(!silent) setSyncBadge('syncing');
   try{
