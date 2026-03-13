@@ -7,7 +7,7 @@ const SHEET_ID = '1kUU-_-IFJkKd97O-Im-A6xojsafYG-0njVyRKmSLKeE';
 
 // ── 리포트 시트 헤더 ──
 const REPORT_HEADERS = {
-  'Daily_Report':   ['Submitted','Driver','Date','Rego','Agency','Attraction','Pickup','Dropoff',
+  'Daily_Report':   ['Submitted','Driver','Date','Rego','Seats','Agency','Attraction','Pickup','Dropoff',
                      'KM_Start','KM_End','Time_Start','Time_End','Guide','Tour_Code',
                      'SVC_Label','SVC_Charge','Hotel_Surcharge','Dist_Surcharge',
                      'OT','Trailer','Total_TA','DR_Cost','Toll','Toll_Personal',
@@ -44,7 +44,8 @@ const MASTER_HEADERS = {
   'Sub_Rates':  ['Rego','Tour','seats_21','seats_25','seats_40','seats_50'],
   'Ledger':     ['WeekStart','Date','Rego','Tour','TA','SubTotal','MyDr','Extra',
                  'OT','Trailer','Hotel','Note'],
-  'Wages':      ['Driver','WeekStart','Date','Amount','Method','Note']
+  'Wages':      ['Driver','WeekStart','Date','Amount','Method','Note'],
+  'Notices':    ['ID','Title','Content','Type','Date','Active']
 };
 
 // ── 탭 색상 ──
@@ -52,7 +53,8 @@ const TAB_COLORS = {
   'M_Vehicles':'#d97706','M_Drivers':'#1a56db','M_Clients':'#7e3af2',
   'M_Guides':'#0e9f6e','M_Hotels':'#e02424','M_PriceClient':'#0694a2',
   'M_PriceDriver':'#057a55','M_PriceSub':'#7c3aed','Sub_Rates':'#b45309','Ledger':'#1e40af','Wages':'#065f46',
-  'MOT_Report':'#be185d'
+  'MOT_Report':'#be185d',
+  'Notices':'#0369a1'
 };
 
 function cors(data) {
@@ -77,6 +79,14 @@ function doGet(e) {
     if (action === 'get_ledger')      return cors(getLedgerSheet());
     if (action === 'get_wages')       return cors(getWagesSheet(e.parameter.driver));
     if (action === 'get_mot_reports') return cors(getReports('MOT_Report', e.parameter.driver));
+    if (action === 'get_notices')     return cors(getNoticesSheet());
+    if (action === 'get_active_regos') return cors(getActiveRegos());
+    if (action === 'save_notices')       return cors(replaceMasterSheet('Notices', payload.rows));
+
+    // ── 드라이버 정보 수정 ──
+    if (action === 'update_driver_pin')  return cors(updateDriverPin(payload.driverName, payload.pin));
+    if (action === 'update_driver_info') return cors(updateDriverInfo(payload.driverName, payload.data));
+
     return cors({ok:false, msg:'Unknown action: ' + action});
   } catch(err) {
     return cors({ok:false, error: err.toString()});
@@ -119,6 +129,12 @@ function doPost(e) {
     if (action === 'update_wage')        return cors(updateMasterRow('Wages', payload.rowIndex, payload.data));
     if (action === 'delete_wage')        return cors(deleteMasterRow('Wages', payload.rowIndex));
     if (action === 'replace_wages')      return cors(replaceMasterSheet('Wages', payload.rows));
+
+    if (action === 'save_notices')       return cors(replaceMasterSheet('Notices', payload.rows));
+
+    // ── 드라이버 정보 수정 ──
+    if (action === 'update_driver_pin')  return cors(updateDriverPin(payload.driverName, payload.pin));
+    if (action === 'update_driver_info') return cors(updateDriverInfo(payload.driverName, payload.data));
 
     return cors({ok:false, msg:'Unknown action: ' + action});
   } catch(err) {
@@ -293,6 +309,110 @@ function initAllMasters() {
     results.push({sheet:name, status:'created'});
   });
   return {ok:true, results};
+}
+
+
+
+// ═══════════════════════════════════════════════════
+// 드라이버 PIN / 정보 수정
+// ═══════════════════════════════════════════════════
+function updateDriverPin(driverName, pin) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('M_Drivers');
+  if (!sheet) return {ok: false, msg: 'M_Drivers 시트 없음'};
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const nameENIdx = headers.indexOf('Name_EN');
+  const nameKRIdx = headers.indexOf('Name_KR');
+  const pinIdx    = headers.indexOf('PIN');
+  if (pinIdx === -1) return {ok: false, msg: 'PIN 컬럼 없음'};
+  for (let r = 1; r < data.length; r++) {
+    if (data[r][nameENIdx] === driverName || data[r][nameKRIdx] === driverName) {
+      sheet.getRange(r + 1, pinIdx + 1).setValue(pin);
+      return {ok: true};
+    }
+  }
+  return {ok: false, msg: '드라이버 없음: ' + driverName};
+}
+
+function updateDriverInfo(driverName, data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('M_Drivers');
+  if (!sheet) return {ok: false, msg: 'M_Drivers 시트 없음'};
+  const sheetData = sheet.getDataRange().getValues();
+  const headers = sheetData[0];
+  const nameENIdx = headers.indexOf('Name_EN');
+  const nameKRIdx = headers.indexOf('Name_KR');
+
+  const fieldMap = {
+    nameEN: 'Name_EN', nameKR: 'Name_KR', mobile: 'Mobile_1',
+    licClass: 'License_Class', licNo: 'License_No', licExp: 'License_Expiry',
+    authNo: 'Authority_No', authExp: 'Authority_Expiry',
+    nokName: 'NEXT_OF_KIN', address: 'Address', suburb: 'Suburb'
+  };
+
+  for (let r = 1; r < sheetData.length; r++) {
+    if (sheetData[r][nameENIdx] === driverName || sheetData[r][nameKRIdx] === driverName) {
+      Object.entries(data).forEach(([key, val]) => {
+        const col = fieldMap[key];
+        if (col) {
+          const colIdx = headers.indexOf(col);
+          if (colIdx !== -1) sheet.getRange(r + 1, colIdx + 1).setValue(val);
+        }
+      });
+      return {ok: true};
+    }
+  }
+  return {ok: false, msg: '드라이버 없음: ' + driverName};
+}
+
+// ═══════════════════════════════════════════════════
+// 공지사항 & 활성 운행 조회
+// ═══════════════════════════════════════════════════
+function getNoticesSheet() {
+  const r = getMaster('Notices');
+  return {ok: r.ok, rows: r.rows || []};
+}
+
+function getActiveRegos() {
+  // Pre_Departure는 있지만 End_of_Shift가 없는 운행 = 현재 운행 중
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const preSheet = ss.getSheetByName('Pre_Departure');
+  const eosSheet = ss.getSheetByName('End_of_Shift');
+  if (!preSheet) return {ok: true, regos: []};
+
+  const preData = preSheet.getDataRange().getValues();
+  if (preData.length < 2) return {ok: true, regos: []};
+  const preHeaders = preData[0];
+  const preRows = preData.slice(1).map(row => {
+    const obj = {};
+    preHeaders.forEach((h,i) => obj[h] = row[i]);
+    return obj;
+  });
+
+  // EoS 데이터 수집
+  const eosSet = new Set();
+  if (eosSheet && eosSheet.getLastRow() > 1) {
+    const eosData = eosSheet.getDataRange().getValues();
+    const eosH = eosData[0];
+    eosData.slice(1).forEach(row => {
+      const obj = {};
+      eosH.forEach((h,i) => obj[h] = row[i]);
+      // Driver+Date+Rego 조합으로 종료 여부 판단
+      eosSet.add(String(obj.Driver)+'|'+String(obj.Date)+'|'+String(obj.Rego));
+    });
+  }
+
+  // Pre_Departure는 있지만 End_of_Shift 없는 것 = 운행 중
+  const active = [];
+  preRows.forEach(r => {
+    const key = String(r.Driver)+'|'+String(r.Date)+'|'+String(r.Rego);
+    if (!eosSet.has(key)) {
+      active.push({driver: String(r.Driver), rego: String(r.Rego), date: String(r.Date)});
+    }
+  });
+
+  return {ok: true, regos: active};
 }
 
 /**
