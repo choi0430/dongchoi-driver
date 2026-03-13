@@ -4275,19 +4275,36 @@ function updateOTHint(fromEndTime){
           sub: effOT.toFixed(2)+'h → 올림 '+effOT_ceil+'h × $'+otRate+'/h = $'+otAmt
         });
       } else {
-        // 미입력 — 강조 경고 + 버튼 안내
-        items.push({ type:'warn',
-          title: '🚨 OT 발생! $'+otAmt+' 입력 필요 ('+seats+')',
-          sub: effOT.toFixed(2)+'h → 올림 '+effOT_ceil+'h × $'+otRate+'/h | 위 $'+otAmt+' 버튼을 눌러주세요 ↑'
-        });
+        // 미입력 — 야경이 아닌 경우 자동 선택
+        const nightType = document.getElementById('f-night-type')?.value || 'none';
+        const isNight = nightType !== 'none';
+        if(!isNight){
+          // 자동으로 해당 금액 버튼 선택
+          selectOTAmount(otAmt);
+          items.push({ type:'apply',
+            title: '✅ OT $'+otAmt+' 자동 선택됨 ('+seats+')',
+            sub: effOT.toFixed(2)+'h → 올림 '+effOT_ceil+'h × $'+otRate+'/h'
+          });
+        } else {
+          // 야경: OT 자동선택 제외, 힌트만 표시
+          items.push({ type:'info',
+            title: '🌃 야경 일정 — OT 자동선택 제외',
+            sub: '계산된 OT: $'+otAmt+' ('+effOT_ceil+'h × $'+otRate+'/h) · 필요시 수동 입력'
+          });
+        }
       }
       // ── 종료 시간 입력 시 toast 알림 (중복 방지)
       if(fromEndTime){
+        const nightType2 = document.getElementById('f-night-type')?.value || 'none';
         const toastKey = et+'|'+otAmt;
         if(_lastOTToastKey !== toastKey){
           _lastOTToastKey = toastKey;
-          if(navigator.vibrate) navigator.vibrate([100,50,100]);
-          showToast('🚨 OT 발생! $'+otAmt+' 입력 필요 ('+seats+' · '+effOT_ceil+'h)', 'error');
+          if(nightType2 === 'none'){
+            if(navigator.vibrate) navigator.vibrate([100,50,100]);
+            showToast('✅ OT $'+otAmt+' 자동 선택됨 ('+seats+' · '+effOT_ceil+'h)', 'success');
+          } else {
+            showToast('🌃 야경 — OT $'+otAmt+' 참고 (자동선택 제외)', 'info');
+          }
         }
       }
     } else if(effOT > 0 && !otRate){
@@ -4868,7 +4885,15 @@ function onNightChange(){
   const type  = document.getElementById('f-night-type')?.value || 'none';
   const info  = document.getElementById('night-info');
   const input = document.getElementById('f-night');
-  if(type==='none'){ info.style.display='none'; input.value=0; calcTotal(); return; }
+  if(type==='none'){
+    info.style.display='none'; input.value=0; calcTotal();
+    // 야경 해제 시 종료시간 기반으로 OT 재계산
+    updateOTHint(false);
+    return;
+  }
+  // 야경 선택 시 자동선택된 OT 초기화 (야경은 OT 별도 처리)
+  selectOTAmount(0);
+  showToast('🌃 야경 선택 — OT 초기화됨 (필요시 수동 입력)', 'info');
   const r = getNightRate();
   if(!r){ info.style.display='none'; calcTotal(); return; }
   const typeLabel = {guide_opt:'가이드 옵션 (현장 수령)', agency_incl:'여행사 포함 약식', prepaid_opt:'옵션 — 한국 선결제'}[type];
