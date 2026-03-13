@@ -3978,12 +3978,59 @@ function renderTodayReports(){
 // RATE / CALC
 // ═══════════════════════════════════════
 function autoRate(){
-  const att = document.getElementById('dr-attraction').value;
-  if(!att||!RATES[att]) return;
-  const r = RATES[att];
-  document.getElementById('f-svc').value = r.ta||0;
-  calcTotal();
-  showToast(`${att} 요금 자동 입력: $${r.ta}`,'success');
+  const att = document.getElementById('dr-attraction')?.value;
+  if(!att) return;
+
+  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+  if(!seats) return; // 인승 미선택 시 스킵 (updateSvcHint가 힌트 표시)
+
+  const sk = seatKey(seats);
+
+  // M_PriceDriver 기반 드라이버 비용 계산
+  const courseData = getPDCourseFromMaster(att);
+  if(courseData){
+    const skData = courseData[sk] || {};
+    let drAmt = Number(skData.base || 0);
+
+    // 수동 차량 여부 확인 (+$20)
+    const rego = getCurrentRego() || '';
+    const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
+    if(veh?.Transmission === 'Manual') drAmt += 20;
+
+    if(drAmt > 0){
+      const drStr = String(drAmt);
+      const svcOpts = SVC_OPTIONS[seats] || [];
+      const matched = svcOpts.some(o => o.val === drStr);
+      if(matched){
+        cselSetValue('f-svc-select', drStr);
+        calcTotal();
+        showToast(`${att} 서비스 비용 자동 선택: $${drAmt}`,'success');
+      } else {
+        // SVC_OPTIONS에 없는 금액 → OTHER + 직접 입력
+        cselSetValue('f-svc-select', 'OTHER');
+        const customEl = document.getElementById('f-svc-custom');
+        if(customEl){ customEl.value = drAmt; }
+        const wrapEl = document.getElementById('f-svc-custom-wrap');
+        if(wrapEl){ wrapEl.style.display = 'block'; }
+        calcTotal();
+        showToast(`${att} 서비스 비용 자동 입력: $${drAmt} (직접 입력)`,'success');
+      }
+      return;
+    }
+  }
+
+  // M_PriceDriver에 코스 없을 때 → 기존 RATES fallback
+  if(RATES[att]){
+    const r = RATES[att];
+    const drStr = String(r.dr||0);
+    const svcOpts = SVC_OPTIONS[seats] || [];
+    const matched = svcOpts.some(o => o.val === drStr);
+    if(matched){
+      cselSetValue('f-svc-select', drStr);
+      calcTotal();
+      showToast(`${att} 서비스 비용 자동 선택: $${r.dr}`,'success');
+    }
+  }
 }
 
 // ═══════════════════════════════════════
