@@ -1894,9 +1894,29 @@ function sddAddNew(key, value) {
     }
   } else if(cfg.type==='agency') {
     if(!MASTER.agencies.find(x=>x.Name===v)){
-      MASTER.agencies.push({Name:v,ClientID:Date.now().toString(16).slice(-8),Mobile:'',Address:''});
+      const newAgency = {Name:v, ClientID:Date.now().toString(16).slice(-8), Mobile:'', Address:''};
+      MASTER.agencies.push(newAgency);
+      // 캐시에도 즉시 반영 (재시작 후에도 유지)
+      try {
+        const raw = localStorage.getItem(MASTER_CACHE_KEY);
+        if(raw){
+          const cached = JSON.parse(raw);
+          // 캐시 구조에 따라 agencies 업데이트
+          if(cached.data){
+            if(!cached.data.M_Clients) cached.data.M_Clients = [];
+            if(!cached.data.M_Clients.find(x=>x.Name===v)) cached.data.M_Clients.push(newAgency);
+            if(!cached.data.agencies) cached.data.agencies = [];
+            if(!cached.data.agencies.find(x=>x.Name===v)) cached.data.agencies.push(newAgency);
+          }
+          // syncMaster 형식도 처리
+          if(!cached.agencies) cached.agencies = [];
+          if(!cached.agencies.find(x=>x.Name===v)) cached.agencies.push(newAgency);
+          localStorage.setItem(MASTER_CACHE_KEY, JSON.stringify(cached));
+        }
+      } catch(e){}
+      // GAS Sheets에도 저장
       fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-        body:JSON.stringify({action:'add_master',sheet:'M_Clients',data:{Name:v,ClientID:Date.now().toString(16).slice(-8),Mobile:'',Address:''}})
+        body:JSON.stringify({action:'add_master',sheet:'M_Clients',data:newAgency})
       }).catch(()=>{});
     }
   } else if(cfg.type==='attraction') {
