@@ -281,9 +281,22 @@ function getReports(sheetName, driver) {
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) return {ok:true, rows:[]};
   const headers = data[0];
+  // 날짜 셀(Date 오브젝트)을 dd/mm/yyyy 문자열로 변환
+  const DATE_FIELDS = ['Date','Submitted','License_Expiry','Authority_Expiry','Rego_Date','HVIS_Date'];
+  function fmtCell(h, v) {
+    if (DATE_FIELDS.indexOf(h) !== -1 && v instanceof Date && !isNaN(v)) {
+      // AEST(UTC+10) 기준으로 변환
+      const local = new Date(v.getTime() + 10 * 3600 * 1000);
+      const dd = String(local.getUTCDate()).padStart(2,'0');
+      const mm = String(local.getUTCMonth()+1).padStart(2,'0');
+      const yyyy = local.getUTCFullYear();
+      return dd + '/' + mm + '/' + yyyy;
+    }
+    return v;
+  }
   let rows = data.slice(1).map(row => {
     const obj = {};
-    headers.forEach((h,i) => obj[h] = row[i]);
+    headers.forEach((h,i) => { obj[h] = fmtCell(h, row[i]); });
     return obj;
   });
   if (driver) rows = rows.filter(r => r.Driver === driver);
