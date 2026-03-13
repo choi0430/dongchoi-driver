@@ -4860,23 +4860,78 @@ function setAdminSyncBadge(state){
 async function runAdminSync(silent=true){
   if(!silent) setAdminSyncBadge('syncing');
   try{
-    // 현재 열린 탭에 따라 필요한 것만 갱신
-    const activeTab = document.querySelector('.tab-btn.active')?.dataset?.tab || '';
-    const refreshAll = !silent;
+    // 현재 활성 페이지 ID (.pg.on)
+    const pg = document.querySelector('.pg.on')?.id || '';
 
-    if(activeTab==='dr'||refreshAll){
-      // DR 리포트 강제 갱신
+    // ── 1. 차량 ──
+    if(pg==='pveh' || !silent){
+      await syncVehicles();
+      if(pg==='pveh') rV();
+    }
+
+    // ── 2. 드라이버 ──
+    if(pg==='pdrv' || !silent){
+      await syncDrivers();
+      if(pg==='pdrv') rD();
+    }
+
+    // ── 3. 여행사 + 요금표 (Client/Price는 항상 함께) ──
+    if(['pcli','pprc'].includes(pg) || !silent){
+      await syncClients();
+      await syncPrices();   // M_PriceClient + M_PriceDriver
+      if(pg==='pcli')      { rC(); rP(); }
+      else if(pg==='pprc') { rP(); rPD(); }
+    }
+
+    // ── 4. 가이드 ──
+    if(pg==='pgui' || !silent){
+      await syncGuides();
+      if(pg==='pgui') rG();
+    }
+
+    // ── 5. 호텔 ──
+    if(pg==='phtl' || !silent){
+      await syncHotels();
+      if(pg==='phtl') rH();
+    }
+
+    // ── 6. 서브 요금표 ──
+    if(pg==='psub' || !silent){
+      await syncSub();
+      if(pg==='psub') rSub();
+    }
+
+    // ── 7. DR 리포트 ──
+    if(pg==='pdr' || !silent){
       _drCache=null; _drCacheTime=0;
       await loadDR();
     }
-    if(activeTab==='wages'||refreshAll){
+
+    // ── 8. 인보이스 (캐시 무효화 → 다음 열람 시 자동 재로드) ──
+    if(pg==='pinv' || !silent){
+      _invReports = null;
+      if(pg==='pinv') initInvoice();
+    }
+
+    // ── 9. 급여 ──
+    if(pg==='pwage' || !silent){
       _wagesLastSync=0;
       await loadWagesFromSheet(true);
       if(ST.curWageDriver) rWage(ST.curWageDriver);
     }
-    if(activeTab==='notices'||refreshAll){
+
+    // ── 10. 공지사항 ──
+    if(pg==='pnotice' || !silent){
       await loadNoticesFromGAS();
+      if(pg==='pnotice') renderAdminNotices();
     }
+
+    // ── 11. MOT ──
+    if(pg==='pmot' || !silent){
+      _motLastSync=0;
+      await rMot(true);
+    }
+
     _adminLastSync = Date.now();
     setAdminSyncBadge('ok');
   }catch(e){ setAdminSyncBadge('error'); }
