@@ -5519,8 +5519,8 @@ function getDriverWagesFromLocal(driverName){
 // wk.key("dd/mm/yy~dd/mm/yy") → YYYY-MM-DD (월요일) 변환
 // admin_wages의 키 형식과 맞추기 위해 사용
 function wkKeyToMonISO(wkKey){
-  // wkKey 예: "09/03/26~15/03/26"
-  const monPart = wkKey.split('~')[0]; // "09/03/26"
+  // wkKey 예: "09/03/2026~15/03/2026" 또는 "09/03/26~15/03/26"
+  const monPart = wkKey.split('~')[0];
   if(!monPart) return null;
   const [dd, mm, yy] = monPart.split('/');
   if(!dd||!mm||!yy) return null;
@@ -5948,7 +5948,6 @@ async function renderSalary(){
     const nm=String(r.Driver||'').trim();
     return nm===driverName || nm===(currentDriver?.englishName||'') || nm===(currentDriver?.initials||'');
   }).map(r=>({
-    id:   r.ID||r.id||'',
     date: fmtDate(r.Date||''),
     dr:   parseFloat(r.DR_Cost||0),
     nightOwner: parseFloat(r.Night_Owner||0)
@@ -5967,8 +5966,9 @@ async function renderSalary(){
   Object.entries(driverWages).forEach(([monISO, wkWages])=>{
     const d = new Date(monISO+'T00:00:00');
     if(isNaN(d)) return;
+    // getWeekKey와 동일한 fmt (4자리 연도) 사용해야 키가 일치함
+    const fmt = x => String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+x.getFullYear();
     const sun = new Date(d); sun.setDate(d.getDate()+6);
-    const fmt = x => String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+String(x.getFullYear()).slice(2);
     const wkKey = fmt(d)+'~'+fmt(sun);
     const entries = wkWages.entries || [];
     const paid = entries.reduce((s,e)=>s+(Number(e.amount)||0),0);
