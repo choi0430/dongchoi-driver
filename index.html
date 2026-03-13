@@ -2558,6 +2558,7 @@ function doLogout() {
   }
   // 세션 삭제 (다음 시작 시 자동 로그인 안 됨)
   if(currentDriver?.name) localStorage.removeItem('dc_session_' + currentDriver.name);
+  _draftListenerAttached = false;  // 다음 로그인 시 리스너 재등록
   currentDriver = null;
   // 상태 초기화
   activeShifts = [];
@@ -2959,8 +2960,28 @@ function goStep(n){
   const _scr=document.getElementById('screen');
   if(_scr){_scr.scrollTop=0;_scr.scrollLeft=0;}
   setTimeout(()=>{const s=document.getElementById('screen');if(s){s.scrollTop=0;s.scrollTo({top:0,behavior:'instant'});}},50);
-  if(n===2){ renderStep2SavedReports(); updateSurchargeOptions(); }
+  if(n===2){
+    renderStep2SavedReports();
+    updateSurchargeOptions();
+    // draft 복원 시도
+    setTimeout(()=>{
+      const restored = restoreDailyDraft();
+      if(restored) showToast('📝 작성 중이던 내용을 복원했습니다','success');
+      _attachDraftListeners();
+    }, 100);
+  }
   if(n===3) renderShiftSummary();
+}
+
+// step2 폼 전체에 input/change 이벤트 위임 — 자동 draft 저장
+let _draftListenerAttached = false;
+function _attachDraftListeners(){
+  if(_draftListenerAttached) return;
+  const step2 = document.getElementById('step-2');
+  if(!step2) return;
+  step2.addEventListener('input',  ()=>saveDailyDraft(), { passive:true });
+  step2.addEventListener('change', ()=>saveDailyDraft(), { passive:true });
+  _draftListenerAttached = true;
 }
 
 // ═══════════════════════════════════════
@@ -3302,6 +3323,7 @@ function submitDailyReport(){
   });
   renderTodayReports();
   renderStep2SavedReports();
+  clearDailyDraft();  // 제출 완료 → draft 삭제
   // reset form
   ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   ['f-ot','f-night','f-tip','f-toll','f-fuel','f-etc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
@@ -3629,6 +3651,114 @@ function submitEndShift(){
   runSync(false);
   startAutoSync();
   showPage('home');
+}
+
+// ═══════════════════════════════════════════════
+// DAILY REPORT DRAFT — 자동 저장 / 복원
+// ═══════════════════════════════════════════════
+function _draftKey(){
+  return 'dr_draft_' + (currentDriver?.name || 'guest') + '_' + (editingShiftId || '');
+}
+
+function saveDailyDraft(){
+  try {
+    const draft = {
+      agency:      document.getElementById('dr-agency')?.value || '',
+      attraction:  document.getElementById('dr-attraction')?.value || '',
+      pickup:      document.getElementById('dr-pickup')?.value || '',
+      dropoff:     document.getElementById('dr-dropoff')?.value || '',
+      kmStart:     document.getElementById('dr-km-start')?.value || '',
+      kmEnd:       document.getElementById('dr-km-end')?.value || '',
+      timeStart:   document.getElementById('dr-start')?.value || '',
+      timeEnd:     document.getElementById('dr-end')?.value || '',
+      guide:       document.getElementById('dr-guide')?.value || '',
+      tourcode:    document.getElementById('dr-tourcode')?.value || '',
+      remarks:     document.getElementById('dr-remarks')?.value || '',
+      seats:       document.getElementById('dr-seats')?.value || '',
+      ot:          document.getElementById('f-ot')?.value || '',
+      toll:        document.getElementById('f-toll')?.value || '',
+      tollDetail:  document.getElementById('f-toll-detail')?.value || '',
+      fuel:        document.getElementById('f-fuel')?.value || '',
+      tip:         document.getElementById('f-tip')?.value || '',
+      etc:         document.getElementById('f-etc')?.value || '',
+      tollPersonal: document.getElementById('toll-personal')?.checked || false,
+      fuelPersonal: document.getElementById('fuel-personal')?.checked || false,
+      wash:        document.getElementById('f-wash')?.value || '0',
+      meal:        document.getElementById('f-meal')?.value || '0',
+      trailer:     document.getElementById('f-trailer')?.value || '0',
+      early:       document.getElementById('f-early')?.value || '0',
+      nightType:   document.getElementById('f-night-type')?.value || 'none',
+      night:       document.getElementById('f-night')?.value || '0',
+      svcSelect:   document.getElementById('f-svc-select')?.value || '',
+      svcCustom:   document.getElementById('f-svc-custom')?.value || '',
+      hotelSelect: document.getElementById('f-hotel-select')?.value || '0',
+      distSelect:  document.getElementById('f-dist-select')?.value || '0',
+      _ts: Date.now()
+    };
+    localStorage.setItem(_draftKey(), JSON.stringify(draft));
+  } catch(e) {}
+}
+
+function clearDailyDraft(){
+  try { localStorage.removeItem(_draftKey()); } catch(e) {}
+}
+
+function restoreDailyDraft(){
+  try {
+    const raw = localStorage.getItem(_draftKey());
+    if(!raw) return false;
+    const d = JSON.parse(raw);
+    // 24시간 이상 지난 draft는 무시
+    if(Date.now() - (d._ts || 0) > 86400000){ clearDailyDraft(); return false; }
+
+    // 텍스트 / 숫자 필드
+    const textFields = ['dr-agency','dr-attraction','dr-pickup','dr-dropoff',
+      'dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'];
+    const valMap = { 'dr-agency':d.agency,'dr-attraction':d.attraction,'dr-pickup':d.pickup,
+      'dr-dropoff':d.dropoff,'dr-km-start':d.kmStart,'dr-km-end':d.kmEnd,
+      'dr-start':d.timeStart,'dr-end':d.timeEnd,'dr-guide':d.guide,
+      'dr-tourcode':d.tourcode,'dr-remarks':d.remarks };
+    textFields.forEach(id=>{ const el=document.getElementById(id); if(el&&valMap[id]) el.value=valMap[id]; });
+
+    // 숫자 입력 필드
+    [['f-ot',d.ot],['f-toll',d.toll],['f-toll-detail',d.tollDetail],
+     ['f-fuel',d.fuel],['f-tip',d.tip],['f-etc',d.etc]].forEach(([id,v])=>{
+      const el=document.getElementById(id); if(el&&v) el.value=v;
+    });
+
+    // 체크박스
+    const tp=document.getElementById('toll-personal'); if(tp) tp.checked=!!d.tollPersonal;
+    const fp=document.getElementById('fuel-personal'); if(fp) fp.checked=!!d.fuelPersonal;
+
+    // 인승 select (먼저 세팅해야 svc 옵션이 빌드됨)
+    const seatsEl=document.getElementById('dr-seats');
+    if(seatsEl && d.seats){ seatsEl.value=d.seats; updateSurchargeOptions(); }
+
+    // 버튼형 선택 값들 (hidden input 값 + 버튼 UI)
+    if(d.wash)    selectWash(parseFloat(d.wash)||0);
+    if(d.meal)    selectMeal(parseFloat(d.meal)||0);
+    if(d.trailer) selectTrailer(parseFloat(d.trailer)||0);
+    if(d.early)   selectEarly(parseFloat(d.early)||0);
+
+    // csel (커스텀 셀렉트) 값 복원
+    if(d.nightType && d.nightType !== 'none') cselSetValue('f-night-type', d.nightType);
+    if(d.night && parseFloat(d.night)){
+      const nf=document.getElementById('f-night'); if(nf) nf.value=d.night;
+      const ni=document.getElementById('night-info'); if(ni) ni.style.display='block';
+    }
+    if(d.svcSelect) cselSetValue('f-svc-select', d.svcSelect);
+    if(d.svcCustom){
+      const sc=document.getElementById('f-svc-custom'); if(sc) sc.value=d.svcCustom;
+      const sw=document.getElementById('f-svc-custom-wrap');
+      if(sw && d.svcSelect==='OTHER') sw.style.display='block';
+    }
+    if(d.hotelSelect) cselSetValue('f-hotel-select', d.hotelSelect);
+    if(d.distSelect)  cselSetValue('f-dist-select',  d.distSelect);
+
+    calcTotal();
+    updateOTHint();
+    return true;
+  } catch(e) { return false; }
 }
 
 function renderStep2SavedReports(){
@@ -4633,6 +4763,7 @@ function selectTrailer(amt){
     b.style.borderColor = sel ? 'var(--accent)' : 'var(--border)';
   });
   calcTotal();
+  saveDailyDraft();
 }
 function getEarlyRate(){
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
@@ -4663,6 +4794,7 @@ function selectEarly(amt){
     br.style.borderColor = sel ? 'var(--accent)' : 'var(--border)';
   }
   calcTotal();
+  saveDailyDraft();
 }
 // 야간투어 요율 테이블
 const NIGHT_RATES = {
@@ -4728,6 +4860,7 @@ function selectWash(amt){
     b.style.borderColor = sel ? 'var(--accent)' : 'var(--border)';
   });
   calcTotal();
+  saveDailyDraft();
 }
 function selectMeal(amt){
   document.getElementById('f-meal').value = amt;
@@ -4740,6 +4873,7 @@ function selectMeal(amt){
     b.style.borderColor = sel ? 'var(--accent)' : 'var(--border)';
   });
   calcTotal();
+  saveDailyDraft();
 }
 function updateEarlyHint(){
   const hintLabel = document.getElementById('early-time-hint');
