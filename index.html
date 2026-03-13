@@ -4085,7 +4085,7 @@ function updateHotelHint(){
     let suggestAmt = 0;
     if(pickupSurch && dropoffSurch)                                       suggestAmt = fullFee;
     else if((pickupSurch && dropoffAP) || (pickupAP && dropoffSurch))     suggestAmt = halfFee;
-    else                                                                   suggestAmt = halfFee;
+    else                                                                   suggestAmt = fullFee;  // 서차지호텔↔일반장소
 
     const dirDesc = (() => {
       if(pickupSurch && dropoffSurch)         return '왕복 — 양쪽 서차지 구역';
@@ -4397,11 +4397,11 @@ function autoFillDRSurcharges(force){
 
     let targetHotel = 0;
     if(pickupSurch && dropoffSurch){
-      targetHotel = fullFee;  // 왕복
+      targetHotel = fullFee;  // 양쪽 서차지 호텔
     } else if((pickupSurch && dropoffAP) || (pickupAP && dropoffSurch)){
-      targetHotel = halfFee;  // 편도 50%
+      targetHotel = halfFee;  // 서차지 호텔 ↔ 공항 편도
     } else if(pickupSurch || dropoffSurch){
-      targetHotel = halfFee;  // 단방향 서차지 → 50% 제안
+      targetHotel = fullFee;  // 서차지 호텔 ↔ 일반장소 (편도 진입)
     }
     if(targetHotel > 0 && String(targetHotel) !== String(curHotel)){
       // HOTEL_OPTIONS에 해당 값이 있는 경우만 세팅
@@ -4432,8 +4432,12 @@ function autoFillDRSurcharges(force){
   }
 
   // ── 3) OT 자동 제안 ────────────────────────────────────
-  const curOT = parseFloat(document.getElementById('f-ot')?.value || '0');
-  if((force || curOT === 0) && startVal && endVal){
+  const _otInput = document.getElementById('f-ot');
+  const curOT = parseFloat(_otInput?.value || '0');
+  // OT 버튼 중 $0 이외 선택된 것이 있으면 이미 사용자가 선택한 것 → force 아니면 건드리지 않음
+  const _otBtnSelected = document.querySelector('.ot-btn.selected, .num-btn[data-ot].selected');
+  const otAlreadySet = !force && (curOT > 0);
+  if(!otAlreadySet && startVal && endVal){
     const [sh, sm] = startVal.split(':').map(Number);
     const [eh, em] = endVal.split(':').map(Number);
     const startMin = sh*60+sm;
@@ -4468,32 +4472,50 @@ function autoFillDRSurcharges(force){
   // ── 5) SVC 자동 추천 ────────────────────────────────────
   const curSvc = cselGetValue('f-svc-select');
   if((force || !curSvc) && seats && att){
-    const courseData = getCourseData(att);
-    const maxH = courseData ? Number(courseData.max_hours) : null;
+    const sk5   = seatKey(seats);
+    const courseData5 = getCourseData(att);
+    // getCourseData → getPDCourseFromMaster 구조: courseData[sk].base
+    const skData5 = courseData5 ? (courseData5[sk5] || {}) : {};
+    const drBase5 = Number(skData5.base || 0);
+    const isManual5 = (()=>{
+      const rego = document.getElementById('pre-rego')?.value || '';
+      const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
+      return veh?.Transmission === 'Manual';
+    })();
+    const drAmt5 = drBase5 + (isManual5 ? 20 : 0);
     const svcOpts = SVC_OPTIONS[seats] || [];
-    if(svcOpts.length && maxH){
-      // 코스 max_hours 기준으로 SVC 매핑
-      let targetSvc = null;
-      if(maxH <= 6){
-        // TSF 계열
-        const tsf = svcOpts.find(o=>o.label.includes('TSF') && !o.label.includes('DINNER') && !o.label.includes('ONLY') && !o.label.includes('10HR') && !o.label.includes('12HR'));
-        targetSvc = tsf?.val || null;
-      } else if(maxH <= 8){
-        // CITY/HALF 계열
-        const city = svcOpts.find(o=>o.label.includes('CITY')||o.label.includes('HALF'));
-        targetSvc = city?.val || null;
-      } else if(maxH <= 10){
-        // 10HR 계열 (Manual 제외)
-        const hr10 = svcOpts.find(o=>o.label.includes('10HR') && !o.label.includes('MANUAL') && !o.label.includes('BLUE'));
-        targetSvc = hr10?.val || null;
-      } else {
-        // 12HR 계열 (Manual 제외)
-        const hr12 = svcOpts.find(o=>o.label.includes('12HR') && !o.label.includes('MANUAL'));
-        targetSvc = hr12?.val || null;
-      }
+
+    // M_PriceDriver base 금액이 있으면 그 값으로 직접 매핑
+    if(drAmt5 > 0 && svcOpts.length){
+      const exact = svcOpts.find(o=>Number(o.val)===drAmt5);
+      const exactBase = svcOpts.find(o=>Number(o.val)===drBase5);
+      const targetSvc = (exact || exactBase)?.val || null;
       if(targetSvc && targetSvc !== curSvc){
         cselSetValue('f-svc-select', targetSvc);
         onSvcSelectChange();
+      }
+    } else {
+      // fallback: max_hours 기반 라벨 매핑
+      const maxH = courseData5 ? Number(courseData5.max_hours) : null;
+      if(svcOpts.length && maxH){
+        let targetSvc = null;
+        if(maxH <= 6){
+          const tsf = svcOpts.find(o=>o.label.includes('TSF') && !o.label.includes('DINNER') && !o.label.includes('ONLY') && !o.label.includes('10HR') && !o.label.includes('12HR'));
+          targetSvc = tsf?.val || null;
+        } else if(maxH <= 8){
+          const city = svcOpts.find(o=>o.label.includes('CITY')||o.label.includes('HALF'));
+          targetSvc = city?.val || null;
+        } else if(maxH <= 10){
+          const hr10 = svcOpts.find(o=>o.label.includes('10HR') && !o.label.includes('MANUAL') && !o.label.includes('BLUE'));
+          targetSvc = hr10?.val || null;
+        } else {
+          const hr12 = svcOpts.find(o=>o.label.includes('12HR') && !o.label.includes('MANUAL'));
+          targetSvc = hr12?.val || null;
+        }
+        if(targetSvc && targetSvc !== curSvc){
+          cselSetValue('f-svc-select', targetSvc);
+          onSvcSelectChange();
+        }
       }
     }
   }
@@ -4586,7 +4608,7 @@ function _updateAutoFillBanner(){
       let fee=0;
       if(ps&&ds) fee=fullFee;
       else if((ps&&da)||(pa&&ds)) fee=halfFee;
-      else fee=halfFee;
+      else fee=fullFee;  // 서차지호텔↔일반장소
       lines.push('🏨 호텔 서차지: <b>$'+fee+'</b> 자동 선택됨'+(ps&&ds?' (왕복)':' (편도)'));
     }
   }
