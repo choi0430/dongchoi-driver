@@ -4156,25 +4156,42 @@ function updateSvcHint(){
   const curVal = parseFloat(cselGetValue('f-svc-select') || 0);
   const items  = [];
 
-  // 인승 또는 어트랙션 미선택 시 — 힌트 없음
-  if(!seats || !att){ hintEl.style.display='none'; return; }
+  // 인승 미선택 시 — 힌트 없음
+  if(!seats){ hintEl.style.display='none'; return; }
 
-  // M_PriceDriver에서 코스 매칭
-  const sk = seatKey(seats); // '21S' → '21'
-  const baseKey = 'seats_'+sk+'_base';
-  const courseData = getPDCourseFromMaster(att);
-
+  const sk = seatKey(seats);
   const isManualVehicle = (()=>{
-    const rego = document.getElementById('pre-rego')?.value || '';
+    const rego = document.getElementById('pre-rego')?.value || getCurrentRego() || '';
     const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
     return veh?.Transmission === 'Manual';
   })();
   const manualAdd = isManualVehicle ? 20 : 0;
 
+  // ── 관광지 미선택: 인승별 범위 안내
+  if(!att){
+    const rows = MASTER.priceDriver || [];
+    const allBase = rows
+      .map(r => Number(r['seats_'+sk+'_base']||0))
+      .filter(v => v > 0);
+    if(allBase.length){
+      const mn = Math.min(...allBase) + manualAdd;
+      const mx = Math.max(...allBase) + manualAdd;
+      items.push({ type:'info',
+        title: '💰 '+seats+' 드라이버 비용 범위: $'+mn+' — $'+mx,
+        sub: '관광지 선택 시 정확한 금액이 표시됩니다'+(isManualVehicle?' · 수동 +$20 포함':'')
+      });
+    } else {
+      hintEl.style.display='none'; return;
+    }
+    renderHintBox(hintEl, items);
+    return;
+  }
+
+  // ── 관광지 + 인승 모두 선택: 정확한 금액 표시
+  const courseData = getPDCourseFromMaster(att);
   if(courseData){
-    // getPDCourseFromMaster 반환 구조: courseData[sk].base (예: courseData['21'].base)
     const skData = courseData[sk] || {};
-    const drBase = Number(skData.base ?? courseData[baseKey] ?? 0);
+    const drBase = Number(skData.base || 0);
     const drAmt  = drBase + manualAdd;
     const maxH   = courseData.max_hours;
     const otRate = seats==='40S'||seats==='50S' ? 40 : 30;
@@ -4183,21 +4200,27 @@ function updateSvcHint(){
       const isSelected = (curVal === drAmt || curVal === drBase);
       if(isSelected){
         items.push({ type:'apply',
-          title: '✅ 서비스 차지 $'+drAmt+(isManualVehicle?' (수동 +$20 포함)':''),
-          sub: att+' + '+seats+(maxH?' · 기준 '+maxH+'시간 · OT $'+otRate+'/h':'')
+          title: '✅ 서비스 차지 선택됨 · 드라이버 $'+drAmt+(isManualVehicle?' (수동 +$20)':''),
+          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')
         });
       } else {
-        items.push({ type:'info',
-          title: '💡 드라이버 서비스 차지: $'+drAmt+(isManualVehicle?' (수동 +$20 포함)':''),
-          sub: att+' + '+seats+(maxH?' · 기준 '+maxH+'시간 · OT $'+otRate+'/h':'')
+        items.push({ type:'warn',
+          title: '💰 이 코스 드라이버 비용: $'+drAmt+(isManualVehicle?' (수동 +$20 포함)':''),
+          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')
+            +(curVal > 0 ? ' · 현재 선택: $'+curVal : ' · 서비스 차지를 선택해 주세요')
         });
       }
     } else {
-      hintEl.style.display='none'; return;
+      items.push({ type:'info',
+        title: '❓ M_PriceDriver에 이 코스 금액 없음',
+        sub: att+' · '+seats+' — 직접 입력해 주세요'
+      });
     }
   } else {
-    // M_PriceDriver에 코스 없음
-    hintEl.style.display='none'; return;
+    items.push({ type:'info',
+      title: '❓ 등록되지 않은 코스',
+      sub: att+' — M_PriceDriver에 추가하거나 직접 입력하세요'
+    });
   }
 
   renderHintBox(hintEl, items);
