@@ -1918,6 +1918,21 @@ function sddAddNew(key, value) {
       fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({action:'add_master',sheet:'M_Clients',data:newAgency})
       }).catch(()=>{});
+      // M_PriceClient에 기존 Course 목록 기준으로 빈 요금표 행 자동 생성
+      const pcRows = (MASTER.priceClient||[]);
+      const allCourses = [...new Set(pcRows.map(r=>r.Course).filter(Boolean))];
+      if(allCourses.length > 0){
+        const priceRows = allCourses.map(course=>({
+          Agency:v, Course:course, max_hours:'',
+          seats_21_rate:0, seats_21_ot:0,
+          seats_25_rate:0, seats_25_ot:0,
+          seats_40_rate:0, seats_40_ot:0,
+          seats_50_rate:0, seats_50_ot:0,
+        }));
+        fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+          body:JSON.stringify({action:'add_price_client_agency',agency:v,rows:priceRows})
+        }).catch(()=>{});
+      }
     }
   } else if(cfg.type==='attraction') {
     if(!MASTER.courses.find(x=>x.Course_Name===v)){
