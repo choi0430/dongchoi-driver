@@ -3484,21 +3484,21 @@ async function renderWageAll() {
     return;
   }
 
-  listEl.innerHTML = driverStats.map(({ drv, earned, paid, balance }) =>
-    '<div style="background:var(--sf2);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;"' +
-      ' onclick="setWageTab('single');ST.wageDriver='' + escH(drv) + '';rWage();">' +
-      '<div>' +
-        '<div style="font-size:13px;font-weight:700;color:var(--t1);">' + escH(drv) + '</div>' +
-        '<div style="font-size:11px;color:var(--t3);margin-top:2px;">발생 $' + earned.toLocaleString() + ' · 지급 $' + paid.toLocaleString() + '</div>' +
-      '</div>' +
-      '<div style="text-align:right;">' +
-        '<div style="font-size:15px;font-weight:800;color:' + (balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)') + ';">' +
-          (balance>0?'+':'') + '$' + balance.toLocaleString() +
-        '</div>' +
-        '<div style="font-size:10px;color:var(--t3);">' + (balance>0?'미지급':'미수') + '</div>' +
-      '</div>' +
-    '</div>'
-  ).join('');
+  listEl.innerHTML = driverStats.map(({ drv, earned, paid, balance }) => {
+    const de = escH(drv);
+    const bc = balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)';
+    return '<div style="background:var(--sf2);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;"'
+      + ' data-drv="' + de + '" onclick="selectWageDriver(this.dataset.drv)">'
+      + '<div>'
+      + '<div style="font-size:13px;font-weight:700;color:var(--t1);">' + de + '</div>'
+      + '<div style="font-size:11px;color:var(--t3);margin-top:2px;">발생 $' + earned.toLocaleString() + ' · 지급 $' + paid.toLocaleString() + '</div>'
+      + '</div>'
+      + '<div style="text-align:right;">'
+      + '<div style="font-size:15px;font-weight:800;color:' + bc + ';">' + (balance>0?'+':'') + '$' + balance.toLocaleString() + '</div>'
+      + '<div style="font-size:10px;color:var(--t3);">' + (balance>0?'미지급':'미수') + '</div>'
+      + '</div>'
+      + '</div>';
+  }).join('');
 }
 
 function getMondayOfDate(isoDate) {
@@ -3620,7 +3620,8 @@ async function getEarnedFromSheets(driverName, weekStart) {
   return total;
 }
 
-async function rWage(){
+async function selectWageDriver(drv){setWageTab('single');ST.wageDriver=drv;rWage();}
+function rWage(){
   // 로드는 nv()의 캐시 로직에서 처리 — rWage는 렌더만 담당
   // (syncWagesNow()에서 수동 재로드 가능)
   const dSel = document.getElementById('wage-driver-sel');
