@@ -2740,20 +2740,14 @@ async function submitMotReport() {
   const checkSummary = Object.entries(allChecks)
     .map(([k,v])=>`${k}:${v}`).join('|');
 
-  try {
-    await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({
-        action: 'submit_mot',
-        Date: fmtDate(date), Time: time, Driver: driver, Rego: rego,
-        Location: location, Officer: officer, Type: type,
-        Result: result, NoticeNum: noticeNum, Fine: fine,
-        Notes: notes, FailedItems: failedItems.join(','),
-        Checks: checkSummary
-      })
-    });
-  } catch(e) { console.warn('MOT GAS 저장 실패:', e); }
+  // GAS 저장 (재시도 큐 방식)
+  postToSheetsWithRetry('submit_mot', {
+    Date: fmtDate(date), Time: time, Driver: driver, Rego: rego,
+    Location: location, Officer: officer, Type: type,
+    Result: result, NoticeNum: noticeNum, Fine: fine,
+    Notes: notes, FailedItems: failedItems.join(','),
+    Checks: checkSummary
+  });
 
   // 폼 리셋
   ['mot-rego','mot-location','mot-officer','mot-notice-num','mot-fine','mot-notes'].forEach(id=>{
@@ -3177,6 +3171,9 @@ function submitDailyReport(){
     night: parseFloat(document.getElementById('f-night')?.value||0),
     nightOwner: getNightRate()?.owner || 0,
     tip: parseFloat(document.getElementById('f-tip')?.value||0),
+    wash: parseFloat(document.getElementById('f-wash')?.value||0),
+    meal: parseFloat(document.getElementById('f-meal')?.value||0),
+    etc: parseFloat(document.getElementById('f-etc')?.value||0),
     remarks: document.getElementById('dr-remarks').value,
   };
   if(report.seats) shift.seats = report.seats; // 마지막 인승 저장 (다음 리포트 초기값)
@@ -3215,10 +3212,13 @@ function submitDailyReport(){
     Fuel: report.fuel,
     Fuel_Personal: report.fuelPersonal ? 'Y' : '',
     Early: report.early,
-    Night: report.night,
+    Night_DR: report.night,
     Night_Type: report.nightType || '',
     Night_Owner: report.nightOwner || 0,
+    Wash: report.wash || 0,
+    Meal: report.meal || 0,
     Tip: report.tip,
+    Etc: report.etc || 0,
     Total_TA: report.total,
     DR_Cost: report.dr,
     Remarks: report.remarks

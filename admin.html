@@ -624,6 +624,27 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 </div>
 
 <!-- WAGE PAGE -->
+
+<!-- MOT 리포트 관리 페이지 -->
+<div class="pg" id="pmot">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">🚔 MOT 검사 기록</div><div class="ssb">드라이버 제출 전체 조회</div></div>
+    <button class="btn bgh sm" onclick="rMot(true)">🔄 새로고침</button>
+  </div>
+  <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+    <select id="mot-filter-driver" class="profit-sel" style="flex:1;min-width:100px;" onchange="renderMotAdmin()">
+      <option value="">전체 드라이버</option>
+    </select>
+    <select id="mot-filter-result" class="profit-sel" style="flex:1;min-width:80px;" onchange="renderMotAdmin()">
+      <option value="">전체 결과</option>
+      <option value="PASS">PASS</option>
+      <option value="FAIL">FAIL</option>
+      <option value="ADVISORY">ADVISORY</option>
+    </select>
+  </div>
+  <div id="mot-admin-list" style="padding:10px 14px;"></div>
+</div>
+
 <div class="pg" id="pwage">
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">💵 드라이버 급여</div><div class="ssb">지급 기록 관리</div></div>
@@ -632,13 +653,31 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <button class="btn bac sm" onclick="openWageEntry(null)">+ 지급 추가</button>
     </div>
   </div>
-  <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;">
-    <select id="wage-driver-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
-    <select id="wage-week-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
-    <button class="btn brd sm" onclick="deleteWageWeek()" style="padding:0 10px;" title="주간 삭제">🗑</button>
+  <!-- 탭: 드라이버별 / 전체 -->
+  <div style="display:flex;gap:0;padding:10px 14px 0;">
+    <button id="wage-tab-single" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;" onclick="setWageTab('single')">👤 드라이버별</button>
+    <button id="wage-tab-all" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="setWageTab('all')">📊 전체 보기</button>
   </div>
-  <div id="wage-summary" style="padding:10px 14px 0;"></div>
-  <div id="wage-list" style="padding:0 14px;"></div>
+  <!-- 드라이버별 뷰 -->
+  <div id="wage-view-single">
+    <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;">
+      <select id="wage-driver-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
+      <select id="wage-week-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
+      <button class="btn brd sm" onclick="deleteWageWeek()" style="padding:0 10px;" title="주간 삭제">🗑</button>
+    </div>
+    <div id="wage-summary" style="padding:10px 14px 0;"></div>
+    <div id="wage-list" style="padding:0 14px;"></div>
+  </div>
+  <!-- 전체 보기 뷰 -->
+  <div id="wage-view-all" style="display:none;padding:10px 14px 0;">
+    <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;">
+      <select id="wage-all-week-sel" class="profit-sel" style="flex:1;" onchange="renderWageAll()">
+        <option value="">전체 기간</option>
+      </select>
+    </div>
+    <div id="wage-all-summary"></div>
+    <div id="wage-all-list"></div>
+  </div>
 </div>
 
 <!-- SUB CONTRACT PAGE -->
@@ -768,6 +807,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div class="ni" id="nhtl" onclick="nv('phtl','nhtl');rH()"><div class="nie">🏨</div><div class="nil">호텔</div></div>
   <div class="ni" id="nsub" onclick="nv('psub','nsub');rSub()"><div class="nie">🤝</div><div class="nil">서브</div></div>
   <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div></div>
+  <div class="ni" id="nmot" onclick="nv('pmot','nmot');rMot()"><div class="nie">🚔</div><div class="nil">MOT</div></div>
   <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
   <div class="ni" id="ninv" onclick="nv('pinv','ninv');initInvoice()"><div class="nie">🧾</div><div class="nil">인보이스</div></div>
 </div>
@@ -893,6 +933,7 @@ function nv(pg,ni){
     phtl:  ()=>rH(),
     pprc:  ()=>{ rP(); rPD(); },
     psub:  ()=>rSub(),
+    pmot:  ()=>rMot(),
     pwage: ()=>rWage(ST.curWageDriver),
     pinv:  ()=>initInvoice(),
     pntc:  ()=>loadNoticesFromGAS(),
@@ -907,6 +948,7 @@ function nv(pg,ni){
     phtl:  ()=>syncHotels().then(rH),
     pprc:  ()=>syncPrices().then(()=>{ rP(); rPD(); }),
     psub:  ()=>syncSub().then(rSub),
+    pmot:  ()=>{ _motLastSync=0; return rMot(true); },
     pwage: ()=>{ _wagesLastSync=0; return loadWagesFromSheet(true).then(()=>rWage(ST.curWageDriver)); },
     pinv:  ()=>initInvoice(),
     pntc:  ()=>loadNoticesFromGAS(),
@@ -3259,6 +3301,213 @@ function renderAdminNotices() {
   }).join('');
 }
 
+
+
+// ═══════════════════════════════════════════════
+// MOT 관리자 - 전체 조회
+// ═══════════════════════════════════════════════
+let _motCache = [];
+let _motLastSync = 0;
+
+async function rMot(force=false) {
+  if (force || Date.now() - _motLastSync > 30000) {
+    try {
+      const res = await fetch(SCRIPT_URL + '?action=get_mot_reports');
+      const json = await res.json();
+      if (json.ok) {
+        _motCache = json.rows || [];
+        _motLastSync = Date.now();
+      }
+    } catch(e) { console.warn('MOT 로드 실패:', e); }
+  }
+  // 드라이버 필터 셀렉트 채우기
+  const dSel = document.getElementById('mot-filter-driver');
+  if (dSel) {
+    const drivers = [...new Set(_motCache.map(r => r.Driver).filter(Boolean))].sort();
+    const cur = dSel.value;
+    dSel.innerHTML = '<option value="">전체 드라이버</option>' +
+      drivers.map(d => '<option value="' + escH(d) + '"' + (d===cur?' selected':'') + '>' + escH(d) + '</option>').join('');
+  }
+  renderMotAdmin();
+}
+
+function renderMotAdmin() {
+  const el = document.getElementById('mot-admin-list');
+  if (!el) return;
+  const driverF = document.getElementById('mot-filter-driver')?.value || '';
+  const resultF = document.getElementById('mot-filter-result')?.value || '';
+
+  let rows = [..._motCache];
+  if (driverF) rows = rows.filter(r => r.Driver === driverF);
+  if (resultF) rows = rows.filter(r => String(r.Result||'').toUpperCase() === resultF);
+  rows.sort((a,b) => String(b.Date||'').localeCompare(String(a.Date||'')));
+
+  if (!rows.length) {
+    el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--t3);font-size:13px;">기록이 없습니다.</div>';
+    return;
+  }
+
+  // 요약 통계
+  const total = rows.length;
+  const fails = rows.filter(r => String(r.Result||'').toUpperCase()==='FAIL').length;
+  const fines = rows.reduce((s,r) => s + (parseFloat(r.Fine)||0), 0);
+
+  el.innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">' +
+      motStat('총 건수', total + '건', 'var(--ac)') +
+      motStat('FAIL', fails + '건', fails>0?'var(--rd)':'var(--t3)') +
+      motStat('벌금 합계', '$' + fines.toLocaleString(), fines>0?'var(--or)':'var(--t3)') +
+    '</div>' +
+    rows.map(r => {
+      const res = String(r.Result||'').toUpperCase();
+      const resColor = res==='PASS'?'#16a34a':res==='FAIL'?'#dc2626':'#d97706';
+      const failed = r.FailedItems ? r.FailedItems.split(',').filter(Boolean) : [];
+      return '<div style="background:var(--sf2);border-radius:12px;padding:12px 14px;margin-bottom:8px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">' +
+          '<div>' +
+            '<div style="font-size:13px;font-weight:800;color:var(--t1);">' + escH(r.Driver||'') + ' · ' + escH(r.Rego||'') + '</div>' +
+            '<div style="font-size:11px;color:var(--t3);margin-top:2px;">' + escH(String(r.Date||'')) + ' ' + escH(r.Time||'') +
+              (r.Location ? ' · ' + escH(r.Location) : '') + '</div>' +
+          '</div>' +
+          '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">' +
+            '<span style="font-size:12px;font-weight:800;color:' + resColor + ';background:' + resColor + '18;padding:2px 10px;border-radius:20px;">' + res + '</span>' +
+            (parseFloat(r.Fine||0)>0 ? '<span style="font-size:11px;color:#dc2626;font-weight:700;">벌금 $' + parseFloat(r.Fine).toLocaleString() + '</span>' : '') +
+          '</div>' +
+        '</div>' +
+        (r.Type ? '<div style="font-size:11px;color:var(--t3);">유형: ' + escH(r.Type) + (r.Officer?' · 담당관: '+escH(r.Officer):'') + '</div>' : '') +
+        (failed.length ? '<div style="margin-top:6px;"><span style="font-size:10px;font-weight:700;color:#dc2626;">미통과 항목: </span>' +
+          failed.map(f=>'<span style="font-size:10px;background:#fee2e2;color:#dc2626;border-radius:4px;padding:1px 6px;margin:1px;display:inline-block;">'+escH(f)+'</span>').join('') + '</div>' : '') +
+        (r.Notes ? '<div style="font-size:11px;color:var(--t2);margin-top:4px;border-top:1px solid var(--b2);padding-top:4px;">' + escH(r.Notes) + '</div>' : '') +
+      '</div>';
+    }).join('');
+}
+
+function motStat(label, val, color) {
+  return '<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">' +
+    '<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">' + label + '</div>' +
+    '<div style="font-size:15px;font-weight:800;color:' + color + ';">' + val + '</div>' +
+  '</div>';
+}
+
+// ═══════════════════════════════════════════════
+// 급여 탭 전환
+// ═══════════════════════════════════════════════
+let _wageTab = 'single';
+
+function setWageTab(tab) {
+  _wageTab = tab;
+  document.getElementById('wage-view-single').style.display = tab==='single' ? '' : 'none';
+  document.getElementById('wage-view-all').style.display = tab==='all' ? '' : 'none';
+  document.getElementById('wage-tab-single').classList.toggle('on', tab==='single');
+  document.getElementById('wage-tab-all').classList.toggle('on', tab==='all');
+  if (tab==='all') renderWageAll();
+}
+
+async function renderWageAll() {
+  const sumEl = document.getElementById('wage-all-summary');
+  const listEl = document.getElementById('wage-all-list');
+  if (!sumEl || !listEl) return;
+
+  const wages = getWages();
+  const rows = _reportsCache || [];
+
+  // 주차 목록 수집 (전체 드라이버 통합)
+  const allWeeks = new Set();
+  Object.values(wages).forEach(dw => Object.keys(dw).forEach(w => allWeeks.add(w)));
+  rows.forEach(r => { if(r._isoDate) allWeeks.add(getMondayOfDate(r._isoDate)); });
+  const sortedWeeks = [...allWeeks].filter(Boolean).sort((a,b) => b.localeCompare(a));
+
+  // 주차 셀렉트 채우기
+  const wSel = document.getElementById('wage-all-week-sel');
+  const curWeek = wSel?.value || '';
+  if (wSel) {
+    wSel.innerHTML = '<option value="">전체 기간</option>' +
+      sortedWeeks.map(w => '<option value="'+w+'"'+(w===curWeek?' selected':'')+'>'+getWeekLabel(w)+'</option>').join('');
+  }
+  const filterWeek = wSel?.value || '';
+
+  // 드라이버별 합산
+  const drivers = DB.D.map(d => d.Name_KR || d.Name_EN).filter(Boolean);
+  let grandEarned = 0, grandPaid = 0;
+  const driverStats = [];
+
+  for (const drv of drivers) {
+    const drvWages = wages[drv] || {};
+    let earned = 0, paid = 0;
+
+    if (filterWeek) {
+      // 특정 주
+      const mon = filterWeek;
+      const sun = (() => { const d=new Date(mon); d.setDate(d.getDate()+6); return toLocalISO(d); })();
+      const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
+      const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+      const weekRows = rows.filter(r => matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
+      earned = weekRows.reduce((s,r) => s+(parseFloat(r.DR_Cost)||0), 0);
+      const week = drvWages[mon] || {entries:[]};
+      paid = (week.entries||[]).reduce((s,e) => s+(e.amount||0), 0);
+    } else {
+      // 전체 기간
+      for (const [wk, week] of Object.entries(drvWages)) {
+        paid += (week.entries||[]).reduce((s,e) => s+(e.amount||0), 0);
+      }
+      earned = rows.filter(r => {
+        const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
+        const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+        return matchNames.has(String(r.Driver||'').trim());
+      }).reduce((s,r) => s+(parseFloat(r.DR_Cost)||0), 0);
+    }
+
+    if (earned > 0 || paid > 0) {
+      driverStats.push({ drv, earned, paid, balance: earned - paid });
+      grandEarned += earned;
+      grandPaid += paid;
+    }
+  }
+
+  driverStats.sort((a,b) => Math.abs(b.balance) - Math.abs(a.balance));
+
+  // 전체 요약
+  sumEl.innerHTML =
+    '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:10px;">' +
+      '<div style="font-size:11px;color:var(--t3);font-weight:700;margin-bottom:8px;">' +
+        (filterWeek ? getWeekLabel(filterWeek) : '전체 기간') + ' — 전체 드라이버 합계' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">' +
+        wstat('총 발생 DR', grandEarned, 'var(--gn)') +
+        wstat('총 지급', grandPaid, 'var(--ac)') +
+        wstat('총 잔액', grandEarned - grandPaid, (grandEarned-grandPaid)>0?'var(--or)':'var(--t3)') +
+      '</div>' +
+    '</div>';
+
+  if (!driverStats.length) {
+    listEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--t3);font-size:13px;">데이터가 없습니다.</div>';
+    return;
+  }
+
+  listEl.innerHTML = driverStats.map(({ drv, earned, paid, balance }) =>
+    '<div style="background:var(--sf2);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;"' +
+      ' onclick="setWageTab('single');ST.wageDriver='' + escH(drv) + '';rWage();">' +
+      '<div>' +
+        '<div style="font-size:13px;font-weight:700;color:var(--t1);">' + escH(drv) + '</div>' +
+        '<div style="font-size:11px;color:var(--t3);margin-top:2px;">발생 $' + earned.toLocaleString() + ' · 지급 $' + paid.toLocaleString() + '</div>' +
+      '</div>' +
+      '<div style="text-align:right;">' +
+        '<div style="font-size:15px;font-weight:800;color:' + (balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)') + ';">' +
+          (balance>0?'+':'') + '$' + balance.toLocaleString() +
+        '</div>' +
+        '<div style="font-size:10px;color:var(--t3);">' + (balance>0?'미지급':'미수') + '</div>' +
+      '</div>' +
+    '</div>'
+  ).join('');
+}
+
+function getMondayOfDate(isoDate) {
+  const d = new Date(isoDate);
+  const day = d.getDay();
+  const diff = (day===0) ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return toLocalISO(d);
+}
 
 // WAGE (드라이버 급여 지급)
 // ═══════════════════════════════════════

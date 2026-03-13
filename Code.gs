@@ -15,7 +15,9 @@ const REPORT_HEADERS = {
                      'Wash','Meal','Tip','Etc','Remarks'],
   'Pre_Departure':  ['Submitted','Driver','Date','Rego','Seats','Start_KM','Fuel','Start_Time',
                      'Check_Results','Remarks'],
-  'End_of_Shift':   ['Submitted','Driver','Date','Rego','End_KM','End_Time','Fuel_End','Remarks']
+  'End_of_Shift':   ['Submitted','Driver','Date','Rego','End_KM','End_Time','Fuel_End','Remarks'],
+  'MOT_Report':     ['Submitted','Driver','Date','Time','Rego','Location','Officer','Type',
+                     'Result','NoticeNum','Fine','Notes','FailedItems','Checks']
 };
 
 // ── 마스터 시트 헤더 ──
@@ -49,7 +51,8 @@ const MASTER_HEADERS = {
 const TAB_COLORS = {
   'M_Vehicles':'#d97706','M_Drivers':'#1a56db','M_Clients':'#7e3af2',
   'M_Guides':'#0e9f6e','M_Hotels':'#e02424','M_PriceClient':'#0694a2',
-  'M_PriceDriver':'#057a55','M_PriceSub':'#7c3aed','Sub_Rates':'#b45309','Ledger':'#1e40af','Wages':'#065f46'
+  'M_PriceDriver':'#057a55','M_PriceSub':'#7c3aed','Sub_Rates':'#b45309','Ledger':'#1e40af','Wages':'#065f46',
+  'MOT_Report':'#be185d'
 };
 
 function cors(data) {
@@ -73,6 +76,7 @@ function doGet(e) {
     if (action === 'get_price_sub')   return cors(getPriceSubSheet());
     if (action === 'get_ledger')      return cors(getLedgerSheet());
     if (action === 'get_wages')       return cors(getWagesSheet(e.parameter.driver));
+    if (action === 'get_mot_reports') return cors(getReports('MOT_Report', e.parameter.driver));
     return cors({ok:false, msg:'Unknown action: ' + action});
   } catch(err) {
     return cors({ok:false, error: err.toString()});
@@ -91,6 +95,7 @@ function doPost(e) {
     if (action === 'save_report')        return cors(saveReport('Daily_Report',  payload.data));
     if (action === 'save_predeparture')  return cors(saveReport('Pre_Departure', payload.data));
     if (action === 'save_endofshift')    return cors(saveReport('End_of_Shift',  payload.data));
+    if (action === 'submit_mot')         return cors(saveReport('MOT_Report',    payload.data));
 
     // 마스터 CRUD
     if (action === 'add_master')         return cors(addMasterRow(payload.sheet, payload.data));
