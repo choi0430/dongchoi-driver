@@ -3232,8 +3232,8 @@ function submitDailyReport(){
     tourcode: document.getElementById('dr-tourcode').value,
     total, dr: parseFloat(document.getElementById('t-dr').textContent.replace('$',''))||0,
     svcCharge: getSvcValue(), svcLabel,
-    hotelSurcharge: getHotelValue(),
-    distSurcharge: getDistValue(),
+    hotelSurcharge: getHotelTA(),   // TA 청구 기준 (인보이스용)
+    distSurcharge: getDistTA(),     // TA 청구 기준 (인보이스용)
     ot: parseFloat(document.getElementById('f-ot')?.value||0),
     trailer: parseFloat(document.getElementById('f-trailer')?.value||0),
     toll: parseFloat(document.getElementById('f-toll')?.value||0),
@@ -3872,56 +3872,72 @@ function updateManualHint(veh){
 }
 
 // ──────────────────────────────────────────
-// Hotel Surcharge 힌트: 선택된 DR 금액 안내
+// Hotel Surcharge 통합 힌트 (픽업/드롭 감지 + 드롭다운 선택)
 // ──────────────────────────────────────────
 function updateHotelHint(){
-  const hintEl = document.getElementById('hotel-hint-box');
+  const hintEl  = document.getElementById('hotel-hint-box');
   if(!hintEl) return;
+
   const seats   = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
-  const curVal  = parseFloat(cselGetValue('f-hotel-select') || '0');
   const pickup  = (document.getElementById('dr-pickup')?.value  || '').trim();
   const dropoff = (document.getElementById('dr-dropoff')?.value || '').trim();
+  const curVal  = parseFloat(cselGetValue('f-hotel-select') || '0');
 
-  if(!seats){ hintEl.style.display='none'; return; }
-
-  const items = [];
+  const hotelOpts  = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
+  const fullFee    = hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 20;
+  const halfFee    = hotelOpts.length >= 2 ? Number(hotelOpts[1]?.val || 0) : Math.round(fullFee/2);
+  const seatsLabel = seats || '인승 미선택';
 
   function isSurch(name){
     if(!name) return false;
     const h = (MASTER.hotels||[]).find(h=>h.Hotel_Name===name);
     return h?.Surcharge_Area ? h.Surcharge_Area.trim()!=='' : false;
   }
+
   const pickupSurch  = isSurch(pickup);
   const dropoffSurch = isSurch(dropoff);
   const pickupAP     = AIRPORT_PATTERN.test(pickup);
   const dropoffAP    = AIRPORT_PATTERN.test(dropoff);
+  const hasSurch     = pickupSurch || dropoffSurch;
+  const items        = [];
 
-  if(curVal === 0){
-    // $0 선택 — 서차지 호텔이 픽업/드롭에 있으면 경고
-    if(pickupSurch || dropoffSurch){
-      const surchHotel = pickupSurch ? pickup : dropoff;
-      const drOpts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
-      const maxDR  = Math.max(...drOpts.map(o=>Number(o.val)));
-      items.push({ type:'warn',
-        title: '⚠️ 서차지 구역 호텔 감지 — ' + surchHotel,
-        sub:   seats + ' 기준 드라이버 서차지: 편도 $'+(maxDR/2 === Math.round(maxDR/2) ? maxDR/2 : drOpts[1]?.val||'?')+' · 양쪽 $'+maxDR
-      });
-    } else {
-      hintEl.style.display='none'; return;
-    }
-  } else {
-    // 금액 선택됨 — 확인 힌트
+  if(curVal > 0){
+    // ── 금액 선택됨: 확인 힌트 ──
     const dirLabel = (() => {
-      if(pickupSurch && dropoffSurch) return '양쪽 서차지 구역';
+      if(pickupSurch && dropoffSurch)          return '양쪽 서차지 구역 호텔';
       if((pickupSurch && dropoffAP) || (pickupAP && dropoffSurch)) return '편도 (공항 ↔ 서차지 호텔)';
-      if(pickupSurch) return pickup + ' 픽업';
+      if(pickupSurch)  return pickup  + ' 픽업';
       if(dropoffSurch) return dropoff + ' 드롭';
       return '호텔 서차지';
     })();
     items.push({ type:'apply',
-      title: '✅ 호텔 서차지 $'+curVal+' 드라이버 지급 ('+seats+')',
+      title: '✅ 호텔 서차지 $'+curVal+' 드라이버 지급 ('+seatsLabel+')',
       sub:   dirLabel
     });
+  } else if(hasSurch){
+    // ── $0이지만 서차지 호텔 감지: 경고 힌트 ──
+    const surchName = pickupSurch ? pickup : dropoff;
+    let suggestAmt = 0;
+    if(pickupSurch && dropoffSurch)                                       suggestAmt = fullFee;
+    else if((pickupSurch && dropoffAP) || (pickupAP && dropoffSurch))     suggestAmt = halfFee;
+    else                                                                   suggestAmt = halfFee;
+
+    const dirDesc = (() => {
+      if(pickupSurch && dropoffSurch)         return '왕복 — 양쪽 서차지 구역';
+      if(pickupSurch && dropoffAP)            return pickup + ' 픽업 → 공항 편도';
+      if(pickupAP && dropoffSurch)            return '공항 픽업 → ' + dropoff + ' 편도';
+      if(pickupSurch)                         return pickup + ' 픽업 (단방향)';
+      return dropoff + ' 드롭 (단방향)';
+    })();
+    items.push({ type:'warn',
+      title: '⚠️ 서차지 구역 호텔 — ' + surchName,
+      sub:   dirDesc + ' · ' + seatsLabel + ' 기준 $'+suggestAmt+' 권장'
+    });
+  } else if(!seats){
+    hintEl.style.display='none'; return;
+  } else {
+    // 서차지 호텔 없음, $0 — 숨김
+    hintEl.style.display='none'; return;
   }
 
   renderHintBox(hintEl, items);
@@ -4107,59 +4123,10 @@ function isSurchargeHotel(name){
 
 // 픽업/드롭 변경될 때마다 호출 — 호텔 서차지 + Early 통합 알림
 function checkHotelSurchargeHint(){
-  const pickup  = (document.getElementById('dr-pickup')?.value  || '').trim();
-  const dropoff = (document.getElementById('dr-dropoff')?.value || '').trim();
-  const hintEl  = document.getElementById('pickup-drop-hint');
-  if(!hintEl) return;
-
-  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
-  const hotelOpts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
-  const fullFee   = hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 10;
-  const halfFee   = Math.round(fullFee/2);
-  const seatsLabel = seats ? seats : '인승 미선택';
-
-  function isSurch(name){
-    if(!name) return false;
-    if(MASTER.hotels && MASTER.hotels.length){
-      const h = MASTER.hotels.find(h=>h.Hotel_Name===name);
-      if(h) return h.Surcharge_Area ? h.Surcharge_Area.trim()!=='' : false;
-    }
-    return false;
-  }
-
-  const pickupSurcharge  = isSurch(pickup);
-  const dropoffSurcharge = isSurch(dropoff);
-  const pickupAirport    = AIRPORT_PATTERN.test(pickup);
-  const dropoffAirport   = AIRPORT_PATTERN.test(dropoff);
-
-  // 픽업/드롭 미입력 시 — 인승 있으면 기본 금액 안내
-  if(!pickup && !dropoff){
-    if(seats && fullFee > 0){
-      renderHintBox(hintEl, [{ type:'info', title:'🏨 호텔 서차지 ('+seats+')', sub:'서차지 구역 단방향 $'+halfFee+' / 왕복 $'+fullFee+' · 픽업/드롭 입력 시 자동 감지' }]);
-    } else {
-      renderHintBox(hintEl, []);
-    }
-    return;
-  }
-
-  // 서차지 호텔 없으면 숨기기
-  if(!pickupSurcharge && !dropoffSurcharge){ renderHintBox(hintEl, []); return; }
-
-  const items = [];
-
-  if(pickupSurcharge && dropoffSurcharge){
-    items.push({ type:'warn', title:'🏨 호텔 서차지 전액 적용 — $'+fullFee+' ('+seatsLabel+')', sub:'픽업·드롭 모두 서차지 구역 호텔' });
-  } else if(pickupSurcharge && dropoffAirport){
-    items.push({ type:'info', title:'🏨 호텔 서차지 50% — $'+halfFee+' ('+seatsLabel+')', sub:'서차지 호텔 픽업 → 공항 드롭 (전액 $'+fullFee+'의 50%)' });
-  } else if(pickupAirport && dropoffSurcharge){
-    items.push({ type:'info', title:'🏨 호텔 서차지 50% — $'+halfFee+' ('+seatsLabel+')', sub:'공항 픽업 → 서차지 호텔 드롭 (전액 $'+fullFee+'의 50%)' });
-  } else if(pickupSurcharge){
-    items.push({ type:'warn', title:'🏨 호텔 서차지 해당 — '+pickup, sub:'서차지 구역 호텔 픽업 · 최대 $'+fullFee+' ('+seatsLabel+') · 방향 확인 후 선택' });
-  } else if(dropoffSurcharge){
-    items.push({ type:'warn', title:'🏨 호텔 서차지 해당 — '+dropoff, sub:'서차지 구역 호텔 드롭 · 최대 $'+fullFee+' ('+seatsLabel+') · 방향 확인 후 선택' });
-  }
-
-  renderHintBox(hintEl, items);
+  // pickup-drop-hint는 비워두고 hotel-hint-box로 통합
+  const legacyEl = document.getElementById('pickup-drop-hint');
+  if(legacyEl) renderHintBox(legacyEl, []);
+  updateHotelHint();
 }
 
 function calcOT(){
