@@ -98,6 +98,8 @@ function doPost(e) {
 
     // 리포트 저장
     if (action === 'save_report')        return cors(saveReport('Daily_Report',  payload.data));
+    if (action === 'update_report')      return cors(updateReport(payload.sheet, payload.rowIndex, payload.data));
+    if (action === 'delete_report')      return cors(deleteReport(payload.sheet, payload.rowIndex));
     if (action === 'save_predeparture')  return cors(saveReport('Pre_Departure', payload.data));
     if (action === 'save_endofshift')    return cors(saveReport('End_of_Shift',  payload.data));
     if (action === 'submit_mot')         return cors(saveReport('MOT_Report',    payload.data));
@@ -159,6 +161,26 @@ function saveReport(sheetName, data) {
 // ═══════════════════════════════════════════════════
 // 마스터 읽기
 // ═══════════════════════════════════════════════════
+
+function updateReport(sheetName, rowIndex, data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return {ok: false, msg: sheetName + ' 시트 없음'};
+  const headers = REPORT_HEADERS[sheetName];
+  if (!headers) return {ok: false, msg: 'Unknown sheet: ' + sheetName};
+  const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  return {ok: true};
+}
+
+function deleteReport(sheetName, rowIndex) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return {ok: false, msg: sheetName + ' 시트 없음'};
+  sheet.deleteRow(rowIndex);
+  return {ok: true};
+}
+
 function getMaster(sheetName) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(sheetName);

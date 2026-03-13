@@ -625,6 +625,155 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
 <!-- WAGE PAGE -->
 
+<!-- DR REPORT PAGE -->
+<div class="pg" id="pdr">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">📋 운행 리포트</div><div class="ssb">Daily Report 조회·수정·삭제</div></div>
+    <button class="btn bgh sm" onclick="loadDR(true)">🔄 새로고침</button>
+  </div>
+  <!-- 필터 -->
+  <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+    <select id="dr-filter-driver" class="profit-sel" style="flex:1;min-width:110px;" onchange="renderDR()">
+      <option value="">전체 드라이버</option>
+    </select>
+    <select id="dr-filter-week" class="profit-sel" style="flex:1;min-width:120px;" onchange="renderDR()">
+      <option value="">전체 기간</option>
+    </select>
+    <select id="dr-filter-rego" class="profit-sel" style="flex:1;min-width:90px;" onchange="renderDR()">
+      <option value="">전체 차량</option>
+    </select>
+  </div>
+  <!-- 요약 배지 -->
+  <div id="dr-summary" style="padding:6px 14px 0;font-size:11px;color:var(--t3);"></div>
+  <!-- 리포트 목록 -->
+  <div id="dr-list" style="padding:8px 14px 80px;"></div>
+</div>
+
+<!-- DR 수정 모달 -->
+<div id="dr-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9200;align-items:center;justify-content:center;padding:12px;">
+  <div style="background:var(--sf);border-radius:16px;width:100%;max-width:500px;max-height:92vh;overflow-y:auto;padding:18px;">
+    <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:14px;">✏️ 리포트 수정</div>
+    <div id="dr-modal-meta" style="font-size:11px;color:var(--t3);margin-bottom:12px;padding:8px 10px;background:var(--sf2);border-radius:8px;"></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <!-- Row 1 -->
+      <div>
+        <div class="flb">날짜</div>
+        <input id="drm-date" class="profit-finp" style="width:100%;" placeholder="DD/MM/YYYY">
+      </div>
+      <div>
+        <div class="flb">차량 (Rego)</div>
+        <input id="drm-rego" class="profit-finp" style="width:100%;">
+      </div>
+      <!-- Row 2 -->
+      <div>
+        <div class="flb">여행사</div>
+        <input id="drm-agency" class="profit-finp" style="width:100%;">
+      </div>
+      <div>
+        <div class="flb">어트랙션</div>
+        <input id="drm-attraction" class="profit-finp" style="width:100%;">
+      </div>
+      <!-- Row 3 -->
+      <div>
+        <div class="flb">픽업</div>
+        <input id="drm-pickup" class="profit-finp" style="width:100%;">
+      </div>
+      <div>
+        <div class="flb">드롭오프</div>
+        <input id="drm-dropoff" class="profit-finp" style="width:100%;">
+      </div>
+      <!-- Row 4 -->
+      <div>
+        <div class="flb">시작 시간</div>
+        <input id="drm-time-start" class="profit-finp" style="width:100%;" placeholder="HH:MM">
+      </div>
+      <div>
+        <div class="flb">종료 시간</div>
+        <input id="drm-time-end" class="profit-finp" style="width:100%;" placeholder="HH:MM">
+      </div>
+      <!-- Row 5 -->
+      <div>
+        <div class="flb">KM 시작</div>
+        <input id="drm-km-start" class="profit-finp" type="number" style="width:100%;">
+      </div>
+      <div>
+        <div class="flb">KM 종료</div>
+        <input id="drm-km-end" class="profit-finp" type="number" style="width:100%;">
+      </div>
+      <!-- Row 6 -->
+      <div>
+        <div class="flb">DR Cost ($)</div>
+        <input id="drm-dr-cost" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
+      <div>
+        <div class="flb">OT ($)</div>
+        <input id="drm-ot" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
+      <!-- Row 7 -->
+      <div>
+        <div class="flb">SVC ($)</div>
+        <input id="drm-svc" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
+      <div>
+        <div class="flb">Hotel Surcharge ($)</div>
+        <input id="drm-hotel-surch" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
+      <!-- Row 8 -->
+      <div>
+        <div class="flb">Dist Surcharge ($)</div>
+        <input id="drm-dist-surch" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
+      <div>
+        <div class="flb">Early ($)</div>
+        <input id="drm-early" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
+      <!-- Row 9 -->
+      <div>
+        <div class="flb">Night DR ($)</div>
+        <input id="drm-night-dr" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
+      <div>
+        <div class="flb">Toll ($)</div>
+        <input id="drm-toll" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
+      <!-- Row 10 -->
+      <div>
+        <div class="flb">Wash ($)</div>
+        <input id="drm-wash" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
+      <div>
+        <div class="flb">Meal ($)</div>
+        <input id="drm-meal" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
+    </div>
+
+    <!-- 가이드/투어코드 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
+      <div>
+        <div class="flb">가이드</div>
+        <input id="drm-guide" class="profit-finp" style="width:100%;">
+      </div>
+      <div>
+        <div class="flb">Tour Code</div>
+        <input id="drm-tourcode" class="profit-finp" style="width:100%;">
+      </div>
+    </div>
+
+    <!-- 비고 -->
+    <div style="margin-top:8px;">
+      <div class="flb">비고 (Remarks)</div>
+      <textarea id="drm-remarks" class="profit-finp" rows="2" style="width:100%;resize:none;font-family:sans-serif;line-height:1.5;"></textarea>
+    </div>
+
+    <div id="dr-modal-err" style="color:#ef4444;font-size:12px;margin-top:6px;display:none;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn brd" style="flex:1;" onclick="closeDRModal()">취소</button>
+      <button class="btn bac" style="flex:2;" onclick="saveDREdit()">💾 저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- MOT 리포트 관리 페이지 -->
 <div class="pg" id="pmot">
   <div class="shd" style="padding-top:8px">
@@ -807,6 +956,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div class="ni" id="nhtl" onclick="nv('phtl','nhtl');rH()"><div class="nie">🏨</div><div class="nil">호텔</div></div>
   <div class="ni" id="nsub" onclick="nv('psub','nsub');rSub()"><div class="nie">🤝</div><div class="nil">서브</div></div>
   <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div></div>
+  <div class="ni" id="ndr" onclick="nv('pdr','ndr');loadDR()"><div class="nie">📋</div><div class="nil">리포트</div></div>
   <div class="ni" id="nmot" onclick="nv('pmot','nmot');rMot()"><div class="nie">🚔</div><div class="nil">MOT</div></div>
   <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
   <div class="ni" id="ninv" onclick="nv('pinv','ninv');initInvoice()"><div class="nie">🧾</div><div class="nil">인보이스</div></div>
@@ -933,6 +1083,7 @@ function nv(pg,ni){
     phtl:  ()=>rH(),
     pprc:  ()=>{ rP(); rPD(); },
     psub:  ()=>rSub(),
+    pdr:   ()=>renderDR(),
     pmot:  ()=>rMot(),
     pwage: ()=>rWage(ST.curWageDriver),
     pinv:  ()=>initInvoice(),
@@ -948,6 +1099,7 @@ function nv(pg,ni){
     phtl:  ()=>syncHotels().then(rH),
     pprc:  ()=>syncPrices().then(()=>{ rP(); rPD(); }),
     psub:  ()=>syncSub().then(rSub),
+    pdr:   ()=>loadDR(true),
     pmot:  ()=>{ _motLastSync=0; return rMot(true); },
     pwage: ()=>{ _wagesLastSync=0; return loadWagesFromSheet(true).then(()=>rWage(ST.curWageDriver)); },
     pinv:  ()=>initInvoice(),
@@ -3809,6 +3961,265 @@ async function pushWagesToSheet(){
 }
 // wages 구조: { "드라이버명": { "YYYY-MM-DD(월요일)": { total:0, paid:0, entries:[] } } }
 // entry: { date, amount, method, note }
+
+
+// ═══════════════════════════════════════════════════════════
+// DR REPORT 관리 (loadDR / renderDR / edit / delete)
+// ═══════════════════════════════════════════════════════════
+let _drCache = null;
+let _drCacheTime = 0;
+const DR_CACHE_TTL = 3 * 60 * 1000;
+
+async function loadDR(force=false){
+  if(!force && _drCache && Date.now()-_drCacheTime < DR_CACHE_TTL){ renderDR(); return; }
+  try{
+    const res  = await fetch(SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+    const json = await res.json();
+    if(json.ok && json.rows){
+      _drCache = json.rows.map((r,i)=>({ ...r, _rowIndex: i+2 })); // Sheets row = index+2 (헤더 row1)
+      _drCacheTime = Date.now();
+      // _reportsCache도 동기화 (급여 계산용)
+      _reportsCache = _drCache.map(r=>({ ...r, _isoDate: parseToISO(r.Date||'') }));
+    }
+  }catch(e){ toast('리포트 로드 실패: '+e.message,'er'); }
+  renderDR();
+}
+
+function renderDR(){
+  const rows = _drCache || [];
+  const driverSel = document.getElementById('dr-filter-driver');
+  const weekSel   = document.getElementById('dr-filter-week');
+  const regoSel   = document.getElementById('dr-filter-rego');
+  if(!driverSel) return;
+
+  // 드라이버 필터 옵션 채우기
+  const drivers = [...new Set(rows.map(r=>String(r.Driver||'').trim()).filter(Boolean))].sort();
+  const curDrv = driverSel.value;
+  if(driverSel.options.length !== drivers.length+1){
+    driverSel.innerHTML = '<option value="">전체 드라이버</option>' +
+      drivers.map(d=>`<option value="${escH(d)}">${escH(d)}</option>`).join('');
+    if(curDrv) driverSel.value = curDrv;
+  }
+
+  // 주간 필터 옵션 채우기
+  const weeks = [...new Set(rows.map(r=>{ const iso=parseToISO(r.Date||''); if(!iso) return ''; const d=new Date(iso+'T00:00:00'); const diff=(d.getDay()+6)%7; const mon=new Date(d); mon.setDate(d.getDate()-diff); return mon.toISOString().slice(0,10); }).filter(Boolean))].sort().reverse();
+  const curWk = weekSel.value;
+  if(weekSel.options.length !== weeks.length+1){
+    weekSel.innerHTML = '<option value="">전체 기간</option>' +
+      weeks.map(w=>{ const d=new Date(w+'T00:00:00'); const sun=new Date(d); sun.setDate(d.getDate()+6); const fmt=x=>String(x.getDate()).padStart(2,'0')+'/'+(x.getMonth()+1+'').padStart(2,'0')+'/'+x.getFullYear(); return `<option value="${w}">${fmt(d)}~${fmt(sun)}</option>`; }).join('');
+    if(curWk) weekSel.value = curWk;
+  }
+
+  // 차량 필터
+  const regos = [...new Set(rows.map(r=>String(r.Rego||'').trim()).filter(Boolean))].sort();
+  const curRego = regoSel.value;
+  if(regoSel.options.length !== regos.length+1){
+    regoSel.innerHTML = '<option value="">전체 차량</option>' +
+      regos.map(rg=>`<option value="${escH(rg)}">${escH(rg)}</option>`).join('');
+    if(curRego) regoSel.value = curRego;
+  }
+
+  // 필터 적용
+  let filtered = rows;
+  if(driverSel.value) filtered = filtered.filter(r=>r.Driver===driverSel.value);
+  if(weekSel.value){
+    const wMon = weekSel.value;
+    const wSun = new Date(wMon+'T00:00:00'); wSun.setDate(wSun.getDate()+6);
+    filtered = filtered.filter(r=>{ const iso=parseToISO(r.Date||''); return iso>=wMon && iso<=wSun.toISOString().slice(0,10); });
+  }
+  if(regoSel.value) filtered = filtered.filter(r=>r.Rego===regoSel.value);
+
+  // 날짜 내림차순 정렬
+  filtered = [...filtered].sort((a,b)=>{ const ai=parseToISO(a.Date||''), bi=parseToISO(b.Date||''); return bi.localeCompare(ai); });
+
+  // 요약
+  const sumDR = filtered.reduce((s,r)=>s+parseFloat(r.DR_Cost||0),0);
+  document.getElementById('dr-summary').textContent =
+    `${filtered.length}건 · DR 합계 $${sumDR.toFixed(2)}`;
+
+  const el = document.getElementById('dr-list');
+  if(!el) return;
+
+  if(filtered.length===0){
+    el.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">리포트가 없습니다</div>';
+    return;
+  }
+
+  el.innerHTML = filtered.map(r=>{
+    const dr   = parseFloat(r.DR_Cost||0);
+    const ot   = parseFloat(r.OT||0);
+    const svc  = parseFloat(r.SVC_Charge||0);
+    const htl  = parseFloat(r.Hotel_Surcharge||0);
+    const dst  = parseFloat(r.Dist_Surcharge||0);
+    const erl  = parseFloat(r.Early||0);
+    const ngt  = parseFloat(r.Night_DR||0);
+    const wsh  = parseFloat(r.Wash||0);
+    const meal = parseFloat(r.Meal||0);
+    const toll = parseFloat(r.Toll||0);
+    const total = dr+ot+svc+htl+dst+erl+ngt+wsh+meal+toll;
+    const rowIdx = r._rowIndex;
+    const rid = encodeURIComponent(JSON.stringify(rowIdx));
+
+    // 금액 뱃지들
+    const badges = [
+      dr   ? `DR $${dr}`   : '',
+      ot   ? `OT $${ot}`   : '',
+      svc  ? `SVC $${svc}` : '',
+      htl  ? `HTL $${htl}` : '',
+      dst  ? `DST $${dst}` : '',
+      erl  ? `ERL $${erl}` : '',
+      ngt  ? `NGT $${ngt}` : '',
+      wsh  ? `WSH $${wsh}` : '',
+      meal ? `MEL $${meal}`: '',
+      toll ? `TOL $${toll}`: '',
+    ].filter(Boolean).map(b=>`<span style="display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;background:var(--sf2);color:var(--t2);margin:1px;">${b}</span>`).join('');
+
+    return `<div style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12px;font-weight:800;color:var(--t1);">${escH(fmtDate(r.Date))} &nbsp;<span style="color:var(--t3);font-weight:400;">${escH(r.Driver||'')} · ${escH(r.Rego||'')}</span></div>
+          <div style="font-size:11px;color:var(--ac);font-weight:700;margin:2px 0;">${escH(r.Agency||'')}${r.Attraction?' · '+escH(r.Attraction):''}</div>
+          <div style="font-size:11px;color:var(--t3);">${r.Time_Start||''}${r.Time_End?' ~ '+r.Time_End:''} &nbsp;|&nbsp; ${r.KM_Start||''}${r.KM_End?' ~ '+r.KM_End+' km':''}</div>
+          <div style="margin-top:4px;">${badges}</div>
+        </div>
+        <div style="flex-shrink:0;text-align:right;">
+          <div style="font-size:14px;font-weight:800;color:var(--t1);">$${total.toFixed(2)}</div>
+          <div style="display:flex;gap:4px;margin-top:4px;">
+            <button onclick="openDREdit(${rowIdx})" style="padding:4px 10px;border-radius:7px;border:1px solid var(--bd);background:var(--sf);font-size:11px;font-weight:700;cursor:pointer;color:var(--ac);">✏️</button>
+            <button onclick="deleteDR(${rowIdx})" style="padding:4px 10px;border-radius:7px;border:1px solid #fecaca;background:#fef2f2;font-size:11px;font-weight:700;cursor:pointer;color:#ef4444;">🗑</button>
+          </div>
+        </div>
+      </div>
+      ${r.Remarks ? `<div style="font-size:11px;color:var(--t3);margin-top:6px;border-top:1px solid var(--bd);padding-top:5px;">${escH(r.Remarks)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function openDREdit(rowIndex){
+  const r = (_drCache||[]).find(x=>x._rowIndex===rowIndex);
+  if(!r){ toast('리포트를 찾을 수 없습니다','er'); return; }
+  window._drEditRow = rowIndex;
+
+  document.getElementById('dr-modal-meta').textContent =
+    `제출: ${r.Submitted||'-'}  |  드라이버: ${r.Driver||'-'}`;
+  document.getElementById('drm-date').value        = fmtDate(r.Date)||'';
+  document.getElementById('drm-rego').value        = r.Rego||'';
+  document.getElementById('drm-agency').value      = r.Agency||'';
+  document.getElementById('drm-attraction').value  = r.Attraction||'';
+  document.getElementById('drm-pickup').value      = r.Pickup||'';
+  document.getElementById('drm-dropoff').value     = r.Dropoff||'';
+  document.getElementById('drm-time-start').value  = r.Time_Start||'';
+  document.getElementById('drm-time-end').value    = r.Time_End||'';
+  document.getElementById('drm-km-start').value    = r.KM_Start||'';
+  document.getElementById('drm-km-end').value      = r.KM_End||'';
+  document.getElementById('drm-dr-cost').value     = r.DR_Cost||'';
+  document.getElementById('drm-ot').value          = r.OT||'';
+  document.getElementById('drm-svc').value         = r.SVC_Charge||'';
+  document.getElementById('drm-hotel-surch').value = r.Hotel_Surcharge||'';
+  document.getElementById('drm-dist-surch').value  = r.Dist_Surcharge||'';
+  document.getElementById('drm-early').value       = r.Early||'';
+  document.getElementById('drm-night-dr').value    = r.Night_DR||'';
+  document.getElementById('drm-toll').value        = r.Toll||'';
+  document.getElementById('drm-wash').value        = r.Wash||'';
+  document.getElementById('drm-meal').value        = r.Meal||'';
+  document.getElementById('drm-guide').value       = r.Guide||'';
+  document.getElementById('drm-tourcode').value    = r.Tour_Code||'';
+  document.getElementById('drm-remarks').value     = r.Remarks||'';
+
+  const errEl = document.getElementById('dr-modal-err');
+  if(errEl){ errEl.style.display='none'; errEl.textContent=''; }
+  document.getElementById('dr-modal').style.display='flex';
+}
+
+function closeDRModal(){
+  document.getElementById('dr-modal').style.display='none';
+  window._drEditRow = null;
+}
+
+async function saveDREdit(){
+  const rowIndex = window._drEditRow;
+  if(!rowIndex){ toast('수정 대상 없음','er'); return; }
+
+  const orig = (_drCache||[]).find(x=>x._rowIndex===rowIndex);
+  if(!orig){ toast('원본 데이터 없음','er'); return; }
+
+  const errEl = document.getElementById('dr-modal-err');
+
+  // 날짜 유효성
+  const dateVal = document.getElementById('drm-date').value.trim();
+  if(!/^\d{2}\/\d{2}\/\d{4}$/.test(dateVal)){
+    errEl.textContent='날짜 형식: DD/MM/YYYY'; errEl.style.display='block'; return;
+  }
+
+  // 업데이트된 데이터 구성 (원본 유지 + 수정값 덮어쓰기)
+  const updated = {
+    ...orig,
+    Date:             dateVal,
+    Rego:             document.getElementById('drm-rego').value.trim(),
+    Agency:           document.getElementById('drm-agency').value.trim(),
+    Attraction:       document.getElementById('drm-attraction').value.trim(),
+    Pickup:           document.getElementById('drm-pickup').value.trim(),
+    Dropoff:          document.getElementById('drm-dropoff').value.trim(),
+    Time_Start:       document.getElementById('drm-time-start').value.trim(),
+    Time_End:         document.getElementById('drm-time-end').value.trim(),
+    KM_Start:         document.getElementById('drm-km-start').value,
+    KM_End:           document.getElementById('drm-km-end').value,
+    DR_Cost:          document.getElementById('drm-dr-cost').value,
+    OT:               document.getElementById('drm-ot').value,
+    SVC_Charge:       document.getElementById('drm-svc').value,
+    Hotel_Surcharge:  document.getElementById('drm-hotel-surch').value,
+    Dist_Surcharge:   document.getElementById('drm-dist-surch').value,
+    Early:            document.getElementById('drm-early').value,
+    Night_DR:         document.getElementById('drm-night-dr').value,
+    Toll:             document.getElementById('drm-toll').value,
+    Wash:             document.getElementById('drm-wash').value,
+    Meal:             document.getElementById('drm-meal').value,
+    Guide:            document.getElementById('drm-guide').value.trim(),
+    Tour_Code:        document.getElementById('drm-tourcode').value.trim(),
+    Remarks:          document.getElementById('drm-remarks').value.trim(),
+  };
+  // _rowIndex는 전송하지 않음
+  const { _rowIndex, _isoDate, ...sendData } = updated;
+
+  try{
+    const res  = await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'update_report', sheet:'Daily_Report', rowIndex, data:sendData})});
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error||json.msg||'저장 실패');
+
+    // 캐시 업데이트
+    const idx = _drCache.findIndex(x=>x._rowIndex===rowIndex);
+    if(idx!==-1) _drCache[idx] = { ...updated, _isoDate: parseToISO(dateVal) };
+    _reportsCache = null; // 급여 캐시도 무효화
+
+    closeDRModal();
+    renderDR();
+    toast('✅ 리포트 수정 완료','ok');
+  }catch(e){ errEl.textContent='저장 실패: '+e.message; errEl.style.display='block'; }
+}
+
+async function deleteDR(rowIndex){
+  const r = (_drCache||[]).find(x=>x._rowIndex===rowIndex);
+  if(!r) return;
+  const label = `${fmtDate(r.Date)} · ${r.Driver} · ${r.Agency}`;
+  if(!confirm(`이 리포트를 삭제하시겠습니까?\n\n${label}`)) return;
+
+  try{
+    const res  = await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'delete_report', sheet:'Daily_Report', rowIndex})});
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error||json.msg||'삭제 실패');
+
+    // 캐시에서 제거 + rowIndex 재조정 (삭제된 행 아래 -1)
+    _drCache = _drCache
+      .filter(x=>x._rowIndex!==rowIndex)
+      .map(x=>x._rowIndex>rowIndex ? {...x,_rowIndex:x._rowIndex-1} : x);
+    _reportsCache = null;
+
+    renderDR();
+    toast('🗑 리포트 삭제 완료','ok');
+  }catch(e){ toast('삭제 실패: '+e.message,'er'); }
+}
 
 // ── GAS Daily_Report 캐시 (관리자용 dr 계산) ──────────────────────
 let _reportsCache = null; // [{ Driver, Date(iso), DR_Cost, ... }]
