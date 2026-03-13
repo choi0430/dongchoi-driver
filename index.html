@@ -4425,18 +4425,23 @@ const SVC_OPTIONS = {
   ],
 };
 
+// 호텔 서차지: val은 TA 청구 금액 기준
+// 양쪽(서차지 호텔↔서차지 호텔): 21/25S $80 TA / $20 DR, 40S $150 TA / $30 DR, 50S $160 TA / $30 DR
+// 편도(서차지 호텔↔공항):        21/25S $40 TA / $10 DR, 40S  $75 TA / $15 DR, 50S  $80 TA / $15 DR
+// val = TA 청구액, dr = 드라이버 지급액
 const HOTEL_OPTIONS = {
-  '21S': [{val:'0',label:'$0'},{val:'10',label:'$10'},{val:'20',label:'$20'}],
-  '25S': [{val:'0',label:'$0'},{val:'10',label:'$10'},{val:'20',label:'$20'}],
-  '40S': [{val:'0',label:'$0'},{val:'15',label:'$15'},{val:'30',label:'$30'}],
-  '50S': [{val:'0',label:'$0'},{val:'15',label:'$15'},{val:'30',label:'$30'}],
+  '21S': [{val:'0',label:'$0',dr:0},{val:'40',label:'$40 — 편도 (TA)',dr:10},{val:'80',label:'$80 — 양쪽 (TA)',dr:20}],
+  '25S': [{val:'0',label:'$0',dr:0},{val:'40',label:'$40 — 편도 (TA)',dr:10},{val:'80',label:'$80 — 양쪽 (TA)',dr:20}],
+  '40S': [{val:'0',label:'$0',dr:0},{val:'75',label:'$75 — 편도 (TA)',dr:15},{val:'150',label:'$150 — 양쪽 (TA)',dr:30}],
+  '50S': [{val:'0',label:'$0',dr:0},{val:'80',label:'$80 — 편도 (TA)',dr:15},{val:'160',label:'$160 — 양쪽 (TA)',dr:30}],
 };
 
+// 거리 서차지: val = TA 청구액, dr = 드라이버 지급액
 const DIST_OPTIONS = {
-  '21S': [{val:'0',label:'$0 — 없음'},{val:'30',label:'$30 — 21/25S 거리 서차지'}],
-  '25S': [{val:'0',label:'$0 — 없음'},{val:'30',label:'$30 — 21/25S 거리 서차지'}],
-  '40S': [{val:'0',label:'$0 — 없음'},{val:'40',label:'$40 — 40/50S 거리 서차지'}],
-  '50S': [{val:'0',label:'$0 — 없음'},{val:'40',label:'$40 — 40/50S 거리 서차지'}],
+  '21S': [{val:'0',label:'$0 — 없음',dr:0},{val:'80',label:'$80 — 거리 서차지 (TA)',dr:20}],
+  '25S': [{val:'0',label:'$0 — 없음',dr:0},{val:'80',label:'$80 — 거리 서차지 (TA)',dr:20}],
+  '40S': [{val:'0',label:'$0 — 없음',dr:0},{val:'150',label:'$150 — 거리 서차지 (TA)',dr:30}],
+  '50S': [{val:'0',label:'$0 — 없음',dr:0},{val:'160',label:'$160 — 거리 서차지 (TA)',dr:30}],
 };
 
 // ═══════════════════════════════════════════════════
@@ -4849,7 +4854,37 @@ function getSvcValue(){
   return parseFloat(v||0);
 }
 function getHotelValue(){return parseFloat(document.getElementById('f-hotel-select')?.value||0);}
+function getHotelDR(){
+  // 선택된 호텔 서차지 TA값 → 해당 옵션의 dr값 반환
+  const seats = document.getElementById('dr-seats')?.value || '21S';
+  const val = document.getElementById('f-hotel-select')?.value || '0';
+  const opts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
+  const opt = opts.find(o=>o.val===val);
+  return opt ? (opt.dr || 0) : 0;
+}
 function getDistValue(){return parseFloat(document.getElementById('f-dist-select')?.value||0);}
+function getDistDR(){
+  // 선택된 거리 서차지 TA값 → 해당 옵션의 dr값 반환
+  const seats = document.getElementById('dr-seats')?.value || '21S';
+  const val = document.getElementById('f-dist-select')?.value || '0';
+  const opts = DIST_OPTIONS[seats] || DIST_OPTIONS['21S'];
+  const opt = opts.find(o=>o.val===val);
+  return opt ? (opt.dr || 0) : 0;
+}
+// Early/Late: TA = Airport Transfer SVC × 1.3 (별도 항목으로 청구), DR = 21/25S $20, 40/50S $30
+function getEarlyDR(seats){
+  return (seats==='40S'||seats==='50S') ? 30 : 20;
+}
+// OT TA 요율: 21/25S $80/h, 40S $150/h, 50S $160/h
+// OT DR 요율: 21/25S $30/h, 40S $40/h, 50S $40/h
+function getOTRateTA(seats){
+  if(seats==='50S') return 160;
+  if(seats==='40S') return 150;
+  return 80;
+}
+function getOTRateDR(seats){
+  return (seats==='40S'||seats==='50S') ? 40 : 30;
+}
 
 function calcTotal(){
   const seats = document.getElementById('dr-seats')?.value || '';
@@ -4864,7 +4899,8 @@ function calcTotal(){
   const nightTA = (nightType!=='none' && nightRate) ? nightRate.ta : 0;
   const nightDR = (nightType!=='none' && nightRate) ? nightRate.dr : 0;
   // ta(여행사 청구): 톨비는 40/50인승만, 연료비/세차/식비 포함 안 함, 야간투어 별도
-  const fixedTA=['f-ot','f-trailer','f-early','f-tip','f-etc'];
+  // Early/Late는 별도 계산 (Airport Transfer × 0.3) — f-early는 DR전용 고정값
+  const fixedTA=['f-ot','f-trailer','f-tip','f-etc'];
   const isManualVehicle = (()=>{
     const rego = document.getElementById('pre-rego')?.value || '';
     const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
@@ -4873,14 +4909,28 @@ function calcTotal(){
   const svcVal = getSvcValue();
   const isLongRun = svcVal >= 250; // $250 이상 = 10HR/12HR 일정
   const manualBonus = (isManualVehicle && isLongRun) ? 20 : 0;
-  let ta=svcVal+getHotelValue()+getDistValue();
+  // Early/Late TA: Airport Transfer 여행사별 요금 × 0.3 (DR은 고정 $30/$40)
+  const earlyVal = parseFloat(document.getElementById('f-early')?.value||0);
+  let earlyTA = 0;
+  if(earlyVal > 0){
+    const agency = document.getElementById('dr-agency')?.value || '';
+    const sk = seatKey(seats);
+    const rateCol = 'seats_'+sk+'_rate';
+    const clientRows = MASTER.priceClient || [];
+    const atRow = clientRows.find(r =>
+      r.Course && r.Course.toLowerCase() === 'airport transfer' &&
+      (!agency || r.Agency === agency)
+    ) || clientRows.find(r => r.Course && r.Course.toLowerCase() === 'airport transfer');
+    const airportTA = atRow ? (Number(atRow[rateCol]) || 0) : 0;
+    earlyTA = Math.round(airportTA * 0.3);
+  }
+  let ta=svcVal+getHotelValue()+getDistValue()+earlyTA;
   fixedTA.forEach(id=>{ta+=parseFloat(document.getElementById(id)?.value||0);});
   if(isLarge) ta += tollVal;
   ta += nightTA;
   // dr(드라이버 지급): 기본 수당 + OT + 호텔서차지 + 거리서차지 + 야간투어 + 세차 + 식비 + 개인결제 톨/연료
   const att=document.getElementById('dr-attraction')?.value;
   const otVal = parseFloat(document.getElementById('f-ot')?.value||0);
-  const earlyVal = parseFloat(document.getElementById('f-early')?.value||0);
   const trailerVal = parseFloat(document.getElementById('f-trailer')?.value||0);
   const tipVal = parseFloat(document.getElementById('f-tip')?.value||0);
 
