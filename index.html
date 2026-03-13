@@ -975,8 +975,6 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
     <div style="font-size:12px;font-weight:800;color:#1d4ed8;margin-bottom:8px;letter-spacing:.5px;">ℹ️ NSW Bus Accreditation 스티커란?</div>
     <div style="font-size:12px;color:#1e40af;line-height:1.7;">
       <b>Bus Operator Accreditation 스티커</b>는 Transport for NSW(TfNSW)가 발행하는 버스 운행 인가 증명 스티커입니다.<br>
-      • 차량 <b>앞 유리 좌측 상단</b>에 부착 (의무)<br>
-      • 운행 인가번호(Accreditation No.)와 만료일이 표시됨<br>
       • 경찰·교통부 검사관이 노상 정차 시 <b>첫 번째로 확인</b>하는 항목<br>
       • Driver Authority Card(버스 운전 자격증)는 차량 <b>실내 승객이 볼 수 있는 위치</b>에 부착 (의무)
     </div>
@@ -2604,8 +2602,7 @@ const MOT_DRIVER_CHECKS = [
 ];
 
 const MOT_VEHICLE_CHECKS = [
-  { id:'accreditation',     label:'Accreditation Sticker',      sublabel:'TfNSW 운행 인가 스티커 (앞 유리 좌측 상단)' },
-  { id:'rego_label',        label:'Registration Label',         sublabel:'차량 등록 스티커 (유효 기간 내)' },
+  { id:'accreditation',     label:'Accreditation Sticker',      sublabel:'TfNSW Bus Operator Accreditation 스티커' },
   { id:'operator_notice',   label:'Operator Notice (in-bus)',   sublabel:'차내 버스 운영자 연락처·불만 신고 안내 부착' },
   { id:'authority_card_display', label:'Driver Authority Card Display', sublabel:'카드홀더에 승객이 볼 수 있게 부착' },
   { id:'first_aid',         label:'First Aid Kit',              sublabel:'응급 처치 키트 (유효 기간 포함)' },
@@ -2621,7 +2618,6 @@ const MOT_VEHICLE_CHECKS = [
 const MOT_SAFETY_CHECKS = [
   { id:'fire_tag',          label:'Fire Tag (Annual Inspection)',sublabel:'소화기 연간 검사 태그 부착' },
   { id:'window_washer',     label:'Window Washer',              sublabel:'와이퍼·워셔액 정상' },
-  { id:'camera',            label:'CCTV / Dash Cam',            sublabel:'차량 카메라 작동 상태' },
   { id:'accessible',        label:'Accessibility Features',     sublabel:'장애인 램프·안전 장치 (해당 시)' },
   { id:'child_restrain',    label:'Child Restraints (if any)',  sublabel:'아동용 좌석 고정장치 (해당 시)' },
 ];
@@ -3122,6 +3118,8 @@ function addDailyReport(shiftId){
   updateOTHint();
   updateSvcHint();
   updateDistHint();
+  updateEarlyHint();
+  checkHotelSurchargeHint();
 }
 
 function startEndShift(shiftId){
@@ -3905,37 +3903,49 @@ function updateDistHint(){
 function updateSvcHint(){
   const hintEl = document.getElementById('svc-hint-box');
   if(!hintEl) return;
-  const att   = document.getElementById('dr-attraction')?.value || '';
-  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+  const att    = document.getElementById('dr-attraction')?.value || '';
+  const seats  = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   const curVal = cselGetValue('f-svc-select') || '';
+  const opts   = SVC_OPTIONS[seats] || [];
+  const items  = [];
 
-  if(!att || !seats){ hintEl.style.display='none'; return; }
+  // ① 인승 미선택 시 — 각 인승 기본 요금 안내
+  if(!seats){
+    items.push({ type:'info',
+      title: '💡 인승 선택 시 서비스 차지 안내',
+      sub:   '21/25S: $90(TSF) · $180(City) · $250(10H) · $280(12H) | 40S: $120(TSF) · $310(10H) | 50S: $150(TSF) · $320(10H)'
+    });
+    renderHintBox(hintEl, items);
+    return;
+  }
 
-  const opts = SVC_OPTIONS[seats] || [];
+  // ② 어트랙션 선택 전 — 인승별 요금표 보여주기
+  if(!att){
+    const labels = opts.filter(o=>o.val!=='OTHER').map(o=>o.label.replace(' ('+seats+' 요금)','')).join(' · ');
+    items.push({ type:'info', title:'💡 '+seats+' 서비스 차지 요금표', sub: labels });
+    renderHintBox(hintEl, items);
+    return;
+  }
+
   if(!opts.length){ hintEl.style.display='none'; return; }
 
-  // 어트랙션 → 추천 SVC 키워드 매핑
+  // ③ 어트랙션 + 인승 모두 있으면 — 패턴 매칭으로 추천
   const attU = att.toUpperCase();
   let recommended = null;
 
-  // 패턴 매칭: 어트랙션 이름에서 SVC 유형 추론
   if(/AIRPORT|TRANSFER/.test(attU) && !/DINNER/.test(attU)){
-    // TSF: Airport Transfer, Hotel Transfer
     recommended = opts.find(o => o.label.includes('TSF') && !o.label.includes('DINNER') && !o.label.includes('ONLY'));
   } else if(/DINNER/.test(attU)){
     recommended = opts.find(o => o.label.includes('DINNER'));
   } else if(/CITY.*HALF|HALF.*DAY/.test(attU)){
     recommended = opts.find(o => o.label.includes('CITY') || o.label.includes('HALF'));
   } else if(/CITY TOUR/.test(attU) && !/HALF/.test(attU)){
-    // 시티투어 Full: 10HR
     recommended = opts.find(o => o.label.includes('10HR') && !o.label.includes('MANUAL') && !o.label.includes('BLUE'));
   } else if(/BLUE MOUNTAINS|HUNTER|CENTRAL COAST|PORT STEPHENS|NEWCASTLE|WOLLONGONG|CANBERRA|JERVIS/.test(attU)){
-    // 지방 투어: 10~12HR
     const maxH = getMaxHours(att);
     if(maxH && maxH >= 12){
       recommended = opts.find(o => o.label.includes('12HR') && !o.label.includes('MANUAL'));
     } else {
-      // BLUE MOUNTAINS 50S는 BLUE 구분
       if(seats==='50S' && /BLUE/.test(attU)){
         recommended = opts.find(o => o.label.includes('BLUE'));
       } else {
@@ -3946,15 +3956,17 @@ function updateSvcHint(){
     recommended = opts.find(o => o.label.includes('10HR') && !o.label.includes('MANUAL'));
   }
 
-  if(!recommended){ hintEl.style.display='none'; return; }
-
-  const isSelected = (curVal === recommended.val);
-  const items = [];
-
-  if(isSelected){
-    items.push({ type:'apply', title:'✅ 추천 SVC 선택됨', sub:recommended.label+' ('+seats+' · '+att+')' });
+  if(recommended){
+    const isSelected = (curVal === recommended.val);
+    if(isSelected){
+      items.push({ type:'apply', title:'✅ '+recommended.label, sub:att+' + '+seats+' 기준 서비스 차지' });
+    } else {
+      items.push({ type:'info', title:'💡 추천 서비스 차지: '+recommended.label, sub:att+' + '+seats+' 기준 — 확인 후 선택' });
+    }
   } else {
-    items.push({ type:'info', title:'💡 추천 SVC: '+recommended.label, sub:att+' + '+seats+' 기준 — 직접 확인 후 선택하세요' });
+    // 매핑 안 된 경우도 요금표 표시
+    const labels = opts.filter(o=>o.val!=='OTHER').map(o=>o.label.replace(' ('+seats+' 요금)','')).join(' · ');
+    items.push({ type:'info', title:'💡 '+seats+' 서비스 차지 요금표', sub: labels });
   }
 
   renderHintBox(hintEl, items);
@@ -3969,7 +3981,20 @@ function updateOTHint(){
   const att  = document.getElementById('dr-attraction')?.value;
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
 
-  if(!st){ renderHintBox(hintBox, []); return; }
+  if(!st){
+    // 시작 시간 없어도 OT 기준 안내는 표시
+    const otRate0 = seats ? getOTRate(null, seats) : null;
+    const items0 = [];
+    if(!seats){
+      items0.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:'21/25S $30/h · 40/50S $40/h | 1시간 단위 올림 · 15분 waive' });
+    } else {
+      items0.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:seats+' 요율: $'+otRate0+'/h · 1시간 단위 올림 · 15분 waive' });
+    }
+    const maxH0 = att ? getMaxHours(att) : null;
+    if(maxH0) items0.push({ type:'info', title:'⏱ 코스 기준 시간: '+maxH0+'시간', sub:'출발 시간 입력 시 OT 적용 여부 자동 계산' });
+    renderHintBox(hintBox, items0);
+    return;
+  }
 
   const [sh,sm] = st.split(':').map(Number);
   const maxH    = getMaxHours(att);
@@ -3982,9 +4007,9 @@ function updateOTHint(){
 
   // ① 20:00 이후 OT 조건 안내
   if(!seats){
-    items.push({ type:'info', title:'🕗 20:15 이후 OT 적용 (15분 waive)', sub:'인승 선택 시 정확한 요율 표시 — 21/25S $30/h · 40/50S $40/h' });
+    items.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:'21/25S $30/h · 40/50S $40/h | 1시간 단위 올림 청구 | 인승 선택 시 정확한 요율 표시' });
   } else {
-    items.push({ type:'info', title:'🕗 20:15 이후 OT 적용 (15분 waive)', sub:seats+' 요율: $'+otRate+'/h (1시간 단위 올림 청구)' });
+    items.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:seats+' 요율: $'+otRate+'/h · 1시간 단위 올림 청구 · 15분 waive 적용' });
   }
 
   // ② 코스 기준 max_hours 초과 조건
@@ -4063,8 +4088,15 @@ function checkHotelSurchargeHint(){
   const pickupAirport    = AIRPORT_PATTERN.test(pickup);
   const dropoffAirport   = AIRPORT_PATTERN.test(dropoff);
 
-  // 픽업/드롭 미입력 시
-  if(!pickup && !dropoff){ renderHintBox(hintEl, []); return; }
+  // 픽업/드롭 미입력 시 — 인승 있으면 기본 금액 안내
+  if(!pickup && !dropoff){
+    if(seats && fullFee > 0){
+      renderHintBox(hintEl, [{ type:'info', title:'🏨 호텔 서차지 ('+seats+')', sub:'서차지 구역 단방향 $'+halfFee+' / 왕복 $'+fullFee+' · 픽업/드롭 입력 시 자동 감지' }]);
+    } else {
+      renderHintBox(hintEl, []);
+    }
+    return;
+  }
 
   // 서차지 호텔 없으면 숨기기
   if(!pickupSurcharge && !dropoffSurcharge){ renderHintBox(hintEl, []); return; }
@@ -4429,8 +4461,11 @@ function updateEarlyHint(){
 
   if(!hintBox) return;
 
-  // 픽업/드롭 미입력 시
-  if(!pickup && !dropoff){ renderHintBox(hintBox, []); return; }
+  // 픽업/드롭 미입력 시 — 기본 안내
+  if(!pickup && !dropoff){
+    renderHintBox(hintBox, [{ type:'info', title:'🌅 Early / Late 서차지 기준', sub:'호텔→공항 06:00 이전 출발: 조기출발 $'+earlyAmt+' ('+seatsLabel+') | 공항→호텔 23:00 이후 픽업: 야간 $'+earlyAmt }]);
+    return;
+  }
   // 공항 이동 아닌 경우
   if(!hotelToAirport && !airportToHotel){ renderHintBox(hintBox, []); return; }
 
@@ -5016,14 +5051,22 @@ async function renderPay(){
   // ── 로딩 표시
   const badge0 = document.getElementById('pay-unpaid-badge');
   const el0 = document.getElementById('pay-weeks-list');
-  if(badge0){ badge0.textContent='⏳ 불러오는 중'; badge0.style.background='var(--muted)'; }
-  if(el0)  { el0.innerHTML='<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">💰 급여 데이터를 불러오는 중...</div>'; }
 
-  // ── GAS에서 병렬 로드: DR 리포트 + Wages
-  await Promise.all([
-    fetchDRCache(),
-    loadDriverWagesFromGAS(driverName)
-  ]);
+  // ── 캐시가 살아있으면 즉시 렌더, 없으면 await 후 렌더
+  const drCacheAlive    = _drReportsCache && Date.now()-_drCacheTime < DR_CACHE_TTL;
+  const wagesCacheAlive = Date.now()-_driverWagesLastSync < 60000;
+
+  if(!drCacheAlive || !wagesCacheAlive){
+    if(badge0){ badge0.textContent='⏳ 불러오는 중'; badge0.style.background='var(--muted)'; }
+    if(el0)  { el0.innerHTML='<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">\uD83D\uDCB0 급여 데이터를 불러오는 중...</div>'; }
+    await Promise.all([
+      drCacheAlive    ? Promise.resolve() : fetchDRCache(),
+      wagesCacheAlive ? Promise.resolve() : loadDriverWagesFromGAS(driverName)
+    ]);
+  } else {
+    // 백그라운드 갱신 (다음 렌더에 반영)
+    Promise.all([fetchDRCache(), loadDriverWagesFromGAS(driverName)]).catch(()=>{});
+  }
 
   // ── DR 리포트: GAS 우선, 로컬 fallback 병합
   const gasReports = (_drReportsCache||[]).filter(r=>{
