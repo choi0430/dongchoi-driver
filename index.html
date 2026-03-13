@@ -1491,14 +1491,15 @@ function applyMasterData(data) {
     .filter((n, i, arr) => arr.indexOf(n) === i)
     .map(n => ({Name:n, Mobile:'', Address:''}));
   MASTER.agencies = [...fromClients, ...fromPrice];
-  MASTER.courses     = (data.M_Courses   || []);
-  // M_Courses가 get_all_masters에 없으면 별도 로드
-  if(!MASTER.courses.length){
-    fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=M_Courses')
-      .then(r=>r.json()).then(j=>{
-        if(j.ok && j.rows?.length){ MASTER.courses = j.rows; }
-      }).catch(()=>{});
-  }
+  // M_Courses 대신 M_PriceDriver에서 코스 목록 동기화 (중복 없음, 자동 최신화)
+  const pdRows = data.M_PriceDriver || [];
+  MASTER.courses = pdRows
+    .filter(r => r.Course && String(r.Course).trim())
+    .filter((r, i, arr) => arr.findIndex(x => x.Course === r.Course) === i)
+    .map(r => ({
+      Course_Name: String(r.Course).trim(),
+      max_hours: r.max_hours || ''
+    }));
   MASTER.hotels      = (data.M_Hotels      || []);
   MASTER.priceClient = (data.M_PriceClient || []);
   MASTER.priceDriver = (data.M_PriceDriver || []);
@@ -1753,18 +1754,15 @@ const SDD_CONFIG = {
   }), type:'prerego' },
   agency:     { list: ()=> (MASTER.agencies||[]).map(a=>({name:a.Name,sub:a.Mobile||''})),              type:'agency' },
   attraction: { list: ()=>{
+    // M_PriceDriver 기반 동적 코스 목록 (가격표와 자동 동기화)
     if(MASTER.courses && MASTER.courses.length>0)
-      return MASTER.courses.map(c=>({name:c.Course_Name,sub:c.max_hours?c.max_hours+'h max':''}));
-    // 마스터 로드 전 fallback
-    return [
-      {name:'BLUE MOUNTAINS',sub:'10h max'},{name:'CITY TOUR',sub:'10h max'},
-      {name:'HUNTER VALLEY',sub:'10h max'},{name:'CENTRAL COAST',sub:'10h max'},
-      {name:'CANBERRA',sub:'12h max'},{name:'JERVIS BAY',sub:'10h max'},
-      {name:'PORT STEPHENS',sub:'10h max'},{name:'NEWCASTLE',sub:'10h max'},
-      {name:'WOLLONGONG',sub:'10h max'},{name:'AIRPORT TRANSFER',sub:''},
-      {name:'DINNER TRANSFER',sub:''},{name:'HOTEL TRANSFER',sub:''},
-      {name:'CHARTER',sub:''},{name:'CITY TOUR / HALF',sub:''}
-    ];
+      return MASTER.courses.map(c=>({
+        name: c.Course_Name,
+        sub: c.max_hours ? c.max_hours+'h max' : ''
+      }));
+    // 마스터 로드 전 최소 fallback
+    return [{name:'BLUE MOUNTAINS',sub:''},{name:'CITY TOUR',sub:''},
+            {name:'AIRPORT TRANSFER',sub:''}];
   }, type:'attraction' }
 };
 
