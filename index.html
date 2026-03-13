@@ -4879,11 +4879,39 @@ function calcTotal(){
   ta += nightTA;
   // dr(드라이버 지급): 기본 수당 + OT + 호텔서차지 + 거리서차지 + 야간투어 + 세차 + 식비 + 개인결제 톨/연료
   const att=document.getElementById('dr-attraction')?.value;
-  let dr=att&&RATES[att]?RATES[att].dr+(parseFloat(document.getElementById('f-ot')?.value||0)):0;
+  const otVal = parseFloat(document.getElementById('f-ot')?.value||0);
+  const earlyVal = parseFloat(document.getElementById('f-early')?.value||0);
+  const trailerVal = parseFloat(document.getElementById('f-trailer')?.value||0);
+  const tipVal = parseFloat(document.getElementById('f-tip')?.value||0);
+
+  // ── 드라이버 기본 수당 계산 ──
+  // 우선순위: M_PriceDriver 코스별 인승별 base → RATES[att].dr fallback → SVC 추산
+  let drBase = 0;
+  const seatK = seatKey(seats);
+  const courseData = att ? getCourseData(att) : null;
+  if(courseData && courseData[seatK] && courseData[seatK].base > 0){
+    // M_PriceDriver 기반 정확한 드라이버 base pay
+    drBase = courseData[seatK].base;
+    // 드라이버가 SVC를 다르게 선택한 경우 — 비율로 조정
+    // (코스 base SVC를 알 수 없으므로, 다른 SVC 선택 시 그냥 base 유지)
+  } else if(att && RATES[att]){
+    // 구버전 RATES fallback
+    drBase = RATES[att].dr || 0;
+  } else {
+    // 코스 없거나 매핑 없는 경우: SVC 값 기반 추산
+    // TA = SVC 기준, DR은 roughly SVC * 0.55 수준 (시스템 규칙 없는 경우 추정치)
+    // 단, 코스가 없으면 0으로 두고 드라이버가 직접 확인
+    drBase = 0;
+  }
+
+  let dr = drBase + otVal;
   dr += getHotelValue(); // 호텔 서차지 전액 드라이버 지급
   dr += getDistValue();  // 거리 서차지 전액 드라이버 지급
+  dr += earlyVal;        // Early/Late 서차지 드라이버 지급
+  dr += trailerVal;      // 트레일러 드라이버 지급
   dr += manualBonus;     // 수동 차량 10/12HR 추가 수당 $20
   dr += nightDR + washVal + mealVal;
+  dr += tipVal;          // 팁 드라이버 지급
   const tollPersonal = document.getElementById('toll-personal')?.checked;
   const fuelPersonal = document.getElementById('fuel-personal')?.checked;
   if(tollPersonal) dr += tollVal;
@@ -5593,11 +5621,14 @@ function showPayDetail(wk){
     reports.forEach(r=>{
       // 계산 근거 항목 빌드
       const breakdown=[];
-      // 기본 수당 (attraction 기반 DR rate)
+      // 기본 수당 (attraction 기반 DR rate — early/trailer/tip/서차지 제외한 순수 기본 수당)
       const baseRate = (r.dr||0)
         - (r.ot||0)
         - (r.hotelSurcharge||0)
         - (r.distSurcharge||0)
+        - (r.early||0)
+        - (r.trailer||0)
+        - (r.tip||0)
         - (r.night||0)
         - (r.wash||0)
         - (r.meal||0)
