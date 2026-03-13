@@ -376,6 +376,7 @@ function getNoticesSheet() {
 
 function getActiveRegos() {
   // Pre_Departure는 있지만 End_of_Shift가 없는 운행 = 현재 운행 중
+  // ★ 오늘 날짜 기준으로만 체크 (과거 기록 제외)
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const preSheet = ss.getSheetByName('Pre_Departure');
   const eosSheet = ss.getSheetByName('End_of_Shift');
@@ -384,13 +385,31 @@ function getActiveRegos() {
   const preData = preSheet.getDataRange().getValues();
   if (preData.length < 2) return {ok: true, regos: []};
   const preHeaders = preData[0];
+
+  // 오늘 날짜 문자열 (Sydney 시간 기준) - "DD/MM/YYYY" 또는 "YYYY-MM-DD" 양쪽 대응
+  const now = new Date();
+  const sydOffset = 10 * 60; // AEST UTC+10 (DST는 +11이지만 보수적으로 처리)
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const syd = new Date(utc + sydOffset * 60000);
+  const yy = syd.getFullYear();
+  const mm = String(syd.getMonth()+1).padStart(2,'0');
+  const dd = String(syd.getDate()).padStart(2,'0');
+  const todayISO = yy+'-'+mm+'-'+dd;           // "2025-03-13"
+  const todayDMY = dd+'/'+mm+'/'+yy;           // "13/03/2025"
+  const todayMDY = mm+'/'+dd+'/'+yy;           // "03/13/2025"
+
+  function isToday(val) {
+    const s = String(val).trim().replace(/\s+.*/,''); // 시간 부분 제거
+    return s === todayISO || s === todayDMY || s === todayMDY;
+  }
+
   const preRows = preData.slice(1).map(row => {
     const obj = {};
     preHeaders.forEach((h,i) => obj[h] = row[i]);
     return obj;
-  });
+  }).filter(r => isToday(r.Date)); // ★ 오늘 것만
 
-  // EoS 데이터 수집
+  // EoS 데이터 수집 (오늘 것만)
   const eosSet = new Set();
   if (eosSheet && eosSheet.getLastRow() > 1) {
     const eosData = eosSheet.getDataRange().getValues();
@@ -398,17 +417,26 @@ function getActiveRegos() {
     eosData.slice(1).forEach(row => {
       const obj = {};
       eosH.forEach((h,i) => obj[h] = row[i]);
-      // Driver+Date+Rego 조합으로 종료 여부 판단
-      eosSet.add(String(obj.Driver)+'|'+String(obj.Date)+'|'+String(obj.Rego));
+      if (isToday(obj.Date)) {
+        // Rego+Date 조합 (Driver는 빈값일 수 있으므로 Rego+Date로만 판단)
+        eosSet.add(String(obj.Rego).trim()+'|'+String(obj.Date).trim());
+      }
     });
   }
 
   // Pre_Departure는 있지만 End_of_Shift 없는 것 = 운행 중
   const active = [];
+  const seen = new Set(); // 동일 Rego 중복 방지
   preRows.forEach(r => {
-    const key = String(r.Driver)+'|'+String(r.Date)+'|'+String(r.Rego);
-    if (!eosSet.has(key)) {
-      active.push({driver: String(r.Driver), rego: String(r.Rego), date: String(r.Date)});
+    const regoKey = String(r.Rego).trim()+'|'+String(r.Date).trim();
+    if (!eosSet.has(regoKey) && !seen.has(regoKey)) {
+      seen.add(regoKey);
+      const driverName = String(r.Driver || '').trim();
+      active.push({
+        driver: driverName || '알 수 없음',
+        rego: String(r.Rego).trim(),
+        date: String(r.Date).trim()
+      });
     }
   });
 
