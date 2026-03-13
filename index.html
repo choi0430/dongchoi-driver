@@ -4053,14 +4053,8 @@ function updateHotelHint(){
   const halfFee    = hotelOpts.length >= 2 ? Number(hotelOpts[1]?.val || 0) : Math.round(fullFee/2);
   const seatsLabel = seats || '인승 미선택';
 
-  function isSurch(name){
-    if(!name) return false;
-    const h = (MASTER.hotels||[]).find(h=>h.Hotel_Name===name);
-    return h?.Surcharge_Area ? h.Surcharge_Area.trim()!=='' : false;
-  }
-
-  const pickupSurch  = isSurch(pickup);
-  const dropoffSurch = isSurch(dropoff);
+  const pickupSurch  = isSurchargeHotel(pickup);
+  const dropoffSurch = isSurchargeHotel(dropoff);
   const pickupAP     = AIRPORT_PATTERN.test(pickup);
   const dropoffAP    = AIRPORT_PATTERN.test(dropoff);
   const hasSurch     = pickupSurch || dropoffSurch;
@@ -4385,13 +4379,9 @@ function autoFillDRSurcharges(force){
   // ── 1) 호텔 서차지 ──────────────────────────────────────
   const curHotel = parseFloat(cselGetValue('f-hotel-select') || '0');
   if(force || curHotel === 0){
-    function isSurch(name){
-      if(!name) return false;
-      const h = (MASTER.hotels||[]).find(h=>h.Hotel_Name===name);
-      return h?.Surcharge_Area ? h.Surcharge_Area.trim()!=='' : false;
-    }
-    const pickupSurch  = isSurch(pickup);
-    const dropoffSurch = isSurch(dropoff);
+    // 전역 isSurchargeHotel 사용 (로컬 function 선언 hoisting 문제 방지)
+    const pickupSurch  = isSurchargeHotel(pickup);
+    const dropoffSurch = isSurchargeHotel(dropoff);
     const pickupAP     = AIRPORT_PATTERN.test(pickup);
     const dropoffAP    = AIRPORT_PATTERN.test(dropoff);
 
@@ -4594,12 +4584,7 @@ function _updateAutoFillBanner(){
 
   // 호텔 서차지 안내
   if(pickup || dropoff){
-    function isSurch(name){
-      if(!name) return false;
-      const h=(MASTER.hotels||[]).find(h=>h.Hotel_Name===name);
-      return h?.Surcharge_Area?h.Surcharge_Area.trim()!=='':false;
-    }
-    const ps=isSurch(pickup), ds=isSurch(dropoff);
+    const ps=isSurchargeHotel(pickup), ds=isSurchargeHotel(dropoff);
     const pa=AIRPORT_PATTERN.test(pickup), da=AIRPORT_PATTERN.test(dropoff);
     if(ps||ds){
       const hotelOpts=HOTEL_OPTIONS[seats]||HOTEL_OPTIONS['21S'];
