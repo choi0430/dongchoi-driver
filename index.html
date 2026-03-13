@@ -3904,75 +3904,56 @@ function updateDistHint(){
 }
 
 // ──────────────────────────────────────────
-// SVC 추천 힌트: 어트랙션 + 인승 기반
+// SVC 추천 힌트: 어트랙션 + 인승 기반 (DR 금액 기준)
 // ──────────────────────────────────────────
 function updateSvcHint(){
   const hintEl = document.getElementById('svc-hint-box');
   if(!hintEl) return;
   const att    = document.getElementById('dr-attraction')?.value || '';
   const seats  = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
-  const curVal = cselGetValue('f-svc-select') || '';
-  const opts   = SVC_OPTIONS[seats] || [];
+  const curVal = parseFloat(cselGetValue('f-svc-select') || 0);
   const items  = [];
 
-  // ① 인승 미선택 시 — 각 인승 기본 요금 안내
-  if(!seats){
-    items.push({ type:'info',
-      title: '💡 인승 선택 시 서비스 차지 안내',
-      sub:   '21/25S: $90(TSF) · $180(City) · $250(10H) · $280(12H) | 40S: $120(TSF) · $310(10H) | 50S: $150(TSF) · $320(10H)'
-    });
-    renderHintBox(hintEl, items);
-    return;
-  }
+  // 인승 또는 어트랙션 미선택 시 — 힌트 없음
+  if(!seats || !att){ hintEl.style.display='none'; return; }
 
-  // ② 어트랙션 선택 전 — 인승별 요금표 보여주기
-  if(!att){
-    const labels = opts.filter(o=>o.val!=='OTHER').map(o=>o.label.replace(' ('+seats+' 요금)','')).join(' · ');
-    items.push({ type:'info', title:'💡 '+seats+' 서비스 차지 요금표', sub: labels });
-    renderHintBox(hintEl, items);
-    return;
-  }
+  // M_PriceDriver에서 코스 매칭
+  const sk = seatKey(seats); // '21S' → '21'
+  const baseKey = 'seats_'+sk+'_base';
+  const courseData = getPDCourseFromMaster(att);
 
-  if(!opts.length){ hintEl.style.display='none'; return; }
+  const isManualVehicle = (()=>{
+    const rego = document.getElementById('pre-rego')?.value || '';
+    const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
+    return veh?.Transmission === 'Manual';
+  })();
+  const manualAdd = isManualVehicle ? 20 : 0;
 
-  // ③ 어트랙션 + 인승 모두 있으면 — 패턴 매칭으로 추천
-  const attU = att.toUpperCase();
-  let recommended = null;
+  if(courseData){
+    const drBase = Number(courseData[baseKey] || 0);
+    const drAmt  = drBase + manualAdd;
+    const maxH   = courseData.max_hours;
+    const otRate = seats==='40S'||seats==='50S' ? 40 : 30;
 
-  if(/AIRPORT|TRANSFER/.test(attU) && !/DINNER/.test(attU)){
-    recommended = opts.find(o => o.label.includes('TSF') && !o.label.includes('DINNER') && !o.label.includes('ONLY'));
-  } else if(/DINNER/.test(attU)){
-    recommended = opts.find(o => o.label.includes('DINNER'));
-  } else if(/CITY.*HALF|HALF.*DAY/.test(attU)){
-    recommended = opts.find(o => o.label.includes('CITY') || o.label.includes('HALF'));
-  } else if(/CITY TOUR/.test(attU) && !/HALF/.test(attU)){
-    recommended = opts.find(o => o.label.includes('10HR') && !o.label.includes('MANUAL') && !o.label.includes('BLUE'));
-  } else if(/BLUE MOUNTAINS|HUNTER|CENTRAL COAST|PORT STEPHENS|NEWCASTLE|WOLLONGONG|CANBERRA|JERVIS/.test(attU)){
-    const maxH = getMaxHours(att);
-    if(maxH && maxH >= 12){
-      recommended = opts.find(o => o.label.includes('12HR') && !o.label.includes('MANUAL'));
-    } else {
-      if(seats==='50S' && /BLUE/.test(attU)){
-        recommended = opts.find(o => o.label.includes('BLUE'));
+    if(drAmt > 0){
+      const isSelected = (curVal === drAmt || curVal === drBase);
+      if(isSelected){
+        items.push({ type:'apply',
+          title: '✅ 서비스 차지 $'+drAmt+(isManualVehicle?' (수동 +$20 포함)':''),
+          sub: att+' + '+seats+(maxH?' · 기준 '+maxH+'시간 · OT $'+otRate+'/h':'')
+        });
       } else {
-        recommended = opts.find(o => o.label.includes('10HR') && !o.label.includes('MANUAL') && !o.label.includes('BLUE'));
+        items.push({ type:'info',
+          title: '💡 드라이버 서비스 차지: $'+drAmt+(isManualVehicle?' (수동 +$20 포함)':''),
+          sub: att+' + '+seats+(maxH?' · 기준 '+maxH+'시간 · OT $'+otRate+'/h':'')
+        });
       }
-    }
-  } else if(/CHARTER/.test(attU)){
-    recommended = opts.find(o => o.label.includes('10HR') && !o.label.includes('MANUAL'));
-  }
-
-  if(recommended){
-    const isSelected = (curVal === recommended.val);
-    if(isSelected){
-      items.push({ type:'apply', title:'✅ '+recommended.label, sub:att+' + '+seats+' 기준 서비스 차지' });
     } else {
-      items.push({ type:'info', title:'💡 추천 서비스 차지: '+recommended.label, sub:att+' + '+seats+' 기준 — 확인 후 선택' });
+      hintEl.style.display='none'; return;
     }
   } else {
-    // 매핑 안 된 경우도 요금표 표시
-    const labels = opts.filter(o=>o.val!=='OTHER').map(o=>o.label.replace(' ('+seats+' 요금)','')).join(' · ');
-    items.push({ type:'info', title:'💡 '+seats+' 서비스 차지 요금표', sub: labels });
+    // M_PriceDriver에 코스 없음
+    hintEl.style.display='none'; return;
   }
 
   renderHintBox(hintEl, items);
@@ -4013,9 +3994,9 @@ function updateOTHint(){
 
   // ① 20:00 이후 OT 조건 안내
   if(!seats){
-    items.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:'21/25S $30/h · 40/50S $40/h | 1시간 단위 올림 청구 | 인승 선택 시 정확한 요율 표시' });
+    items.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:'21/25S $30/h · 40/50S $40/h | 1시간 단위 올림 | 인승 선택 시 정확한 요율 표시' });
   } else {
-    items.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:seats+' 요율: $'+otRate+'/h · 1시간 단위 올림 청구 · 15분 waive 적용' });
+    items.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:seats+' 드라이버 OT 요율: $'+otRate+'/h · 1시간 단위 올림 · 15분 waive 적용' });
   }
 
   // ② 코스 기준 max_hours 초과 조건
@@ -4046,7 +4027,7 @@ function updateOTHint(){
     if(effOT > 0 && otRate){
       const effOT_ceil = Math.ceil(effOT);
       const otAmt = effOT_ceil * otRate;
-      items.push({ type:'warn', title:'⚠️ OT 발생 — $'+otAmt+' 청구 ('+seats+')', sub:effOT.toFixed(2)+'h → 1h 단위 올림 '+effOT_ceil+'h × $'+otRate+'/h' });
+      items.push({ type:'warn', title:'⚠️ OT 발생 — $'+otAmt+' 드라이버 지급 ('+seats+')', sub:effOT.toFixed(2)+'h → 1h 단위 올림 '+effOT_ceil+'h × $'+otRate+'/h' });
     } else if(effOT > 0 && !otRate){
       items.push({ type:'warn', title:'⚠️ OT 발생', sub:effOT.toFixed(2)+'h ('+Math.ceil(effOT)+'h 올림) — 인승 선택 후 금액 확인' });
     } else if(totalMin > 0){
@@ -4392,9 +4373,9 @@ const SVC_OPTIONS = {
     {val:'150', label:'$150 — DINNER TSF (21인승 요금)'},
     {val:'180', label:'$180 — CITY/HALF (21인승 요금)'},
     {val:'250', label:'$250 — 10HR (21인승 요금)'},
-    {val:'260', label:'$260 — 10HR/MANUAL (21인승 요금)'},
+    {val:'270', label:'$270 — 10HR/MANUAL (21인승 요금)'},
     {val:'280', label:'$280 — 12HR (21인승 요금)'},
-    {val:'290', label:'$290 — 12HR/MANUAL (21인승 요금)'},
+    {val:'300', label:'$300 — 12HR/MANUAL (21인승 요금)'},
     {val:'OTHER', label:'직접 입력 (OTHER)'},
   ],
   '25S': [
@@ -4403,9 +4384,9 @@ const SVC_OPTIONS = {
     {val:'150', label:'$150 — DINNER TSF (25인승 요금)'},
     {val:'180', label:'$180 — CITY/HALF (25인승 요금)'},
     {val:'250', label:'$250 — 10HR (25인승 요금)'},
-    {val:'260', label:'$260 — 10HR/MANUAL (25인승 요금)'},
+    {val:'270', label:'$270 — 10HR/MANUAL (25인승 요금)'},
     {val:'280', label:'$280 — 12HR (25인승 요금)'},
-    {val:'290', label:'$290 — 12HR/MANUAL (25인승 요금)'},
+    {val:'300', label:'$300 — 12HR/MANUAL (25인승 요금)'},
     {val:'OTHER', label:'직접 입력 (OTHER)'},
   ],
   '40S': [
@@ -4429,19 +4410,22 @@ const SVC_OPTIONS = {
 // 양쪽(서차지 호텔↔서차지 호텔): 21/25S $80 TA / $20 DR, 40S $150 TA / $30 DR, 50S $160 TA / $30 DR
 // 편도(서차지 호텔↔공항):        21/25S $40 TA / $10 DR, 40S  $75 TA / $15 DR, 50S  $80 TA / $15 DR
 // val = TA 청구액, dr = 드라이버 지급액
+// 호텔 서차지: val = 드라이버 지급액 기준
+// 21/25S: 편도 $10, 양쪽 $20 / 40/50S: 편도 $15, 양쪽 $30
 const HOTEL_OPTIONS = {
-  '21S': [{val:'0',label:'$0',dr:0},{val:'40',label:'$40 — 편도 (TA)',dr:10},{val:'80',label:'$80 — 양쪽 (TA)',dr:20}],
-  '25S': [{val:'0',label:'$0',dr:0},{val:'40',label:'$40 — 편도 (TA)',dr:10},{val:'80',label:'$80 — 양쪽 (TA)',dr:20}],
-  '40S': [{val:'0',label:'$0',dr:0},{val:'75',label:'$75 — 편도 (TA)',dr:15},{val:'150',label:'$150 — 양쪽 (TA)',dr:30}],
-  '50S': [{val:'0',label:'$0',dr:0},{val:'80',label:'$80 — 편도 (TA)',dr:15},{val:'160',label:'$160 — 양쪽 (TA)',dr:30}],
+  '21S': [{val:'0',label:'$0',dr:0},{val:'10',label:'$10 — 편도',dr:10},{val:'20',label:'$20 — 양쪽',dr:20}],
+  '25S': [{val:'0',label:'$0',dr:0},{val:'10',label:'$10 — 편도',dr:10},{val:'20',label:'$20 — 양쪽',dr:20}],
+  '40S': [{val:'0',label:'$0',dr:0},{val:'15',label:'$15 — 편도',dr:15},{val:'30',label:'$30 — 양쪽',dr:30}],
+  '50S': [{val:'0',label:'$0',dr:0},{val:'15',label:'$15 — 편도',dr:15},{val:'30',label:'$30 — 양쪽',dr:30}],
 };
 
-// 거리 서차지: val = TA 청구액, dr = 드라이버 지급액
+// 거리 서차지: val = 드라이버 지급액 기준
+// 21/25S: $30 / 40/50S: $40
 const DIST_OPTIONS = {
-  '21S': [{val:'0',label:'$0 — 없음',dr:0},{val:'80',label:'$80 — 거리 서차지 (TA)',dr:20}],
-  '25S': [{val:'0',label:'$0 — 없음',dr:0},{val:'80',label:'$80 — 거리 서차지 (TA)',dr:20}],
-  '40S': [{val:'0',label:'$0 — 없음',dr:0},{val:'150',label:'$150 — 거리 서차지 (TA)',dr:30}],
-  '50S': [{val:'0',label:'$0 — 없음',dr:0},{val:'160',label:'$160 — 거리 서차지 (TA)',dr:30}],
+  '21S': [{val:'0',label:'$0 — 없음',dr:0},{val:'30',label:'$30 — 거리 서차지',dr:30}],
+  '25S': [{val:'0',label:'$0 — 없음',dr:0},{val:'30',label:'$30 — 거리 서차지',dr:30}],
+  '40S': [{val:'0',label:'$0 — 없음',dr:0},{val:'40',label:'$40 — 거리 서차지',dr:40}],
+  '50S': [{val:'0',label:'$0 — 없음',dr:0},{val:'40',label:'$40 — 거리 서차지',dr:40}],
 };
 
 // ═══════════════════════════════════════════════════
@@ -4855,22 +4839,34 @@ function getSvcValue(){
   return parseFloat(v||0);
 }
 function getHotelValue(){return parseFloat(document.getElementById('f-hotel-select')?.value||0);}
+function getHotelTA(){
+  // 드라이버 지급액(val) → TA 청구액 역산
+  // 21/25S: DR $10→TA $40, DR $20→TA $80 / 40S: DR $15→TA $75, DR $30→TA $150 / 50S: DR $15→TA $80, DR $30→TA $160
+  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '21S';
+  const dr = getHotelValue();
+  if(dr===0) return 0;
+  const taMap = {
+    '21S':{10:40,20:80}, '25S':{10:40,20:80},
+    '40S':{15:75,30:150}, '50S':{15:80,30:160}
+  };
+  return (taMap[seats]||taMap['21S'])[dr] || 0;
+}
 function getHotelDR(){
-  // 선택된 호텔 서차지 TA값 → 해당 옵션의 dr값 반환
-  const seats = document.getElementById('dr-seats')?.value || '21S';
-  const val = document.getElementById('f-hotel-select')?.value || '0';
-  const opts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
-  const opt = opts.find(o=>o.val===val);
-  return opt ? (opt.dr || 0) : 0;
+  // val이 이미 DR 기준이므로 그대로 반환
+  return getHotelValue();
 }
 function getDistValue(){return parseFloat(document.getElementById('f-dist-select')?.value||0);}
+function getDistTA(){
+  // 드라이버 지급액 → TA 청구액 역산
+  // 21/25S: DR $30→TA $80 / 40/50S: DR $40→TA $150/$160
+  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '21S';
+  const dr = getDistValue();
+  if(dr===0) return 0;
+  const taMap = {'21S':80,'25S':80,'40S':150,'50S':160};
+  return dr > 0 ? (taMap[seats] || 80) : 0;
+}
 function getDistDR(){
-  // 선택된 거리 서차지 TA값 → 해당 옵션의 dr값 반환
-  const seats = document.getElementById('dr-seats')?.value || '21S';
-  const val = document.getElementById('f-dist-select')?.value || '0';
-  const opts = DIST_OPTIONS[seats] || DIST_OPTIONS['21S'];
-  const opt = opts.find(o=>o.val===val);
-  return opt ? (opt.dr || 0) : 0;
+  return getDistValue();
 }
 // Early/Late: TA = Airport Transfer SVC × 1.3 (별도 항목으로 청구), DR = 21/25S $20, 40/50S $30
 function getEarlyDR(seats){
@@ -4908,7 +4904,7 @@ function calcTotal(){
     return veh?.Transmission === 'Manual';
   })();
   const svcVal = getSvcValue();
-  const isLongRun = svcVal >= 250; // $250 이상 = 10HR/12HR 일정
+  const isLongRun = svcVal >= 250; // $250 이상 = 10HR/12HR 일정 (MANUAL: $270/$300 포함)
   const manualBonus = (isManualVehicle && isLongRun) ? 20 : 0;
   // Early/Late TA: Airport Transfer 여행사별 요금 × 0.3 (DR은 고정 $30/$40)
   const earlyVal = parseFloat(document.getElementById('f-early')?.value||0);
@@ -4925,7 +4921,7 @@ function calcTotal(){
     const airportTA = atRow ? (Number(atRow[rateCol]) || 0) : 0;
     earlyTA = Math.round(airportTA * 0.3);
   }
-  let ta=svcVal+getHotelValue()+getDistValue()+earlyTA;
+  let ta=svcVal+getHotelTA()+getDistTA()+earlyTA;
   fixedTA.forEach(id=>{ta+=parseFloat(document.getElementById(id)?.value||0);});
   if(isLarge) ta += tollVal;
   ta += nightTA;
