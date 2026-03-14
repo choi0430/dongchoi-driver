@@ -1422,6 +1422,28 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
   </div>
 </div>
 
+<!-- 차량 잠금 안내 모달 -->
+<div class="modal-overlay" id="modal-vehicle-locked">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">🔒 차량 사용 불가 / Vehicle In Use</div>
+    <div style="background:#fff5f5;border:1.5px solid #fed7d7;border-radius:12px;padding:16px;margin-bottom:16px;">
+      <div style="font-size:16px;font-weight:700;color:#c53030;margin-bottom:10px;" id="locked-rego-title">🚌 —</div>
+      <div style="font-size:13px;color:#742a2a;line-height:2;">
+        <div>👤 사용 드라이버: <b id="locked-driver">—</b></div>
+        <div>📅 운행 날짜: <b id="locked-date">—</b></div>
+        <div>🕐 시작 시간: <b id="locked-starttime">—</b></div>
+      </div>
+    </div>
+    <p style="font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:18px;">
+      이 차량은 위 드라이버가 운행 중입니다.<br>
+      <b>End of Shift 완료 후</b> 사용 가능합니다.<br>
+      <span style="color:#c05621;font-size:12px;">This vehicle is in use. Available after End of Shift.</span>
+    </p>
+    <button class="btn btn-secondary" onclick="closeModal('modal-vehicle-locked')" style="width:100%;">확인 / OK</button>
+  </div>
+</div>
+
 <script>
 
 // ── 전화번호 앞 0 복원 ──
@@ -1749,8 +1771,8 @@ const SDD_CONFIG = {
   prerego:    { list: ()=> (MASTER.vehicles||[]).map(v=>{
     const activeInfo = _activeRegosCache.find(r=>r.rego===v.Rego);
     const sub = (v.Seats?v.Seats+'인승':'')+(v.Transmission==='Manual'?' · 🔧 수동':'')
-               +(activeInfo ? ' 🚫 운행중: '+activeInfo.driver : '');
-    return {name:v.Rego, sub, disabled:!!activeInfo};
+               +(activeInfo ? ' 🔒 운행중: '+activeInfo.driver : '');
+    return {name:v.Rego, sub, disabled:!!activeInfo, lockInfo: activeInfo||null};
   }), type:'prerego' },
   agency:     { list: ()=> (MASTER.agencies||[]).map(a=>({name:a.Name,sub:a.Mobile||''})),              type:'agency' },
   attraction: { list: ()=>{
@@ -1804,7 +1826,12 @@ function sddFilter(key) {
     } else {
       div.style.opacity='0.45';
       div.style.cursor='not-allowed';
-      div.addEventListener('mousedown', function(e){ e.preventDefault(); e.stopPropagation(); showToast('🚫 이미 다른 드라이버가 운행 중인 차량입니다.','error'); });
+      const _lockInfo = o.lockInfo || null;
+      const _regoName = o.name;
+      div.addEventListener('mousedown', function(e){
+        e.preventDefault(); e.stopPropagation();
+        showLockedVehicleModal(_regoName, _lockInfo);
+      });
     }
     frag.appendChild(div);
   });
@@ -3107,7 +3134,8 @@ async function completePre(){
   // 1) 같은 드라이버가 이미 해당 차량으로 운행 중인지 (로컬 체크)
   const alreadyMine = activeShifts.some(s => s.rego === rego);
   if(alreadyMine){
-    showToast(`🚫 ${rego} 차량은 이미 운행 중입니다. End of Shift를 먼저 완료하세요.\n${rego} is already in use. Please complete End of Shift first.`,'error');
+    const myShift = activeShifts.find(s => s.rego === rego);
+    showLockedVehicleModal(rego, {driver: currentDriver?.name||'나', date: myShift?.date||'', startTime: myShift?.startTime||''});
     return;
   }
   // 2) 다른 드라이버가 운행 중인지 (GAS 서버 체크)
@@ -3118,12 +3146,7 @@ async function completePre(){
     if(json.ok && json.regos){
       const conflict = json.regos.find(r => r.rego === rego);
       if(conflict){
-        const isMine = conflict.driver === (currentDriver?.name || '');
-        if(isMine){
-          showToast(`🚫 ${rego} 차량은 이미 운행 중입니다. End of Shift를 먼저 완료하세요.\n${rego} is already in use. Please complete End of Shift first.`,'error');
-        } else {
-          showToast(`🚫 ${rego} 차량은 현재 ${conflict.driver} 드라이버가 운행 중입니다.\n${rego} is currently being used by ${conflict.driver}.`,'error');
-        }
+        showLockedVehicleModal(rego, conflict);
         return;
       }
     }
@@ -6718,6 +6741,16 @@ function showToast(msg,type=''){
   setTimeout(()=>t.classList.remove('show'),2500);
 }
 function closeModal(id){document.getElementById(id).classList.remove('open');}
+
+function showLockedVehicleModal(rego, lockInfo) {
+  const info = lockInfo || {};
+  document.getElementById('locked-rego-title').textContent = '🚌 ' + rego;
+  document.getElementById('locked-driver').textContent = info.driver || '알 수 없음';
+  document.getElementById('locked-date').textContent = info.date || '—';
+  document.getElementById('locked-starttime').textContent = info.startTime || '—';
+  document.getElementById('modal-vehicle-locked').classList.add('open');
+}
+
 function switchToAdmin(){showToast('관리자 앱으로 전환 중...');setTimeout(()=>window.location.href='admin.html',1000);}
 
 // ═══════════════════════════════════════
