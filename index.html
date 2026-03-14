@@ -4074,53 +4074,83 @@ function autoRate(){
   if(!att) return;
 
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
-  if(!seats) return; // 인승 미선택 시 스킵 (updateSvcHint가 힌트 표시)
+  if(!seats) return;
 
   const sk = seatKey(seats);
+  const rateCol = 'seats_' + sk + '_rate';
+  const agency  = document.getElementById('dr-agency')?.value || '';
 
-  // M_PriceDriver 기반 드라이버 비용 계산
+  // ── 1순위: M_PriceClient (여행사 청구 요금) ──
+  const clientRows = MASTER.priceClient || [];
+  // 해당 여행사+코스 행 찾기 (대소문자 무시)
+  const attLc = att.toLowerCase();
+  let clientRow = clientRows.find(r =>
+    r.Course && r.Course.toLowerCase() === attLc && r.Agency === agency
+  );
+  // 여행사 매칭 안되면 동일 코스 중 첫 번째
+  if(!clientRow) clientRow = clientRows.find(r =>
+    r.Course && r.Course.toLowerCase() === attLc
+  );
+
+  if(clientRow){
+    const taAmt = Number(clientRow[rateCol] || 0);
+    if(taAmt > 0){
+      const taStr = String(taAmt);
+      const svcOpts = SVC_OPTIONS[seats] || [];
+      const matched = svcOpts.some(o => o.val === taStr);
+      if(matched){
+        cselSetValue('f-svc-select', taStr);
+      } else {
+        // SVC_OPTIONS에 없는 금액 → OTHER + 직접 입력
+        cselSetValue('f-svc-select', 'OTHER');
+        const customEl = document.getElementById('f-svc-custom');
+        if(customEl){ customEl.value = taAmt; }
+        const wrapEl = document.getElementById('f-svc-custom-wrap');
+        if(wrapEl){ wrapEl.style.display = 'block'; }
+      }
+      calcTotal();
+      showToast(`${att} 여행사 요금 자동 선택: $${taAmt}`,'success');
+      return;
+    }
+  }
+
+  // ── 2순위: M_PriceDriver fallback (여행사 요금 없을 때) ──
   const courseData = getPDCourseFromMaster(att);
   if(courseData){
     const skData = courseData[sk] || {};
     let drAmt = Number(skData.base || 0);
-
-    // 수동 차량 여부 확인 (+$20)
     const rego = getCurrentRego() || '';
     const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
     if(veh?.Transmission === 'Manual') drAmt += 20;
-
     if(drAmt > 0){
       const drStr = String(drAmt);
       const svcOpts = SVC_OPTIONS[seats] || [];
       const matched = svcOpts.some(o => o.val === drStr);
       if(matched){
         cselSetValue('f-svc-select', drStr);
-        calcTotal();
-        showToast(`${att} 서비스 비용 자동 선택: $${drAmt}`,'success');
       } else {
-        // SVC_OPTIONS에 없는 금액 → OTHER + 직접 입력
         cselSetValue('f-svc-select', 'OTHER');
         const customEl = document.getElementById('f-svc-custom');
         if(customEl){ customEl.value = drAmt; }
         const wrapEl = document.getElementById('f-svc-custom-wrap');
         if(wrapEl){ wrapEl.style.display = 'block'; }
-        calcTotal();
-        showToast(`${att} 서비스 비용 자동 입력: $${drAmt} (직접 입력)`,'success');
       }
+      calcTotal();
+      showToast(`${att} 서비스 비용 자동 선택: $${drAmt} (드라이버 기준)`,'success');
       return;
     }
   }
 
-  // M_PriceDriver에 코스 없을 때 → 기존 RATES fallback
+  // ── 3순위: 기존 RATES fallback ──
   if(RATES[att]){
     const r = RATES[att];
-    const drStr = String(r.dr||0);
+    const taStr = String(r.ta||0);
     const svcOpts = SVC_OPTIONS[seats] || [];
-    const matched = svcOpts.some(o => o.val === drStr);
+    const matched = svcOpts.some(o => o.val === taStr);
     if(matched){
-      cselSetValue('f-svc-select', drStr);
+      cselSetValue('f-svc-select', taStr);
       calcTotal();
-      showToast(`${att} 서비스 비용 자동 선택: $${r.dr}`,'success');
+      showToast(`${att} 서비스 비용 자동 선택: $${r.ta}`,'success');
     }
   }
 }
@@ -4471,38 +4501,57 @@ function updateSvcHint(){
   }
 
   // ── 관광지 + 인승 모두 선택: 정확한 금액 표시
-  const courseData = getPDCourseFromMaster(att);
-  if(courseData){
-    const skData = courseData[sk] || {};
-    const drBase = Number(skData.base || 0);
-    const drAmt  = drBase + manualAdd;
-    const maxH   = courseData.max_hours;
-    const otRate = seats==='40S'||seats==='50S' ? 40 : 30;
+  const sk2 = sk;
+  const rateCol2 = 'seats_' + sk2 + '_rate';
+  const agency2  = document.getElementById('dr-agency')?.value || '';
+  const clientRows2 = MASTER.priceClient || [];
+  const attLc2 = att.toLowerCase();
+  let taRow = clientRows2.find(r =>
+    r.Course && r.Course.toLowerCase() === attLc2 && r.Agency === agency2
+  ) || clientRows2.find(r =>
+    r.Course && r.Course.toLowerCase() === attLc2
+  );
+  const taAmt = taRow ? Number(taRow[rateCol2] || 0) : 0;
 
-    if(drAmt > 0){
-      const isSelected = (curVal === drAmt || curVal === drBase);
-      if(isSelected){
-        items.push({ type:'apply',
-          title: '✅ 서비스 차지 선택됨 · 드라이버 $'+drAmt+(isManualVehicle?' (수동 +$20)':''),
-          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')
-        });
-      } else {
-        items.push({ type:'warn',
-          title: '💰 이 코스 드라이버 비용: $'+drAmt+(isManualVehicle?' (수동 +$20 포함)':''),
-          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')
-            +(curVal > 0 ? ' · 현재 선택: $'+curVal : ' · 서비스 차지를 선택해 주세요')
-        });
-      }
+  const courseData = getPDCourseFromMaster(att);
+  const skData2 = courseData?.[sk] || {};
+  const drBase = Number(skData2.base || 0);
+  const drAmt  = drBase + manualAdd;
+  const maxH   = courseData?.max_hours;
+  const otRate = seats==='40S'||seats==='50S' ? 40 : 30;
+
+  if(taAmt > 0){
+    const isSelected = (curVal === taAmt);
+    if(isSelected){
+      items.push({ type:'apply',
+        title: '✅ 여행사 요금 선택됨: $'+taAmt+(agency2?' ('+agency2+')':''),
+        sub: att+' · '+seats+(drAmt?' · 드라이버: $'+drAmt:'')+(maxH?' · 기준 '+maxH+'h':'')
+      });
     } else {
-      items.push({ type:'info',
-        title: '❓ M_PriceDriver에 이 코스 금액 없음',
-        sub: att+' · '+seats+' — 직접 입력해 주세요'
+      items.push({ type:'warn',
+        title: '💰 여행사 요금: $'+taAmt+(agency2?' ('+agency2+')':''),
+        sub: att+' · '+seats+(drAmt?' · 드라이버: $'+drAmt:'')+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')
+          +(curVal > 0 ? ' · 현재 선택: $'+curVal : ' · 서비스 차지를 선택해 주세요')
+      });
+    }
+  } else if(drAmt > 0){
+    const isSelected = (curVal === drAmt || curVal === drBase);
+    if(isSelected){
+      items.push({ type:'apply',
+        title: '✅ 서비스 차지 선택됨 · 드라이버 $'+drAmt+(isManualVehicle?' (수동 +$20)':''),
+        sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')
+      });
+    } else {
+      items.push({ type:'warn',
+        title: '💰 드라이버 비용: $'+drAmt+(isManualVehicle?' (수동 +$20 포함)':''),
+        sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')
+          +(curVal > 0 ? ' · 현재 선택: $'+curVal : ' · 서비스 차지를 선택해 주세요')
       });
     }
   } else {
     items.push({ type:'info',
       title: '❓ 등록되지 않은 코스',
-      sub: att+' — M_PriceDriver에 추가하거나 직접 입력하세요'
+      sub: att+' — M_PriceClient 또는 M_PriceDriver에 추가하거나 직접 입력하세요'
     });
   }
 
