@@ -20,8 +20,8 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-family:sans-serif;font-size:14px;overflow:hidden;}
 #app{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden;}
-#screen{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;padding-bottom:calc(80px + var(--sb));will-change:scroll-position;}
-.page{display:none;padding:0;padding-bottom:40px;}
+#screen{flex:1 1 0;min-height:0;position:relative;overflow:hidden;}
+.page{display:none;position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;padding:0;padding-bottom:calc(80px + var(--sb));}
 .page.active{display:block;}
 
 /* TOP BAR */
@@ -3026,8 +3026,8 @@ function showPage(id){
   if(navEl) navEl.classList.add('active');
   const nav = document.getElementById('nav-'+id);
   if(nav) nav.classList.add('active');
-  // 페이지 전환 후 #screen 스크롤 맨 위로
-  requestAnimationFrame(()=>{ const _s=document.getElementById('screen'); if(_s) _s.scrollTop=0; });
+  // 페이지 전환 후 해당 페이지 스크롤 맨 위로
+  requestAnimationFrame(()=>{ const _p=document.getElementById('page-'+id); if(_p) _p.scrollTop=0; });
   // 연락처 탭 진입 시 최신 데이터로 재렌더링
   if(id === 'contacts'){ _activeRegosFetched=false; renderContacts(); }
   if(id === 'me') initMyInfoPage();
@@ -3063,9 +3063,9 @@ function goStep(n){
   if(s2) s2.textContent = curShift ? curShift.rego : '—';
   if(s3) s3.textContent = curShift ? curShift.rego : '—';
   currentStep = n;
-  const _scr=document.getElementById('screen');
+  const _scr=document.getElementById('page-report');
   if(_scr){_scr.scrollTop=0;_scr.scrollLeft=0;}
-  setTimeout(()=>{const s=document.getElementById('screen');if(s){s.scrollTop=0;s.scrollTo({top:0,behavior:'instant'});}},50);
+  setTimeout(()=>{const s=document.getElementById('page-report');if(s){s.scrollTop=0;s.scrollTo({top:0,behavior:'instant'});}},50);
   if(n===1){
     // Pre Departure draft 복원 + 자동저장 리스너
     setTimeout(()=>{
