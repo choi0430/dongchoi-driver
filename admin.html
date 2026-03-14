@@ -2845,8 +2845,17 @@ function calcInvRow(r) {
     }
   }
 
-  const total = baseRate + ot + hotel + dist + earlyTA;
-  return { baseRate, ot, hotel, dist, earlyTA, total, rateSource };
+  // ── Airport Parking Fee ──
+  // 픽업지가 공항인 경우: 21/25S $30, 40/50S $40 추가 청구 (TA only)
+  const pickupVal  = String(r.Pickup  || '').trim();
+  const dropoffVal = String(r.Dropoff || '').trim();
+  // 공항 패턴: SYD, AIRPORT, KINGSFORD, MASCOT 등
+  const apPattern = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
+  const hasAirport = apPattern.test(pickupVal) || apPattern.test(dropoffVal);
+  const parkingFee = hasAirport ? (seatNum >= 40 ? 40 : 30) : 0;
+
+  const total = baseRate + ot + hotel + dist + earlyTA + parkingFee;
+  return { baseRate, ot, hotel, dist, earlyTA, parkingFee, total, rateSource };
 }
 async function initInvoice() {
   _invReports = null; // 항상 최신 리포트 재로드
@@ -3000,16 +3009,17 @@ function renderInvPreview(rows, agency, from, to) {
   rows.sort((a, b) => a._iso.localeCompare(b._iso));
 
   // calcInvRow로 각 행 청구액 계산 (M_PriceClient 요금표 기준)
-  let grandTotal = 0, totalBase = 0, totalOT = 0, totalHotel = 0, totalDist = 0, totalEarly = 0;
+  let grandTotal = 0, totalBase = 0, totalOT = 0, totalHotel = 0, totalDist = 0, totalEarly = 0, totalParking = 0;
   let hasPriceTable = false, hasFallback = false;
   rows.forEach(r => {
     const c = calcInvRow(r);
-    grandTotal += c.total;
-    totalBase  += c.baseRate;
-    totalOT    += c.ot;
-    totalHotel += c.hotel;
-    totalDist  += c.dist;
-    totalEarly += c.earlyTA;
+    grandTotal   += c.total;
+    totalBase    += c.baseRate;
+    totalOT      += c.ot;
+    totalHotel   += c.hotel;
+    totalDist    += c.dist;
+    totalEarly   += c.earlyTA;
+    totalParking += (c.parkingFee || 0);
     if (c.rateSource === 'price_table') hasPriceTable = true;
     else hasFallback = true;
   });
@@ -3044,7 +3054,8 @@ function renderInvPreview(rows, agency, from, to) {
         ${totalEarly>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Early/Late</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalEarly.toLocaleString()}</div></div>` : ''}
         ${totalOT>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">OT</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalOT.toLocaleString()}</div></div>` : ''}
         ${totalHotel>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">호텔</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalHotel.toLocaleString()}</div></div>` : ''}
-        ${totalDist>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">거리</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
+        ${totalDist>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">거리</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
+        ${totalParking>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">공항주차</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalParking.toLocaleString()}</div></div>` : ''}
       </div>` : ''}
       <!-- 그룹 방식 선택 -->
       <div style="margin-bottom:8px;">
@@ -3088,8 +3099,9 @@ function renderInvPreview(rows, agency, from, to) {
             ${c.earlyTA? `<div style="font-size:10px;color:var(--or);">+Early $${c.earlyTA}</div>` : ''}
             ${c.ot    ? `<div style="font-size:10px;color:var(--or);">+OT $${c.ot}</div>` : ''}
             ${c.hotel ? `<div style="font-size:10px;color:var(--ac);">+호텔 $${c.hotel}</div>` : ''}
-            ${c.dist  ? `<div style="font-size:10px;color:var(--ac);">+거리 $${c.dist}</div>` : ''}
-            ${km      ? `<div style="font-size:10px;color:var(--t3);">${km}km</div>` : ''}
+            ${c.dist        ? `<div style="font-size:10px;color:var(--ac);">+거리 $${c.dist}</div>` : ''}
+            ${c.parkingFee  ? `<div style="font-size:10px;color:var(--or);">+공항주차 $${c.parkingFee}</div>` : ''}
+            ${km            ? `<div style="font-size:10px;color:var(--t3);">${km}km</div>` : ''}
           </div>
         </div>
       </div>`;
@@ -3204,10 +3216,11 @@ async function generateInvoice() {
   function _makeTableRow(r, fd) {
     const c   = calcInvRow(r);
     const extras = [
-      c.earlyTA ? `Early/Late Surcharge $${c.earlyTA.toLocaleString()}` : '',
-      c.ot      ? `OT $${c.ot.toLocaleString()}` : '',
-      c.hotel   ? `Hotel Surcharge $${c.hotel.toLocaleString()}` : '',
-      c.dist    ? `Distance Surcharge $${c.dist.toLocaleString()}` : '',
+      c.earlyTA     ? `Early/Late Surcharge $${c.earlyTA.toLocaleString()}` : '',
+      c.ot          ? `OT $${c.ot.toLocaleString()}` : '',
+      c.hotel       ? `Hotel Surcharge $${c.hotel.toLocaleString()}` : '',
+      c.dist        ? `Distance Surcharge $${c.dist.toLocaleString()}` : '',
+      c.parkingFee  ? `Airport Parking Fee $${c.parkingFee.toLocaleString()}` : '',
     ].filter(Boolean).join(' · ');
     const timeStr = r._timeStart || r._timeEnd ? (r._timeStart||'') + (r._timeEnd ? ' - '+r._timeEnd : '') : '-';
     const baseLabel = c.rateSource === 'price_table'
