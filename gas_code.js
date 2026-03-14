@@ -30,7 +30,11 @@ function sheetToJSON(sheet) {
   const headers = data[0].map(h => String(h).trim());
   return data.slice(1).map(row => {
     const obj = {};
-    headers.forEach((h, i) => { obj[h] = row[i] !== undefined && row[i] !== null ? row[i] : ''; });
+    headers.forEach((h, i) => {
+      const v = row[i];
+      // Date 오브젝트는 dd/mm/yyyy 문자열로 변환 (UTC 직렬화 시 타임존 오류 방지)
+      obj[h] = (v instanceof Date) ? fmtDate(v) : (v !== undefined && v !== null ? v : '');
+    });
     return obj;
   }).filter(row => headers.some(h => row[h] !== ''));
 }

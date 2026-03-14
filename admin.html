@@ -1172,10 +1172,22 @@ function parseToISO(ds){
 }
 
 function fmtDate(ds){
-  // dd/mm/yyyy 표시용: dd/mm/yyyy 그대로, YYYY-MM-DD → 변환
+  // dd/mm/yyyy 표시용
   if(!ds)return '-';
   const s=String(ds).trim();
+  // 이미 dd/mm/yyyy
   if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  // ISO timestamp (구글 시트: 2026-03-11T00:00:00.000Z) → UTC+10 로컬 날짜
+  if(s.includes('T')){
+    const d=new Date(s);
+    if(!isNaN(d)){
+      const local=new Date(d.getTime()+10*3600*1000);
+      const dd=String(local.getUTCDate()).padStart(2,'0');
+      const mm=String(local.getUTCMonth()+1).padStart(2,'0');
+      return dd+'/'+mm+'/'+local.getUTCFullYear();
+    }
+  }
+  // YYYY-MM-DD
   if(/^\d{4}-\d{2}-\d{2}/.test(s)){const[y,m,d]=s.slice(0,10).split('-');return d+'/'+m+'/'+y;}
   return s;
 }
@@ -4096,7 +4108,7 @@ function renderDR(){
   if(weekSel.value){
     const wMon = weekSel.value;
     const wSun = new Date(wMon+'T00:00:00'); wSun.setDate(wSun.getDate()+6);
-    filtered = filtered.filter(r=>{ const iso=parseToISO(r.Date||''); return iso>=wMon && iso<=wSun.toISOString().slice(0,10); });
+    filtered = filtered.filter(r=>{ const iso=parseToISO(r.Date||''); return iso>=wMon && iso<=toLocalISO(wSun); });
   }
   if(regoSel.value) filtered = filtered.filter(r=>r.Rego===regoSel.value);
 
