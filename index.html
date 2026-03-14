@@ -2184,6 +2184,24 @@ const CONTACTS = [
 ];
 
 // ── Google Sheets API 설정 ──
+// 구글 시트 시간 파싱: 1899-12-29T22:20:00.000Z → "08:20" (UTC+10, 24h)
+function parseSheetTime(ts) {
+  if(!ts) return '';
+  const s = String(ts).trim();
+  // 이미 HH:MM 형식이면 그대로
+  if(/^\d{1,2}:\d{2}$/.test(s)) return s.padStart(5,'0').slice(0,5);
+  // ISO timestamp (구글 시트 시간값)
+  if(s.includes('T')) {
+    const d = new Date(s);
+    if(!isNaN(d)) {
+      // UTC+10 고정 (구글 시트가 AEST 기준으로 직렬화)
+      const h  = (d.getUTCHours() + 10) % 24;
+      const mn = String(d.getUTCMinutes()).padStart(2,'0');
+      return String(h).padStart(2,'0') + ':' + mn;
+    }
+  }
+  return s.length <= 5 ? s : '';
+}
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
 
 async function submitToSheets(action, data) {
@@ -4033,8 +4051,8 @@ function renderTodayReports(){
           dropoff: gr.Dropoff || '',
           kmStart: gr.KM_Start || '',
           kmEnd: gr.KM_End || '',
-          timeStart: gr.Time_Start || '',
-          timeEnd: gr.Time_End || '',
+          timeStart: parseSheetTime(gr.Time_Start),
+          timeEnd: parseSheetTime(gr.Time_End),
           guide: gr.Guide || '',
           tourcode: gr.Tour_Code || '',
           total: parseFloat(gr.Total_TA || 0),
