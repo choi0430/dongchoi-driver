@@ -2202,6 +2202,19 @@ function parseSheetTime(ts) {
   }
   return s.length <= 5 ? s : '';
 }
+
+// 두 시간(HH:MM)으로 운행 시간 계산 → "Xh Ym" 문자열 반환
+function calcDuration(start, end) {
+  if(!start || !end) return '';
+  const toMin = t => { const [h,m] = t.split(':').map(Number); return h*60+(m||0); };
+  const s = toMin(parseSheetTime(start));
+  const e = toMin(parseSheetTime(end));
+  if(isNaN(s)||isNaN(e)) return '';
+  let diff = e - s;
+  if(diff < 0) diff += 24*60; // 자정 넘기는 경우
+  const h = Math.floor(diff/60), m = diff%60;
+  return h > 0 ? (m > 0 ? h+'h '+m+'m' : h+'h') : m+'m';
+}
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
 
 async function submitToSheets(action, data) {
@@ -6463,7 +6476,7 @@ function showPayDetail(wk){
           <div>
             <div class="pay-report-agency">${r.agency||'—'}</div>
             <div class="pay-report-attr">${r.attraction||''} ${r.rego?'· '+r.rego:''}</div>
-            ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">⏱ '+parseSheetTime(r.timeStart)+' – '+parseSheetTime(r.timeEnd||'')+'</div>':''}
+            ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">⏱ '+parseSheetTime(r.timeStart)+' – '+parseSheetTime(r.timeEnd||'')+(calcDuration(r.timeStart,r.timeEnd)?'<span style="margin-left:6px;background:var(--surface3,rgba(255,255,255,.1));border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;">'+calcDuration(r.timeStart,r.timeEnd)+'</span>':'')+'</div>':''}
             ${(r.pickup||r.dropoff)?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">📍 '+(r.pickup||'')+(r.dropoff&&r.dropoff!==r.pickup?' → '+r.dropoff:'')+'</div>':''}
             ${r.tourcode?'<div style="font-size:11px;color:var(--muted);">🏷 '+r.tourcode+'</div>':''}
           </div>
