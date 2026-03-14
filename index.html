@@ -4098,7 +4098,8 @@ function renderTodayReports(){
         <div class="report-amount">$${r.total}</div>
       </div>
       <div class="report-detail">
-        ${r.timeStart?`<span class="report-tag">⏱ ${parseSheetTime(r.timeStart)}–${parseSheetTime(r.timeEnd||'')}</span>`:''}
+        ${r.timeStart?`<span class="report-tag">⏱ ${parseSheetTime(r.timeStart)}–${parseSheetTime(r.timeEnd||'')}${calcDuration(r.timeStart,r.timeEnd)?' ('+calcDuration(r.timeStart,r.timeEnd)+')':''}</span>`:''}
+        ${(r.kmStart&&r.kmEnd)?`<span class="report-tag">🛣 ${parseInt(r.kmEnd)-parseInt(r.kmStart)>0?(parseInt(r.kmEnd)-parseInt(r.kmStart)).toLocaleString()+' km':''+r.kmStart+'→'+r.kmEnd+' km'}</span>`:''}
         ${r.guide?`<span class="report-tag">👤 ${r.guide}</span>`:''}
         ${r.tourcode?`<span class="report-tag">🏷 ${r.tourcode}</span>`:''}
       </div>
@@ -6180,7 +6181,7 @@ async function renderPay(){
     attraction:  r.Attraction||'',
     rego:        r.Rego||'',
     svc:         parseFloat(r.SVC_Fee||0),
-    dr:          parseFloat(r.DR_Cost||0),
+    dr:          calcDRCostFromRow(r),
     ot:          parseFloat(r.OT||0),
     hotelSurcharge: parseFloat(r.Hotel_Surcharge||0),
     distSurcharge:  parseFloat(r.Dist_Surcharge||0),
@@ -6199,6 +6200,8 @@ async function renderPay(){
     timeEnd:     r.Time_End||r.DR_End||'',
     pickup:      r.Pickup||'',
     dropoff:     r.Dropoff||'',
+    kmStart:     r.KM_Start||r.Start_KM||'',
+    kmEnd:       r.KM_End||r.End_KM||'',
     id:          r.ID||r.id||''
   }));
 
@@ -6492,6 +6495,7 @@ function showPayDetail(wk){
             <div class="pay-report-agency">${r.agency||'—'}</div>
             <div class="pay-report-attr">${r.attraction||''} ${r.rego?'· '+r.rego:''}</div>
             ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">⏱ '+parseSheetTime(r.timeStart)+' – '+parseSheetTime(r.timeEnd||'')+(calcDuration(r.timeStart,r.timeEnd)?'<span style="margin-left:6px;background:var(--surface3,rgba(255,255,255,.1));border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;">'+calcDuration(r.timeStart,r.timeEnd)+'</span>':'')+'</div>':''}
+            ${(r.kmStart||r.kmEnd)?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">🛣 '+(r.kmStart?r.kmStart+' km':'—')+' → '+(r.kmEnd?r.kmEnd+' km':'—')+(r.kmStart&&r.kmEnd&&parseInt(r.kmEnd)-parseInt(r.kmStart)>0?' <span style="margin-left:4px;background:rgba(14,159,110,.15);border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;color:var(--green);">+'+( parseInt(r.kmEnd)-parseInt(r.kmStart) ).toLocaleString()+' km</span>':'')+'</div>':''}
             ${(r.pickup||r.dropoff)?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">📍 '+(r.pickup||'')+(r.dropoff&&r.dropoff!==r.pickup?' → '+r.dropoff:'')+'</div>':''}
             ${r.tourcode?'<div style="font-size:11px;color:var(--muted);">🏷 '+r.tourcode+'</div>':''}
           </div>
