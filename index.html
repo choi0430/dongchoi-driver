@@ -3326,6 +3326,9 @@ function submitDailyReport(){
   if(!agency||!att){showToast('여행사와 관광지를 선택하세요','error');return;}
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(!shift){showToast('운행 중인 차량이 없습니다','error');return;}
+  // 제출 직전 항상 재계산 (SVC 자동선택 후 calcTotal이 안 불린 경우 대비)
+  autoRate();
+  calcTotal();
   const total = parseFloat(document.getElementById('t-ta').textContent.replace('$',''))||0;
   const svcLabel = (()=>{ const b=document.querySelector('.csel-btn[data-csel="f-svc-select"]'); return b?b.textContent.trim():''; })();
   const report = {
@@ -6052,7 +6055,35 @@ async function fetchDRCache(){
 }
 
 // 드라이버 주간 DR_Cost 합산 (GAS 기준)
-async function getGASDRForWeek(driverName, monISO){
+async // DR_Cost 재계산 헬퍼 (DR_Cost가 0이거나 빈 문자열인 경우 각 항목 합산)
+function calcDRCostFromRow(r) {
+  const stored = parseFloat(r.DR_Cost);
+  if(stored > 0) return stored;
+  // DR_Cost 없음 → M_PriceDriver base + extras
+  const svc  = parseFloat(r.SVC_Charge)||0;
+  const ot   = parseFloat(r.OT)||0;
+  const htl  = parseFloat(r.Hotel_Surcharge)||0;
+  const dst  = parseFloat(r.Dist_Surcharge)||0;
+  const erl  = parseFloat(r.Early)||0;
+  const trl  = parseFloat(r.Trailer)||0;
+  const ngt  = parseFloat(r.Night_DR)||0;
+  const wsh  = parseFloat(r.Wash)||0;
+  const mel  = parseFloat(r.Meal)||0;
+  const tip  = parseFloat(r.Tip)||0;
+  const toll = r.Toll_Personal==='Y' ? (parseFloat(r.Toll)||0) : 0;
+  const fuel = r.Fuel_Personal==='Y' ? (parseFloat(r.Fuel)||0) : 0;
+  // M_PriceDriver에서 base 조회
+  const seatsNum = parseInt(String(r.Seats||'').replace(/[^0-9]/g,''))||25;
+  const ck = seatsNum>=50?'50':seatsNum>=40?'40':seatsNum>=25?'25':'21';
+  const att = String(r.Attraction||'').trim();
+  const pdEntry = typeof MASTER!=='undefined' ? MASTER.priceDriver?.find(p=>p.Course===att) : null;
+  const drBase = pdEntry ? (Number(pdEntry['seats_'+ck+'_base'])||0) : 0;
+  const base = drBase > 0 ? drBase : svc;
+  if(base === 0) return 0;
+  return base + ot + htl + dst + erl + trl + ngt + wsh + mel + tip + toll + fuel;
+}
+
+function getGASDRForWeek(driverName, monISO){
   const rows = await fetchDRCache();
   const sun = (()=>{const d=new Date(monISO+'T00:00:00');d.setDate(d.getDate()+6);return toLocalISO(d);})();
   const matchNames = new Set([driverName]);
@@ -6064,7 +6095,7 @@ async function getGASDRForWeek(driverName, monISO){
   let total=0;
   rows.forEach(r=>{
     if(!matchNames.has(String(r.Driver||'').trim())) return;
-    if(r._isoDate>=monISO&&r._isoDate<=sun) total+=(parseFloat(r.DR_Cost)||0);
+    if(r._isoDate>=monISO&&r._isoDate<=sun) total+=calcDRCostFromRow(r);
   });
   return total;
 }
@@ -6443,7 +6474,7 @@ async function renderSalary(){
     return nm===driverName || nm===(currentDriver?.englishName||'') || nm===(currentDriver?.initials||'');
   }).map(r=>({
     date: fmtDate(r.Date||''),
-    dr:   parseFloat(r.DR_Cost||0),
+    dr:   calcDRCostFromRow(r),
     nightOwner: parseFloat(r.Night_Owner||0)
   }));
   const localAll = getAllReports();
