@@ -4050,40 +4050,37 @@ function renderShiftSummary(){
 
 function renderTodayReports(){
   const el = document.getElementById('today-reports-list');
-  // GAS 캐시에서 오늘 날짜 리포트도 병합 (새로고침 후에도 표시)
-  const todayISO = todayDisplay(); // dd/mm/yyyy
+  const todayISO = todayDisplay();
   const driverName = currentDriver?.name || '';
-  if(_drReportsCache && driverName) {
-    const gasToday = _drReportsCache.filter(r =>
-      r.Driver === driverName && r.Date === todayISO
-    );
-    gasToday.forEach(gr => {
-      const alreadyIn = todayReports.some(r => r.tourcode === gr.Tour_Code && r.date === todayISO);
-      if(!alreadyIn) {
-        todayReports.push({
-          id: 'gas_' + (gr.Tour_Code || Date.now()),
-          date: gr.Date,
-          seats: gr.Seats || '',
-          agency: gr.Agency || '',
-          attraction: gr.Attraction || '',
-          pickup: gr.Pickup || '',
-          dropoff: gr.Dropoff || '',
-          kmStart: gr.KM_Start || '',
-          kmEnd: gr.KM_End || '',
-          timeStart: parseSheetTime(gr.Time_Start),
-          timeEnd: parseSheetTime(gr.Time_End),
-          guide: gr.Guide || '',
-          tourcode: gr.Tour_Code || '',
-          total: parseFloat(gr.Total_TA || 0),
-          dr: parseFloat(gr.DR_Cost || 0),
-          svcCharge: parseFloat(gr.SVC_Charge || 0),
-          rego: gr.Rego || '',
-          driver: gr.Driver || ''
-        });
-      }
-    });
-  }
-  const myReports = todayReports.filter(r => !r.driver || r.driver === driverName);
+
+  // GAS 기준 오늘 리포트 (운행날짜 기준)
+  const gasToday = (_drReportsCache||[]).filter(r => {
+    const nm = String(r.Driver||'').trim();
+    return (nm===driverName || nm===(currentDriver?.englishName||'')) && fmtDate(r.Date||'')===todayISO;
+  }).map(r=>({
+    date:      fmtDate(r.Date||''),
+    agency:    r.Agency||'',
+    attraction:r.Attraction||'',
+    rego:      r.Rego||'',
+    kmStart:   r.KM_Start||'',
+    kmEnd:     r.KM_End||'',
+    timeStart: parseSheetTime(r.Time_Start),
+    timeEnd:   parseSheetTime(r.Time_End),
+    guide:     r.Guide||'',
+    tourcode:  r.Tour_Code||'',
+    dr:        calcDRCostFromRow(r),
+    total:     parseFloat(r.Total_TA||0),
+  }));
+
+  // GAS에 없는 경우(방금 제출, 아직 동기화 전) 로컬 fallback
+  const localToday = todayReports.filter(r =>
+    (!r.driver || r.driver===driverName) && r.date===todayISO
+  );
+  const mkKey = r=>`${r.date}_${r.rego}_${r.agency}_${r.attraction}`;
+  const gasKeys = new Set(gasToday.map(mkKey));
+  const localOnly = localToday.filter(r => !gasKeys.has(mkKey(r)));
+
+  const myReports = [...gasToday, ...localOnly];
   document.getElementById('today-report-count').textContent = myReports.length+'건';
   if(myReports.length===0){
     el.innerHTML=`<div style="padding:0 12px 12px;text-align:center;color:var(--muted);font-size:13px;padding:20px;">오늘 제출된 리포트가 없습니다</div>`;
@@ -4096,7 +4093,7 @@ function renderTodayReports(){
           <div style="font-weight:700;">${r.agency}</div>
           <div style="font-size:12px;color:var(--muted);">${r.attraction} · ${r.rego}</div>
         </div>
-        <div class="report-amount">$${r.total}</div>
+        <div class="report-amount" style="color:var(--green);">$${r.dr||0}</div>
       </div>
       <div class="report-detail">
         ${r.timeStart?`<span class="report-tag">⏱ ${parseSheetTime(r.timeStart)}–${parseSheetTime(r.timeEnd||'')}${calcDuration(r.timeStart,r.timeEnd)?' ('+calcDuration(r.timeStart,r.timeEnd)+')':''}</span>`:''}
