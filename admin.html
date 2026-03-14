@@ -4681,71 +4681,76 @@ function openView(type, idx) {
   const tmap = { V:'차량', D:'드라이버', C:'여행사', G:'가이드' };
   document.getElementById('view-modal-title').textContent = '👁 ' + (tmap[type]||type) + ' 상세 정보';
 
-  let rows = [];
-  if (type === 'D') {
-    rows = [
-      ['영문 이름', d.Name_EN],
-      ['한글 이름', d.Name_KR],
-      ['이메일 (DriverID)', d.DriverID],
-      ['연락처', d.Mobile_1],
-      ['비상연락처', d['NEXT OF KIN']],
-      ['면허 등급', d.License_Class],
-      ['면허 번호', d['License_#']],
-      ['면허 만료일', fmtDate(d.License_Expiry||'')],
-      ['Authority 번호', d['Authority_#']],
-      ['Authority 만료일', fmtDate(d.Authority_Expiry||'')],
-      ['주소', d.Address],
-      ['Suburb', d.Suburb],
-      ['은행', d.Bank_Name],
-      ['BSB', d.BSB],
-      ['계좌번호', d.Account_Number],
-    ];
-  } else if (type === 'V') {
-    const yr = d['Manufacture Date'] || d.Manufacture_Date || '';
-    rows = [
-      ['차량번호 (Rego)', d.Rego],
-      ['상태', d.Current_Status],
-      ['제조사', d.Make],
-      ['모델', d.Model],
-      ['연도', yr],
-      ['좌석수', d.Capacity],
-      ['변속기', d.Transmission],
-      ['소유자', d.Owner],
-      ['Accreditation', d.Accreditation],
-      ['Rego 만료일', fmtDate(d.Rego_Date||'')],
-      ['HVIS 만료일', fmtDate(d.HVIS_Date||'')],
-      ['현재 KM', d.Current_KM ? Number(d.Current_KM).toLocaleString() + ' km' : ''],
-      ['마지막 정비 KM', d.Last_Service_KM ? Number(d.Last_Service_KM).toLocaleString() + ' km' : ''],
-      ['정비 간격', d.Service_Interval_KM ? Number(d.Service_Interval_KM).toLocaleString() + ' km' : ''],
-      ['보험 만료일', fmtDate(d.Insurance_Date||'')],
-      ['비고', d.Remarks],
-    ];
-  } else if (type === 'C') {
-    rows = [
-      ['여행사명', d.Name],
-      ['Client ID', d.ClientID],
-      ['연락처', d.Mobile],
-      ['이메일', d.Email],
-      ['주소', d.Address],
-      ['담당자', d.Contact_Person],
-      ['비고', d.Remarks],
-    ];
-  } else if (type === 'G') {
-    rows = [
-      ['Guide ID', d.GuideID],
-      ['가이드명', d.Guide_Name],
-      ['연락처', d.Mobile],
-      ['소속 여행사', d.Agency],
-      ['이메일', d.Email],
-      ['비고', d.Remarks],
-    ];
-  }
+  // 값이 있는 필드만 표시하는 헬퍼
+  const row = (label, val) => {
+    if(val===undefined||val===null||val==='') return '';
+    return `<div style="background:var(--sf2);border-radius:10px;padding:10px 14px;margin-bottom:8px;">
+      <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">${escH(label)}</div>
+      <div style="font-size:14px;font-weight:600;color:var(--t1);word-break:break-all;">${escH(String(val))}</div>
+    </div>`;
+  };
+  const row2 = (fields) => {
+    const filled = fields.filter(([,v])=>v!==undefined&&v!==null&&v!=='');
+    if(!filled.length) return '';
+    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:0;">` +
+      filled.map(([label,val])=>`<div style="background:var(--sf2);border-radius:10px;padding:10px 14px;">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">${escH(label)}</div>
+        <div style="font-size:14px;font-weight:600;color:var(--t1);">${escH(String(val))}</div>
+      </div>`).join('') + `</div><div style="margin-bottom:8px;"></div>`;
+  };
 
-  const html = rows.filter(([,v]) => v !== undefined && v !== null && v !== '').map(([label, val]) => `
-    <div style="display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--bd);">
-      <div style="min-width:130px;font-size:11px;color:var(--t3);font-weight:600;padding-top:1px;">${escH(label)}</div>
-      <div style="flex:1;font-size:13px;color:var(--t1);font-weight:500;word-break:break-all;">${escH(String(val))}</div>
-    </div>`).join('');
+  let html = '';
+
+  if(type === 'D') {
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">👤 기본 정보</div>`;
+    html += row2([['영문 이름', d.Name_EN], ['한글 이름', d.Name_KR]]);
+    html += row2([['이메일 (DriverID)', d.DriverID], ['연락처', d.Mobile_1]]);
+    html += row('비상연락처 (Next of Kin)', d['NEXT OF KIN'] || d.NEXT_OF_KIN);
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🪪 면허 / Authority</div>`;
+    html += row2([['면허 등급', d.License_Class], ['면허 번호', d['License_#']]]);
+    html += row2([['면허 만료일', fmtDate(d.License_Expiry||'')], ['Authority 번호', d['Authority_#']]]);
+    html += row('Authority 만료일', fmtDate(d.Authority_Expiry||''));
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🏠 주소</div>`;
+    html += row2([['주소', d.Address], ['Suburb', d.Suburb]]);
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🏦 계좌 정보</div>`;
+    html += row2([['은행', d.Bank_Name], ['BSB', d.BSB]]);
+    html += row('계좌번호', d.Account_Number);
+
+  } else if(type === 'V') {
+    const yr = d['Manufacture Date'] || d.Manufacture_Date || '';
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🚌 차량 정보</div>`;
+    html += row2([['차량번호 (Rego)', d.Rego], ['상태', d.Current_Status]]);
+    html += row2([['제조사', d.Make], ['모델', d.Model]]);
+    html += row2([['연도', yr], ['좌석수', d.Capacity ? d.Capacity+'인승' : '']]);
+    html += row2([['변속기', d.Transmission], ['소유자', d.Owner]]);
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">📅 만료일</div>`;
+    html += row2([['Rego 만료일', fmtDate(d.Rego_Date||'')], ['HVIS 만료일', fmtDate(d.HVIS_Date||'')]]);
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔧 정비</div>`;
+    html += row2([['현재 KM', d.Current_KM ? Number(d.Current_KM).toLocaleString()+' km' : ''],
+                  ['마지막 정비 KM', d.Last_Service_KM ? Number(d.Last_Service_KM).toLocaleString()+' km' : '']]);
+    html += row('정비 간격', d.Service_Interval_KM ? Number(d.Service_Interval_KM).toLocaleString()+' km' : '');
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔢 식별 번호</div>`;
+    html += row2([['VIN', d.VIN], ['Engine No.', d['Engine Number'] || d.Engine_No]]);
+    html += row('Accreditation', d.Accreditation);
+
+  } else if(type === 'C') {
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🏢 여행사 정보</div>`;
+    html += row2([['여행사명', d.Name], ['Client ID', d.ClientID]]);
+    html += row2([['연락처', d.Mobile], ['이메일', d.Email]]);
+    html += row('주소', d.Address);
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🏦 계좌 정보</div>`;
+    html += row2([['은행', d.Bank_Name], ['BSB', d.BSB]]);
+    html += row('계좌번호', d.Account_Number);
+    html += row('담당자', d.Contact_Person);
+    html += row('비고', d.Remarks);
+
+  } else if(type === 'G') {
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🎤 가이드 정보</div>`;
+    html += row2([['Guide ID', d.GuideID], ['가이드명', d.Guide_Name]]);
+    html += row2([['연락처', d.Mobile], ['이메일', d.Email]]);
+    html += row('소속 여행사', d.Agency);
+    html += row('비고', d.Remarks);
+  }
 
   document.getElementById('view-modal-body').innerHTML = html ||
     '<div style="padding:30px;text-align:center;color:var(--t3);">데이터가 없습니다</div>';
