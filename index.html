@@ -6205,8 +6205,16 @@ async function renderPay(){
   // 로컬 리포트도 병합 (GAS에 아직 없는 방금 제출한 것)
   const localReports = getAllReports();
   const gasIds = new Set(gasReports.map(r=>r.id).filter(Boolean));
+  // GAS 리포트의 날짜+금액 조합으로 중복 키 생성 (ID 형식이 달라도 중복 방지)
+  const gasDeupKeys = new Set(gasReports.map(r=>`${r.date}_${r.dr}_${r.rego}`));
   const mergedReports = [...gasReports];
-  localReports.forEach(r=>{ if(!r.id||!gasIds.has(r.id)) mergedReports.push(r); });
+  localReports.forEach(r=>{
+    const dupKey = `${r.date}_${r.dr}_${r.rego}`;
+    // ID가 일치하거나, 날짜+금액+차량이 모두 같으면 중복으로 간주
+    if(r.id && gasIds.has(r.id)) return;
+    if(gasDeupKeys.has(dupKey)) return;
+    mergedReports.push(r);
+  });
 
   // ── 주별 그룹핑
   const weekMap = {};
@@ -6547,7 +6555,12 @@ async function renderSalary(){
   }));
   const localAll = getAllReports();
   const gasIds2 = new Set(gasAll.map(r=>r.id).filter(Boolean));
-  const all = [...gasAll, ...localAll.filter(r=>!r.id||!gasIds2.has(r.id))];
+  const gasDupKeys2 = new Set(gasAll.map(r=>`${r.date}_${r.dr}_${r.rego||''}`));
+  const all = [...gasAll, ...localAll.filter(r=>{
+    if(r.id && gasIds2.has(r.id)) return false;
+    if(gasDupKeys2.has(`${r.date}_${r.dr}_${r.rego||''}`)) return false;
+    return true;
+  })];
   const weekMap = {};
   all.forEach(r=>{
     const wk = getWeekKey(r.date);
