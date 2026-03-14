@@ -18,7 +18,7 @@
   --radius:14px;--sb:env(safe-area-inset-bottom,0px);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-family:sans-serif;font-size:14px;overflow:hidden;}
+html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-family:sans-serif;font-size:14px;overflow:auto;}
 #app{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden;}
 #screen{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;padding-bottom:calc(80px + var(--sb));will-change:scroll-position;}
 .page{display:none;padding:0;padding-bottom:60px;}
@@ -881,7 +881,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 </div>
 
 <!-- ══════ CONTACTS ══════ -->
-<div class="page" id="page-contacts" style="padding-bottom:100px;">
+<div class="page" id="page-contacts">
   <div class="sec-head"><div><div class="sec-title">연락처</div><div class="sec-sub">드라이버 · 가이드</div></div></div>
   <div style="padding:0 12px 12px;display:flex;gap:8px;">
     <button class="btn btn-primary btn-sm" onclick="filterContacts('all')" id="cf-all">전체</button>
@@ -893,19 +893,19 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 </div>
 
 <!-- ══════ ATTRACTIONS ══════ -->
-<div class="page" id="page-attractions" style="padding-bottom:100px;">
+<div class="page" id="page-attractions">
   <div class="sec-head"><div><div class="sec-title">관광지 안내</div><div class="sec-sub">픽업 포인트 · 안내사항</div></div></div>
   <div id="attraction-list"></div>
 </div>
 
 <!-- ══════ NOTICES ══════ -->
-<div class="page" id="page-notices" style="padding-bottom:100px;">
+<div class="page" id="page-notices">
   <div class="sec-head"><div><div class="sec-title">공지사항</div><div class="sec-sub">Notice Board</div></div></div>
   <div id="notice-list"></div>
 </div>
 
 <!-- ══════ MY INFO ══════ -->
-<div class="page" id="page-defect" style="padding-bottom:100px;">
+<div class="page" id="page-defect">
   <div style="padding:16px 16px 0;">
     <span style="background:linear-gradient(135deg,#ef4444,#dc2626);color:white;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;">⚠️ 차량 결함 리포트</span>
   </div>
@@ -965,7 +965,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
     </div>
   </div>
 </div>
-<div class="page" id="page-mot" style="padding-bottom:100px;">
+<div class="page" id="page-mot">
   <!-- 헤더 배지 -->
   <div style="padding:16px 16px 0;">
     <span style="background:linear-gradient(135deg,#1d4ed8,#1e40af);color:white;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;letter-spacing:.5px;">🚔 TfNSW 운행 중 검사 기록</span>
@@ -1104,7 +1104,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
     </div>
   </div>
 </div>
-<div class="page" id="page-pay" style="padding-bottom:100px;">
+<div class="page" id="page-pay">
   <div class="sec-head">
     <div><div class="sec-title">💰 급여</div></div>
     <div style="display:flex;align-items:center;gap:6px;">
@@ -1126,7 +1126,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
   </div>
 </div>
 
-<div class="page" id="page-me" style="padding-bottom:100px;">
+<div class="page" id="page-me">
 
   <!-- ── 헤더 카드 ── -->
   <div class="sec-head"><div><div class="sec-title">내 정보</div></div>
@@ -1676,10 +1676,8 @@ function populateContacts() {
     ];
   }
   rebuildDriverList();
-  // 연락처 탭이 열려있을 때만 갱신 (재귀 방지)
-  if(typeof renderContacts === 'function' && document.getElementById('page-contacts')?.classList.contains('active')) {
-    renderContacts();
-  }
+  // 연락처 화면 즉시 갱신
+  if(typeof renderContacts === 'function') renderContacts();
 }
 
 function rebuildDriverList() {
@@ -5668,6 +5666,11 @@ function renderContacts(filter,search){
   filter=filter||contactFilter; search=search||'';
   // 처음 연락처 탭 진입 시 운행 상태 비동기 조회 (결과 오면 재렌더)
   if(!_activeRegosFetched){ fetchActiveRegosForContacts(); }
+  // MASTER 로드 완료 후 window.CONTACTS가 최신인지 확인
+  if(typeof MASTER!=='undefined' && (MASTER.drivers?.length||0)+(MASTER.guides?.length||0) > 0
+     && typeof populateContacts==='function' && !(window.CONTACTS?.length > CONTACTS.length)) {
+    populateContacts();
+  }
   const el=document.getElementById('contact-list');
   const contactData = window.CONTACTS || CONTACTS;
   let list=contactData.filter(c=>(filter==='all'||c.type===filter)&&(c.name.toLowerCase().includes(search.toLowerCase())||c.phone.includes(search)));
@@ -5698,10 +5701,7 @@ async function fetchActiveRegosForContacts(){
     }
     _activeRegosFetched = true;
   } catch(e){ /* 네트워크 오류 무시 */ }
-  // 연락처 탭이 현재 열려있을 때만 재렌더 (재귀 방지)
-  if(document.getElementById('page-contacts')?.classList.contains('active')) {
-    renderContacts();
-  }
+  renderContacts();
 }
 
 // Pre Departure 화면 열릴 때 운행 중 차량 목록 갱신
