@@ -3791,6 +3791,8 @@ async function renderWageAll() {
   const sumEl = document.getElementById('wage-all-summary');
   const listEl = document.getElementById('wage-all-list');
   if (!sumEl || !listEl) return;
+  // DB.D 로드 대기
+  if(!DB.D || DB.D.length === 0) { setTimeout(renderWageAll, 300); return; }
 
   const wages = getWages();
   const rows = _reportsCache || [];
@@ -4268,8 +4270,11 @@ async function getEarnedFromSheets(driverName, weekStart) {
 
 async function selectWageDriver(drv){setWageTab('single');ST.wageDriver=drv;rWage();}
 function rWage(){
-  // 로드는 nv()의 캐시 로직에서 처리 — rWage는 렌더만 담당
-  // (syncWagesNow()에서 수동 재로드 가능)
+  // DB.D가 아직 로드 안됐으면 잠시 후 재시도
+  if(!DB.D || DB.D.length === 0) {
+    setTimeout(rWage, 300);
+    return;
+  }
   const dSel = document.getElementById('wage-driver-sel');
   if(!dSel) return;
   const drivers = DB.D.map(d=>({name:d.Name_KR||d.Name_EN, en:d.Name_EN}));
@@ -5285,6 +5290,8 @@ async function loadAllFromSheets(){
       _syncEl.textContent = '✅ 마지막 동기화: ' + _hh + ':' + _mm;
     }
     rDash();
+    // 데이터 로드 완료 후 급여 탭이 열려있으면 즉시 렌더
+    rWage();
     toast('✅ 데이터 로드 완료','ok');
     startAdminAutoSync();
     await loadNoticesFromGAS();
