@@ -6116,16 +6116,12 @@ function cleanupLocalDuplicates(gasRows) {
              .map(mkKey)
     );
     // tourcode 세트
-    const gasTourcodes = new Set(
-      gasRows.filter(r=>r.Tour_Code).map(r=>r.Tour_Code)
-    );
     // 로컬 리포트 정리
     let local = [];
     try { local = JSON.parse(localStorage.getItem('reports_'+driverName)||'[]'); } catch(e){}
     const before = local.length;
     local = local.filter(r=>{
-      if(gasKeys.has(mkKeyLocal(r))) return false;  // GAS에 있음 → 제거
-      if(r.tourcode && gasTourcodes.has(r.tourcode)) return false; // tourcode 일치 → 제거
+      if(gasKeys.has(mkKeyLocal(r))) return false;  // GAS에 있음(날짜+차량+여행사+관광지 일치) → 제거
       return true;
     });
     if(local.length < before) {
@@ -6133,7 +6129,6 @@ function cleanupLocalDuplicates(gasRows) {
       // todayReports도 동기화
       todayReports = todayReports.filter(r=>{
         if(gasKeys.has(mkKeyLocal(r))) return false;
-        if(r.tourcode && gasTourcodes.has(r.tourcode)) return false;
         return true;
       });
       console.log(`🧹 로컬 중복 ${before-local.length}건 정리됨`);
@@ -6267,9 +6262,6 @@ async function renderPay(){
   localReports.forEach(r=>{
     if(r.id && gasIds.has(r.id)) return;
     if(gasDupKeys.has(mkDupKey(r))) return;
-    // 추가 안전망: tourcode가 있으면 tourcode도 비교
-    const tourDup = r.tourcode && gasReports.some(g=>g.tourcode && g.tourcode===r.tourcode);
-    if(tourDup) return;
     mergedReports.push(r);
   });
 
