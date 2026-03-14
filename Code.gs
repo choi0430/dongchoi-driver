@@ -345,6 +345,49 @@ function getReports(sheetName, driver) {
 }
 
 // ═══════════════════════════════════════════════════
+// 시트 헤더 행을 REPORT_HEADERS 기준으로 재설정
+// (시트 헤더가 코드와 달라 컬럼 밀림 현상 발생 시 1회 실행)
+// ═══════════════════════════════════════════════════
+function fixReportHeaders() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const results = [];
+  Object.keys(REPORT_HEADERS).forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) { results.push(sheetName + ': 시트 없음'); return; }
+    const headers = REPORT_HEADERS[sheetName];
+    // 현재 헤더 확인
+    const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const currentStr = currentHeaders.join(',');
+    const targetStr = headers.join(',');
+    if (currentStr === targetStr) {
+      results.push(sheetName + ': 이미 일치 ✓');
+      return;
+    }
+    // 헤더 행 업데이트
+    // 기존 컬럼 수보다 새 헤더가 많으면 범위 확장 필요
+    const newLen = headers.length;
+    const oldLen = sheet.getLastColumn();
+    if (newLen > oldLen) {
+      sheet.getRange(1, 1, 1, newLen).setValues([headers]);
+    } else {
+      sheet.getRange(1, 1, 1, newLen).setValues([headers]);
+      // 남은 기존 컬럼 헤더 클리어
+      if (oldLen > newLen) {
+        sheet.getRange(1, newLen + 1, 1, oldLen - newLen).clearContent();
+      }
+    }
+    sheet.getRange(1, 1, 1, newLen)
+      .setBackground('#1a56db').setFontColor('white').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    results.push(sheetName + ': 헤더 업데이트 완료 (' + oldLen + '→' + newLen + '컬럼)');
+  });
+  Logger.log(results.join('\n'));
+  SpreadsheetApp.getUi().alert('헤더 재설정 완료:\n' + results.join('\n'));
+  return {ok: true, results};
+}
+
+
+// ═══════════════════════════════════════════════════
 // 마스터 시트 초기화 (신규 시트 포함)
 // ═══════════════════════════════════════════════════
 function initAllMasters() {
