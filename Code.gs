@@ -489,7 +489,8 @@ function getActiveRegos() {
       active.push({
         driver: driverName || '알 수 없음',
         rego: String(r.Rego).trim(),
-        date: String(r.Date).trim()
+        date: String(r.Date).trim(),
+        startTime: String(r.Start_Time || '').trim()
       });
     }
   });
