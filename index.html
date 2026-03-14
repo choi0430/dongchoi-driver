@@ -4009,7 +4009,7 @@ function renderStep2SavedReports(){
           <div class="report-amount">$${r.total}</div>
         </div>
         <div class="report-detail">
-          ${r.timeStart?`<span class="report-tag">⏱ ${r.timeStart}–${r.timeEnd}</span>`:''}
+          ${r.timeStart?`<span class="report-tag">⏱ ${parseSheetTime(r.timeStart)}–${parseSheetTime(r.timeEnd||'')}</span>`:''}
           ${r.guide?`<span class="report-tag">👤 ${r.guide}</span>`:''}
         </div>
       </div>`).join('')}`;
@@ -4083,7 +4083,7 @@ function renderTodayReports(){
         <div class="report-amount">$${r.total}</div>
       </div>
       <div class="report-detail">
-        ${r.timeStart?`<span class="report-tag">⏱ ${r.timeStart}–${r.timeEnd}</span>`:''}
+        ${r.timeStart?`<span class="report-tag">⏱ ${parseSheetTime(r.timeStart)}–${parseSheetTime(r.timeEnd||'')}</span>`:''}
         ${r.guide?`<span class="report-tag">👤 ${r.guide}</span>`:''}
         ${r.tourcode?`<span class="report-tag">🏷 ${r.tourcode}</span>`:''}
       </div>
@@ -6067,7 +6067,12 @@ async function fetchDRCache(){
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
     const json = await res.json();
     if(json.ok && json.rows){
-      _drReportsCache = json.rows.map(r=>({...r, _isoDate:parseToISO(r.Date||'')}));
+      _drReportsCache = json.rows.map(r=>({
+        ...r,
+        _isoDate: parseToISO(r.Date||''),
+        Time_Start: parseSheetTime(r.Time_Start),
+        Time_End:   parseSheetTime(r.Time_End),
+      }));
       _drCacheTime = Date.now();
     }
   }catch(e){ console.warn('DR 캐시 로드 실패:',e); }
@@ -6456,7 +6461,7 @@ function showPayDetail(wk){
           <div>
             <div class="pay-report-agency">${r.agency||'—'}</div>
             <div class="pay-report-attr">${r.attraction||''} ${r.rego?'· '+r.rego:''}</div>
-            ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">⏱ '+r.timeStart+' – '+(r.timeEnd||'')+'</div>':''}
+            ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">⏱ '+parseSheetTime(r.timeStart)+' – '+parseSheetTime(r.timeEnd||'')+'</div>':''}
             ${r.tourcode?'<div style="font-size:11px;color:var(--muted);">🏷 '+r.tourcode+'</div>':''}
           </div>
           <div style="text-align:right;">
