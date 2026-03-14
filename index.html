@@ -18,10 +18,10 @@
   --radius:14px;--sb:env(safe-area-inset-bottom,0px);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-family:sans-serif;font-size:14px;overflow:auto;}
+html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-family:sans-serif;font-size:14px;overflow:hidden;}
 #app{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden;}
-#screen{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;padding-bottom:calc(80px + var(--sb));will-change:scroll-position;}
-.page{display:none;padding:0;padding-bottom:60px;}
+#screen{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;padding-bottom:calc(80px + var(--sb));}
+.page{display:none;padding:0;padding-bottom:20px;}
 .page.active{display:block;}
 
 /* TOP BAR */
@@ -1676,8 +1676,10 @@ function populateContacts() {
     ];
   }
   rebuildDriverList();
-  // 연락처 화면 즉시 갱신
-  if(typeof renderContacts === 'function') renderContacts();
+  // 연락처 화면이 활성화된 경우에만 갱신 (무한루프 방지)
+  if(typeof renderContacts === 'function' && document.getElementById('page-contacts')?.classList.contains('active')) {
+    renderContacts();
+  }
 }
 
 function rebuildDriverList() {
@@ -3025,7 +3027,8 @@ function showPage(id){
   if(navEl) navEl.classList.add('active');
   const nav = document.getElementById('nav-'+id);
   if(nav) nav.classList.add('active');
-  const _s=document.getElementById('screen'); if(_s) _s.scrollTop=0;
+  // 페이지 전환 후 스크롤 맨 위로 (rAF로 렌더링 완료 후 실행)
+  requestAnimationFrame(()=>{ const _p=document.getElementById('page-'+id); if(_p) _p.scrollTop=0; });
   // 연락처 탭 진입 시 최신 데이터로 재렌더링
   if(id === 'contacts'){ _activeRegosFetched=false; renderContacts(); }
   if(id === 'me') initMyInfoPage();
@@ -5666,11 +5669,6 @@ function renderContacts(filter,search){
   filter=filter||contactFilter; search=search||'';
   // 처음 연락처 탭 진입 시 운행 상태 비동기 조회 (결과 오면 재렌더)
   if(!_activeRegosFetched){ fetchActiveRegosForContacts(); }
-  // MASTER 로드 완료 후 window.CONTACTS가 최신인지 확인
-  if(typeof MASTER!=='undefined' && (MASTER.drivers?.length||0)+(MASTER.guides?.length||0) > 0
-     && typeof populateContacts==='function' && !(window.CONTACTS?.length > CONTACTS.length)) {
-    populateContacts();
-  }
   const el=document.getElementById('contact-list');
   const contactData = window.CONTACTS || CONTACTS;
   let list=contactData.filter(c=>(filter==='all'||c.type===filter)&&(c.name.toLowerCase().includes(search.toLowerCase())||c.phone.includes(search)));
@@ -5724,8 +5722,9 @@ function renderContactItem(c){
   const myName = currentDriver?.name || '';
   // 관리자 여부: 앱 내 관리자 모드 OR 현재 드라이버가 관리자(대표)
   const isAdmin = !!(window.isAdminMode) || (currentDriver?.IsAdmin === 'Y') || (currentDriver?.Name_EN||'').toLowerCase().includes('choi');
-  const isSelf  = c.type==='driver' && c.name === myName;
-  const isOther = c.type==='driver' && !isSelf;
+  // isSelf: 이름이 완전 일치하거나, c.name이 myName을 포함(한국어+영어 혼합 형식 대응)
+  const isSelf  = (c.type==='driver'||c.type==='driver-guide') && (c.name === myName || c.name.startsWith(myName + ' (') || myName.startsWith(c.name + ' ('));
+  const isOther = (c.type==='driver'||c.type==='driver-guide') && !isSelf;
 
   // ── 자신 또는 관리자: 모두 표시
   if(isSelf || isAdmin){
