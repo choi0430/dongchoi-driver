@@ -3016,12 +3016,9 @@ function goStep(n){
   if(n===2){
     renderStep2SavedReports();
     updateSurchargeOptions();
-    // Daily Report draft 복원 — DOM 렌더 후 충분한 시간 확보
-    setTimeout(()=>{
-      _attachDraftListeners();
-      const restored = restoreDailyDraft();
-      if(restored) showToast('📝 작성 중이던 내용을 복원했습니다','success');
-    }, 250);
+    _attachDraftListeners();
+    // Daily Report draft 복원 — MASTER 준비 완료 보장 후 실행
+    _restoreDailyDraftWhenReady();
   }
   if(n===3){
     renderShiftSummary();
@@ -3847,6 +3844,34 @@ function restoreEosDraft(){
     if(d.fuelChk)   { const el=document.getElementById('eos-fuel-chk');   if(el){ el.checked=true;  onEosCheckChange('eos-fuel-item','eos-fuel-chk');    } }
     return !!(d.endKm || d.endTime);
   } catch(e) { return false; }
+}
+
+// MASTER 로드 완료를 기다렸다가 draft 복원 (최대 5초 폴링)
+function _restoreDailyDraftWhenReady(){
+  const raw = localStorage.getItem(_draftKey());
+  if(!raw) return; // draft 없으면 바로 종료
+
+  const maxWait = 5000;
+  const interval = 100;
+  let elapsed = 0;
+
+  function attempt(){
+    elapsed += interval;
+    if(_masterReady){
+      // MASTER 준비 완료 → 복원 실행
+      const restored = restoreDailyDraft();
+      if(restored) showToast('📝 작성 중이던 내용을 복원했습니다','success');
+      return;
+    }
+    if(elapsed >= maxWait){
+      // 타임아웃 — MASTER 없이라도 텍스트 필드라도 복원
+      const restored = restoreDailyDraft();
+      if(restored) showToast('📝 작성 중이던 내용을 복원했습니다','success');
+      return;
+    }
+    setTimeout(attempt, interval);
+  }
+  setTimeout(attempt, 150); // 최초 150ms 후 시작 (DOM 렌더 확보)
 }
 
 function restoreDailyDraft(){
