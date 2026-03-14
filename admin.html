@@ -1010,6 +1010,24 @@ const DB = {
 // ═══════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════
+// 구글 시트 시간 파싱: 1899-12-29T22:20:00.000Z → "08:20" (UTC+10, 24h)
+function parseSheetTime(ts) {
+  if(!ts) return '';
+  const s = String(ts).trim();
+  // 이미 HH:MM 형식이면 그대로
+  if(/^\d{1,2}:\d{2}$/.test(s)) return s.padStart(5,'0').slice(0,5);
+  // ISO timestamp (구글 시트 시간값)
+  if(s.includes('T')) {
+    const d = new Date(s);
+    if(!isNaN(d)) {
+      // UTC+10 고정 (구글 시트가 AEST 기준으로 직렬화)
+      const h  = (d.getUTCHours() + 10) % 24;
+      const mn = String(d.getUTCMinutes()).padStart(2,'0');
+      return String(h).padStart(2,'0') + ':' + mn;
+    }
+  }
+  return s.length <= 5 ? s : '';
+}
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
 let ST = {pin:'',mt:null,mi:null,dt:null,di:null,ptype:'client',curAg:null,curSub:null,curSubVeh:null,subTab:'rates'};
 let _adminReady = false; // 데이터 준비 완료 플래그
@@ -2934,26 +2952,8 @@ async function loadInvReports() {
           // UTC timestamp 포함 모든 날짜 형식 지원
           // GAS Date가 "2026-03-10T13:00:00.000Z" 형식이므로 parseToISO로 처리
           const iso = parseToISO(r.Date || '');
-          // 시간 파싱 (구글시트 1899-12-29T... 형태)
-          const parseGSheetTime = ts => {
-            if (!ts) return '';
-            const s = String(ts);
-            if (s.includes('T')) {
-              const m = s.match(/T(\d{2}):(\d{2})/);
-              if (m) {
-                let h = parseInt(m[1]), mn = m[2];
-                // 구글시트 시간은 UTC, +11 해서 AEST
-                const d = new Date(ts);
-                if (!isNaN(d)) {
-                  const local = new Date(d.getTime() + 11*3600*1000);
-                  h = local.getUTCHours(); mn = String(local.getUTCMinutes()).padStart(2,'0');
-                }
-                const ampm = h >= 12 ? 'PM' : 'AM';
-                return `${h===0?12:h>12?h-12:h}:${mn} ${ampm}`;
-              }
-            }
-            return s.length <= 5 ? s : '';
-          };
+          // 시간 파싱: 전역 parseSheetTime 사용 (UTC+10, 24h)
+          const parseGSheetTime = parseSheetTime;
           return {
             ...r,
             _iso: iso,
@@ -4137,7 +4137,7 @@ function renderDR(){
         <div style="flex:1;min-width:0;">
           <div style="font-size:12px;font-weight:800;color:var(--t1);">${escH(fmtDate(r.Date))} &nbsp;<span style="color:var(--t3);font-weight:400;">${escH(r.Driver||'')} · ${escH(r.Rego||'')}</span></div>
           <div style="font-size:11px;color:var(--ac);font-weight:700;margin:2px 0;">${escH(r.Agency||'')}${r.Attraction?' · '+escH(r.Attraction):''}</div>
-          <div style="font-size:11px;color:var(--t3);">${r.Time_Start||''}${r.Time_End?' ~ '+r.Time_End:''} &nbsp;|&nbsp; ${r.KM_Start||''}${r.KM_End?' ~ '+r.KM_End+' km':''}</div>
+          <div style="font-size:11px;color:var(--t3);">${parseSheetTime(r.Time_Start)||''}${r.Time_End?' ~ '+parseSheetTime(r.Time_End):''} &nbsp;|&nbsp; ${r.KM_Start||''}${r.KM_End?' ~ '+r.KM_End+' km':''}</div>
           <div style="margin-top:4px;">${badges}</div>
         </div>
         <div style="flex-shrink:0;text-align:right;">
@@ -4166,8 +4166,8 @@ function openDREdit(rowIndex){
   document.getElementById('drm-attraction').value  = r.Attraction||'';
   document.getElementById('drm-pickup').value      = r.Pickup||'';
   document.getElementById('drm-dropoff').value     = r.Dropoff||'';
-  document.getElementById('drm-time-start').value  = r.Time_Start||'';
-  document.getElementById('drm-time-end').value    = r.Time_End||'';
+  document.getElementById('drm-time-start').value  = parseSheetTime(r.Time_Start)||'';
+  document.getElementById('drm-time-end').value    = parseSheetTime(r.Time_End)||'';
   document.getElementById('drm-km-start').value    = r.KM_Start||'';
   document.getElementById('drm-km-end').value      = r.KM_End||'';
   document.getElementById('drm-dr-cost').value     = r.DR_Cost||'';
