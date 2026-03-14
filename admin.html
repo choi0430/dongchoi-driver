@@ -2771,9 +2771,27 @@ function calcInvRow(r) {
   const attraction = String(r.Attraction||'').trim();
   const seats      = String(r.Seats||'').trim();          // e.g. "21S","25S","40S","50S"
   const ot         = parseFloat(r.OT)              || 0;
-  const hotel      = parseFloat(r.Hotel_Surcharge) || 0;
-  const dist       = parseFloat(r.Dist_Surcharge)  || 0;
-  const earlyDR    = parseFloat(r.Early)           || 0;  // DR 금액($20/$30) — TA는 별도계산
+  const hotelDR    = parseFloat(r.Hotel_Surcharge) || 0;  // DR 기준값 (드라이버 지급액)
+  const distDR     = parseFloat(r.Dist_Surcharge)  || 0;  // DR 기준값 (드라이버 지급액)
+  const earlyDR    = parseFloat(r.Early)           || 0;  // DR 기준값
+
+  // ── Hotel/Dist DR → TA 역산 ──
+  // Hotel: 21/25S DR $10→TA $40, DR $20→TA $80 / 40S DR $15→TA $75, DR $30→TA $150 / 50S DR $15→TA $80, DR $30→TA $160
+  // Dist:  21/25S DR $30→TA $80 / 40S DR $40→TA $150 / 50S DR $40→TA $160
+  const seatNum = parseInt(seats.replace(/[^0-9]/g,''))||21;
+  function hotelDRtoTA(dr, sn) {
+    if(dr===0) return 0;
+    if(sn>=50) return dr===15?80:dr===30?160:dr*4;
+    if(sn>=40) return dr===15?75:dr===30?150:dr*4;
+    return dr===10?40:dr===20?80:dr*4; // 21/25S
+  }
+  function distDRtoTA(dr, sn) {
+    if(dr===0) return 0;
+    if(sn>=40) return dr===40?150:dr*3.75;
+    return dr===30?80:Math.round(dr*2.67); // 21/25S
+  }
+  const hotel = hotelDRtoTA(hotelDR, seatNum);
+  const dist  = distDRtoTA(distDR, seatNum);
 
   // seats 숫자 추출: "21S" → "21"
   const seatKey = seats.replace(/[^0-9]/g,'') || '21';
