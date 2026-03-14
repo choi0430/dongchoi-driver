@@ -6240,28 +6240,8 @@ async function renderPay(){
     id:          r.ID||r.id||''
   }));
 
-  // 로컬 리포트도 병합 (GAS에 아직 없는 방금 제출한 것)
-  const localReports = getAllReports();
-  const gasIds = new Set(gasReports.map(r=>r.id).filter(Boolean));
-  // 중복 키: 날짜 + 차량 + 여행사 + 관광지 (금액은 키에서 제외 — GAS/로컬 계산 방식 차이 있음)
-  const mkDupKey = r => `${r.date}_${r.rego}_${r.agency}_${r.attraction}_${r.tourcode||''}`;
-  const gasDupKeys = new Set(gasReports.map(mkDupKey));
-  // GAS dr=0인 경우 로컬 동일 리포트의 dr값으로 보완
-  const localByKey = {};
-  localReports.forEach(r=>{ localByKey[mkDupKey(r)] = r; });
-  const mergedReports = gasReports.map(r=>{
-    if((r.dr||0) > 0) return r;
-    const localMatch = localByKey[mkDupKey(r)];
-    if(localMatch && (localMatch.dr||0) > 0) return {...r, dr: localMatch.dr};
-    return r;
-  });
-  // 로컬 리포트 중 GAS에 이미 있는 것(날짜+차량+여행사+관광지 일치) 제외
-  // GAS 전송 실패로 로컬에만 남은 경우도 GAS에 동일 운행 있으면 제외
-  localReports.forEach(r=>{
-    if(r.id && gasIds.has(r.id)) return;
-    if(gasDupKeys.has(mkDupKey(r))) return;
-    mergedReports.push(r);
-  });
+  // GAS 데이터만 사용 (로컬 병합 없음 → 중복 원천 차단)
+  const mergedReports = gasReports;
 
   // ── 주별 그룹핑
   const weekMap = {};
@@ -6601,15 +6581,8 @@ async function renderSalary(){
     dr:   calcDRCostFromRow(r),
     nightOwner: parseFloat(r.Night_Owner||0)
   }));
-  const localAll = getAllReports();
-  const gasIds2 = new Set(gasAll.map(r=>r.id).filter(Boolean));
-  const mkDupKey2 = r => `${r.date}_${r.rego||''}_${r.agency||''}_${r.attraction||''}_${r.tourcode||r.Tour_Code||''}`;
-  const gasDupKeys2 = new Set(gasAll.map(mkDupKey2));
-  const all = [...gasAll, ...localAll.filter(r=>{
-    if(r.id && gasIds2.has(r.id)) return false;
-    if(gasDupKeys2.has(mkDupKey2(r))) return false;
-    return true;
-  })];
+  // GAS 데이터만 사용
+  const all = gasAll;
   const weekMap = {};
   all.forEach(r=>{
     const wk = getWeekKey(r.date);
