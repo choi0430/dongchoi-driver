@@ -2349,10 +2349,31 @@ async function importFromReports(){
     const attraction = String(r.Attraction||'').trim();
     const seats      = String(r.Seats||'').trim();           // '21S','25S','40S','50S'
     const totalTA    = parseFloat(r.Total_TA)||0;
-    const drCost     = parseFloat(r.DR_Cost)||0;
     const otAmt      = parseFloat(r.OT)||0;
     const trailerAmt = parseFloat(r.Trailer)||0;
-    const hotelAmt   = parseFloat(r.Hotel_Surcharge)||0;
+    const hotelAmt   = parseFloat(r.Hotel_Surcharge)||0;  // DR 기준값
+    const distAmt    = parseFloat(r.Dist_Surcharge)||0;   // DR 기준값
+    const earlyAmt   = parseFloat(r.Early)||0;
+    const nightDRAmt = parseFloat(r.Night_DR)||0;
+    const washAmt    = parseFloat(r.Wash)||0;
+    const mealAmt    = parseFloat(r.Meal)||0;
+    const tipAmt     = parseFloat(r.Tip)||0;
+    const tollAmt    = r.Toll_Personal === 'Y' ? (parseFloat(r.Toll)||0) : 0;
+    const fuelAmt    = r.Fuel_Personal === 'Y' ? (parseFloat(r.Fuel)||0) : 0;
+    const svcAmt     = parseFloat(r.SVC_Charge)||0;
+
+    // DR_Cost: 저장값 사용, 0이면 직접 계산 (헤더 밀림 등 이전 오류 보정)
+    let drCost = parseFloat(r.DR_Cost)||0;
+    if(drCost === 0 && svcAmt > 0){
+      // M_PriceDriver에서 base 조회
+      const capRaw2 = (String(r.Seats||'')).replace('S','').trim();
+      const capKey2 = parseInt(capRaw2)>=50?'50':parseInt(capRaw2)>=40?'40':parseInt(capRaw2)>=25?'25':'21';
+      const pdEntry = DB.PD[attraction];
+      const drBase2 = pdEntry ? (Number(pdEntry[capKey2]?.base)||0) : 0;
+      // base가 있으면 base + extras, 없으면 SVC 그대로
+      const baseForCalc = drBase2 > 0 ? drBase2 : svcAmt;
+      drCost = baseForCalc + otAmt + hotelAmt + distAmt + earlyAmt + trailerAmt + nightDRAmt + washAmt + mealAmt + tipAmt + tollAmt + fuelAmt;
+    }
 
     // 중복 체크 (날짜+차량+코스+드라이버 모두 동일한 건만 스킵)
     const driver = String(r.Driver||'').trim();
@@ -2390,7 +2411,7 @@ async function importFromReports(){
       // 서브 요율표에 별도 OT율이 없으면 드라이버 OT금액 그대로 사용
       const subOTRate = parseFloat(subRates[rego]?.[attraction]?.['ot_'+capKey]) || pdOTRate;
       const subOT     = otHours * subOTRate;
-      subTotal = baseRate + subOT + trailerAmt + hotelAmt;
+      subTotal = baseRate + subOT + trailerAmt + hotelAmt + distAmt;
       if(baseRate===0){
         errors.push(isoDate+' '+attraction+' ('+rego+') — 서브 요금표 없음 (직접 입력 필요)');
       }
@@ -4366,7 +4387,33 @@ async function renderWage(){
   const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
   const weekReports = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
   const nightOwnerTotal = weekReports.reduce((s,r)=>s+(parseFloat(r.Night_Owner)||0),0);
-  const grossDR = weekReports.reduce((s,r)=>s+(parseFloat(r.DR_Cost)||0),0);
+  // DR_Cost가 0/빈 문자열이면 각 항목 합산으로 재계산
+  function calcDRFromReport(r) {
+    const stored = parseFloat(r.DR_Cost);
+    if(stored > 0) return stored;
+    // DR_Cost 없음 → M_PriceDriver base + extras
+    const svc  = parseFloat(r.SVC_Charge)||0;
+    const ot   = parseFloat(r.OT)||0;
+    const htl  = parseFloat(r.Hotel_Surcharge)||0;
+    const dst  = parseFloat(r.Dist_Surcharge)||0;
+    const erl  = parseFloat(r.Early)||0;
+    const trl  = parseFloat(r.Trailer)||0;
+    const ngt  = parseFloat(r.Night_DR)||0;
+    const wsh  = parseFloat(r.Wash)||0;
+    const mel  = parseFloat(r.Meal)||0;
+    const tip  = parseFloat(r.Tip)||0;
+    const toll = r.Toll_Personal==='Y' ? (parseFloat(r.Toll)||0) : 0;
+    const fuel = r.Fuel_Personal==='Y' ? (parseFloat(r.Fuel)||0) : 0;
+    const seats = String(r.Seats||'').replace('S','').trim();
+    const ck = parseInt(seats)>=50?'50':parseInt(seats)>=40?'40':parseInt(seats)>=25?'25':'21';
+    const att2 = String(r.Attraction||'').trim();
+    const pdEntry = DB.PD?.[att2];
+    const drBase = pdEntry ? (Number(pdEntry[ck]?.base)||0) : 0;
+    const base = drBase > 0 ? drBase : svc;
+    if(base === 0) return 0;
+    return base + ot + htl + dst + erl + trl + ngt + wsh + mel + tip + toll + fuel;
+  }
+  const grossDR = weekReports.reduce((s,r)=>s+calcDRFromReport(r),0);
 
   // 요약 카드
   const summaryGrid = nightOwnerTotal > 0
