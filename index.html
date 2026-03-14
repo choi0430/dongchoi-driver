@@ -6084,7 +6084,11 @@ function getWageEntriesForWeek(driverWages, wkKey){
 // _drReportsCache/DR_CACHE_TTL 선언은 파일 상단으로 이동됨
 
 async function fetchDRCache(){
-  if(_drReportsCache && Date.now()-_drCacheTime < DR_CACHE_TTL) return _drReportsCache;
+  if(_drReportsCache && Date.now()-_drCacheTime < DR_CACHE_TTL){
+    // 캐시 히트여도 로컬 중복 정리는 항상 실행
+    cleanupLocalDuplicates(_drReportsCache);
+    return _drReportsCache;
+  }
   try{
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
     const json = await res.json();
@@ -6096,7 +6100,6 @@ async function fetchDRCache(){
         Time_End:   parseSheetTime(r.Time_End),
       }));
       _drCacheTime = Date.now();
-      // GAS 로드 성공 시 → 로컬 중복 자동 정리
       cleanupLocalDuplicates(_drReportsCache);
     }
   }catch(e){ console.warn('DR 캐시 로드 실패:',e); }
@@ -6188,21 +6191,16 @@ async function renderPay(){
   const badge0 = document.getElementById('pay-unpaid-badge');
   const el0 = document.getElementById('pay-weeks-list');
 
-  // ── 캐시가 살아있으면 즉시 렌더, 없으면 await 후 렌더
-  const drCacheAlive    = _drReportsCache && Date.now()-_drCacheTime < DR_CACHE_TTL;
+  // 급여 탭: 항상 최신 데이터로 (캐시 무시 refresh)
   const wagesCacheAlive = Date.now()-_driverWagesLastSync < 60000;
-
-  if(!drCacheAlive || !wagesCacheAlive){
-    if(badge0){ badge0.textContent='⏳ 불러오는 중'; badge0.style.background='var(--muted)'; }
-    if(el0)  { el0.innerHTML='<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">\uD83D\uDCB0 급여 데이터를 불러오는 중...</div>'; }
-    await Promise.all([
-      drCacheAlive    ? Promise.resolve() : fetchDRCache(),
-      wagesCacheAlive ? Promise.resolve() : loadDriverWagesFromGAS(driverName)
-    ]);
-  } else {
-    // 백그라운드 갱신 (다음 렌더에 반영)
-    Promise.all([fetchDRCache(), loadDriverWagesFromGAS(driverName)]).catch(()=>{});
-  }
+  if(badge0){ badge0.textContent='⏳ 불러오는 중'; badge0.style.background='var(--muted)'; }
+  if(el0)  { el0.innerHTML='<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">\uD83D\uDCB0 급여 데이터를 불러오는 중...</div>'; }
+  // 캐시 만료 강제 → GAS에서 새로 받아서 로컬 중복 즉시 정리
+  _drCacheTime = 0;
+  await Promise.all([
+    fetchDRCache(),
+    wagesCacheAlive ? Promise.resolve() : loadDriverWagesFromGAS(driverName)
+  ]);
 
   // ── DR 리포트: GAS 우선, 로컬 fallback 병합
   const gasReports = (_drReportsCache||[]).filter(r=>{
