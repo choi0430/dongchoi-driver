@@ -1450,10 +1450,25 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 
 // ── 날짜 포맷 헬퍼 dd/mm/yyyy ──
 function fmtDate(val) {
-  // dd/mm/yyyy 표시용: dd/mm/yyyy 그대로, YYYY-MM-DD → 변환
+  // dd/mm/yyyy 표시용
   if (!val) return '';
   const s = String(val).trim();
+  // 이미 dd/mm/yyyy 형식
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  // ISO timestamp (구글 시트 날짜값: 2026-03-11T00:00:00.000Z)
+  // → UTC+10/11(AEST/AEDT) 기준 로컬 날짜로 변환
+  if (s.includes('T') || (s.includes('-') && s.length > 10)) {
+    const d = new Date(s);
+    if (!isNaN(d)) {
+      // 호주 동부 시간 (UTC+10 고정, DST 무시 — 날짜 경계만 맞추면 됨)
+      const local = new Date(d.getTime() + 10 * 60 * 60 * 1000);
+      const dd = String(local.getUTCDate()).padStart(2,'0');
+      const mm = String(local.getUTCMonth()+1).padStart(2,'0');
+      const yy = local.getUTCFullYear();
+      return dd + '/' + mm + '/' + yy;
+    }
+  }
+  // YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
     const [y, m, d] = s.slice(0,10).split('-');
     return d + '/' + m + '/' + y;
@@ -5971,10 +5986,22 @@ function parseToISO(ds){
   // 내부 날짜 비교/정렬용 YYYY-MM-DD 변환 (표시용 아님)
   if(!ds) return '';
   const s = String(ds).trim();
+  // dd/mm/yyyy
   if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){
     const [dd,mm,yyyy]=s.split('/'); return yyyy+'-'+mm+'-'+dd;
   }
-  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10); // ISO fallback
+  // ISO timestamp → UTC+10 기준 날짜
+  if(s.includes('T')) {
+    const d = new Date(s);
+    if(!isNaN(d)){
+      const local = new Date(d.getTime() + 10*60*60*1000);
+      const dd = String(local.getUTCDate()).padStart(2,'0');
+      const mm = String(local.getUTCMonth()+1).padStart(2,'0');
+      return local.getUTCFullYear()+'-'+mm+'-'+dd;
+    }
+  }
+  // YYYY-MM-DD
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
   return '';
 }
 
