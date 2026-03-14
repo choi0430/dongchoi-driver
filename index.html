@@ -2963,6 +2963,10 @@ function autoRestoreSession() {
 
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
+
+    // 세션 복원 후 GAS 동기화 시작 (오늘 리포트 & 마스터 최신화)
+    runSync(false);
+    startAutoSync();
   }
   tryRestore();
 }
@@ -4006,7 +4010,40 @@ function renderShiftSummary(){
 
 function renderTodayReports(){
   const el = document.getElementById('today-reports-list');
-  const myReports = todayReports.filter(r => !r.driver || r.driver === (currentDriver?.name||''));
+  // GAS 캐시에서 오늘 날짜 리포트도 병합 (새로고침 후에도 표시)
+  const todayISO = todayDisplay(); // dd/mm/yyyy
+  const driverName = currentDriver?.name || '';
+  if(_drReportsCache && driverName) {
+    const gasToday = _drReportsCache.filter(r =>
+      r.Driver === driverName && r.Date === todayISO
+    );
+    gasToday.forEach(gr => {
+      const alreadyIn = todayReports.some(r => r.tourcode === gr.Tour_Code && r.date === todayISO);
+      if(!alreadyIn) {
+        todayReports.push({
+          id: 'gas_' + (gr.Tour_Code || Date.now()),
+          date: gr.Date,
+          seats: gr.Seats || '',
+          agency: gr.Agency || '',
+          attraction: gr.Attraction || '',
+          pickup: gr.Pickup || '',
+          dropoff: gr.Dropoff || '',
+          kmStart: gr.KM_Start || '',
+          kmEnd: gr.KM_End || '',
+          timeStart: gr.Time_Start || '',
+          timeEnd: gr.Time_End || '',
+          guide: gr.Guide || '',
+          tourcode: gr.Tour_Code || '',
+          total: parseFloat(gr.Total_TA || 0),
+          dr: parseFloat(gr.DR_Cost || 0),
+          svcCharge: parseFloat(gr.SVC_Charge || 0),
+          rego: gr.Rego || '',
+          driver: gr.Driver || ''
+        });
+      }
+    });
+  }
+  const myReports = todayReports.filter(r => !r.driver || r.driver === driverName);
   document.getElementById('today-report-count').textContent = myReports.length+'건';
   if(myReports.length===0){
     el.innerHTML=`<div style="padding:0 12px 12px;text-align:center;color:var(--muted);font-size:13px;padding:20px;">오늘 제출된 리포트가 없습니다</div>`;
@@ -6592,7 +6629,7 @@ async function runSync(silent=true){
     // 현재 열린 탭에 따라 재렌더링
     const activePage = document.querySelector('.page.active')?.id;
     if(activePage==='page-pay')    renderPay();
-    if(activePage==='page-home')   syncSalary();
+    if(activePage==='page-home')   { syncSalary(); renderTodayReports(); }
     _lastSyncTime = Date.now();
     if(!silent) setSyncBadge('ok');
     else setSyncBadge('ok');
