@@ -1151,7 +1151,7 @@ let _adminReady = false; // 데이터 준비 완료 플래그
 
 function doAdminLogout(){
   localStorage.removeItem('dc_admin_session');
-  ST.pin=''; upP();
+  ST.pin=''; if(typeof upP==='function') upP();
   document.getElementById('sm').classList.remove('on');
   document.getElementById('sl').classList.add('on');
 }
@@ -2078,8 +2078,8 @@ async function syncLedgerEntryToSheet(entry, rowIndex){
         body:JSON.stringify({action:'update_ledger',rowIndex,data:row})});
     } else {
       const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'add_ledger',data:row})});
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json=await res.json();
       return json.row; // 새 rowIndex 반환
     }
@@ -4131,9 +4131,9 @@ async function pushWagesToSheet(){
   );
   try{
     const res = await fetch(APPS_SCRIPT_URL,{method:'POST',
-    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'replace_wages',rows})});
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const j = await res.json();
     return j.ok;
   }catch(e){ console.warn('wages push 실패:',e); return false; }
@@ -4368,8 +4368,8 @@ async function saveDREdit(){
 
   try{
     const res  = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       body:JSON.stringify({action:'update_report', sheet:'Daily_Report', rowIndex, data:sendData})});
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok) throw new Error(json.error||json.msg||'저장 실패');
 
@@ -4392,8 +4392,8 @@ async function deleteDR(rowIndex){
 
   try{
     const res  = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       body:JSON.stringify({action:'delete_report', sheet:'Daily_Report', rowIndex})});
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok) throw new Error(json.error||json.msg||'삭제 실패');
 
@@ -4682,15 +4682,15 @@ async function saveWageEntry(){
     if(isEdit && existingRowIndex){
       // 기존 행 업데이트
       const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'update_wage',rowIndex:existingRowIndex,data:row})});
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json=await res.json();
       toast(json.ok?'✅ 수정 & 시트 저장':'⚠️ 수정됨 (시트 sync 실패)','ok');
     } else {
       // 새 행 추가
       const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'add_wage',data:row})});
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json=await res.json();
       if(json.ok && json.row){
         // _rowIndex 업데이트
@@ -4722,8 +4722,8 @@ async function deleteWageEntry(idx){
   try{
     if(rowIndex){
       const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'delete_wage',rowIndex})});
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const j=await res.json();
       toast(j.ok?'✅ 삭제 & 시트 반영':'⚠️ 삭제됨 (시트 sync 실패)','ok');
     } else {
@@ -5350,8 +5350,8 @@ async function savePSToSheets(){
       });
     });
     const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       body:JSON.stringify({action:'replace_price_sub',rows})});
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json=await res.json();
     toast(json.ok?'서브 요금 저장 완료 ☁️':'서브 요금 저장됨 (Sheets 오류)','ok');
   } catch(e){ toast('서브 요금 저장됨 (오프라인)','ok'); }
