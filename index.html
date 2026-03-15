@@ -1888,9 +1888,9 @@ function sddSelect(key, value) {
     const found = GUIDE_LIST.find(g=>g.name===value);
     if(found && window.currentGuidePhone !== undefined) window.currentGuidePhone = found.mobile;
   }
-  if(key==='pickup'||key==='dropoff'){ checkHotelSurchargeHint(); updateEarlyHint(); autoFillDRSurcharges(); }
+  if(key==='pickup'||key==='dropoff'){ checkHotelSurchargeHint(); updateHotelHint(); updateEarlyHint(); autoFillDRSurcharges(); }
   // 코스 선택 시 요금/OT 자동 계산
-  if(key==='attraction'){ autoRate(); onAttractionChange(); autoFillDRSurcharges(); }
+  if(key==='attraction'){ autoRate(); onAttractionChange(); autoFillDRSurcharges(); updateSvcHint(); updateOTHint(); }
   // 차량 선택 시 실제 인승 힌트 표시 (요청 인승 dr-seats는 건드리지 않음)
   if(key==='rego'){
     const v = MASTER.vehicles?.find(v=>v.Rego===value);
@@ -4477,12 +4477,12 @@ function updateDistHint(){
   if(curVal > 0){
     items.push({ type:'apply',
       title: '✅ 거리 서차지 $'+curVal+' 적용 ('+seatsLabel+')',
-      sub: '원거리 구간 추가 · 드라이버 수당에 포함'
+      sub: '드라이버 수당에 포함 · 추가 일정 또는 장거리 이동'
     });
   } else {
     items.push({ type:'no',
       title: '❌ 거리 서차지 미적용 ('+seatsLabel+' 기준 $'+rate+')',
-      sub: '원거리 구간(예: Eastern Creek, Norwest 등) 해당 시 선택하세요'
+      sub: '정규 코스 외 추가 일정 또는 장거리(예: Eastern Creek, Norwest, Penrith 등) 해당 시 선택'
     });
   }
   renderHintBox(hintEl, items);
@@ -4583,10 +4583,18 @@ function updateOTHint(fromEndTime){
   }
 
   if(!st){
-    // 인승 미선택 시 힌트 숨김
+    // 시간 미입력 시: 인승+코스 기준 기본 안내
     if(!seats){ renderHintBox(hintBox, []); return; }
-    // 시간 미입력 시 힌트 숨김
-    renderHintBox(hintBox, []);
+    const otRate0 = seats ? getOTRate(att, seats) : 30;
+    const maxH0   = att ? getMaxHours(att) : null;
+    const seatsLabel0 = seats;
+    const items0 = [];
+    items0.push({ type:'info',
+      title: '⏱ OT 기준: 20:15 이후 또는 코스 기준시간 초과',
+      sub: seatsLabel0+' 기준 $'+otRate0+'/h · 1시간 단위 올림 · 15분 waive'
+        +(maxH0 ? ' · 코스 기준 '+maxH0+'h' : '')
+    });
+    renderHintBox(hintBox, items0);
     return;
   }
 
@@ -4801,7 +4809,13 @@ function autoFillDRSurcharges(force){
     if(targetHotel > 0 && String(targetHotel) !== String(curHotel)){
       // HOTEL_OPTIONS에 해당 값이 있는 경우만 세팅
       const valid = hotelOpts.find(o=>Number(o.val)===targetHotel);
-      if(valid) cselSetValue('f-hotel-select', String(targetHotel));
+      if(valid){
+        cselSetValue('f-hotel-select', String(targetHotel));
+        calcTotal();
+        updateHotelHint(); // 힌트 즉시 업데이트
+      }
+    } else {
+      updateHotelHint(); // 변경 없어도 힌트는 갱신
     }
   }
 
@@ -5508,14 +5522,17 @@ function updateSurchargeOptions(){
   const distOpts = DIST_OPTIONS[seats] || DIST_OPTIONS['21S'];
   cselBuild('f-dist-select', distOpts.map(o=>({val:o.val,label:o.label})), '0');
 
-  checkHotelSurchargeHint();
-  updateSvcHint();
-  updateDistHint();
   calcTotal();
   // 인승 변경 시 관광지 힌트(드라이버 비용)도 갱신
   onAttractionChange();
   // 인승 변경 시 서차지 자동 재계산 (force: 인승 변경은 항상 재세팅)
   autoFillDRSurcharges(true);
+  // 서차지 채운 후 힌트 전체 갱신
+  updateSvcHint();
+  updateHotelHint();
+  updateDistHint();
+  updateOTHint();
+  checkHotelSurchargeHint();
 }
 function onSvcSelectChange(){
   const val  = cselGetValue('f-svc-select');
