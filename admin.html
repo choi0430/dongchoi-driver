@@ -194,14 +194,53 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     </div>
     <div class="fr"><label class="fl">PIN 번호</label>
       <div class="pind"><div class="pdot" id="p0"></div><div class="pdot" id="p1"></div><div class="pdot" id="p2"></div><div class="pdot" id="p3"></div></div>
-      <div class="npd">
-        <button class="npb" onclick="PP('1')">1</button><button class="npb" onclick="PP('2')">2</button><button class="npb" onclick="PP('3')">3</button>
-        <button class="npb" onclick="PP('4')">4</button><button class="npb" onclick="PP('5')">5</button><button class="npb" onclick="PP('6')">6</button>
-        <button class="npb" onclick="PP('7')">7</button><button class="npb" onclick="PP('8')">8</button><button class="npb" onclick="PP('9')">9</button>
-        <div></div><button class="npb" onclick="PP('0')">0</button><button class="npb dl" onclick="PPD()">⌫</button>
-      </div>
-      <button class="btn bac" style="margin-top:12px" id="login-btn" onclick="doLogin()">관리자 접속 →</button>
-      <div id="setup-note" style="display:none;margin-top:8px;color:#6b7280;font-size:12px;text-align:center;">처음 사용 시 PIN을 설정합니다. 이 PIN은 이 기기에 저장됩니다.</div>
+      <div class="npd" id="pinpad"></div>
+      <button class="btn bac" type="button" style="margin-top:12px" id="login-btn">관리자 접속 →</button>
+    </div>
+  </div>
+</div>
+</div>
+<script>
+(function(){
+  var _pin = '';
+  function _upDots(){for(var i=0;i<4;i++)document.getElementById('p'+i).classList.toggle('on',i<_pin.length);}
+  function _doLogin(){
+    var acct = document.getElementById('la').value;
+    if(!acct){alert('계정을 선택해주세요');return;}
+    var saved = sessionStorage.getItem('admin_pin')||localStorage.getItem('admin_pin')||'0000';
+    if(!localStorage.getItem('admin_pin'))localStorage.setItem('admin_pin','0000');
+    if(_pin!==saved){_pin='';_upDots();alert('PIN이 틀렸습니다. 기본 PIN은 0000 입니다.');return;}
+    document.getElementById('sl').classList.remove('on');
+    document.getElementById('sm').classList.add('on');
+    var n=new Date();var dd=String(n.getDate()).padStart(2,'0');var mm=String(n.getMonth()+1).padStart(2,'0');
+    var days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var ddate=document.getElementById('ddate');
+    if(ddate)ddate.textContent=dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')';
+    sessionStorage.setItem('adminAuthenticated','true');
+    localStorage.setItem('dc_admin_session',acct);
+    if(typeof toast==='function')toast('데이터 로딩 중...','ok');
+    if(typeof loadAllFromSheets==='function')loadAllFromSheets();
+  }
+  function _pp(n){if(_pin.length>=4)return;_pin+=n;_upDots();if(_pin.length===4)setTimeout(_doLogin,200);}
+  function _ppd(){_pin=_pin.slice(0,-1);_upDots();}
+  // 전역 노출
+  window.PP=_pp; window.PPD=_ppd; window.doLogin=_doLogin;
+  // 버튼 생성
+  var pad=document.getElementById('pinpad');
+  var keys=['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  keys.forEach(function(k){
+    if(k===''){var d=document.createElement('div');pad.appendChild(d);return;}
+    var b=document.createElement('button');
+    b.className='npb'+(k==='⌫'?' dl':'');
+    b.type='button';
+    b.textContent=k;
+    b.addEventListener('click',function(){k==='⌫'?_ppd():_pp(k);});
+    pad.appendChild(b);
+  });
+  document.getElementById('login-btn').addEventListener('click',_doLogin);
+})();
+</script>
+<div style="display:none">
     </div>
   </div>
 </div>
@@ -1112,27 +1151,8 @@ let ST = {pin:'',mt:null,mi:null,dt:null,di:null,ptype:'client',curAg:null,curSu
 let _adminReady = false; // 데이터 준비 완료 플래그
 
 // ═══════════════════════════════════════
-// LOGIN
+// LOGIN — PIN 처리는 HTML 인라인 스크립트에서 담당
 // ═══════════════════════════════════════
-function PP(n){if(ST.pin.length>=4)return;ST.pin+=n;upP();if(ST.pin.length===4)setTimeout(doLogin,200)}
-function PPD(){ST.pin=ST.pin.slice(0,-1);upP()}
-function upP(){for(let i=0;i<4;i++)document.getElementById('p'+i).classList.toggle('on',i<ST.pin.length)}
-
-function doLogin(){
-  if(!document.getElementById('la').value){toast('계정 선택','er');return}
-  const savedPin = sessionStorage.getItem('admin_pin') || localStorage.getItem('admin_pin') || '0000';
-  if(!localStorage.getItem('admin_pin')) localStorage.setItem('admin_pin','0000');
-  if(ST.pin!==savedPin){toast('PIN 오류','er');ST.pin='';upP();return}
-  document.getElementById('sl').classList.remove('on');
-  document.getElementById('sm').classList.add('on');
-  document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
-  // 세션 저장 (자동 복원용)
-  const acct = document.getElementById('la').value;
-  sessionStorage.setItem('adminAuthenticated', 'true');
-  localStorage.setItem('dc_admin_session', acct);
-  toast('데이터 로딩 중...','ok');
-  loadAllFromSheets();
-}
 
 function doAdminLogout(){
   localStorage.removeItem('dc_admin_session');
