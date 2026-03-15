@@ -1459,11 +1459,24 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 // 시드니 UTC offset 동적 계산 (AEST=+10, AEDT=+11 서머타임 자동 적용)
 function getSydneyOffsetMs(date) {
   const d = date || new Date();
-  // Intl API로 시드니 기준 시간과 UTC 차이 계산
-  const utcStr = d.toLocaleString('en-US', {timeZone:'UTC'});
-  const sydStr = d.toLocaleString('en-US', {timeZone:'Australia/Sydney'});
-  const diff = (new Date(sydStr) - new Date(utcStr));
-  return diff;
+  // Intl.DateTimeFormat으로 시드니 UTC offset 계산 (AEST=+10, AEDT=+11 자동)
+  try {
+    const fmt = new Intl.DateTimeFormat('en-AU', {
+      timeZone: 'Australia/Sydney',
+      year:'numeric', month:'2-digit', day:'2-digit',
+      hour:'2-digit', minute:'2-digit', second:'2-digit',
+      hour12: false
+    });
+    const parts = fmt.formatToParts(d);
+    const get = t => parseInt(parts.find(p=>p.type===t)?.value||'0');
+    const sydLocal = new Date(Date.UTC(get('year'),get('month')-1,get('day'),get('hour')%24,get('minute'),get('second')));
+    return sydLocal.getTime() - d.getTime();
+  } catch(e) {
+    // fallback: toLocaleString
+    const utcStr = d.toLocaleString('en-US', {timeZone:'UTC'});
+    const sydStr = d.toLocaleString('en-US', {timeZone:'Australia/Sydney'});
+    return (new Date(sydStr) - new Date(utcStr));
+  }
 }
 function fmtDate(val) {
   // dd/mm/yyyy 표시용

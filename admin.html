@@ -1027,11 +1027,24 @@ const DB = {
 // 시드니 UTC offset 동적 계산 (AEST=+10, AEDT=+11 서머타임 자동 적용)
 function getSydneyOffsetMs(date) {
   const d = date || new Date();
-  // Intl API로 시드니 기준 시간과 UTC 차이 계산
-  const utcStr = d.toLocaleString('en-US', {timeZone:'UTC'});
-  const sydStr = d.toLocaleString('en-US', {timeZone:'Australia/Sydney'});
-  const diff = (new Date(sydStr) - new Date(utcStr));
-  return diff;
+  // Intl.DateTimeFormat으로 시드니 UTC offset 계산 (AEST=+10, AEDT=+11 자동)
+  try {
+    const fmt = new Intl.DateTimeFormat('en-AU', {
+      timeZone: 'Australia/Sydney',
+      year:'numeric', month:'2-digit', day:'2-digit',
+      hour:'2-digit', minute:'2-digit', second:'2-digit',
+      hour12: false
+    });
+    const parts = fmt.formatToParts(d);
+    const get = t => parseInt(parts.find(p=>p.type===t)?.value||'0');
+    const sydLocal = new Date(Date.UTC(get('year'),get('month')-1,get('day'),get('hour')%24,get('minute'),get('second')));
+    return sydLocal.getTime() - d.getTime();
+  } catch(e) {
+    // fallback: toLocaleString
+    const utcStr = d.toLocaleString('en-US', {timeZone:'UTC'});
+    const sydStr = d.toLocaleString('en-US', {timeZone:'Australia/Sydney'});
+    return (new Date(sydStr) - new Date(utcStr));
+  }
 }
 function parseSheetTime(ts) {
   if(!ts) return '';
@@ -4175,7 +4188,7 @@ function renderDR(){
           <div style="font-size:11px;color:var(--ac);font-weight:700;margin:2px 0;">${escH(r.Agency||'')}${r.Attraction?' · '+escH(r.Attraction):''}</div>
           <div style="font-size:11px;color:var(--t3);">
             ${(()=>{const s=parseSheetTime(r.Time_Start),e=parseSheetTime(r.Time_End);const dur=calcDuration(r.Time_Start,r.Time_End);return s?(s+(e?' ~ '+e:'')+(dur?' <span style="background:var(--sf2);border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;">'+dur+'</span>':'')):'';})()}
-            ${r.KM_Start||r.KM_End?'&nbsp;|&nbsp;'+(r.KM_Start||'')+(r.KM_End?' ~ '+r.KM_End+' km':''):''}
+            ${(()=>{ if(!r.KM_Start&&!r.KM_End) return ''; const s=parseInt(r.KM_Start)||0, e=parseInt(r.KM_End)||0; const diff=(s&&e&&e>s)?e-s:0; return '&nbsp;|&nbsp;'+(r.KM_Start||'')+(r.KM_End?' → '+r.KM_End+' km':'')+(diff?' <span style="background:#f0fdf4;border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;color:#16a34a;">+'+diff.toLocaleString()+' km</span>':''); })()}
           </div>
           ${(r.Pickup||r.Dropoff)?`<div style="font-size:11px;color:var(--t3);margin-top:2px;">📍 ${escH(r.Pickup||'')}${r.Dropoff&&r.Dropoff!==r.Pickup?' → '+escH(r.Dropoff):''}</div>`:''}
           ${r.Hotel_Surcharge>0?`<div style="font-size:11px;color:var(--t3);margin-top:2px;">🏨 호텔 서차지 $${r.Hotel_Surcharge}</div>`:''}
