@@ -766,7 +766,15 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 
         <div class="total-box">
           <div style="display:none;"><span id="t-ta">$0</span></div>
-          <div class="total-row"><span class="total-label">드라이버 비용</span><span class="total-val accent" id="t-dr">$0</span></div>
+          <div class="total-row"><span class="total-label">드라이버 비용 (소계)</span><span class="total-val accent" id="t-dr-gross">$0</span></div>
+          <div class="total-row" id="night-owner-row" style="display:none;">
+            <span class="total-label" style="color:var(--red);">🌃 야경 회사 납입</span>
+            <span class="total-val" style="color:var(--red);font-weight:700;" id="t-owner">-$0</span>
+          </div>
+          <div class="total-row" style="border-top:2px solid var(--accent);margin-top:4px;padding-top:10px;">
+            <span class="total-label" style="font-weight:700;color:var(--text);">💰 실 지급액</span>
+            <span class="total-val accent" style="font-size:20px;font-weight:800;" id="t-dr">$0</span>
+          </div>
         </div>
 
         <div class="form-group"><label class="form-label">비고</label><textarea class="form-textarea" id="dr-remarks" placeholder="기타 사항..."></textarea></div>
@@ -3545,7 +3553,7 @@ function submitDailyReport(){
     timeEnd: document.getElementById('dr-end').value,
     guide: document.getElementById('dr-guide').value,
     tourcode: document.getElementById('dr-tourcode').value,
-    total, dr: parseFloat(document.getElementById('t-dr').textContent.replace('$',''))||0,
+    total, dr: parseFloat((document.getElementById('t-dr-gross')||document.getElementById('t-dr')).textContent.replace('$',''))||0,
     svcCharge: getSvcValue(), svcLabel,
     hotelSurcharge: getHotelValue(),  // DR 드라이버 지급 기준
     distSurcharge: getDistValue(),    // DR 드라이버 지급 기준
@@ -5447,6 +5455,7 @@ function onNightChange(){
 
   if(type==='none'){
     if(input) input.value = 0;
+    if(hintEl) hintEl.style.display = 'none';
     calcTotal();
     _lastOTToastKey = '';
     updateOTHint(true);
@@ -5464,13 +5473,29 @@ function onNightChange(){
     prepaid_opt: '옵션 — 한국 선결제'
   }[type] || type;
 
-  // 입력값만 설정, 힌트 없음
+  // 입력값 설정
   if(!r){
     if(input) input.value = 0;
   } else if(type==='guide_opt'){
     if(input) input.value = 0;
   } else {
     if(input) input.value = r.dr;
+  }
+  // 야경 회사 납입금 힌트 표시
+  if(hintEl && r){
+    const ownerAmt = r.owner || 0;
+    const drAmt    = r.dr    || 0;
+    const taAmt    = r.ta    || 0;
+    let hintHtml = `<div style="background:#fff5f5;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;">`;
+    hintHtml += `<div style="font-weight:700;color:var(--red);margin-bottom:4px;">🌃 야경 — ${typeLabel} (${seatsLabel})</div>`;
+    if(taAmt > 0) hintHtml += `<div style="color:var(--muted);">여행사 청구: <strong>$${taAmt}</strong></div>`;
+    if(drAmt > 0) hintHtml += `<div style="color:var(--muted);">야경 수당: <strong style="color:var(--green);">+$${drAmt}</strong></div>`;
+    if(ownerAmt > 0) hintHtml += `<div style="color:var(--red);">회사 납입 차감: <strong>-$${ownerAmt}</strong></div>`;
+    hintHtml += `</div>`;
+    hintEl.innerHTML = hintHtml;
+    hintEl.style.display = '';
+  } else if(hintEl){
+    hintEl.style.display = 'none';
   }
   calcTotal();
   updateOTHint();
@@ -5804,8 +5829,28 @@ function calcTotal(){
   const fuelPersonal = document.getElementById('fuel-personal')?.checked;
   if(tollPersonal) dr += tollVal;
   if(fuelPersonal) dr += fuelVal;
+  // 야경 회사 납입금: 드라이버 소계에서 차감
+  const nightOwner = (nightType !== 'none' && nightRate) ? (nightRate.owner || 0) : 0;
+  const drNet = dr - nightOwner;
+  // 총액 표시
   document.getElementById('t-ta').textContent='$'+ta.toFixed(0);
-  document.getElementById('t-dr').textContent='$'+dr.toFixed(0);
+  // 소계 표시
+  const grossEl = document.getElementById('t-dr-gross');
+  if(grossEl) grossEl.textContent='$'+dr.toFixed(0);
+  // 야경 회사 납입 행 표시/숨김
+  const ownerRow = document.getElementById('night-owner-row');
+  const ownerEl  = document.getElementById('t-owner');
+  if(ownerRow && ownerEl){
+    if(nightOwner > 0){
+      ownerRow.style.display='';
+      ownerEl.textContent='-$'+nightOwner.toFixed(0);
+    } else {
+      ownerRow.style.display='none';
+      ownerEl.textContent='-$0';
+    }
+  }
+  // 실 지급액 (= 소계 - 회사 납입)
+  document.getElementById('t-dr').textContent='$'+drNet.toFixed(0);
 }
 
 // ═══════════════════════════════════════
