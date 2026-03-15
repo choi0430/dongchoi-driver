@@ -5262,9 +5262,23 @@ function cselSelect(id, value, label) {
   cselClose(id);
   const btn = document.querySelector('.csel-btn[data-csel="'+id+'"]');
   if(btn){ btn.textContent = label; btn.dataset.value = value; }
-  // hidden input 동기화
+  // hidden input 값 동기화
   const hidden = document.getElementById(id);
-  if(hidden){ hidden.value = value; hidden.dispatchEvent(new Event('change')); }
+  if(hidden) hidden.value = value;
+  // 서차지/야경 선택 시 즉시 직접 호출 (이벤트 전파 방식 대신 보장)
+  if(id==='f-dist-select'){
+    if(typeof onDistSelectChange==='function') onDistSelectChange();
+  } else if(id==='f-hotel-select'){
+    if(typeof onHotelSelectChange==='function') onHotelSelectChange();
+  } else if(id==='f-svc-select'){
+    if(typeof onSvcSelectChange==='function') onSvcSelectChange();
+    if(typeof calcTotal==='function') calcTotal();
+  } else if(id==='f-night-type'){
+    if(typeof onNightChange==='function') onNightChange();
+  } else {
+    // 다른 hidden input은 기존 이벤트 방식 유지
+    if(hidden) hidden.dispatchEvent(new Event('change'));
+  }
 }
 function cselGetValue(id) {
   const btn = document.querySelector('.csel-btn[data-csel="'+id+'"]');
