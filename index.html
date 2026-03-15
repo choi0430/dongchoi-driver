@@ -1711,8 +1711,8 @@ function populateContacts() {
       ...MASTER.guides.map(g => ({
         type:'guide',
         name: g.Guide_Name || g.Name || g.name || '',
-        initials: g.Initials || String(g.Guide_Name||g.Name||'?').substring(0,2).toUpperCase(),
-        phone: fixPhone(g.Mobile || g.Phone || '') || '',
+        initials: g.Initials || String(g.Guide_Name||g.Name||'').substring(0,2).toUpperCase(),
+        phone: fixPhone(g.Mobile || g.Phone || ''),
         note: g.Type || '프리랜서',
         color:'#0e9f6e'
       }))
@@ -3516,9 +3516,6 @@ function submitDailyReport(){
     Total_TA: report.total,
     DR_Cost: report.dr,
     Remarks: report.remarks
-  }).then(r => {
-    if(r?.ok) showToast('☁️ Google Sheets 저장 완료','success');
-    else showToast('⚠️ 서버 저장 실패 — 로컬에 저장됨 (나중에 자동 재전송)','error');
   });
   renderTodayReports();
   renderStep2SavedReports();
@@ -5766,7 +5763,7 @@ function renderContacts(filter,search){
   if(!_activeRegosFetched){ fetchActiveRegosForContacts(); }
   const el=document.getElementById('contact-list');
   const contactData = window.CONTACTS || CONTACTS;
-  let list=contactData.filter(c=>(filter==='all'||c.type===filter)&&((c.name||'').toLowerCase().includes(search.toLowerCase())||(c.phone||'').includes(search)));
+  let list=contactData.filter(c=>(filter==='all'||c.type===filter)&&(c.name.toLowerCase().includes(search.toLowerCase())||c.phone.includes(search)));
   // driver-guide는 드라이버 탭과 가이드 탭 모두에 표시
   const drivers=list.filter(c=>c.type==='driver'||c.type==='driver-guide');
   const guides=list.filter(c=>c.type==='guide'||c.type==='driver-guide');
