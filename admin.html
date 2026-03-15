@@ -1064,7 +1064,7 @@ function parseSheetTime(ts) {
   }
   return s.length <= 5 ? s : '';
 }
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
 
 // ===== SECURITY & MONEY HELPERS =====
 function safeSetLocal(key, value) {
@@ -1810,7 +1810,7 @@ function getSubRates(){
 }
 async function loadSubRatesFromSheet(){
   try{
-    const res = await fetch(SCRIPT_URL+'?action=get_sub_rates');
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_sub_rates');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok||!json.rows?.length) return;
@@ -1844,7 +1844,7 @@ async function saveSubRates(){
     Object.entries(rates).forEach(([rg,tours])=>Object.entries(tours).forEach(([tour,caps])=>{
       rows.push({Rego:rg,Tour:tour,seats_21:caps['21']||0,seats_25:caps['25']||0,seats_40:caps['40']||0,seats_50:caps['50']||0});
     }));
-    const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'replace_sub_rates',rows})});
+    const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'replace_sub_rates',rows})});
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json=await res.json();
     toast(json.ok?'서브 요금 저장 완료 ☁️':'서브 요금 저장됨 (Sheets 오류)','ok');
@@ -2026,7 +2026,7 @@ function saveLedger(d){ safeSetLocal('admin_ledger', d); }
 // 시트에서 Ledger 로드 (행 배열 → 주간 트리 구조)
 async function loadLedgerFromSheet(){
   try{
-    const res = await fetch(SCRIPT_URL+'?action=get_ledger');
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_ledger');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok||!json.rows?.length) return;
@@ -2057,10 +2057,10 @@ async function syncLedgerEntryToSheet(entry, rowIndex){
     OT:entry.ot,Trailer:entry.trailer,Hotel:entry.hotel,Note:entry.note};
   try{
     if(rowIndex){
-      await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({action:'update_ledger',rowIndex,data:row})});
     } else {
-      const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'add_ledger',data:row})});
       const json=await res.json();
@@ -2072,7 +2072,7 @@ async function syncLedgerEntryToSheet(entry, rowIndex){
 async function deleteLedgerEntryFromSheet(rowIndex){
   if(!rowIndex) return;
   try{
-    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'delete_ledger',rowIndex})});
   }catch(e){console.warn('Ledger delete 실패:',e);}
 }
@@ -2134,7 +2134,7 @@ async function deleteLedgerWeek(){
       TA:e.ta,SubTotal:e.subTotal,MyDr:e.myDr,Extra:e.extra,
       OT:e.ot,Trailer:e.trailer,Hotel:e.hotel,Note:e.note
     })));
-    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'replace_ledger',rows})});
   }catch(e){console.warn('Ledger 주간 삭제 sync:',e);}
 }
@@ -2430,7 +2430,7 @@ async function importFromReports(){
 
   let reports = [];
   try {
-    const res = await fetch(SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(json.ok) reports = json.rows;
@@ -2576,7 +2576,7 @@ async function importFromReports(){
       TA:e.ta,SubTotal:e.subTotal,MyDr:e.myDr,Extra:e.extra,
       OT:e.ot,Trailer:e.trailer,Hotel:e.hotel,Note:e.note
     })));
-    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'replace_ledger',rows})});
   } catch(e){ console.warn('Ledger sync:', e); }
 }
@@ -3043,7 +3043,7 @@ async function loadInvReports() {
   // 캐시 or 새 조회 — agency 선택 전에도 리포트 로드해서 드롭다운 채우기
   if (!_invReports) {
     try {
-      const res  = await fetch(SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json = await res.json();
       if (json.ok) {
@@ -3651,14 +3651,14 @@ async function saveNoticesToGAS(notices){
       ID: n.id, Title: n.title, Content: n.body||'',
       Type: n.type||'info', Date: n.date||'', Active: n.active!==false?'true':'false'
     }));
-    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'save_notices',rows})});
   }catch(e){ console.warn('공지 GAS 저장 실패:',e); }
 }
 // 공지사항 GAS 로드
 async function loadNoticesFromGAS(){
   try{
-    const res=await fetch(SCRIPT_URL+'?action=get_notices');
+    const res=await fetch(APPS_SCRIPT_URL+'?action=get_notices');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     if(!res.ok) return;
     const json=await res.json();
@@ -3682,7 +3682,7 @@ async function loadNoticesFromGAS(){
 async function initNoticesIfEmpty(){
   return; // 하드코딩 초기화 비활성화
   try{
-    const res = await fetch(SCRIPT_URL+'?action=get_notices');
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_notices');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     if(!res.ok) return;
     const json = await res.json();
@@ -3697,7 +3697,7 @@ async function initNoticesIfEmpty(){
         Date: n.date||'',
         Active: 'true'
       }));
-      await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({action:'save_notices', rows})});
       // localStorage에도 저장
       const notices = NOTICES.map((n,i)=>({
@@ -3849,7 +3849,7 @@ let _motLastSync = 0;
 async function rMot(force=false) {
   if (force || Date.now() - _motLastSync > 30000) {
     try {
-      const res = await fetch(SCRIPT_URL + '?action=get_mot_reports');
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_mot_reports');
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json = await res.json();
       if (json.ok) {
@@ -4064,7 +4064,7 @@ async function loadWagesFromSheet(forceRefresh){
   if(_wagesSyncing) return;
   _wagesSyncing = true;
   try{
-    const res = await fetch(SCRIPT_URL+'?action=get_wages');
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_wages');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok) {
@@ -4113,7 +4113,7 @@ async function pushWagesToSheet(){
     )
   );
   try{
-    const res = await fetch(SCRIPT_URL,{method:'POST',
+    const res = await fetch(APPS_SCRIPT_URL,{method:'POST',
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'replace_wages',rows})});
@@ -4135,7 +4135,7 @@ const DR_CACHE_TTL = 3 * 60 * 1000;
 async function loadDR(force=false){
   if(!force && _drCache && Date.now()-_drCacheTime < DR_CACHE_TTL){ renderDR(); return; }
   try{
-    const res  = await fetch(SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+    const res  = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(json.ok && json.rows){
@@ -4350,7 +4350,7 @@ async function saveDREdit(){
   const { _rowIndex, _isoDate, ...sendData } = updated;
 
   try{
-    const res  = await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    const res  = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       body:JSON.stringify({action:'update_report', sheet:'Daily_Report', rowIndex, data:sendData})});
     const json = await res.json();
@@ -4374,7 +4374,7 @@ async function deleteDR(rowIndex){
   if(!confirm(`이 리포트를 삭제하시겠습니까?\n\n${label}`)) return;
 
   try{
-    const res  = await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    const res  = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       body:JSON.stringify({action:'delete_report', sheet:'Daily_Report', rowIndex})});
     const json = await res.json();
@@ -4397,7 +4397,7 @@ let _reportsCache = null; // [{ Driver, Date(iso), DR_Cost, ... }]
 async function ensureReportsCache() {
   if (_reportsCache) return _reportsCache;
   try {
-    const res  = await fetch(SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+    const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if (json.ok && json.rows) {
@@ -4664,14 +4664,14 @@ async function saveWageEntry(){
   try{
     if(isEdit && existingRowIndex){
       // 기존 행 업데이트
-      const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'update_wage',rowIndex:existingRowIndex,data:row})});
       const json=await res.json();
       toast(json.ok?'✅ 수정 & 시트 저장':'⚠️ 수정됨 (시트 sync 실패)','ok');
     } else {
       // 새 행 추가
-      const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'add_wage',data:row})});
       const json=await res.json();
@@ -4704,7 +4704,7 @@ async function deleteWageEntry(idx){
   renderWage();
   try{
     if(rowIndex){
-      const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'delete_wage',rowIndex})});
       const j=await res.json();
@@ -5310,7 +5310,7 @@ function initPriceClientForAgency(agencyName) {
     seats_50_rate: 0, seats_50_ot: 0,
   }));
 
-  fetch(SCRIPT_URL, {
+  fetch(APPS_SCRIPT_URL, {
     method: 'POST',
     headers: {'Content-Type': 'text/plain'},
     body: JSON.stringify({action: 'add_price_client_agency', agency: agencyName, rows})
@@ -5332,7 +5332,7 @@ async function savePSToSheets(){
         });
       });
     });
-    const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       body:JSON.stringify({action:'replace_price_sub',rows})});
     const json=await res.json();
@@ -5346,7 +5346,7 @@ async function loadPSFromSheets(){
   if(Date.now() - window._psLastSync < 5*60*1000) return;
   window._psLastSync = Date.now();
   try{
-    const res=await fetch(SCRIPT_URL+'?action=get_price_sub');
+    const res=await fetch(APPS_SCRIPT_URL+'?action=get_price_sub');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json=await res.json();
     if(!json.ok||!json.rows?.length) return;
@@ -5372,7 +5372,7 @@ async function loadPSFromSheets(){
 
 async function loadTab(sheet){
   try {
-    const res = await fetch(SCRIPT_URL+'?action=get_master&sheet='+sheet);
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_master&sheet='+sheet);
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok||!json.rows?.length) return null;
@@ -5478,7 +5478,7 @@ async function syncSub(){
 async function loadAllFromSheets(){
   try {
     toast('📡 Google Sheets 로딩 중...','ok');
-    const res = await fetch(SCRIPT_URL + '?action=get_all_masters');
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok){ toast('데이터 로드 실패','er'); rDash(); return; }
@@ -5605,6 +5605,55 @@ async function loadAllFromSheets(){
   }
 }
 
+
+// ── Pre-Departure Check Save ──
+async function apiSavePreDeparture(rowData, rowIndex) {
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({action: 'save_predeparture', data: rowData, rowIndex})
+    });
+    toast('운행 전 점검이 저장되었습니다 ✓', 'ok');
+  } catch(e) {
+    console.error('apiSavePreDeparture error:', e);
+    toast('저장 실패','er');
+  }
+}
+
+// ── End-of-Shift Check Save ──
+async function apiSaveEndOfShift(rowData, rowIndex) {
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({action: 'save_endofshift', data: rowData, rowIndex})
+    });
+    toast('운행 종료 보고가 저장되었습니다 ✓', 'ok');
+  } catch(e) {
+    console.error('apiSaveEndOfShift error:', e);
+    toast('저장 실패','er');
+  }
+}
+
+// ── Initialize Master Data (Admin Utility) ──
+async function apiInitMasters() {
+  if(!confirm('마스터 데이터를 초기화하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({action: 'init_masters'})
+    });
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
+    const json = await res.json();
+    toast('마스터 데이터가 초기화되었습니다 ✓', 'ok');
+  } catch(e) {
+    console.error('apiInitMasters error:', e);
+    toast('초기화 실패','er');
+  }
+}
+
 async function apiSaveMaster(sheetName, obj, isEdit, idx){
   try {
     const renderMap={M_Vehicles:rV,M_Drivers:rD,M_Clients:rC,M_Guides:rG,M_Hotels:rH};
@@ -5615,7 +5664,7 @@ async function apiSaveMaster(sheetName, obj, isEdit, idx){
     const body = {action, sheet:sheetName, data:obj};
     if(isEdit) body.rowIndex = idx + 2; // 헤더(1) + 0-based
 
-    await fetch(SCRIPT_URL, {
+    await fetch(APPS_SCRIPT_URL, {
       method:'POST',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(body)
@@ -5625,7 +5674,7 @@ async function apiSaveMaster(sheetName, obj, isEdit, idx){
 
 async function apiDeleteMaster(sheetName, rowIndex){
   try {
-    await fetch(SCRIPT_URL, {
+    await fetch(APPS_SCRIPT_URL, {
       method:'POST',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'delete_master', sheet:sheetName, rowIndex})
@@ -5646,7 +5695,7 @@ async function savePCToSheets(){
         });
       });
     });
-    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'replace_master',sheet:'M_PriceClient',rows})});
   } catch(e){ console.error('savePCToSheets error:',e); }
 }
@@ -5660,7 +5709,7 @@ async function savePDToSheets(){
       seats_40_base:v['40']?.base,seats_40_ot:v['40']?.ot,
       seats_50_base:v['50']?.base,seats_50_ot:v['50']?.ot
     }));
-    await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'replace_master',sheet:'M_PriceDriver',rows})});
   } catch(e){ console.error('savePDToSheets error:',e); }
 }
