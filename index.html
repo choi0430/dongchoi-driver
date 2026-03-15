@@ -4582,7 +4582,18 @@ function updateOTHint(fromEndTime){
   const st   = document.getElementById('dr-start')?.value;
   const et   = document.getElementById('dr-end')?.value;
   const att  = document.getElementById('dr-attraction')?.value;
-  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+  // seats: shift 기준 우선, dr-seats select, 서비스 차지 라벨에서 추출 순으로 fallback
+  let seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+  if(!seats){
+    // 서비스 차지 버튼 라벨에서 인승 추출 (예: "$250 — 10HR (25인승 요금)")
+    const svcBtn = document.querySelector('.csel-btn[data-csel="f-svc-select"]');
+    const svcLabel = svcBtn?.textContent || '';
+    const mSeats = svcLabel.match(/(\d+)인승/);
+    if(mSeats){
+      const n = parseInt(mSeats[1]);
+      seats = n>=50?'50S':n>=40?'40S':n>=25?'25S':'21S';
+    }
+  }
 
   if(!st){
     // 인승 미선택 시 힌트 숨김
@@ -4594,18 +4605,13 @@ function updateOTHint(fromEndTime){
 
   const [sh,sm] = st.split(':').map(Number);
   const maxH    = getMaxHours(att);
-  const otRate  = seats ? getOTRate(att, seats) : null;
+  // 인승 없으면 기본 요율 사용 (21/25S 기준 $30)
+  const otRate  = seats ? getOTRate(att, seats) : 30;
   const WAIVE   = 15;
   const startMin = sh*60+sm;
   const pm8WaiveMin = 20*60 + WAIVE; // 20:15
 
   const items = [];
-
-  // ① OT 조건 안내 — 인승 미선택 시 숨김
-  if(!seats){
-    renderHintBox(hintBox, []);
-    return;
-  }
   // ③ 종료 시간 있으면 실제 OT 계산 + 코스 기준 안내
   if(et){
     const [eh,em] = et.split(':').map(Number);
