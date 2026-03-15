@@ -1065,6 +1065,48 @@ function parseSheetTime(ts) {
   return s.length <= 5 ? s : '';
 }
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
+
+// ===== SECURITY & MONEY HELPERS =====
+function safeSetLocal(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch(e) {
+    if (e.name === 'QuotaExceededError') {
+      showToast('저장 공간 부족 - 캐시 삭제 중', 'warning');
+      const keys = Object.keys(localStorage).filter(k => k.startsWith('cache_'));
+      keys.forEach(k => localStorage.removeItem(k));
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch(e2) { console.error('Failed to save:', key); }
+    }
+  }
+}
+
+function safeGetLocal(key, defaultVal = null) {
+  try {
+    const val = localStorage.getItem(key);
+    return val ? JSON.parse(val) : defaultVal;
+  } catch(e) {
+    console.error('Failed to parse localStorage key:', key);
+    return defaultVal;
+  }
+}
+
+function roundMoney(value) {
+  return Math.round((parseFloat(value) || 0) * 100) / 100;
+}
+
+function formatCurrency(value) {
+  const num = roundMoney(value);
+  return '$' + num.toLocaleString('en-AU', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function formatDateAEST(date) {
+  return new Intl.DateTimeFormat('en-AU', {
+    timeZone: 'Australia/Sydney',
+    day: '2-digit', month: '2-digit', year: 'numeric'
+  }).format(date instanceof Date ? date : new Date(date));
+}
+
+
 let ST = {pin:'',mt:null,mi:null,dt:null,di:null,ptype:'client',curAg:null,curSub:null,curSubVeh:null,subTab:'rates'};
 let _adminReady = false; // 데이터 준비 완료 플래그
 
@@ -1076,13 +1118,15 @@ function PPD(){ST.pin=ST.pin.slice(0,-1);upP()}
 function upP(){for(let i=0;i<4;i++)document.getElementById('p'+i).classList.toggle('on',i<ST.pin.length)}
 function doLogin(){
   if(!document.getElementById('la').value){toast('계정 선택','er');return}
-  const savedPin = localStorage.getItem('admin_pin')||'0000';
+  const savedPin = sessionStorage.getItem('admin_pin') || localStorage.getItem('admin_pin');
+  if (!savedPin) { toast('PIN 설정이 필요합니다. 관리자에게 문의하세요','er'); return; }
   if(ST.pin!==savedPin){toast('PIN 오류','er');ST.pin='';upP();return}
   document.getElementById('sl').classList.remove('on');
   document.getElementById('sm').classList.add('on');
   document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
   // 세션 저장 (자동 복원용)
   const acct = document.getElementById('la').value;
+  sessionStorage.setItem('adminAuthenticated', 'true');
   localStorage.setItem('dc_admin_session', acct);
   toast('데이터 로딩 중...','ok');
   loadAllFromSheets();
@@ -1263,12 +1307,12 @@ function rDash(){
 
 
 // ===== VEHICLE MANAGEMENT =====
-function getHvisBookings(){try{return JSON.parse(localStorage.getItem('hvis_bookings')||'[]');}catch(e){return[];}}
-function saveHvisBookings(d){localStorage.setItem('hvis_bookings',JSON.stringify(d));}
-function getMaintRecords(){try{return JSON.parse(localStorage.getItem('maint_records')||'[]');}catch(e){return[];}}
-function saveMaintRecords(d){localStorage.setItem('maint_records',JSON.stringify(d));}
-function getDefectReports(){try{return JSON.parse(localStorage.getItem('defect_reports')||'[]');}catch(e){return[];}}
-function saveDefectReports(d){localStorage.setItem('defect_reports',JSON.stringify(d));}
+function getHvisBookings(){try{return safeGetLocal('hvis_bookings', []);}catch(e){return[];}}
+function saveHvisBookings(d){safeSetLocal('hvis_bookings', d);}
+function getMaintRecords(){try{return safeGetLocal('maint_records', []);}catch(e){return[];}}
+function saveMaintRecords(d){safeSetLocal('maint_records', d);}
+function getDefectReports(){try{return safeGetLocal('defect_reports', []);}catch(e){return[];}}
+function saveDefectReports(d){safeSetLocal('defect_reports', d);}
 
 function setVTab(tab){
   ['list','hvis','maint','defect'].forEach(function(t){
@@ -1491,7 +1535,7 @@ function openMaintEntry(id){
 function saveMaintEntry(id){
   var entry={id:id||Date.now().toString(),rego:gv('mt-rego'),date:gv('mt-date'),
     km:parseInt(gv('mt-km'))||null,type:gv('mt-type'),description:gv('mt-desc'),
-    workshop:gv('mt-shop'),cost:parseFloat(gv('mt-cost'))||0,nextServiceKM:parseInt(gv('mt-nextkm'))||null};
+    workshop:gv('mt-shop'),cost: roundMoney(gv('mt-cost'))||0,nextServiceKM:parseInt(gv('mt-nextkm'))||null};
   if(!entry.rego){toast('Select a vehicle','er');return;}
   if(!entry.date){toast('Enter date','er');return;}
   var recs=getMaintRecords();
@@ -1762,11 +1806,12 @@ function getSubVehicles(){
 }
 
 function getSubRates(){
-  try { return JSON.parse(localStorage.getItem('admin_sub_rates')||'{}'); } catch(e){ return {}; }
+  try { return safeGetLocal('admin_sub_rates', {}); } catch(e){ return {}; }
 }
 async function loadSubRatesFromSheet(){
   try{
     const res = await fetch(SCRIPT_URL+'?action=get_sub_rates');
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok||!json.rows?.length) return;
     const rates={};
@@ -1775,7 +1820,7 @@ async function loadSubRatesFromSheet(){
       if(!rates[r.Rego]) rates[r.Rego]={};
       rates[r.Rego][r.Tour]={'21':Number(r.seats_21)||0,'25':Number(r.seats_25)||0,'40':Number(r.seats_40)||0,'50':Number(r.seats_50)||0};
     });
-    localStorage.setItem('admin_sub_rates',JSON.stringify(rates));
+    safeSetLocal('admin_sub_rates', rates);
   }catch(e){console.warn('서브 요금 로드 실패:',e);}
 }
 async function saveSubRates(){
@@ -1793,13 +1838,14 @@ async function saveSubRates(){
       '50': parseInt(tr.querySelector('[data-cap="50"]')?.value)||0,
     };
   });
-  localStorage.setItem('admin_sub_rates',JSON.stringify(rates));
+  safeSetLocal('admin_sub_rates', rates);
   try{
     const rows=[];
     Object.entries(rates).forEach(([rg,tours])=>Object.entries(tours).forEach(([tour,caps])=>{
       rows.push({Rego:rg,Tour:tour,seats_21:caps['21']||0,seats_25:caps['25']||0,seats_40:caps['40']||0,seats_50:caps['50']||0});
     }));
     const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'replace_sub_rates',rows})});
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json=await res.json();
     toast(json.ok?'서브 요금 저장 완료 ☁️':'서브 요금 저장됨 (Sheets 오류)','ok');
   }catch(e){toast('서브 요금 저장됨 (오프라인)','ok');}
@@ -1864,7 +1910,7 @@ function addSubRate(){
   if(!rates[rego]) rates[rego]={};
   if(rates[rego][tour]){toast('이미 존재하는 코스','er');return;}
   rates[rego][tour]={'21':0,'25':0,'40':0,'50':0};
-  localStorage.setItem('admin_sub_rates', JSON.stringify(rates));
+  safeSetLocal('admin_sub_rates', rates);
   renderSubRates();
 }
 
@@ -1873,7 +1919,7 @@ function deleteSubRate(tour){
   const rego = ST.curSubVeh;
   const rates = getSubRates();
   if(rates[rego]) delete rates[rego][tour];
-  localStorage.setItem('admin_sub_rates', JSON.stringify(rates));
+  safeSetLocal('admin_sub_rates', rates);
   renderSubRates();
   toast('코스 삭제 완료','ok');
 }
@@ -1974,13 +2020,14 @@ function calcProfit(){
 // ═══════════════════════════════════════
 // LEDGER (정산 내역)
 // ═══════════════════════════════════════
-function getLedger(){ try{return JSON.parse(localStorage.getItem('admin_ledger')||'[]');}catch(e){return[];} }
-function saveLedger(d){ localStorage.setItem('admin_ledger',JSON.stringify(d)); }
+function getLedger(){ try{return safeGetLocal('admin_ledger', []);}catch(e){return[];} }
+function saveLedger(d){ safeSetLocal('admin_ledger', d); }
 
 // 시트에서 Ledger 로드 (행 배열 → 주간 트리 구조)
 async function loadLedgerFromSheet(){
   try{
     const res = await fetch(SCRIPT_URL+'?action=get_ledger');
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok||!json.rows?.length) return;
     // rows → [{weekStart, entries:[...]}] 구조로 변환
@@ -1999,7 +2046,7 @@ async function loadLedgerFromSheet(){
       });
     });
     const ledger = Object.values(weekMap).sort((a,b)=>b.weekStart.localeCompare(a.weekStart));
-    localStorage.setItem('admin_ledger',JSON.stringify(ledger));
+    safeSetLocal('admin_ledger', ledger);
   }catch(e){console.warn('Ledger 로드 실패:',e);}
 }
 
@@ -2014,6 +2061,7 @@ async function syncLedgerEntryToSheet(entry, rowIndex){
         body:JSON.stringify({action:'update_ledger',rowIndex,data:row})});
     } else {
       const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'add_ledger',data:row})});
       const json=await res.json();
       return json.row; // 새 rowIndex 반환
@@ -2383,6 +2431,7 @@ async function importFromReports(){
   let reports = [];
   try {
     const res = await fetch(SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(json.ok) reports = json.rows;
     else throw new Error(json.msg);
@@ -2680,7 +2729,7 @@ function renderInvManualList() {
     <div style="background:var(--sf2);border-radius:12px;overflow:hidden;margin-bottom:6px;">
       <div style="padding:8px 12px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;">
         <span style="font-size:11px;font-weight:700;color:var(--t2);">수동 항목 ${items.length}건</span>
-        <span style="font-size:12px;font-weight:800;color:var(--gn);">합계 $${total.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
+        <span style="font-size:12px;font-weight:800;color:var(--gn);">합계 $${total.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
       </div>
       ${items.map(item => {
         const sub = (item.amount||0)+(item.ot||0)+(item.hotel||0);
@@ -2693,7 +2742,7 @@ function renderInvManualList() {
             ${item.note?`<div style="font-size:10px;color:var(--t3);">${escH(item.note)}</div>`:''}
           </div>
           <div style="text-align:right;flex-shrink:0;">
-            <div style="font-size:13px;font-weight:800;color:var(--gn);">$${sub.toLocaleString('en-AU',{minimumFractionDigits:2})}</div>
+            <div style="font-size:13px;font-weight:800;color:var(--gn);">$${sub.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
             ${item.ot?`<div style="font-size:10px;color:var(--t3);">OT $${item.ot}</div>`:''}
             ${item.hotel?`<div style="font-size:10px;color:var(--t3);">Hotel $${item.hotel}</div>`:''}
           </div>
@@ -2995,6 +3044,7 @@ async function loadInvReports() {
   if (!_invReports) {
     try {
       const res  = await fetch(SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json = await res.json();
       if (json.ok) {
         _invReports = json.rows.map(r => {
@@ -3094,8 +3144,8 @@ function renderInvPreview(rows, agency, from, to) {
     else hasFallback = true;
   });
 
-  const gst   = Math.round(grandTotal / 11 * 100) / 100;
-  const exGST = Math.round((grandTotal - gst) * 100) / 100;
+  const gst = roundMoney(grandTotal / 11);
+  const exGST = roundMoney(grandTotal - gst);
   const invNum = getInvNum(agency, from);
 
   // 발행 이력 확인
@@ -3227,8 +3277,8 @@ async function generateInvoice() {
   const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
   let grandTotal = 0;
   rows.forEach(r => { grandTotal += calcInvRow(r).total; });
-  const gst   = Math.round(grandTotal / 11 * 100) / 100;
-  const exGST = Math.round((grandTotal - gst) * 100) / 100;
+  const gst = roundMoney(grandTotal / 11);
+  const exGST = roundMoney(grandTotal - gst);
 
   const invNum = getInvNum(agency, from);
   const issuedKey = `dc_inv_issued_${invNum}`;
@@ -3255,7 +3305,7 @@ async function generateInvoice() {
         const wrows = weeks[mon];
         const wTotal = wrows.reduce((s,r)=>s+calcInvRow(r).total,0);
         const headerRow = `<tr style="background:#f1f5f9;"><td colspan="6" style="font-weight:800;color:#1e40af;font-size:11px;padding:8px 12px;letter-spacing:.5px;">
-          📆 WEEK: ${fd(mon)} — ${fd(sun)} &nbsp;·&nbsp; ${wrows.length}건 &nbsp;·&nbsp; $${wTotal.toLocaleString('en-AU',{minimumFractionDigits:2})}
+          📆 WEEK: ${fd(mon)} — ${fd(sun)} &nbsp;·&nbsp; ${wrows.length}건 &nbsp;·&nbsp; $${wTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}
         </td></tr>`;
         const dataRows = wrows.map(r => _makeTableRow(r, fd)).join('');
         return headerRow + dataRows;
@@ -3272,7 +3322,7 @@ async function generateInvoice() {
         const trows = tours[tc];
         const tTotal = trows.reduce((s,r)=>s+calcInvRow(r).total,0);
         const headerRow = `<tr style="background:#f0fdf4;"><td colspan="6" style="font-weight:800;color:#166534;font-size:11px;padding:8px 12px;letter-spacing:.5px;">
-          🗺 TOUR CODE: ${escH(tc)} &nbsp;·&nbsp; ${trows.length}건 &nbsp;·&nbsp; $${tTotal.toLocaleString('en-AU',{minimumFractionDigits:2})}
+          🗺 TOUR CODE: ${escH(tc)} &nbsp;·&nbsp; ${trows.length}건 &nbsp;·&nbsp; $${tTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}
         </td></tr>`;
         const dataRows = trows.map(r => _makeTableRow(r, fd)).join('');
         return headerRow + dataRows;
@@ -3304,7 +3354,7 @@ async function generateInvoice() {
       '<td>'+escH(r.Rego||'-')+'</td>' +
       '<td style="color:#64748b;white-space:nowrap;font-size:11px;">'+timeStr+'</td>' +
       '<td style="color:#64748b">'+escH(r.Tour_Code||'-')+'</td>' +
-      '<td style="font-weight:700">$'+c.total.toLocaleString('en-AU',{minimumFractionDigits:2})+'</td>' +
+      '<td style="font-weight:700">$'+c.total.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})+'</td>' +
       '</tr>' + extrasRow;
   }
 
@@ -3418,15 +3468,15 @@ async function generateInvoice() {
 <div class="inv-totals">
   <div class="inv-total-row">
     <span>Subtotal (excl. GST)</span>
-    <span>$${exGST.toLocaleString('en-AU', {minimumFractionDigits:2})}</span>
+    <span>$${exGST.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
   </div>
   <div class="inv-total-row">
     <span>GST (10%)</span>
-    <span>$${gst.toLocaleString('en-AU', {minimumFractionDigits:2})}</span>
+    <span>$${gst.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
   </div>
   <div class="inv-total-row grand">
     <span>Total Due</span>
-    <span>$${totalTA.toLocaleString('en-AU', {minimumFractionDigits:2})}</span>
+    <span>$${totalTA.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
   </div>
 </div>
 ${(DC_COMPANY.bank || localStorage.getItem('dc_bank')) ? `
@@ -3469,7 +3519,7 @@ function emailInvoice() {
   const body = encodeURIComponent(
     `Dear ${agency},\n\n` +
     `Please find enclosed Tax Invoice ${invNum} for services provided during ${fd(from)} – ${fd(to)}.\n\n` +
-    `Invoice Total: $${grandTotal.toLocaleString('en-AU',{minimumFractionDigits:2})} (incl. GST)\n` +
+    `Invoice Total: $${grandTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})} (incl. GST)\n` +
     `Due Date: 14 days from invoice date\n` +
     `Reference: ${invNum}\n\n` +
     `Bank: ${DC_COMPANY.bank||''}\n` +
@@ -3609,6 +3659,7 @@ async function saveNoticesToGAS(notices){
 async function loadNoticesFromGAS(){
   try{
     const res=await fetch(SCRIPT_URL+'?action=get_notices');
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     if(!res.ok) return;
     const json=await res.json();
     if(json.ok&&Array.isArray(json.rows)){
@@ -3632,6 +3683,7 @@ async function initNoticesIfEmpty(){
   return; // 하드코딩 초기화 비활성화
   try{
     const res = await fetch(SCRIPT_URL+'?action=get_notices');
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     if(!res.ok) return;
     const json = await res.json();
     if(json.ok && Array.isArray(json.rows) && json.rows.length === 0){
@@ -3798,6 +3850,7 @@ async function rMot(force=false) {
   if (force || Date.now() - _motLastSync > 30000) {
     try {
       const res = await fetch(SCRIPT_URL + '?action=get_mot_reports');
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json = await res.json();
       if (json.ok) {
         _motCache = json.rows || [];
@@ -3998,8 +4051,8 @@ function getMondayOfDate(isoDate) {
 
 // WAGE (드라이버 급여 지급)
 // ═══════════════════════════════════════
-function getWages(){ try{return JSON.parse(localStorage.getItem('admin_wages')||'{}');}catch(e){return {};} }
-function saveWages(d){ localStorage.setItem('admin_wages',JSON.stringify(d)); }
+function getWages(){ try{return safeGetLocal('admin_wages', {});}catch(e){return {};} }
+function saveWages(d){ safeSetLocal('admin_wages', d); }
 
 // ── 급여 양방향 동기화 상태 ──
 let _wagesSyncing = false;
@@ -4012,6 +4065,7 @@ async function loadWagesFromSheet(forceRefresh){
   _wagesSyncing = true;
   try{
     const res = await fetch(SCRIPT_URL+'?action=get_wages');
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok) {
       console.warn('급여 로드 실패:', json.msg);
@@ -4040,7 +4094,7 @@ async function loadWagesFromSheet(forceRefresh){
       )
     );
     // 로컬과 머지: GAS가 항상 master (GAS 데이터로 덮어씀)
-    localStorage.setItem('admin_wages', JSON.stringify(sheetWages));
+    safeSetLocal('admin_wages', sheetWages);
     _wagesLastSync = Date.now();
   }catch(e){console.warn('급여 로드 실패:',e);}
   _wagesSyncing = false;
@@ -4060,6 +4114,7 @@ async function pushWagesToSheet(){
   );
   try{
     const res = await fetch(SCRIPT_URL,{method:'POST',
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'replace_wages',rows})});
     const j = await res.json();
@@ -4081,6 +4136,7 @@ async function loadDR(force=false){
   if(!force && _drCache && Date.now()-_drCacheTime < DR_CACHE_TTL){ renderDR(); return; }
   try{
     const res  = await fetch(SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(json.ok && json.rows){
       _drCache = json.rows.map((r,i)=>({ ...r, _rowIndex: i+2 })); // Sheets row = index+2 (헤더 row1)
@@ -4295,6 +4351,7 @@ async function saveDREdit(){
 
   try{
     const res  = await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       body:JSON.stringify({action:'update_report', sheet:'Daily_Report', rowIndex, data:sendData})});
     const json = await res.json();
     if(!json.ok) throw new Error(json.error||json.msg||'저장 실패');
@@ -4318,6 +4375,7 @@ async function deleteDR(rowIndex){
 
   try{
     const res  = await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       body:JSON.stringify({action:'delete_report', sheet:'Daily_Report', rowIndex})});
     const json = await res.json();
     if(!json.ok) throw new Error(json.error||json.msg||'삭제 실패');
@@ -4340,6 +4398,7 @@ async function ensureReportsCache() {
   if (_reportsCache) return _reportsCache;
   try {
     const res  = await fetch(SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if (json.ok && json.rows) {
       // Date를 ISO(YYYY-MM-DD)로 정규화
@@ -4606,12 +4665,14 @@ async function saveWageEntry(){
     if(isEdit && existingRowIndex){
       // 기존 행 업데이트
       const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'update_wage',rowIndex:existingRowIndex,data:row})});
       const json=await res.json();
       toast(json.ok?'✅ 수정 & 시트 저장':'⚠️ 수정됨 (시트 sync 실패)','ok');
     } else {
       // 새 행 추가
       const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'add_wage',data:row})});
       const json=await res.json();
       if(json.ok && json.row){
@@ -4644,6 +4705,7 @@ async function deleteWageEntry(idx){
   try{
     if(rowIndex){
       const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
         body:JSON.stringify({action:'delete_wage',rowIndex})});
       const j=await res.json();
       toast(j.ok?'✅ 삭제 & 시트 반영':'⚠️ 삭제됨 (시트 sync 실패)','ok');
@@ -5167,11 +5229,13 @@ function saveAdminPin(){
   const cur  = document.getElementById('pin-current').value.trim();
   const nw   = document.getElementById('pin-new').value.trim();
   const conf = document.getElementById('pin-confirm').value.trim();
-  const saved = localStorage.getItem('admin_pin')||'0000';
+  const saved = sessionStorage.getItem('admin_pin') || localStorage.getItem('admin_pin');
+  if (!saved) { toast('PIN이 설정되지 않았습니다. 초기 PIN을 설정하세요','er'); return; }
   if(cur!==saved){toast('현재 PIN이 올바르지 않습니다','er');return}
-  if(nw.length!==4||!/^\d{4}$/.test(nw)){toast('새 PIN은 숫자 4자리여야 합니다','er');return}
+  if(nw.length < 4 || !/^\d{4,}$/.test(nw)){toast('새 PIN은 최소 4자리 이상의 숫자여야 합니다','er');return}
   if(nw!==conf){toast('새 PIN이 일치하지 않습니다','er');return}
-  localStorage.setItem('admin_pin',nw);
+  sessionStorage.setItem('admin_pin', nw);
+  safeSetLocal('admin_pin', nw);
   closePinModal();
   toast('✅ 관리자 PIN이 변경되었습니다','ok');
 }
@@ -5269,6 +5333,7 @@ async function savePSToSheets(){
       });
     });
     const res=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       body:JSON.stringify({action:'replace_price_sub',rows})});
     const json=await res.json();
     toast(json.ok?'서브 요금 저장 완료 ☁️':'서브 요금 저장됨 (Sheets 오류)','ok');
@@ -5282,6 +5347,7 @@ async function loadPSFromSheets(){
   window._psLastSync = Date.now();
   try{
     const res=await fetch(SCRIPT_URL+'?action=get_price_sub');
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json=await res.json();
     if(!json.ok||!json.rows?.length) return;
     const ps={};
@@ -5307,6 +5373,7 @@ async function loadPSFromSheets(){
 async function loadTab(sheet){
   try {
     const res = await fetch(SCRIPT_URL+'?action=get_master&sheet='+sheet);
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok||!json.rows?.length) return null;
     return json.rows;
@@ -5412,6 +5479,7 @@ async function loadAllFromSheets(){
   try {
     toast('📡 Google Sheets 로딩 중...','ok');
     const res = await fetch(SCRIPT_URL + '?action=get_all_masters');
+    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok){ toast('데이터 로드 실패','er'); rDash(); return; }
     const d = json.data;
