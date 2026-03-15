@@ -543,7 +543,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">요청 인승 <span style="font-size:10px;color:var(--muted);">Requested Seats (요금 기준)</span></label>
-            <select class="form-select" id="dr-seats" onchange="updateSurchargeOptions()">
+            <select class="form-select" id="dr-seats" onchange="updateSurchargeOptions();updateSvcHint();updateOTHint();updateHotelHint();updateDistHint();">
               <option value="">선택</option>
               <option value="21S">21인승 요청</option>
               <option value="25S">25인승 요청</option>
@@ -557,7 +557,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">관광지<span class="req">*</span></label>
             <div class="sdd-wrap" id="sdd-attraction-wrap">
               <input class="sdd-input" id="dr-attraction" placeholder="코스 검색 또는 직접 입력" autocomplete="off"
-                oninput="sddFilter('attraction')" onfocus="sddOpen('attraction')" onblur="sddBlur('attraction')">
+                oninput="sddFilter('attraction')" onfocus="sddOpen('attraction')" onblur="sddBlur('attraction');updateSvcHint();updateOTHint();">
               <div class="sdd-dropdown" id="sdd-attraction-list"></div>
             </div>
           </div>
@@ -583,7 +583,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">픽업 장소</label>
             <div class="sdd-wrap" id="sdd-pickup-wrap">
               <input class="sdd-input" id="dr-pickup" placeholder="픽업" autocomplete="off"
-                oninput="sddFilter('pickup')" onfocus="sddOpen('pickup')" onblur="sddBlur('pickup');checkHotelSurchargeHint();updateEarlyHint();autoFillDRSurcharges();">
+                oninput="sddFilter('pickup')" onfocus="sddOpen('pickup')" onblur="sddBlur('pickup');checkHotelSurchargeHint();updateHotelHint();updateDistHint();updateEarlyHint();autoFillDRSurcharges();">
               <div class="sdd-dropdown" id="sdd-pickup-list"></div>
             </div>
           </div>
@@ -591,7 +591,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">드롭 장소</label>
             <div class="sdd-wrap" id="sdd-dropoff-wrap">
               <input class="sdd-input" id="dr-dropoff" placeholder="드롭" autocomplete="off"
-                oninput="sddFilter('dropoff')" onfocus="sddOpen('dropoff')" onblur="sddBlur('dropoff');checkHotelSurchargeHint();updateEarlyHint();autoFillDRSurcharges();">
+                oninput="sddFilter('dropoff')" onfocus="sddOpen('dropoff')" onblur="sddBlur('dropoff');checkHotelSurchargeHint();updateHotelHint();updateDistHint();updateEarlyHint();autoFillDRSurcharges();">
               <div class="sdd-dropdown" id="sdd-dropoff-list"></div>
             </div>
           </div>
@@ -641,7 +641,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">OT 요금 <span style="font-size:11px;color:var(--muted);" id="ot-rate-hint"></span></label>
             <div id="ot-btn-group" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
             <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-ot" placeholder="0" oninput="onOTInput()"></div>
-            <div id="ot-hint-box" style="display:none;margin-top:6px;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.6;"></div>
+            <div id="ot-hint-box" style="margin-top:6px;"></div>
           </div>
           <div class="form-group" id="trailer-group" style="display:none;">
             <label class="form-label">트레일러</label>
@@ -669,7 +669,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
               <div class="csel-dropdown" id="csel-drop-f-hotel-select" data-csel="f-hotel-select"></div>
             </div>
             <input type="hidden" id="f-hotel-select" value="0">
-            <div id="hotel-hint-box" style="display:none;margin-top:6px;"></div>
+            <div id="hotel-hint-box" style="margin-top:6px;"></div>
           </div>
           <div class="form-group">
             <label class="form-label">Distance Surcharge 거리</label>
@@ -679,7 +679,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
               <div class="csel-dropdown" id="csel-drop-f-dist-select" data-csel="f-dist-select"></div>
             </div>
             <input type="hidden" id="f-dist-select" value="0">
-            <div id="dist-hint-box" style="display:none;margin-top:6px;"></div>
+            <div id="dist-hint-box" style="margin-top:6px;"></div>
           </div>
         </div>
         <!-- 호텔 서차지 알림 — 선택란 아래 -->
@@ -698,7 +698,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           <div class="form-group"><label class="form-label">팁</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-tip" placeholder="0" oninput="calcTotal()"></div></div>
         </div>
         <!-- Early/Late 서차지 알림 — 버튼 아래 -->
-        <div id="early-hint-box" style="display:none;margin-bottom:12px;"></div>
+        <div id="early-hint-box" style="margin-bottom:12px;"></div>
         <div class="form-group mb14">
           <label class="form-label">야간투어</label>
           <div class="csel-wrap">
@@ -4407,8 +4407,7 @@ function updateHotelHint(){
 
   const hotelOpts  = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
   const fullFee    = hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 20;
-  // 편도 금액: HOTEL_OPTIONS에서 $0 다음 값 ($10 또는 $15)
-  const halfFee    = hotelOpts.length >= 2 ? Number(hotelOpts[1]?.val || 0) : Math.round(fullFee/2);
+  const halfFee    = hotelOpts.length >= 2 ? Number(hotelOpts[1]?.val||0) : Math.round(fullFee/2);
   const seatsLabel = seats || '인승 미선택';
 
   const pickupSurch  = isSurchargeHotel(pickup);
@@ -4418,43 +4417,44 @@ function updateHotelHint(){
   const hasSurch     = pickupSurch || dropoffSurch;
   const items        = [];
 
-  if(curVal > 0){
-    // ── 금액 선택됨: 확인 힌트 ──
-    const dirLabel = (() => {
-      if(pickupSurch && dropoffSurch)          return '양쪽 서차지 구역 호텔';
-      if((pickupSurch && dropoffAP) || (pickupAP && dropoffSurch)) return '편도 (공항 ↔ 서차지 호텔)';
-      if(pickupSurch)  return pickup  + ' 픽업';
-      if(dropoffSurch) return dropoff + ' 드롭';
-      return '호텔 서차지';
-    })();
-    items.push({ type:'apply',
-      title: '✅ 호텔 서차지 $'+curVal+' 드라이버 지급 ('+seatsLabel+')',
-      sub:   dirLabel
-    });
-  } else if(hasSurch){
-    // ── $0이지만 서차지 호텔 감지: 경고 힌트 ──
-    const surchName = pickupSurch ? pickup : dropoff;
-    let suggestAmt = 0;
-    if(pickupSurch && dropoffSurch)                                       suggestAmt = fullFee;  // 양쪽 서차지 → 양쪽
-    else if((pickupSurch && dropoffAP) || (pickupAP && dropoffSurch))     suggestAmt = halfFee;  // 서차지↔공항 → 편도
-    else                                                                   suggestAmt = halfFee;  // 서차지↔일반장소 → 편도
+  // 픽업/드롭 없으면 숨김
+  if(!pickup && !dropoff){ hintEl.style.display='none'; return; }
 
-    const dirDesc = (() => {
-      if(pickupSurch && dropoffSurch)         return '왕복 — 양쪽 서차지 구역';
-      if(pickupSurch && dropoffAP)            return pickup + ' 픽업 → 공항 편도';
-      if(pickupAP && dropoffSurch)            return '공항 픽업 → ' + dropoff + ' 편도';
-      if(pickupSurch)                         return pickup + ' 픽업 (단방향)';
-      return dropoff + ' 드롭 (단방향)';
-    })();
-    items.push({ type:'warn',
-      title: '⚠️ 서차지 구역 호텔 — ' + surchName,
-      sub:   dirDesc + ' · ' + seatsLabel + ' 기준 $'+suggestAmt+' 권장'
+  if(!hasSurch){
+    // 서차지 호텔 없음 → ❌ 미적용
+    items.push({ type:'no',
+      title: '❌ 호텔 서차지 미적용',
+      sub: '픽업/드롭 위치가 서차지 구역 호텔이 아닙니다'
     });
-  } else if(!seats){
-    hintEl.style.display='none'; return;
   } else {
-    // 서차지 호텔 없음, $0 — 숨김
-    hintEl.style.display='none'; return;
+    // 서차지 호텔 감지 → 권장 금액 계산
+    let suggestAmt = 0;
+    let dirDesc = '';
+    if(pickupSurch && dropoffSurch){
+      suggestAmt = fullFee;
+      dirDesc = '양쪽 서차지 구역 호텔 → 전액';
+    } else if((pickupSurch && dropoffAP)||(pickupAP && dropoffSurch)){
+      suggestAmt = halfFee;
+      dirDesc = '서차지 호텔 ↔ 공항 편도 → 반액';
+    } else {
+      suggestAmt = fullFee;
+      dirDesc = (pickupSurch?pickup:dropoff)+' '+(pickupSurch?'픽업':'드롭')+' → 전액';
+    }
+
+    if(curVal > 0){
+      const match = curVal === suggestAmt;
+      items.push({ type: match?'apply':'warn',
+        title: match
+          ? '✅ 호텔 서차지 $'+curVal+' 드라이버 지급 ('+seatsLabel+')'
+          : '⚠️ 호텔 서차지 권장 $'+suggestAmt+' — 현재 $'+curVal+' 선택됨',
+        sub: dirDesc+' · '+seatsLabel
+      });
+    } else {
+      items.push({ type:'warn',
+        title: '❌ 호텔 서차지 미선택 — 권장 $'+suggestAmt+' ('+seatsLabel+')',
+        sub: dirDesc
+      });
+    }
   }
 
   renderHintBox(hintEl, items);
@@ -4468,28 +4468,23 @@ function updateDistHint(){
   if(!hintEl) return;
   const seats  = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   const curVal = parseFloat(document.getElementById('f-dist-select')?.value || 0);
-  const isLarge = seats==='40S' || seats==='50S';
-  const isSmall = seats==='21S' || seats==='25S';
+  const rate   = (seats==='40S'||seats==='50S') ? 40 : 30;
+  const seatsLabel = seats || '인승 미선택';
 
   if(!seats){ hintEl.style.display='none'; return; }
 
-  const rate = isLarge ? 40 : 30;
   const items = [];
-
   if(curVal > 0){
-    items.push({
-      type: 'apply',
-      title: '✅ 거리 서차지 적용 — $' + curVal,
-      sub: seats + ' · 원거리 구간 추가 — 드라이버 지급에 포함됩니다'
+    items.push({ type:'apply',
+      title: '✅ 거리 서차지 $'+curVal+' 적용 ('+seatsLabel+')',
+      sub: '원거리 구간 추가 · 드라이버 수당에 포함'
     });
   } else {
-    items.push({
-      type: 'info',
-      title: '📍 거리 서차지: ' + seats + ' 기준 $' + rate,
-      sub: '원거리 구간 추가 시 선택 — 드라이버 수당에 포함됩니다'
+    items.push({ type:'no',
+      title: '❌ 거리 서차지 미적용 ('+seatsLabel+' 기준 $'+rate+')',
+      sub: '원거리 구간(예: Eastern Creek, Norwest 등) 해당 시 선택하세요'
     });
   }
-
   renderHintBox(hintEl, items);
 }
 
@@ -4504,7 +4499,6 @@ function updateSvcHint(){
   const curVal = parseFloat(cselGetValue('f-svc-select') || 0);
   const items  = [];
 
-  // 인승 미선택 시 — 힌트 없음
   if(!seats){ hintEl.style.display='none'; return; }
 
   const sk = seatKey(seats);
@@ -4515,62 +4509,54 @@ function updateSvcHint(){
   })();
   const manualAdd = isManualVehicle ? 20 : 0;
 
-  // ── 관광지 미선택: 인승별 범위 안내
   if(!att){
     const rows = MASTER.priceDriver || [];
-    const allBase = rows
-      .map(r => Number(r['seats_'+sk+'_base']||0))
-      .filter(v => v > 0);
+    const allBase = rows.map(r=>Number(r['seats_'+sk+'_base']||0)).filter(v=>v>0);
     if(allBase.length){
-      const mn = Math.min(...allBase) + manualAdd;
-      const mx = Math.max(...allBase) + manualAdd;
+      const mn = Math.min(...allBase)+manualAdd, mx = Math.max(...allBase)+manualAdd;
       items.push({ type:'info',
         title: '💰 '+seats+' 드라이버 비용 범위: $'+mn+' — $'+mx,
         sub: '관광지 선택 시 정확한 금액이 표시됩니다'+(isManualVehicle?' · 수동 +$20 포함':'')
       });
-    } else {
-      hintEl.style.display='none'; return;
-    }
-    renderHintBox(hintEl, items);
-    return;
+    } else { hintEl.style.display='none'; return; }
+    renderHintBox(hintEl, items); return;
   }
 
-  // ── 관광지 + 인승 모두 선택: 드라이버 기준 금액 표시
   const courseData = getPDCourseFromMaster(att);
   if(courseData){
     const skData = courseData[sk] || {};
-    const drBase = Number(skData.base || 0);
+    const drBase = Number(skData.base||0);
     const drAmt  = drBase + manualAdd;
     const maxH   = courseData.max_hours;
-    const otRate = seats==='40S'||seats==='50S' ? 40 : 30;
+    const otRate = (seats==='40S'||seats==='50S') ? 40 : 30;
 
     if(drAmt > 0){
-      const isSelected = (curVal === drAmt || curVal === drBase);
-      if(isSelected){
-        items.push({ type:'apply',
-          title: '✅ 서비스 차지 선택됨 · $'+drAmt+(isManualVehicle?' (수동 +$20)':''),
-          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')
+      if(curVal > 0){
+        const match = (curVal===drAmt || curVal===drBase);
+        items.push({ type: match?'apply':'warn',
+          title: match
+            ? '✅ 서비스 차지 $'+curVal+' 선택됨 ('+seats+')'
+            : '⚠️ 이 코스 권장 $'+drAmt+' — 현재 $'+curVal+' 선택됨',
+          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')+(isManualVehicle?' · 수동 +$20':'')
         });
       } else {
         items.push({ type:'warn',
-          title: '💰 이 코스 드라이버 비용: $'+drAmt+(isManualVehicle?' (수동 +$20 포함)':''),
-          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')
-            +(curVal > 0 ? ' · 현재 선택: $'+curVal : ' · 서비스 차지를 선택해 주세요')
+          title: '❌ 서비스 차지 미선택 — 권장 $'+drAmt+' ('+seats+')',
+          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h':'')+(isManualVehicle?' · 수동 +$20 포함':'')
         });
       }
     } else {
-      items.push({ type:'info',
-        title: '❓ M_PriceDriver에 이 코스 금액 없음',
-        sub: att+' · '+seats+' — 직접 입력해 주세요'
+      items.push({ type: curVal>0?'apply':'info',
+        title: curVal>0 ? '✅ 서비스 차지 $'+curVal+' 입력됨' : '❓ 코스 금액 미등록 — 직접 입력하세요',
+        sub: att+' · '+seats+' · M_PriceDriver 등록 필요'
       });
     }
   } else {
-    items.push({ type:'info',
-      title: '❓ 등록되지 않은 코스',
-      sub: att+' — M_PriceDriver에 추가하거나 직접 입력하세요'
+    items.push({ type: curVal>0?'apply':'info',
+      title: curVal>0 ? '✅ 서비스 차지 $'+curVal+' 입력됨 (미등록 코스)' : '❓ 등록되지 않은 코스 — 직접 입력하세요',
+      sub: att+' · '+seats
     });
   }
-
   renderHintBox(hintEl, items);
 }
 
@@ -4608,6 +4594,7 @@ function updateOTHint(fromEndTime){
   const maxH    = getMaxHours(att);
   // 인승 없으면 기본 요율 사용 (21/25S 기준 $30)
   const otRate  = seats ? getOTRate(att, seats) : 30;
+  const seatsLabel = seats || '21/25S';
   const WAIVE   = 15;
   const startMin = sh*60+sm;
   const pm8WaiveMin = 20*60 + WAIVE; // 20:15
@@ -4627,15 +4614,27 @@ function updateOTHint(fromEndTime){
     if(maxH){ const wm2 = maxH*60+WAIVE; if(totalMin > wm2) durOT = (totalMin-wm2)/60; }
 
     const effOT = Math.max(pm8OT, durOT);
-    // OT 없을 때만 코스 기준 시간 안내 표시
-    if(effOT === 0 && maxH){
-      const maxMin   = startMin + maxH*60;
-      const waiveMin = maxMin + WAIVE;
-      const hh  = String(Math.floor(maxMin/60)%24).padStart(2,'0');
-      const hmm = String(maxMin%60).padStart(2,'0');
-      const hwh = String(Math.floor(waiveMin/60)%24).padStart(2,'0');
-      const hwm = String(waiveMin%60).padStart(2,'0');
-      items.push({ type:'info', title:'⏱ 코스 '+maxH+'h · OT 없음', sub:hh+':'+hmm+' 까지 · waive 후 '+hwh+':'+hwm+'부터 OT' });
+    // OT 없을 때 ❌ 미적용 안내
+    if(effOT === 0){
+      if(maxH){
+        const maxMin   = startMin + maxH*60;
+        const waiveMin = maxMin + WAIVE;
+        const hh  = String(Math.floor(maxMin/60)%24).padStart(2,'0');
+        const hmm = String(maxMin%60).padStart(2,'0');
+        const hwh = String(Math.floor(waiveMin/60)%24).padStart(2,'0');
+        const hwm = String(waiveMin%60).padStart(2,'0');
+        items.push({ type:'no',
+          title: '❌ OT 미적용 (코스 '+maxH+'h 기준, 현재 '+String(Math.floor(totalMin/60))+'h '+String(totalMin%60)+'m)',
+          sub: '종료 기준시간 '+hh+':'+hmm+' · waive 후 '+hwh+':'+hwm+'부터 OT 발생'
+        });
+      } else {
+        const pm8h = String(Math.floor(pm8WaiveMin/60)).padStart(2,'0');
+        const pm8m = String(pm8WaiveMin%60).padStart(2,'0');
+        items.push({ type:'no',
+          title: '❌ OT 미적용 (20:15 미초과)',
+          sub: '현재 종료 '+et+' · 20:15 이후 종료 시 OT 발생 ('+seatsLabel+' $'+otRate+'/h)'
+        });
+      }
     }
     if(effOT > 0 && otRate){
       const effOT_ceil = Math.ceil(effOT);
