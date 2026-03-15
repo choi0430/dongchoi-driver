@@ -4747,42 +4747,8 @@ function checkHotelSurchargeHint(){
 
 function calcOT(){
   updateEarlyHint();
-  updateOTHint();
-
-  // 시간 변경 시 OT는 항상 재계산 (force)
-  const seats   = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
-  const startVal= document.getElementById('dr-start')?.value || '';
-  const endVal  = document.getElementById('dr-end')?.value   || '';
-  const att     = document.getElementById('dr-attraction')?.value || '';
-
-  if(seats && startVal && endVal){
-    const otRate = (seats==='40S'||seats==='50S') ? 40 : 30;
-    const [sh, sm] = startVal.split(':').map(Number);
-    const [eh, em] = endVal.split(':').map(Number);
-    const startMin = sh*60+sm;
-    let totalMin = (eh*60+em) - startMin;
-    if(totalMin < 0) totalMin += 24*60;
-
-    const WAIVE = 15;
-    const maxH  = att ? getMaxHours(att) : null;
-    const pm8WaiveMin = 20*60 + WAIVE; // 20:15
-    const endAbsMin = startMin + totalMin;
-
-    let pm8OT = 0;
-    let durOT = 0;
-    if(endAbsMin > pm8WaiveMin) pm8OT = (endAbsMin - pm8WaiveMin)/60;
-    if(maxH){ const wm2 = maxH*60+WAIVE; if(totalMin > wm2) durOT = (totalMin-wm2)/60; }
-
-    const effOT = Math.max(pm8OT, durOT);
-    if(effOT > 0){
-      const otCeil = Math.ceil(effOT);
-      const otAmt  = otCeil * otRate;
-      selectOTAmount(otAmt);
-    } else {
-      selectOTAmount(0);
-    }
-  }
-
+  // updateOTHint(true): OT 재계산 + 자동 선택 + 힌트 표시
+  updateOTHint(true);
   // 나머지 서차지는 force 없이 (기존 입력 보존)
   autoFillDRSurcharges();
 }
