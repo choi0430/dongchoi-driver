@@ -4419,42 +4419,6 @@ function onAttractionChange(){
   const seats  = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   let html = '';
 
-  // ── 드라이버 비용 인라인 표시 (관광지 선택 직후 바로 보이도록)
-  if(seats){
-    const sk = seatKey(seats);
-    const courseData = getPDCourseFromMaster(att);
-    const isManual = (()=>{
-      const rego = getCurrentRego();
-      const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
-      return veh?.Transmission === 'Manual';
-    })();
-    if(courseData){
-      const drBase = Number((courseData[sk]||{}).base || 0);
-      const drAmt  = drBase + (isManual ? 20 : 0);
-      if(drAmt > 0){
-        html += `<div style="background:#fefce8;border:1.5px solid #fde047;border-radius:8px;padding:8px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-weight:700;color:#713f12;font-size:13px;">💰 드라이버 비용</span>
-          <span style="font-weight:800;color:#b45309;font-size:16px;">$${drAmt}${isManual?' <span style="font-size:11px;">(수동+$20)</span>':''}</span>
-        </div>`;
-      }
-    }
-  } else {
-    // 인승 미선택 시 — 선택 유도
-    const courseData = getPDCourseFromMaster(att);
-    if(courseData){
-      const rates = ['21','25','40','50']
-        .map(k => Number((courseData[k]||{}).base||0))
-        .filter(v=>v>0);
-      if(rates.length){
-        const mn = Math.min(...rates), mx = Math.max(...rates);
-        html += `<div style="background:#fefce8;border:1.5px solid #fde047;border-radius:8px;padding:8px 12px;margin-bottom:6px;">
-          <span style="font-weight:700;color:#713f12;font-size:12px;">💰 드라이버 비용 범위: $${mn}–$${mx} </span>
-          <span style="font-size:11px;color:#92400e;">인승 선택 시 정확한 금액 표시</span>
-        </div>`;
-      }
-    }
-  }
-
   // 1박2일 첫째날
   if(day2){
     html += `<div style="background:#eff6ff;border:1.5px solid #93c5fd;border-radius:8px;padding:8px 10px;margin-bottom:6px;">
@@ -4675,7 +4639,7 @@ function updateSvcHint(){
           title: match
             ? '✅ 서비스 차지 $'+curVal+' 선택됨 ('+seats+')'
             : '⚠️ 이 코스 권장 $'+drAmt+' — 현재 $'+curVal+' 선택됨',
-          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · OT $'+otRate+'/h':'')+(isManualVehicle?' · 수동 +$20':'')
+          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h · 15분 waive 후 OT $'+otRate+'/h':'')+(isManualVehicle?' · 수동 +$20':'')
         });
       } else {
         items.push({ type:'warn',
