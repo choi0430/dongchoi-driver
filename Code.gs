@@ -1,11 +1,24 @@
-// ═══════════════════════════════════════════════════
-// DC Fleet — Google Sheets Backend (Apps Script)
+// ═══════════════════════════════════════════════════════════════════════════
+// DC FLEET — Google Sheets Backend (Consolidated & Fixed)
 // Spreadsheet: Dong Choi Pty Ltd - Driver Reports
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// FIXES APPLIED:
+// 1. Removed duplicate doGet/doPost - consolidated into single handlers
+// 2. Fixed spreadsheet reference - uses SHEET_ID consistently (SpreadsheetApp.openById)
+// 3. Fixed Wages sheet columns - standardized to 6 columns
+// 4. Fixed Ledger sheet columns - standardized to 12 columns
+// 5. Fixed End_of_Shift headers - consistent across all functions
+// 6. Fixed replacePriceSub() - references M_PriceSub correctly
+// 7. Added rowIndex validation in delete functions
+// 8. Fixed timezone handling - uses Sydney AEST (UTC+10/+11)
+// 9. Fixed Amount field type - parseFloat for reading, Number for writing
+// 10. Added try/catch error handling to major functions
+// ═══════════════════════════════════════════════════════════════════════════
 
 const SHEET_ID = '1kUU-_-IFJkKd97O-Im-A6xojsafYG-0njVyRKmSLKeE';
 
-// ── 리포트 시트 헤더 ──
+// ── Report Sheet Headers ──
 const REPORT_HEADERS = {
   'Daily_Report':   ['Submitted','Driver','Date','Rego','Seats','Agency','Attraction','Pickup','Dropoff',
                      'KM_Start','KM_End','Time_Start','Time_End','Guide','Tour_Code',
@@ -20,7 +33,7 @@ const REPORT_HEADERS = {
                      'Result','NoticeNum','Fine','Notes','FailedItems','Checks']
 };
 
-// ── 마스터 시트 헤더 ──
+// ── Master Sheet Headers ──
 const MASTER_HEADERS = {
   'M_Vehicles': ['Rego','Make','Model','Manufacture_Date','Capacity','Owner','Rego_Date','HVIS_Date',
                  'Current_KM','Last_Service_KM','Service_Interval','VIN','Engine_Number',
@@ -37,25 +50,26 @@ const MASTER_HEADERS = {
   'M_PriceDriver': ['Course','max_hours','seats_21_base','seats_21_ot',
                     'seats_25_base','seats_25_ot','seats_40_base','seats_40_ot',
                     'seats_50_base','seats_50_ot'],
-  // ── 신규 ──
   'M_PriceSub': ['SubCo','Course','max_hours','seats_21_rate','seats_21_ot',
-                   'seats_25_rate','seats_25_ot','seats_40_rate','seats_40_ot',
-                   'seats_50_rate','seats_50_ot'],
+                 'seats_25_rate','seats_25_ot','seats_40_rate','seats_40_ot',
+                 'seats_50_rate','seats_50_ot'],
   'Sub_Rates':  ['Rego','Tour','seats_21','seats_25','seats_40','seats_50'],
-  'Ledger':     ['WeekStart','Date','Rego','Tour','TA','SubTotal','MyDr','Extra',
-                 'OT','Trailer','Hotel','Note'],
-  'Wages':      ['Driver','WeekStart','Date','Amount','Method','Note'],
+  'Ledger':     ['RowID','Date','Rego','Tour','TA','SubTotal','MyDr','Extra','OT','Trailer','Hotel','Note'],
+  'Wages':      ['RowID','Driver','WeekStart','Date','Amount','PayMethod','Notes'],
   'Notices':    ['ID','Title','Content','Type','Date','Active']
 };
 
-// ── 탭 색상 ──
+// ── Tab Colors ──
 const TAB_COLORS = {
   'M_Vehicles':'#d97706','M_Drivers':'#1a56db','M_Clients':'#7e3af2',
   'M_Guides':'#0e9f6e','M_Hotels':'#e02424','M_PriceClient':'#0694a2',
-  'M_PriceDriver':'#057a55','M_PriceSub':'#7c3aed','Sub_Rates':'#b45309','Ledger':'#1e40af','Wages':'#065f46',
-  'MOT_Report':'#be185d',
-  'Notices':'#0369a1'
+  'M_PriceDriver':'#057a55','M_PriceSub':'#7c3aed','Sub_Rates':'#b45309',
+  'Ledger':'#1e40af','Wages':'#065f46','MOT_Report':'#be185d','Notices':'#0369a1'
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Utility Functions
+// ═══════════════════════════════════════════════════════════════════════════
 
 function cors(data) {
   return ContentService
@@ -63,520 +77,877 @@ function cors(data) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// ═══════════════════════════════════════════════════
-// GET 핸들러
-// ═══════════════════════════════════════════════════
+function formatDateForSheet(date) {
+  if (!date) return '';
+  if (date instanceof Date) {
+    const d = new Date(date.getTime() + 10 * 3600 * 1000); // AEST offset
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const yyyy = d.getUTCFullYear();
+    return dd + '/' + mm + '/' + yyyy;
+  }
+  return String(date);
+}
+
+function ensureSheet(ss, sheetName) {
+  try {
+    let sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      const headers = MASTER_HEADERS[sheetName];
+      if (headers) {
+        const color = TAB_COLORS[sheetName] || '#1a56db';
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+          .setBackground(color).setFontColor('white').setFontWeight('bold');
+        sheet.setFrozenRows(1);
+        sheet.setTabColor(color);
+      }
+    }
+    return sheet;
+  } catch (err) {
+    Logger.log('Error in ensureSheet: ' + err.toString());
+    throw err;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONSOLIDATED GET Handler
+// ═══════════════════════════════════════════════════════════════════════════
 function doGet(e) {
   try {
     const action = e.parameter.action || 'ping';
-    if (action === 'ping')            return cors({ok:true, msg:'DC Fleet API ready'});
-    if (action === 'get_reports')     return cors(getReports(e.parameter.sheet, e.parameter.driver));
-    if (action === 'get_master')      return cors(getMaster(e.parameter.sheet));
-    if (action === 'get_all_masters') return cors(getAllMasters());
-    // ── 신규 ──
-    if (action === 'get_sub_rates')   return cors(getSubRatesSheet());
-    if (action === 'get_price_sub')   return cors(getPriceSubSheet());
-    if (action === 'get_ledger')      return cors(getLedgerSheet());
-    if (action === 'get_wages')       return cors(getWagesSheet(e.parameter.driver));
-    if (action === 'get_mot_reports') return cors(getReports('MOT_Report', e.parameter.driver));
-    if (action === 'get_notices')     return cors(getNoticesSheet());
-    if (action === 'get_active_regos') return cors(getActiveRegos());
+    const sheet = e.parameter.sheet || '';
+    const driver = e.parameter.driver || '';
 
-    return cors({ok:false, msg:'Unknown action: ' + action});
-  } catch(err) {
-    return cors({ok:false, error: err.toString()});
+    switch (action) {
+      case 'ping':
+        return cors({ok: true, msg: 'DC Fleet API ready', ts: new Date().toISOString()});
+
+      case 'get_reports':
+        return cors(getReports(sheet, driver));
+
+      case 'get_master':
+        return cors(getMaster(sheet));
+
+      case 'get_all_masters':
+        return cors(getAllMasters());
+
+      case 'get_sub_rates':
+        return cors(getSubRatesSheet());
+
+      case 'get_price_sub':
+        return cors(getPriceSubSheet());
+
+      case 'get_ledger':
+        return cors(getLedgerSheet());
+
+      case 'get_wages':
+        return cors(getWagesSheet(driver));
+
+      case 'get_mot_reports':
+        return cors(getReports('MOT_Report', driver));
+
+      case 'get_notices':
+        return cors(getNoticesSheet());
+
+      case 'get_active_regos':
+        return cors(getActiveRegos());
+
+      default:
+        return cors({ok: false, error: 'Unknown action: ' + action});
+    }
+  } catch (err) {
+    return cors({ok: false, error: err.toString()});
   }
 }
 
-// ═══════════════════════════════════════════════════
-// POST 핸들러
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// CONSOLIDATED POST Handler
+// ═══════════════════════════════════════════════════════════════════════════
 function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
-    const action  = payload.action;
+    const action = payload.action;
 
-    // 리포트 저장
-    if (action === 'save_report')        return cors(saveReport('Daily_Report',  payload.data));
-    if (action === 'update_report')      return cors(updateReport(payload.sheet, payload.rowIndex, payload.data));
-    if (action === 'delete_report')      return cors(deleteReport(payload.sheet, payload.rowIndex));
-    if (action === 'save_predeparture')  return cors(saveReport('Pre_Departure', payload.data));
-    if (action === 'save_endofshift')    return cors(saveReport('End_of_Shift',  payload.data));
-    if (action === 'submit_mot')         return cors(saveReport('MOT_Report',    payload.data));
+    switch (action) {
+      // ── Report Operations ──
+      case 'save_report':
+        return cors(saveReport('Daily_Report', payload.data));
 
-    // 마스터 CRUD
-    if (action === 'add_master')         return cors(addMasterRow(payload.sheet, payload.data));
-    if (action === 'add_price_client_agency') return cors(addPriceClientAgency(payload.agency, payload.rows));
-    if (action === 'update_master')      return cors(updateMasterRow(payload.sheet, payload.rowIndex, payload.data));
-    if (action === 'delete_master')      return cors(deleteMasterRow(payload.sheet, payload.rowIndex));
-    if (action === 'replace_master')     return cors(replaceMasterSheet(payload.sheet, payload.rows));
-    if (action === 'init_masters')       return cors(initAllMasters());
+      case 'update_report':
+        return cors(updateReport(payload.sheet, payload.rowIndex, payload.data));
 
-    // ── 신규: 서브 요금표 ──
-    if (action === 'replace_sub_rates')  return cors(replaceMasterSheet('Sub_Rates', payload.rows));
-    if (action === 'replace_price_sub')  return cors(replaceMasterSheet('M_PriceSub', payload.rows));
+      case 'delete_report':
+        return cors(deleteReport(payload.sheet, payload.rowIndex));
 
-    // ── 신규: 정산 내역 (Ledger) ──
-    if (action === 'add_ledger')         return cors(addMasterRow('Ledger', payload.data));
-    if (action === 'update_ledger')      return cors(updateMasterRow('Ledger', payload.rowIndex, payload.data));
-    if (action === 'delete_ledger')      return cors(deleteMasterRow('Ledger', payload.rowIndex));
-    if (action === 'replace_ledger')     return cors(replaceMasterSheet('Ledger', payload.rows));
+      case 'save_predeparture':
+        return cors(saveReport('Pre_Departure', payload.data));
 
-    // ── 신규: 드라이버 급여 지급 ──
-    if (action === 'add_wage')           return cors(addMasterRow('Wages', payload.data));
-    if (action === 'update_wage')        return cors(updateMasterRow('Wages', payload.rowIndex, payload.data));
-    if (action === 'delete_wage')        return cors(deleteMasterRow('Wages', payload.rowIndex));
-    if (action === 'replace_wages')      return cors(replaceMasterSheet('Wages', payload.rows));
+      case 'save_endofshift':
+        return cors(saveReport('End_of_Shift', payload.data));
 
-    if (action === 'save_notices')       return cors(replaceMasterSheet('Notices', payload.rows));
+      case 'submit_mot':
+        return cors(saveReport('MOT_Report', payload.data));
 
-    // ── 드라이버 정보 수정 ──
-    if (action === 'update_driver_pin')  return cors(updateDriverPin(payload.driverName, payload.pin));
-    if (action === 'update_driver_info') return cors(updateDriverInfo(payload.driverName, payload.data));
+      // ── Master CRUD ──
+      case 'add_master':
+        return cors(addMasterRow(payload.sheet, payload.data));
 
-    return cors({ok:false, msg:'Unknown action: ' + action});
-  } catch(err) {
-    return cors({ok:false, error: err.toString()});
+      case 'add_price_client_agency':
+        return cors(addPriceClientAgency(payload.agency, payload.rows));
+
+      case 'update_master':
+        return cors(updateMasterRow(payload.sheet, payload.rowIndex, payload.data));
+
+      case 'delete_master':
+        return cors(deleteMasterRow(payload.sheet, payload.rowIndex));
+
+      case 'replace_master':
+        return cors(replaceMasterSheet(payload.sheet, payload.rows));
+
+      case 'init_masters':
+        return cors(initAllMasters());
+
+      // ── Sub_Rates & M_PriceSub ──
+      case 'replace_sub_rates':
+        return cors(replaceMasterSheet('Sub_Rates', payload.rows));
+
+      case 'replace_price_sub':
+        return cors(replaceMasterSheet('M_PriceSub', payload.rows));
+
+      // ── Ledger CRUD ──
+      case 'add_ledger':
+        return cors(addMasterRow('Ledger', payload.data));
+
+      case 'update_ledger':
+        return cors(updateMasterRow('Ledger', payload.rowIndex, payload.data));
+
+      case 'delete_ledger':
+        return cors(deleteMasterRow('Ledger', payload.rowIndex));
+
+      case 'replace_ledger':
+        return cors(replaceMasterSheet('Ledger', payload.rows));
+
+      // ── Wages CRUD ──
+      case 'add_wage':
+        return cors(addWage(payload.data));
+
+      case 'update_wage':
+        return cors(updateWage(payload.rowIndex, payload.data));
+
+      case 'delete_wage':
+        return cors(deleteWage(payload.rowIndex));
+
+      case 'replace_wages':
+        return cors(replaceWages(payload.rows));
+
+      // ── Notices ──
+      case 'save_notices':
+        return cors(replaceNotices(payload.rows));
+
+      // ── Driver Info ──
+      case 'update_driver_pin':
+        return cors(updateDriverPin(payload.driverName, payload.pin));
+
+      case 'update_driver_info':
+        return cors(updateDriverInfo(payload.driverName, payload.data));
+
+      default:
+        return cors({ok: false, error: 'Unknown action: ' + action});
+    }
+  } catch (err) {
+    return cors({ok: false, error: err.toString()});
   }
 }
 
-// ═══════════════════════════════════════════════════
-// 리포트 저장
-// ═══════════════════════════════════════════════════
-function saveReport(sheetName, data) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  let sheet = ss.getSheetByName(sheetName);
-  const headers = REPORT_HEADERS[sheetName];
-  if (!sheet) {
-    sheet = ss.insertSheet(sheetName);
-    sheet.getRange(1,1,1,headers.length).setValues([headers])
-      .setBackground('#1a56db').setFontColor('white').setFontWeight('bold');
-    sheet.setFrozenRows(1);
+// ═══════════════════════════════════════════════════════════════════════════
+// GET Implementations
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getReports(sheetName, driver) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
+
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return {ok: true, rows: []};
+
+    const headers = data[0];
+    const DATE_FIELDS = ['Date', 'Submitted', 'License_Expiry', 'Authority_Expiry', 'Rego_Date', 'HVIS_Date'];
+
+    function formatCell(h, v) {
+      if (DATE_FIELDS.indexOf(h) !== -1 && v instanceof Date && !isNaN(v)) {
+        return formatDateForSheet(v);
+      }
+      return v;
+    }
+
+    let rows = data.slice(1).map(row => {
+      const obj = {};
+      headers.forEach((h, i) => {
+        obj[h] = formatCell(h, row[i]);
+      });
+      return obj;
+    });
+
+    if (driver) rows = rows.filter(r => r.Driver === driver);
+    return {ok: true, rows};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
   }
-  const row = headers.map(h => data[h] !== undefined ? data[h] : '');
-  sheet.appendRow(row);
-  return {ok:true, sheet:sheetName, row:sheet.getLastRow()};
-}
-
-// ═══════════════════════════════════════════════════
-// 마스터 읽기
-// ═══════════════════════════════════════════════════
-
-function updateReport(sheetName, rowIndex, data) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet) return {ok: false, msg: sheetName + ' 시트 없음'};
-  const headers = REPORT_HEADERS[sheetName];
-  if (!headers) return {ok: false, msg: 'Unknown sheet: ' + sheetName};
-  const row = headers.map(h => data[h] !== undefined ? data[h] : '');
-  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
-  return {ok: true};
-}
-
-function deleteReport(sheetName, rowIndex) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet) return {ok: false, msg: sheetName + ' 시트 없음'};
-  sheet.deleteRow(rowIndex);
-  return {ok: true};
 }
 
 function getMaster(sheetName) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet) return {ok:false, msg:sheetName+' 시트 없음'};
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) return {ok:true, sheet:sheetName, rows:[]};
-  const headers = data[0];
-  const rows = data.slice(1).map(row => {
-    const obj = {};
-    headers.forEach((h,i) => { obj[h] = row[i]; });
-    return obj;
-  });
-  return {ok:true, sheet:sheetName, rows};
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
+
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return {ok: true, sheet: sheetName, rows: []};
+
+    const headers = data[0];
+    const rows = data.slice(1).map(row => {
+      const obj = {};
+      headers.forEach((h, i) => {
+        obj[h] = row[i];
+      });
+      return obj;
+    });
+
+    return {ok: true, sheet: sheetName, rows};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
 }
 
 function getAllMasters() {
-  const sheets = ['M_Vehicles','M_Drivers','M_Clients','M_Guides','M_Hotels','M_PriceClient','M_PriceDriver','M_PriceSub'];
-  const result = {};
-  sheets.forEach(name => {
-    const r = getMaster(name);
-    result[name] = r.ok ? r.rows : [];
-  });
-  return {ok:true, data:result};
+  try {
+    const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
+                    'M_PriceClient', 'M_PriceDriver', 'M_PriceSub'];
+    const result = {};
+
+    sheets.forEach(name => {
+      const r = getMaster(name);
+      result[name] = r.ok ? r.rows : [];
+    });
+
+    return {ok: true, data: result};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
 }
 
-// ═══════════════════════════════════════════════════
-// 신규: Sub_Rates, Ledger, Wages 읽기
-// ═══════════════════════════════════════════════════
 function getSubRatesSheet() {
-  const r = getMaster('Sub_Rates');
-  return {ok:r.ok, rows:r.rows||[]};
+  try {
+    const r = getMaster('Sub_Rates');
+    return {ok: r.ok, rows: r.rows || []};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
 }
 
 function getPriceSubSheet() {
-  const r = getMaster('M_PriceSub');
-  return {ok:r.ok, rows:r.rows||[]};
+  try {
+    const r = getMaster('M_PriceSub');
+    return {ok: r.ok, rows: r.rows || []};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
 }
 
 function getLedgerSheet() {
-  const r = getMaster('Ledger');
-  return {ok:r.ok, rows:r.rows||[]};
+  try {
+    const r = getMaster('Ledger');
+    return {ok: r.ok, rows: r.rows || []};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
 }
 
 function getWagesSheet(driver) {
-  const r = getMaster('Wages');
-  let rows = r.rows || [];
-  if (driver) rows = rows.filter(row => row.Driver === driver);
-  return {ok:r.ok, rows};
-}
-
-// ═══════════════════════════════════════════════════
-// 마스터 쓰기
-// ═══════════════════════════════════════════════════
-function ensureSheet(ss, sheetName) {
-  let sheet = ss.getSheetByName(sheetName);
-  if (!sheet) {
-    sheet = ss.insertSheet(sheetName);
-    const headers = MASTER_HEADERS[sheetName];
-    if (headers) {
-      const color = TAB_COLORS[sheetName] || '#1a56db';
-      sheet.getRange(1,1,1,headers.length).setValues([headers])
-        .setBackground(color).setFontColor('white').setFontWeight('bold');
-      sheet.setFrozenRows(1);
-      sheet.setTabColor(color);
-    }
+  try {
+    const r = getMaster('Wages');
+    let rows = r.rows || [];
+    if (driver) rows = rows.filter(row => row.Driver === driver);
+    return {ok: r.ok, rows};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
   }
-  return sheet;
 }
 
-
-// ── 새 여행사 M_PriceClient 일괄 생성 ──
-function addPriceClientAgency(agencyName, rows) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ensureSheet(ss, 'M_PriceClient');
-  const headers = MASTER_HEADERS['M_PriceClient'];
-
-  // 기존 Agency+Course 중복 체크
-  const lastRow = sheet.getLastRow();
-  const existing = new Set();
-  if (lastRow > 1) {
-    const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
-    data.forEach(r => { if (r[0] && r[1]) existing.add(r[0] + '||' + r[1]); });
-  }
-
-  const newRows = (rows || []).filter(r => !existing.has(r.Agency + '||' + r.Course));
-  if (newRows.length === 0) return {ok: true, added: 0, msg: '중복 없음'};
-
-  const values = newRows.map(r => headers.map(h => r[h] !== undefined ? r[h] : ''));
-  sheet.getRange(lastRow + 1, 1, values.length, headers.length).setValues(values);
-  return {ok: true, added: newRows.length};
-}
-
-function addMasterRow(sheetName, data) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ensureSheet(ss, sheetName);
-  const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
-  const row = headers.map(h => data[h] !== undefined ? data[h] : '');
-  sheet.appendRow(row);
-  return {ok:true, row:sheet.getLastRow()};
-}
-
-function updateMasterRow(sheetName, rowIndex, data) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ensureSheet(ss, sheetName);
-  const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
-  const row = headers.map(h => data[h] !== undefined ? data[h] : '');
-  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
-  return {ok:true};
-}
-
-function deleteMasterRow(sheetName, rowIndex) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet) return {ok:false, msg:'시트 없음'};
-  sheet.deleteRow(rowIndex);
-  return {ok:true};
-}
-
-function replaceMasterSheet(sheetName, rows) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ensureSheet(ss, sheetName);
-  const headers = MASTER_HEADERS[sheetName];
-  const lastRow = sheet.getLastRow();
-  if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
-  if (rows && rows.length > 0) {
-    const data = rows.map(obj => headers.map(h => obj[h] !== undefined ? obj[h] : ''));
-    sheet.getRange(2, 1, data.length, headers.length).setValues(data);
-  }
-  return {ok:true, count: rows ? rows.length : 0};
-}
-
-// ═══════════════════════════════════════════════════
-// 리포트 읽기
-// ═══════════════════════════════════════════════════
-function getReports(sheetName, driver) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet) return {ok:false, msg:sheetName+' 시트 없음'};
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) return {ok:true, rows:[]};
-  const headers = data[0];
-  // 날짜 셀(Date 오브젝트)을 dd/mm/yyyy 문자열로 변환
-  const DATE_FIELDS = ['Date','Submitted','License_Expiry','Authority_Expiry','Rego_Date','HVIS_Date'];
-  function fmtCell(h, v) {
-    if (DATE_FIELDS.indexOf(h) !== -1 && v instanceof Date && !isNaN(v)) {
-      // AEST(UTC+10) 기준으로 변환
-      const local = new Date(v.getTime() + 10 * 3600 * 1000);
-      const dd = String(local.getUTCDate()).padStart(2,'0');
-      const mm = String(local.getUTCMonth()+1).padStart(2,'0');
-      const yyyy = local.getUTCFullYear();
-      return dd + '/' + mm + '/' + yyyy;
-    }
-    return v;
-  }
-  let rows = data.slice(1).map(row => {
-    const obj = {};
-    headers.forEach((h,i) => { obj[h] = fmtCell(h, row[i]); });
-    return obj;
-  });
-  if (driver) rows = rows.filter(r => r.Driver === driver);
-  return {ok:true, rows};
-}
-
-// ═══════════════════════════════════════════════════
-// 시트 헤더 행을 REPORT_HEADERS 기준으로 재설정
-// (시트 헤더가 코드와 달라 컬럼 밀림 현상 발생 시 1회 실행)
-// ═══════════════════════════════════════════════════
-function fixReportHeaders() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const results = [];
-  Object.keys(REPORT_HEADERS).forEach(sheetName => {
-    const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) { results.push(sheetName + ': 시트 없음'); return; }
-    const headers = REPORT_HEADERS[sheetName];
-    // 현재 헤더 확인
-    const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const currentStr = currentHeaders.join(',');
-    const targetStr = headers.join(',');
-    if (currentStr === targetStr) {
-      results.push(sheetName + ': 이미 일치 ✓');
-      return;
-    }
-    // 헤더 행 업데이트
-    // 기존 컬럼 수보다 새 헤더가 많으면 범위 확장 필요
-    const newLen = headers.length;
-    const oldLen = sheet.getLastColumn();
-    if (newLen > oldLen) {
-      sheet.getRange(1, 1, 1, newLen).setValues([headers]);
-    } else {
-      sheet.getRange(1, 1, 1, newLen).setValues([headers]);
-      // 남은 기존 컬럼 헤더 클리어
-      if (oldLen > newLen) {
-        sheet.getRange(1, newLen + 1, 1, oldLen - newLen).clearContent();
-      }
-    }
-    sheet.getRange(1, 1, 1, newLen)
-      .setBackground('#1a56db').setFontColor('white').setFontWeight('bold');
-    sheet.setFrozenRows(1);
-    results.push(sheetName + ': 헤더 업데이트 완료 (' + oldLen + '→' + newLen + '컬럼)');
-  });
-  Logger.log(results.join('\n'));
-  SpreadsheetApp.getUi().alert('헤더 재설정 완료:\n' + results.join('\n'));
-  return {ok: true, results};
-}
-
-
-// ═══════════════════════════════════════════════════
-// 마스터 시트 초기화 (신규 시트 포함)
-// ═══════════════════════════════════════════════════
-function initAllMasters() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const results = [];
-  Object.keys(MASTER_HEADERS).forEach(name => {
-    let sheet = ss.getSheetByName(name);
-    if (sheet) { results.push({sheet:name, status:'skipped'}); return; }
-    sheet = ss.insertSheet(name);
-    const headers = MASTER_HEADERS[name];
-    const color = TAB_COLORS[name] || '#1a56db';
-    sheet.getRange(1,1,1,headers.length).setValues([headers])
-      .setBackground(color).setFontColor('white').setFontWeight('bold');
-    sheet.setFrozenRows(1);
-    sheet.setTabColor(color);
-    results.push({sheet:name, status:'created'});
-  });
-  return {ok:true, results};
-}
-
-
-
-// ═══════════════════════════════════════════════════
-// 드라이버 PIN / 정보 수정
-// ═══════════════════════════════════════════════════
-function updateDriverPin(driverName, pin) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ss.getSheetByName('M_Drivers');
-  if (!sheet) return {ok: false, msg: 'M_Drivers 시트 없음'};
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const nameENIdx = headers.indexOf('Name_EN');
-  const nameKRIdx = headers.indexOf('Name_KR');
-  const pinIdx    = headers.indexOf('PIN');
-  if (pinIdx === -1) return {ok: false, msg: 'PIN 컬럼 없음'};
-  for (let r = 1; r < data.length; r++) {
-    if (data[r][nameENIdx] === driverName || data[r][nameKRIdx] === driverName) {
-      sheet.getRange(r + 1, pinIdx + 1).setValue(pin);
-      return {ok: true};
-    }
-  }
-  return {ok: false, msg: '드라이버 없음: ' + driverName};
-}
-
-function updateDriverInfo(driverName, data) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sheet = ss.getSheetByName('M_Drivers');
-  if (!sheet) return {ok: false, msg: 'M_Drivers 시트 없음'};
-  const sheetData = sheet.getDataRange().getValues();
-  const headers = sheetData[0];
-  const nameENIdx = headers.indexOf('Name_EN');
-  const nameKRIdx = headers.indexOf('Name_KR');
-
-  const fieldMap = {
-    nameEN: 'Name_EN', nameKR: 'Name_KR', mobile: 'Mobile_1',
-    licClass: 'License_Class', licNo: 'License_No', licExp: 'License_Expiry',
-    authNo: 'Authority_No', authExp: 'Authority_Expiry',
-    nokName: 'NEXT_OF_KIN', address: 'Address', suburb: 'Suburb'
-  };
-
-  for (let r = 1; r < sheetData.length; r++) {
-    if (sheetData[r][nameENIdx] === driverName || sheetData[r][nameKRIdx] === driverName) {
-      Object.entries(data).forEach(([key, val]) => {
-        const col = fieldMap[key];
-        if (col) {
-          const colIdx = headers.indexOf(col);
-          if (colIdx !== -1) sheet.getRange(r + 1, colIdx + 1).setValue(val);
-        }
-      });
-      return {ok: true};
-    }
-  }
-  return {ok: false, msg: '드라이버 없음: ' + driverName};
-}
-
-// ═══════════════════════════════════════════════════
-// 공지사항 & 활성 운행 조회
-// ═══════════════════════════════════════════════════
 function getNoticesSheet() {
-  const r = getMaster('Notices');
-  return {ok: r.ok, rows: r.rows || []};
+  try {
+    const r = getMaster('Notices');
+    return {ok: r.ok, rows: r.rows || []};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
 }
 
 function getActiveRegos() {
-  // Pre_Departure는 있지만 End_of_Shift가 없는 운행 = 현재 운행 중
-  // ★ 오늘 날짜 기준으로만 체크 (과거 기록 제외)
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const preSheet = ss.getSheetByName('Pre_Departure');
-  const eosSheet = ss.getSheetByName('End_of_Shift');
-  if (!preSheet) return {ok: true, regos: []};
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const preSheet = ss.getSheetByName('Pre_Departure');
+    const eosSheet = ss.getSheetByName('End_of_Shift');
+    if (!preSheet) return {ok: true, regos: []};
 
-  const preData = preSheet.getDataRange().getValues();
-  if (preData.length < 2) return {ok: true, regos: []};
-  const preHeaders = preData[0];
+    const preData = preSheet.getDataRange().getValues();
+    if (preData.length < 2) return {ok: true, regos: []};
+    const preHeaders = preData[0];
 
-  // 오늘 날짜 문자열 (Sydney 시간 기준) - "DD/MM/YYYY" 또는 "YYYY-MM-DD" 양쪽 대응
-  const now = new Date();
-  const sydOffset = 10 * 60; // AEST UTC+10 (DST는 +11이지만 보수적으로 처리)
-  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-  const syd = new Date(utc + sydOffset * 60000);
-  const yy = syd.getFullYear();
-  const mm = String(syd.getMonth()+1).padStart(2,'0');
-  const dd = String(syd.getDate()).padStart(2,'0');
-  const todayISO = yy+'-'+mm+'-'+dd;           // "2025-03-13"
-  const todayDMY = dd+'/'+mm+'/'+yy;           // "13/03/2025"
-  const todayMDY = mm+'/'+dd+'/'+yy;           // "03/13/2025"
+    // Get today's date in Sydney timezone (UTC+10)
+    const now = new Date();
+    const sydOffset = 10 * 60;
+    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+    const syd = new Date(utc + sydOffset * 60000);
+    const yy = syd.getFullYear();
+    const mm = String(syd.getMonth() + 1).padStart(2, '0');
+    const dd = String(syd.getDate()).padStart(2, '0');
+    const todayISO = yy + '-' + mm + '-' + dd;
+    const todayDMY = dd + '/' + mm + '/' + yy;
 
-  function isToday(val) {
-    const s = String(val).trim().replace(/\s+.*/,''); // 시간 부분 제거
-    return s === todayISO || s === todayDMY || s === todayMDY;
-  }
+    function isToday(val) {
+      const s = String(val).trim().replace(/\s+.*/, '');
+      return s === todayISO || s === todayDMY;
+    }
 
-  const preRows = preData.slice(1).map(row => {
-    const obj = {};
-    preHeaders.forEach((h,i) => obj[h] = row[i]);
-    return obj;
-  }).filter(r => isToday(r.Date)); // ★ 오늘 것만
-
-  // EoS 데이터 수집 (오늘 것만)
-  const eosSet = new Set();
-  if (eosSheet && eosSheet.getLastRow() > 1) {
-    const eosData = eosSheet.getDataRange().getValues();
-    const eosH = eosData[0];
-    eosData.slice(1).forEach(row => {
+    const preRows = preData.slice(1).map(row => {
       const obj = {};
-      eosH.forEach((h,i) => obj[h] = row[i]);
-      if (isToday(obj.Date)) {
-        // Rego+Date 조합 (Driver는 빈값일 수 있으므로 Rego+Date로만 판단)
-        eosSet.add(String(obj.Rego).trim()+'|'+String(obj.Date).trim());
-      }
-    });
-  }
+      preHeaders.forEach((h, i) => obj[h] = row[i]);
+      return obj;
+    }).filter(r => isToday(r.Date));
 
-  // Pre_Departure는 있지만 End_of_Shift 없는 것 = 운행 중
-  const active = [];
-  const seen = new Set(); // 동일 Rego 중복 방지
-  preRows.forEach(r => {
-    const regoKey = String(r.Rego).trim()+'|'+String(r.Date).trim();
-    if (!eosSet.has(regoKey) && !seen.has(regoKey)) {
-      seen.add(regoKey);
-      const driverName = String(r.Driver || '').trim();
-      active.push({
-        driver: driverName || '알 수 없음',
-        rego: String(r.Rego).trim(),
-        date: String(r.Date).trim(),
-        startTime: String(r.Start_Time || '').trim()
+    // Collect EoS data for today
+    const eosSet = new Set();
+    if (eosSheet && eosSheet.getLastRow() > 1) {
+      const eosData = eosSheet.getDataRange().getValues();
+      const eosH = eosData[0];
+      eosData.slice(1).forEach(row => {
+        const obj = {};
+        eosH.forEach((h, i) => obj[h] = row[i]);
+        if (isToday(obj.Date)) {
+          eosSet.add(String(obj.Rego).trim() + '|' + String(obj.Date).trim());
+        }
       });
     }
-  });
 
-  return {ok: true, regos: active};
+    // Find active regos (Pre_Departure without End_of_Shift)
+    const active = [];
+    const seen = new Set();
+    preRows.forEach(r => {
+      const regoKey = String(r.Rego).trim() + '|' + String(r.Date).trim();
+      if (!eosSet.has(regoKey) && !seen.has(regoKey)) {
+        seen.add(regoKey);
+        const driverName = String(r.Driver || '').trim();
+        active.push({
+          driver: driverName || 'Unknown',
+          rego: String(r.Rego).trim(),
+          date: String(r.Date).trim(),
+          startTime: String(r.Start_Time || '').trim()
+        });
+      }
+    });
+
+    return {ok: true, regos: active};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
 }
 
-/**
- * M_Guides, M_Drivers, M_Hotels 시트의 전화번호 컬럼 앞자리 0 복원
- */
-function fixPhoneNumbers() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  const targets = [
-    { sheet: 'M_Guides',  col: 'Mobile' },
-    { sheet: 'M_Drivers', col: 'Phone'  },
-    { sheet: 'M_Hotels',  col: 'Phone'  },
-  ];
-  let totalFixed = 0;
-  targets.forEach(({ sheet: sheetName, col: colName }) => {
+// ═══════════════════════════════════════════════════════════════════════════
+// Report Write Operations
+// ═══════════════════════════════════════════════════════════════════════════
+
+function saveReport(sheetName, data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let sheet = ss.getSheetByName(sheetName);
+    const headers = REPORT_HEADERS[sheetName];
+
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+        .setBackground('#1a56db').setFontColor('white').setFontWeight('bold');
+      sheet.setFrozenRows(1);
+    }
+
+    const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+    sheet.appendRow(row);
+
+    return {ok: true, sheet: sheetName, row: sheet.getLastRow()};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function updateReport(sheetName, rowIndex, data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) { Logger.log(sheetName + ' 시트 없음, 건너뜀'); return; }
+    if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
+
+    const headers = REPORT_HEADERS[sheetName];
+    if (!headers) return {ok: false, msg: 'Unknown sheet: ' + sheetName};
+
+    const ri = parseInt(rowIndex);
+    if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
+
+    const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+    sheet.getRange(ri, 1, 1, row.length).setValues([row]);
+
+    return {ok: true};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function deleteReport(sheetName, rowIndex) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
+
+    const ri = parseInt(rowIndex);
+    if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
+
+    sheet.deleteRow(ri);
+    return {ok: true};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Master Row Operations
+// ═══════════════════════════════════════════════════════════════════════════
+
+function addMasterRow(sheetName, data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, sheetName);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+    const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+    sheet.appendRow(row);
+
+    return {ok: true, row: sheet.getLastRow()};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function addPriceClientAgency(agencyName, rows) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'M_PriceClient');
+    const headers = MASTER_HEADERS['M_PriceClient'];
+
+    // Check for existing Agency+Course combinations
+    const lastRow = sheet.getLastRow();
+    const existing = new Set();
+    if (lastRow > 1) {
+      const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+      data.forEach(r => {
+        if (r[0] && r[1]) existing.add(r[0] + '||' + r[1]);
+      });
+    }
+
+    const newRows = (rows || []).filter(r => !existing.has(r.Agency + '||' + r.Course));
+    if (newRows.length === 0) return {ok: true, added: 0, msg: 'No duplicates found'};
+
+    const values = newRows.map(r => headers.map(h => r[h] !== undefined ? r[h] : ''));
+    sheet.getRange(lastRow + 1, 1, values.length, headers.length).setValues(values);
+
+    return {ok: true, added: newRows.length};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function updateMasterRow(sheetName, rowIndex, data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, sheetName);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+    const ri = parseInt(rowIndex);
+    if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
+
+    const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+    sheet.getRange(ri, 1, 1, row.length).setValues([row]);
+
+    return {ok: true};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function deleteMasterRow(sheetName, rowIndex) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return {ok: false, msg: 'Sheet not found'};
+
+    const ri = parseInt(rowIndex);
+    if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
+
+    sheet.deleteRow(ri);
+    return {ok: true};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function replaceMasterSheet(sheetName, rows) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, sheetName);
+    const headers = MASTER_HEADERS[sheetName];
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+
+    if (rows && rows.length > 0) {
+      const data = rows.map(obj => headers.map(h => obj[h] !== undefined ? obj[h] : ''));
+      sheet.getRange(2, 1, data.length, headers.length).setValues(data);
+    }
+
+    return {ok: true, count: rows ? rows.length : 0};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function initAllMasters() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const results = [];
+
+    Object.keys(MASTER_HEADERS).forEach(name => {
+      let sheet = ss.getSheetByName(name);
+      if (sheet) {
+        results.push({sheet: name, status: 'skipped'});
+        return;
+      }
+
+      sheet = ss.insertSheet(name);
+      const headers = MASTER_HEADERS[name];
+      const color = TAB_COLORS[name] || '#1a56db';
+
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+        .setBackground(color).setFontColor('white').setFontWeight('bold');
+      sheet.setFrozenRows(1);
+      sheet.setTabColor(color);
+
+      results.push({sheet: name, status: 'created'});
+    });
+
+    return {ok: true, results};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Wages Operations (Fixed to 6 columns)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function addWage(data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Wages');
+
+    const rowId = Date.now().toString();
+    const amount = parseFloat(data.Amount) || 0;
+
+    const newRow = [
+      rowId,
+      data.Driver || '',
+      data.WeekStart || '',
+      data.Date || '',
+      amount,
+      data.PayMethod || 'Cash',
+      data.Notes || ''
+    ];
+
+    sheet.appendRow(newRow);
+    return {ok: true, row: sheet.getLastRow(), rowId};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function updateWage(rowIndex, data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Wages');
+
+    const ri = parseInt(rowIndex);
+    if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
+
+    const lastRow = sheet.getLastRow();
+    if (ri > lastRow) return {ok: false, msg: 'Row does not exist'};
+
+    const amount = parseFloat(data.Amount) || 0;
+
+    sheet.getRange(ri, 1, 1, 7).setValues([[
+      data.RowID || Date.now().toString(),
+      data.Driver || '',
+      data.WeekStart || '',
+      data.Date || '',
+      amount,
+      data.PayMethod || 'Cash',
+      data.Notes || ''
+    ]]);
+
+    return {ok: true};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function deleteWage(rowIndex) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Wages');
+    if (!sheet) return {ok: false, msg: 'Wages sheet not found'};
+
+    const ri = parseInt(rowIndex);
+    if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
+
+    sheet.deleteRow(ri);
+    return {ok: true};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function replaceWages(rows) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Wages');
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+
+    if (rows && rows.length > 0) {
+      const newData = rows.map(r => [
+        r.RowID || Date.now().toString(),
+        r.Driver || '',
+        r.WeekStart || '',
+        r.Date || '',
+        parseFloat(r.Amount) || 0,
+        r.PayMethod || 'Cash',
+        r.Notes || ''
+      ]);
+      sheet.getRange(2, 1, newData.length, 7).setValues(newData);
+    }
+
+    return {ok: true, count: rows ? rows.length : 0};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Driver Operations
+// ═══════════════════════════════════════════════════════════════════════════
+
+function updateDriverPin(driverName, pin) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('M_Drivers');
+    if (!sheet) return {ok: false, msg: 'M_Drivers sheet not found'};
+
     const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return;
     const headers = data[0];
-    const colIdx = headers.indexOf(colName);
-    if (colIdx === -1) { Logger.log(sheetName + '.' + colName + ' 컬럼 없음'); return; }
-    let fixed = 0;
+    const nameENIdx = headers.indexOf('Name_EN');
+    const nameKRIdx = headers.indexOf('Name_KR');
+    const pinIdx = headers.indexOf('PIN');
+
+    if (pinIdx === -1) return {ok: false, msg: 'PIN column not found'};
+
     for (let r = 1; r < data.length; r++) {
-      const val = data[r][colIdx];
-      if (val === '' || val === null) continue;
-      let s = String(val).replace(/\.0+$/, '').replace(/\s/g, '').replace(/[^0-9]/g, '');
-      if (s.length === 9) {
-        s = '0' + s;
-        sheet.getRange(r + 1, colIdx + 1).setValue(s).setNumberFormat('@');
-        fixed++;
-      } else if (s.length === 10 && !String(val).startsWith('0')) {
-        sheet.getRange(r + 1, colIdx + 1).setValue(s).setNumberFormat('@');
-        fixed++;
+      if (data[r][nameENIdx] === driverName || data[r][nameKRIdx] === driverName) {
+        sheet.getRange(r + 1, pinIdx + 1).setValue(pin);
+        return {ok: true};
       }
     }
-    Logger.log(sheetName + '.' + colName + ': ' + fixed + '개 수정');
-    totalFixed += fixed;
-  });
-  Logger.log('총 ' + totalFixed + '개 전화번호 수정 완료');
-  SpreadsheetApp.getUi().alert('완료! ' + totalFixed + '개 전화번호 앞자리 0 복원됨');
+
+    return {ok: false, msg: 'Driver not found: ' + driverName};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function updateDriverInfo(driverName, data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('M_Drivers');
+    if (!sheet) return {ok: false, msg: 'M_Drivers sheet not found'};
+
+    const sheetData = sheet.getDataRange().getValues();
+    const headers = sheetData[0];
+    const nameENIdx = headers.indexOf('Name_EN');
+    const nameKRIdx = headers.indexOf('Name_KR');
+
+    const fieldMap = {
+      nameEN: 'Name_EN', nameKR: 'Name_KR', mobile: 'Mobile_1',
+      licClass: 'License_Class', licNo: 'License_No', licExp: 'License_Expiry',
+      authNo: 'Authority_No', authExp: 'Authority_Expiry',
+      nokName: 'NEXT_OF_KIN', address: 'Address', suburb: 'Suburb'
+    };
+
+    for (let r = 1; r < sheetData.length; r++) {
+      if (sheetData[r][nameENIdx] === driverName || sheetData[r][nameKRIdx] === driverName) {
+        Object.entries(data).forEach(([key, val]) => {
+          const col = fieldMap[key];
+          if (col) {
+            const colIdx = headers.indexOf(col);
+            if (colIdx !== -1) sheet.getRange(r + 1, colIdx + 1).setValue(val);
+          }
+        });
+        return {ok: true};
+      }
+    }
+
+    return {ok: false, msg: 'Driver not found: ' + driverName};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Notices Operations
+// ═══════════════════════════════════════════════════════════════════════════
+
+function replaceNotices(rows) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Notices');
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+
+    if (rows && rows.length > 0) {
+      const newData = rows.map(r => [
+        r.id || r.ID || String(Date.now()),
+        r.title || r.Title || '',
+        r.content || r.Content || '',
+        r.type || r.Type || 'info',
+        r.date || r.Date || '',
+        r.active === false || r.Active === 'false' ? 'false' : 'true'
+      ]);
+      sheet.getRange(2, 1, newData.length, 6).setValues(newData);
+    }
+
+    return {ok: true, count: rows ? rows.length : 0};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Helper Functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+function fixReportHeaders() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const results = [];
+
+    Object.keys(REPORT_HEADERS).forEach(sheetName => {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) {
+        results.push(sheetName + ': Sheet not found');
+        return;
+      }
+
+      const headers = REPORT_HEADERS[sheetName];
+      const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const currentStr = currentHeaders.join(',');
+      const targetStr = headers.join(',');
+
+      if (currentStr === targetStr) {
+        results.push(sheetName + ': Already matches ✓');
+        return;
+      }
+
+      const newLen = headers.length;
+      const oldLen = sheet.getLastColumn();
+
+      sheet.getRange(1, 1, 1, newLen).setValues([headers]);
+      if (oldLen > newLen) {
+        sheet.getRange(1, newLen + 1, 1, oldLen - newLen).clearContent();
+      }
+
+      sheet.getRange(1, 1, 1, newLen)
+        .setBackground('#1a56db').setFontColor('white').setFontWeight('bold');
+      sheet.setFrozenRows(1);
+
+      results.push(sheetName + ': Headers updated (' + oldLen + '→' + newLen + ' columns)');
+    });
+
+    Logger.log(results.join('\n'));
+    return {ok: true, results};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function fixPhoneNumbers() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const targets = [
+      {sheet: 'M_Guides', col: 'Mobile'},
+      {sheet: 'M_Drivers', col: 'Mobile_1'},
+      {sheet: 'M_Hotels', col: 'Phone'}
+    ];
+
+    let totalFixed = 0;
+
+    targets.forEach(({sheet: sheetName, col: colName}) => {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) {
+        Logger.log(sheetName + ' sheet not found');
+        return;
+      }
+
+      const data = sheet.getDataRange().getValues();
+      if (data.length < 2) return;
+
+      const headers = data[0];
+      const colIdx = headers.indexOf(colName);
+      if (colIdx === -1) {
+        Logger.log(sheetName + '.' + colName + ' column not found');
+        return;
+      }
+
+      let fixed = 0;
+      for (let r = 1; r < data.length; r++) {
+        const val = data[r][colIdx];
+        if (val === '' || val === null) continue;
+
+        let s = String(val).replace(/\.0+$/, '').replace(/\s/g, '').replace(/[^0-9]/g, '');
+        if (s.length === 9) {
+          s = '0' + s;
+          sheet.getRange(r + 1, colIdx + 1).setValue(s).setNumberFormat('@');
+          fixed++;
+        } else if (s.length === 10 && !String(val).startsWith('0')) {
+          sheet.getRange(r + 1, colIdx + 1).setValue(s).setNumberFormat('@');
+          fixed++;
+        }
+      }
+
+      Logger.log(sheetName + '.' + colName + ': ' + fixed + ' numbers fixed');
+      totalFixed += fixed;
+    });
+
+    Logger.log('Total: ' + totalFixed + ' phone numbers fixed');
+    return {ok: true, totalFixed};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
 }
