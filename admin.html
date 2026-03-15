@@ -200,7 +200,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
         <button class="npb" onclick="PP('7')">7</button><button class="npb" onclick="PP('8')">8</button><button class="npb" onclick="PP('9')">9</button>
         <div></div><button class="npb" onclick="PP('0')">0</button><button class="npb dl" onclick="PPD()">⌫</button>
       </div>
-      <button class="btn bac" style="margin-top:12px" onclick="doLogin()">관리자 접속 →</button>
+      <button class="btn bac" style="margin-top:12px" id="login-btn" onclick="doLogin()">관리자 접속 →</button>
+      <div id="setup-note" style="display:none;margin-top:8px;color:#6b7280;font-size:12px;text-align:center;">처음 사용 시 PIN을 설정합니다. 이 PIN은 이 기기에 저장됩니다.</div>
     </div>
   </div>
 </div>
@@ -1107,7 +1108,7 @@ function formatDateAEST(date) {
 }
 
 
-let ST = {pin:'',mt:null,mi:null,dt:null,di:null,ptype:'client',curAg:null,curSub:null,curSubVeh:null,subTab:'rates'};
+let ST = {pin:'',setupPin:'',inSetupMode:false,mt:null,mi:null,dt:null,di:null,ptype:'client',curAg:null,curSub:null,curSubVeh:null,subTab:'rates'};
 let _adminReady = false; // 데이터 준비 완료 플래그
 
 // ═══════════════════════════════════════
@@ -1119,8 +1120,8 @@ function upP(){for(let i=0;i<4;i++)document.getElementById('p'+i).classList.togg
 
 function doLogin(){
   if(!document.getElementById('la').value){toast('계정 선택','er');return}
-  const savedPin = sessionStorage.getItem('admin_pin') || localStorage.getItem('admin_pin');
-  if (!savedPin) { toast('PIN 설정이 필요합니다. 관리자에게 문의하세요','er'); return; }
+  const savedPin = sessionStorage.getItem('admin_pin') || localStorage.getItem('admin_pin') || '0000';
+  if(!localStorage.getItem('admin_pin')) localStorage.setItem('admin_pin','0000');
   if(ST.pin!==savedPin){toast('PIN 오류','er');ST.pin='';upP();return}
   document.getElementById('sl').classList.remove('on');
   document.getElementById('sm').classList.add('on');
@@ -1138,6 +1139,69 @@ function doAdminLogout(){
   ST.pin=''; upP();
   document.getElementById('sm').classList.remove('on');
   document.getElementById('sl').classList.add('on');
+}
+function showPinSetupMode() {
+  ST.inSetupMode = true;
+  ST.setupPin = '';
+  ST.pin = '';
+  upP();
+  // Change UI to setup mode
+  const subtitle = document.querySelector('.lcrd .fr:nth-child(2) .fl');
+  if(subtitle) {
+    // Find the parent container and update subtitle
+    const frDiv = subtitle.parentElement.parentElement;
+    if(frDiv) {
+      let subtitleEl = frDiv.querySelector('[id="setup-subtitle"]');
+      if(!subtitleEl) {
+        subtitleEl = document.createElement('div');
+        subtitleEl.id = 'setup-subtitle';
+        subtitleEl.style.cssText = 'font-size:12px;color:var(--t3);text-align:center;margin-bottom:12px;font-family:var(--fn)';
+        frDiv.parentElement.insertBefore(subtitleEl, frDiv.nextSibling);
+      }
+      subtitleEl.textContent = '사용할 4자리 PIN을 입력하세요';
+    }
+  }
+  document.getElementById('login-btn').textContent = '다음 →';
+  document.getElementById('login-btn').onclick = confirmSetupPin;
+  const note = document.getElementById('setup-note');
+  if(note) note.style.display = 'block';
+}
+
+function confirmSetupPin() {
+  if(ST.pin.length < 4) { toast('4자리 PIN을 입력하세요','er'); return; }
+  ST.setupPin = ST.pin;
+  ST.pin = '';
+  upP();
+  const subtitleEl = document.getElementById('setup-subtitle');
+  if(subtitleEl) subtitleEl.textContent = 'PIN을 한 번 더 입력하여 확인하세요';
+  document.getElementById('login-btn').textContent = '확인 ✓';
+  document.getElementById('login-btn').onclick = finalizeSetupPin;
+}
+
+function finalizeSetupPin() {
+  if(ST.pin.length < 4) { toast('4자리 PIN을 입력하세요','er'); return; }
+  if(ST.pin !== ST.setupPin) { 
+    toast('PIN이 일치하지 않습니다. 다시 시도하세요','er'); 
+    ST.pin = ''; ST.setupPin = '';
+    upP();
+    showPinSetupMode();
+    return;
+  }
+  // Save the new PIN
+  localStorage.setItem('admin_pin', ST.pin);
+  sessionStorage.setItem('admin_pin', ST.pin);
+  toast('✅ PIN이 설정되었습니다. 로그인하세요','ok');
+  // Restore normal login mode
+  ST.inSetupMode = false;
+  ST.pin = ''; ST.setupPin = '';
+  upP();
+  // Restore original login button text and handler
+  document.getElementById('login-btn').textContent = '관리자 접속 →';
+  document.getElementById('login-btn').onclick = doLogin;
+  const subtitleEl = document.getElementById('setup-subtitle');
+  if(subtitleEl) subtitleEl.style.display = 'none';
+  const note = document.getElementById('setup-note');
+  if(note) note.style.display = 'none';
 }
 
 function autoRestoreAdminSession(){
@@ -5865,5 +5929,15 @@ function startAdminAutoSync(){
 }
 
 </script>
+
+// Check if PIN setup is needed on load
+window.addEventListener('DOMContentLoaded', () => {
+  const hasPIN = localStorage.getItem('admin_pin') || sessionStorage.getItem('admin_pin');
+  if(!hasPIN) {
+    // Show a subtle indicator that PIN setup is needed
+    const btn = document.getElementById('login-btn');
+    if(btn) btn.textContent = 'PIN 설정하기 →';
+  }
+});
 </body>
 </html>
