@@ -3287,18 +3287,22 @@ function addDailyReport(shiftId){
   // 이전 리포트에서 쓴 요청 인승 유지 (있으면)
   if(drSeats && shift?.seats) {
     drSeats.value = shift.seats;
-    updateSurchargeOptions();
   }
+  // 인승 유무와 관계없이 항상 서차지 옵션 초기화 (OT 버튼 렌더링 포함)
+  updateSurchargeOptions();
   updateStep2UI();
-  // 차량 세팅 후 힌트 전체 즉시 갱신
-  updateManualHint();
-  updateOTHint();
-  updateSvcHint();
-  updateDistHint();
-  updateEarlyHint();
-  checkHotelSurchargeHint();
-  // 입력 정보 기반 서차지/OT 초기값 자동 세팅
-  autoFillDRSurcharges(true);
+  // draft 복원 후 힌트/OT 재계산 (draft 값이 반영된 후 실행)
+  setTimeout(()=>{
+    updateManualHint();
+    updateSvcHint();
+    updateDistHint();
+    updateEarlyHint();
+    checkHotelSurchargeHint();
+    updateHotelHint();
+    autoFillDRSurcharges(true);
+    // OT는 마지막에 (시간값 복원 후)
+    updateOTHint(true);
+  }, 100);
 }
 
 function startEndShift(shiftId){
@@ -4482,7 +4486,7 @@ function updateDistHint(){
   } else {
     items.push({ type:'no',
       title: '❌ 거리 서차지 미적용 ('+seatsLabel+' 기준 $'+rate+')',
-      sub: '정규 코스 외 추가 일정 또는 장거리(예: Eastern Creek, Norwest, Penrith 등) 해당 시 선택'
+      sub: '정규 코스 외 추가 일정 해당 시 선택하세요'
     });
   }
   renderHintBox(hintEl, items);
@@ -5506,10 +5510,16 @@ function updateSurchargeOptions(){
 
   // OT 버튼 렌더링
   renderOTButtons(seats);
-  selectOTAmount(0); // $0 버튼 기본 선택 상태
-  // 인승/코스 변경 후에도 시간이 이미 입력돼 있으면 OT 재계산
-  _lastOTToastKey = '';
-  updateOTHint(true);
+  // 시간이 입력돼 있으면 OT 재계산, 없으면 $0 기본
+  const _stVal = document.getElementById('dr-start')?.value;
+  const _etVal = document.getElementById('dr-end')?.value;
+  if(_stVal && _etVal){
+    _lastOTToastKey = '';
+    updateOTHint(true); // 시간 있으면 바로 OT 계산
+  } else {
+    selectOTAmount(0); // 시간 없으면 $0 기본
+    updateOTHint();    // 기본 안내만
+  }
 
   // 트레일러: 21/25인승만 표시, 나머지 숨기고 0으로 초기화
   const trailerGroup = document.getElementById('trailer-group');
