@@ -1023,6 +1023,16 @@ const DB = {
 // STATE
 // ═══════════════════════════════════════
 // 구글 시트 시간 파싱: 1899-12-29T22:20:00.000Z → "08:20" (UTC+10, 24h)
+
+// 시드니 UTC offset 동적 계산 (AEST=+10, AEDT=+11 서머타임 자동 적용)
+function getSydneyOffsetMs(date) {
+  const d = date || new Date();
+  // Intl API로 시드니 기준 시간과 UTC 차이 계산
+  const utcStr = d.toLocaleString('en-US', {timeZone:'UTC'});
+  const sydStr = d.toLocaleString('en-US', {timeZone:'Australia/Sydney'});
+  const diff = (new Date(sydStr) - new Date(utcStr));
+  return diff;
+}
 function parseSheetTime(ts) {
   if(!ts) return '';
   const s = String(ts).trim();
@@ -1033,7 +1043,8 @@ function parseSheetTime(ts) {
     const d = new Date(s);
     if(!isNaN(d)) {
       // UTC+10 고정 (구글 시트가 AEST 기준으로 직렬화)
-      const h  = (d.getUTCHours() + 10) % 24;
+      const offsetH = Math.round(getSydneyOffsetMs(d) / 3600000);
+      const h  = (d.getUTCHours() + offsetH) % 24;
       const mn = String(d.getUTCMinutes()).padStart(2,'0');
       return String(h).padStart(2,'0') + ':' + mn;
     }
@@ -1162,7 +1173,7 @@ function parseToISO(ds){
   if(/^\d{4}-\d{2}-\d{2}T/.test(s)){
     const d = new Date(s);
     if(!isNaN(d)){
-      const local = new Date(d.getTime() + 10*3600*1000);
+      const local = new Date(d.getTime() + getSydneyOffsetMs(d));
       const dd2=String(local.getUTCDate()).padStart(2,'0');
       const mm2=String(local.getUTCMonth()+1).padStart(2,'0');
       return local.getUTCFullYear()+'-'+mm2+'-'+dd2;
@@ -1181,7 +1192,7 @@ function fmtDate(ds){
   if(s.includes('T')){
     const d=new Date(s);
     if(!isNaN(d)){
-      const local=new Date(d.getTime()+10*3600*1000);
+      const local=new Date(d.getTime()+getSydneyOffsetMs(d));
       const dd=String(local.getUTCDate()).padStart(2,'0');
       const mm=String(local.getUTCMonth()+1).padStart(2,'0');
       return dd+'/'+mm+'/'+local.getUTCFullYear();

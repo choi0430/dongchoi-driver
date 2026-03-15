@@ -1449,6 +1449,16 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 // (함수 정의는 아래 useFallbackMaster 앞에 위치)
 
 // ── 날짜 포맷 헬퍼 dd/mm/yyyy ──
+
+// 시드니 UTC offset 동적 계산 (AEST=+10, AEDT=+11 서머타임 자동 적용)
+function getSydneyOffsetMs(date) {
+  const d = date || new Date();
+  // Intl API로 시드니 기준 시간과 UTC 차이 계산
+  const utcStr = d.toLocaleString('en-US', {timeZone:'UTC'});
+  const sydStr = d.toLocaleString('en-US', {timeZone:'Australia/Sydney'});
+  const diff = (new Date(sydStr) - new Date(utcStr));
+  return diff;
+}
 function fmtDate(val) {
   // dd/mm/yyyy 표시용
   if (!val) return '';
@@ -1461,7 +1471,7 @@ function fmtDate(val) {
     const d = new Date(s);
     if (!isNaN(d)) {
       // 호주 동부 시간 (UTC+10 고정, DST 무시 — 날짜 경계만 맞추면 됨)
-      const local = new Date(d.getTime() + 10 * 60 * 60 * 1000);
+      const local = new Date(d.getTime() + getSydneyOffsetMs(d));
       const dd = String(local.getUTCDate()).padStart(2,'0');
       const mm = String(local.getUTCMonth()+1).padStart(2,'0');
       const yy = local.getUTCFullYear();
@@ -2211,7 +2221,8 @@ function parseSheetTime(ts) {
     const d = new Date(s);
     if(!isNaN(d)) {
       // UTC+10 고정 (구글 시트가 AEST 기준으로 직렬화)
-      const h  = (d.getUTCHours() + 10) % 24;
+      const offsetH = Math.round(getSydneyOffsetMs(d) / 3600000);
+      const h  = (d.getUTCHours() + offsetH) % 24;
       const mn = String(d.getUTCMinutes()).padStart(2,'0');
       return String(h).padStart(2,'0') + ':' + mn;
     }
@@ -5994,7 +6005,7 @@ function parseToISO(ds){
   if(s.includes('T')) {
     const d = new Date(s);
     if(!isNaN(d)){
-      const local = new Date(d.getTime() + 10*60*60*1000);
+      const local = new Date(d.getTime() + getSydneyOffsetMs(d));
       const dd = String(local.getUTCDate()).padStart(2,'0');
       const mm = String(local.getUTCMonth()+1).padStart(2,'0');
       return local.getUTCFullYear()+'-'+mm+'-'+dd;
