@@ -609,11 +609,11 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
           <div class="form-group">
             <label class="form-label">시작 시간</label>
-            <input type="time" class="form-input" id="dr-start" onchange="_lastOTToastKey='';calcOT();updateEarlyHint();updateOTHint();" oninput="_lastOTToastKey='';updateOTHint();updateEarlyHint();">
+            <input type="time" class="form-input" id="dr-start" onchange="_lastOTToastKey='';calcOT();updateEarlyHint();" oninput="_lastOTToastKey='';calcOT();updateEarlyHint();">
           </div>
           <div class="form-group">
             <label class="form-label">종료 시간</label>
-            <input type="time" class="form-input" id="dr-end" onchange="calcOT();updateOTHint(true);" oninput="updateOTHint(true);">
+            <input type="time" class="form-input" id="dr-end" onchange="calcOT();" oninput="calcOT();">
           </div>
         </div>
 
@@ -3385,9 +3385,10 @@ function updateStep2UI(){
 function submitDailyReport(){
   const agency = document.getElementById('dr-agency').value;
   const att = document.getElementById('dr-attraction').value;
-  if(!agency||!att){showToast('여행사와 관광지를 선택하세요','error');return;}
+  if(!agency){ showToast('⚠️ 여행사를 입력하세요','error'); return; }
+  if(!att){ showToast('⚠️ 관광지를 선택하세요','error'); return; }
   const shift = activeShifts.find(s=>s.id===editingShiftId);
-  if(!shift){showToast('운행 중인 차량이 없습니다','error');return;}
+  if(!shift){ showToast('⚠️ Pre Departure를 먼저 완료하세요','error'); return; }
   // 제출 직전 항상 재계산 (SVC 자동선택 후 calcTotal이 안 불린 경우 대비)
   autoRate();
   calcTotal();
@@ -3475,7 +3476,7 @@ function submitDailyReport(){
     Remarks: report.remarks
   }).then(r => {
     if(r?.ok) showToast('☁️ Google Sheets 저장 완료','success');
-    else console.warn('Sheets 저장 실패:', r);
+    else showToast('⚠️ 서버 저장 실패 — 로컬에 저장됨 (나중에 자동 재전송)','error');
   });
   renderTodayReports();
   renderStep2SavedReports();
