@@ -4406,6 +4406,7 @@ function updateHotelHint(){
 
   const hotelOpts  = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
   const fullFee    = hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 20;
+  // 편도 금액: HOTEL_OPTIONS에서 $0 다음 값 ($10 또는 $15)
   const halfFee    = hotelOpts.length >= 2 ? Number(hotelOpts[1]?.val || 0) : Math.round(fullFee/2);
   const seatsLabel = seats || '인승 미선택';
 
@@ -4433,9 +4434,9 @@ function updateHotelHint(){
     // ── $0이지만 서차지 호텔 감지: 경고 힌트 ──
     const surchName = pickupSurch ? pickup : dropoff;
     let suggestAmt = 0;
-    if(pickupSurch && dropoffSurch)                                       suggestAmt = fullFee;
-    else if((pickupSurch && dropoffAP) || (pickupAP && dropoffSurch))     suggestAmt = halfFee;
-    else                                                                   suggestAmt = fullFee;  // 서차지호텔↔일반장소
+    if(pickupSurch && dropoffSurch)                                       suggestAmt = fullFee;  // 양쪽 서차지 → 양쪽
+    else if((pickupSurch && dropoffAP) || (pickupAP && dropoffSurch))     suggestAmt = halfFee;  // 서차지↔공항 → 편도
+    else                                                                   suggestAmt = halfFee;  // 서차지↔일반장소 → 편도
 
     const dirDesc = (() => {
       if(pickupSurch && dropoffSurch)         return '왕복 — 양쪽 서차지 구역';
@@ -4726,10 +4727,14 @@ function isSurchargeHotel(name){
 function isAirportLocation(name){
   if(!name) return false;
   if(!AIRPORT_PATTERN.test(name)) return false;
-  // 호텔 목록에 있으면 공항이 아님 (공항 근처 호텔)
-  const inHotelList = (MASTER.hotels||[]).some(h=>h.Hotel_Name===name);
-  if(inHotelList) return false;
-  return true;
+  // 호텔 목록에 있는 경우: 호텔 이름에 AIRPORT가 포함된 경우만 공항 아님으로 처리
+  // 단, "AIRPORT" 단독 항목 또는 공항 자체는 공항으로 처리
+  const matched = (MASTER.hotels||[]).find(h=>h.Hotel_Name===name);
+  if(!matched) return true; // 호텔 목록에 없으면 공항
+  // 호텔 목록에 있어도 이름이 정확히 "AIRPORT"이면 공항으로 처리
+  if(matched.Hotel_Name.trim().toUpperCase() === 'AIRPORT') return true;
+  // 그 외 AIRPORT가 포함된 호텔명(HOLIDAY INN AIRPORT 등)은 공항 아님
+  return false;
 }
 
 // 픽업/드롭 변경될 때마다 호출 — 호텔 서차지 + Early 통합 알림
@@ -4798,8 +4803,9 @@ function autoFillDRSurcharges(force){
   if(!seats) return; // 인승 없으면 요금 계산 불가
 
   const hotelOpts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
-  const fullFee   = hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 10;
-  const halfFee   = Math.round(fullFee/2);
+  const fullFee   = hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 20;
+  // 편도 금액: HOTEL_OPTIONS에서 $0 다음 값 ($10 또는 $15)
+  const halfFee   = hotelOpts.length >= 2 ? Number(hotelOpts[1]?.val || 0) : Math.round(fullFee/2);
   const earlyRate = (seats==='40S'||seats==='50S') ? 40 : 30;
   const otRate    = (seats==='40S'||seats==='50S') ? 40 : 30;
 
@@ -4814,11 +4820,11 @@ function autoFillDRSurcharges(force){
 
     let targetHotel = 0;
     if(pickupSurch && dropoffSurch){
-      targetHotel = fullFee;  // 양쪽 서차지 호텔
+      targetHotel = fullFee;  // 양쪽 서차지 호텔 → 전액
     } else if((pickupSurch && dropoffAP) || (pickupAP && dropoffSurch)){
-      targetHotel = halfFee;  // 서차지 호텔 ↔ 공항 편도
+      targetHotel = halfFee;  // 서차지 호텔 ↔ 공항 → 반액 (편도)
     } else if(pickupSurch || dropoffSurch){
-      targetHotel = fullFee;  // 서차지 호텔 ↔ 일반장소 (편도 진입)
+      targetHotel = fullFee;  // 서차지 호텔 ↔ 일반장소 → 전액
     }
     if(targetHotel > 0 && String(targetHotel) !== String(curHotel)){
       // HOTEL_OPTIONS에 해당 값이 있는 경우만 세팅
