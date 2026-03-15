@@ -16,6 +16,7 @@ const SHEETS = {
   AGENCIES: 'M_Agencies',
   COURSES:  'M_Courses',
   PRICE:    'M_PriceDriver',
+  HOTELS:   'M_Hotels',
   SUB:      'M_Sub_Rates',
   LEDGER:   'Ledger',
   WAGES:    'Wages',
@@ -162,6 +163,9 @@ function getAllMasters() {
   // Wages
   const wageS = SS.getSheetByName(SHEETS.WAGES);
   result.wages = wageS ? sheetToJSON(wageS) : [];
+  // M_Hotels
+  const htlS = SS.getSheetByName(SHEETS.HOTELS);
+  result.hotels = htlS ? sheetToJSON(htlS) : [];
   // Notices
   const ntcS = SS.getSheetByName(SHEETS.NOTICES);
   result.notices = ntcS ? sheetToJSON(ntcS) : [];
@@ -172,6 +176,7 @@ function getAllMasters() {
     M_Agencies:   result.agencies,
     M_Courses:    result.courses,
     M_PriceDriver:result.priceDriver,
+    M_Hotels:     result.hotels,
   };
   return result;
 }
