@@ -4540,8 +4540,9 @@ function updateHotelHint(){
       suggestAmt = halfFee;
       dirDesc = '서차지 호텔 ↔ 공항 편도 → 반액';
     } else {
-      suggestAmt = fullFee;
-      dirDesc = (pickupSurch?pickup:dropoff)+' '+(pickupSurch?'픽업':'드롭')+' → 전액';
+      // 서차지 호텔 ↔ 일반장소(비호텔): 편도 → 반액
+      suggestAmt = halfFee;
+      dirDesc = (pickupSurch?pickup:dropoff)+' '+(pickupSurch?'픽업':'드롭')+' → 편도 반액';
     }
 
     if(curVal > 0){
@@ -4913,11 +4914,11 @@ function autoFillDRSurcharges(force){
 
     let targetHotel = 0;
     if(pickupSurch && dropoffSurch){
-      targetHotel = fullFee;  // 양쪽 서차지 호텔 → 전액
+      targetHotel = fullFee;  // 양쪽 서차지 호텔 → 전액 (양쪽)
     } else if((pickupSurch && dropoffAP) || (pickupAP && dropoffSurch)){
       targetHotel = halfFee;  // 서차지 호텔 ↔ 공항 → 반액 (편도)
     } else if(pickupSurch || dropoffSurch){
-      targetHotel = fullFee;  // 서차지 호텔 ↔ 일반장소 → 전액
+      targetHotel = halfFee;  // 서차지 호텔 ↔ 일반장소 → 반액 (편도)
     }
     if(targetHotel > 0 && String(targetHotel) !== String(curHotel)){
       const valid = hotelOpts.find(o=>Number(o.val)===targetHotel);
@@ -5131,9 +5132,8 @@ function _updateAutoFillBanner(){
       const halfFee=Math.round(fullFee/2);
       let fee=0;
       if(ps&&ds) fee=fullFee;
-      else if((ps&&da)||(pa&&ds)) fee=halfFee;
-      else fee=fullFee;  // 서차지호텔↔일반장소
-      lines.push('🏨 호텔 서차지: <b>$'+fee+'</b> 자동 선택됨'+(ps&&ds?' (왕복)':' (편도)'));
+      else fee=halfFee;  // 서차지 호텔 ↔ 공항 or 일반장소 → 편도 반액
+      lines.push('🏨 호텔 서차지: <b>$'+fee+'</b> 자동 선택됨'+(ps&&ds?' (양쪽)':' (편도)'));
     }
   }
 
