@@ -2233,6 +2233,8 @@ const CONTACTS = [
 function parseSheetTime(ts) {
   if(!ts) return '';
   const s = String(ts).trim();
+  // GAS가 빈 시간 셀을 1899-12-30 날짜로 잘못 반환하는 경우 필터
+  if(s.includes('1899') || s.includes('30/12')) return '';
   // 이미 HH:MM 형식이면 그대로
   if(/^\d{1,2}:\d{2}$/.test(s)) return s.padStart(5,'0').slice(0,5);
   // ISO timestamp (구글 시트 시간값)
@@ -6319,8 +6321,8 @@ async function renderPay(){
     guide:       r.Guide||'',
     tourcode:    r.Tourcode||r.Tour_Code||'',
     remarks:     r.Remarks||'',
-    timeStart:   r.Time_Start||r.DR_Start||'',
-    timeEnd:     r.Time_End||r.DR_End||'',
+    timeStart:   (()=>{ const v=r.Time_Start||r.DR_Start||''; return (v&&!v.includes('1899'))?v:''; })(),
+    timeEnd:     (()=>{ const v=r.Time_End||r.DR_End||''; return (v&&!v.includes('1899'))?v:''; })(),
     pickup:      r.Pickup||'',
     dropoff:     r.Dropoff||'',
     kmStart:     r.KM_Start||r.Start_KM||'',
@@ -6609,7 +6611,7 @@ function showPayDetail(wk){
             ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">⏱ '+parseSheetTime(r.timeStart)+' – '+parseSheetTime(r.timeEnd||'')+(calcDuration(r.timeStart,r.timeEnd)?'<span style="margin-left:6px;background:var(--surface3,rgba(255,255,255,.1));border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;">'+calcDuration(r.timeStart,r.timeEnd)+'</span>':'')+'</div>':''}
             ${(r.kmStart||r.kmEnd)?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">🛣 '+(r.kmStart?r.kmStart+' km':'—')+' → '+(r.kmEnd?r.kmEnd+' km':'—')+(r.kmStart&&r.kmEnd&&parseInt(r.kmEnd)-parseInt(r.kmStart)>0?' <span style="margin-left:4px;background:rgba(14,159,110,.15);border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;color:var(--green);">+'+( parseInt(r.kmEnd)-parseInt(r.kmStart) ).toLocaleString()+' km</span>':'')+'</div>':''}
             ${(r.pickup||r.dropoff)?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">📍 '+(r.pickup||'')+(r.dropoff&&r.dropoff!==r.pickup?' → '+r.dropoff:'')+'</div>':''}
-            ${r.tourcode?'<div style="font-size:11px;color:var(--muted);">🏷 '+r.tourcode+'</div>':''}
+            ${(r.guide||r.tourcode)?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">'+(r.guide?'👤 '+r.guide:'')+(r.guide&&r.tourcode?' · ':'')+( r.tourcode?'🏷 '+r.tourcode:'')+'</div>':''}
           </div>
           <div style="text-align:right;">
             <div class="pay-report-amount" style="color:${netDr<(r.dr||0)?'var(--orange)':'var(--green)'};">$${netDr}</div>
@@ -6624,8 +6626,7 @@ function showPayDetail(wk){
           </div>
           ${nightOwnerNote}
         </div>
-        ${r.guide?'<div style="font-size:11px;color:var(--muted);margin-top:6px;">👤 가이드: '+r.guide+'</div>':''}
-        ${r.remarks?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">📝 '+r.remarks+'</div>':''}
+        ${r.remarks?'<div style="font-size:11px;color:var(--muted);margin-top:6px;">📝 '+r.remarks+'</div>':''}
         <button onclick="requestReportEdit('${r.date}','${r.agency||''}','${r.attraction||''}','${r.rego||''}')"
           style="margin-top:10px;width:100%;padding:9px;background:rgba(254,229,52,.12);border:1.5px solid #FEE500;border-radius:10px;color:#3A1D1D;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
           <img src="https://developers.kakao.com/assets/img/about/logos/kakaolink/kakaolink_btn_small.png" style="width:18px;height:18px;border-radius:4px;">
