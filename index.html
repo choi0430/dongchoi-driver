@@ -1451,6 +1451,101 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 
 <script>
 
+// ============================================================================
+// UTILITY FUNCTIONS (ADDED FOR BUG FIXES)
+// ============================================================================
+
+// Max retries to prevent infinite loops
+const MAX_RETRIES = 3;
+
+// Safe localStorage operations with quota handling
+function safeSetLocal(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch(e) {
+    if (e.name === 'QuotaExceededError') {
+      showToast('저장 공간 부족 - 캐시 정리 중...', 'warning');
+      const keys = Object.keys(localStorage).filter(k => k.startsWith('cache_'));
+      const toDelete = keys.slice(0, Math.max(1, Math.floor(keys.length / 2)));
+      toDelete.forEach(k => localStorage.removeItem(k));
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+        return true;
+      } catch(e2) {
+        console.error('Failed to save after cleanup:', e2);
+        return false;
+      }
+    }
+    console.error('localStorage error:', e);
+    return false;
+  }
+}
+
+function safeGetLocal(key) {
+  try {
+    const item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : null;
+  } catch(e) {
+    console.warn('localStorage read error:', e);
+    return null;
+  }
+}
+
+// Safe event listener management
+function safeAddListener(el, event, handler) {
+  if (!el) return;
+  el.removeEventListener(event, handler);
+  el.addEventListener(event, handler);
+}
+
+// AEST timezone formatter
+function formatDateAEST(dateVal) {
+  try {
+    const date = dateVal instanceof Date ? dateVal : new Date(dateVal);
+    if (isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat('en-AU', {
+      timeZone: 'Australia/Sydney',
+      day: '2-digit', month: '2-digit', year: 'numeric'
+    }).format(date);
+  } catch(e) {
+    console.warn('AEST format error:', e);
+    return fmtDate(dateVal);
+  }
+}
+
+// Null-safe property access
+function safeGet(obj, path, defaultVal = '') {
+  return path.split('.').reduce((current, prop) => current?.[prop], obj) ?? defaultVal;
+}
+
+// Signature size validation
+function validateSigSize(dataUrl, maxBytes = 500000) {
+  if (dataUrl.length > maxBytes) {
+    const sizeKB = Math.round(dataUrl.length / 1024);
+    showToast(`서명 이미지 크기 초과 (${sizeKB}KB). 다시 그려주세요.`, 'error');
+    return false;
+  }
+  return true;
+}
+
+// Field name normalization
+const FIELD_MAP = { 'Phone': 'Mobile', 'Mobile': 'Mobile', 'Name_KR': 'Name_KR', 'Name_EN': 'Name_EN' };
+function getFieldValue(obj, fieldName) {
+  return obj?.[fieldName] ?? obj?.[FIELD_MAP[fieldName]] ?? '';
+}
+
+// Safe fetch with response validation
+async function safeFetch(url, options = {}) {
+  const res = await fetch(url, options);
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
+  const data = await res.json();
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+// ============================================================================
+
 // ── 전화번호 앞 0 복원 ──
 // (함수 정의는 아래 useFallbackMaster 앞에 위치)
 
@@ -6891,6 +6986,10 @@ const _sigStates = {};
 
 function initSigCanvas(canvasId) {
   const c = document.getElementById(canvasId);
+  if (!c) {
+    console.warn(`Canvas element not found: ${canvasId}`);
+    return null;
+  }
   if (!c) return;
   // 이미 초기화됐어도 크기가 0이면 재초기화 허용
   if (_sigStates[canvasId] && c.width > 0) return;
@@ -6959,7 +7058,8 @@ function isSigEmpty(canvasId) {
   return !d.some(v => v !== 0);
 }
 
-function getSigDataUrl(canvasId) {
+// FIXED: Compress signature to prevent oversized data transmission
+  function getSigDataUrl(canvasId) {
   const c = document.getElementById(canvasId);
   return c ? c.toDataURL('image/png') : '';
 }
