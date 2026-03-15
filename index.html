@@ -709,7 +709,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           <input type="hidden" id="f-night-type" value="none">
           <!-- 아래 옵션은 JS에서 cselBuild로 구성 -->
 <!-- 야간투어 옵션은 initNightCsel()으로 구성 -->
-          <div id="night-info" style="display:none;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.7;"></div>
+          <div id="night-hint-box" style="margin-top:6px;"></div>
           <input type="hidden" id="f-night" value="0">
         </div>
         <div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:10px 12px;margin-bottom:14px;">
@@ -3488,7 +3488,7 @@ function submitDailyReport(){
   selectWash(0);
   selectMeal(0);
   const ntEl=document.getElementById('f-night-type');if(ntEl)ntEl.value='none'; cselSetValue('f-night-type','none');
-  const niEl=document.getElementById('night-info');if(niEl)niEl.style.display='none';
+  const niEl=document.getElementById('night-hint-box');if(niEl){niEl.style.display='none';niEl.innerHTML='';}
   const nfEl=document.getElementById('f-night');if(nfEl)nfEl.value=0;
   ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
   selectTrailer(0); // 트레일러 초기화
@@ -4011,7 +4011,7 @@ function restoreDailyDraft(){
     if(d.nightType && d.nightType !== 'none') cselSetValue('f-night-type', d.nightType);
     if(d.night && parseFloat(d.night)){
       const nf=document.getElementById('f-night'); if(nf) nf.value=d.night;
-      const ni=document.getElementById('night-info'); if(ni) ni.style.display='block';
+      onNightChange(); // 야경 복원 시 힌트 재렌더링
     }
 
     // 6) 버튼형 선택값 복원
@@ -5319,53 +5319,76 @@ function initNightCsel(){
 }
 function onNightChange(){
   const type  = document.getElementById('f-night-type')?.value || 'none';
-  const info  = document.getElementById('night-info');
   const input = document.getElementById('f-night');
-  if(type==='none'){
-    info.style.display='none'; input.value=0; calcTotal();
-    // 버튼 강조 초기화
-    document.querySelectorAll('[id^="ot-btn-"]').forEach(b=>{
-      b.style.borderColor = '';
-      b.style.boxShadow   = '';
-    });
-    // 야경 해제 시 OT 재계산 (자동선택 포함)
-    _lastOTToastKey = '';
-    updateOTHint(true);
-    return;
-  }
-  // 야경 선택 시 자동선택된 OT 초기화 (야경은 OT 별도 처리)
-  selectOTAmount(0);
-  // 버튼 강조 초기화
+  const hintEl = document.getElementById('night-hint-box');
+  const seats  = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
+  const seatsLabel = seats || '인승 미선택';
+  const isLarge = (seats==='40S'||seats==='50S');
+
+  // OT 버튼 강조 초기화
   document.querySelectorAll('[id^="ot-btn-"]').forEach(b=>{
     b.style.borderColor = '';
     b.style.boxShadow   = '';
   });
-  showToast('🌃 야경 선택 — OT $0 적용 (추가 운행 시 버튼으로 신청 가능)', 'info');
-  const r = getNightRate();
-  if(!r){ info.style.display='none'; calcTotal(); return; }
-  const typeLabel = {guide_opt:'가이드 옵션 (현장 수령)', agency_incl:'여행사 포함 약식', prepaid_opt:'옵션 — 한국 선결제'}[type];
-  const seats = document.getElementById('dr-seats')?.value||'';
-  let html='';
-  if(type==='guide_opt'){
-    html=`<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:8px 10px;">
-      <div style="font-weight:700;color:#166534;margin-bottom:4px;">🌃 ${typeLabel}</div>
-      <div style="color:#15803d;">• 여행사 청구: <b>$0</b> (가이드가 현장 지급)</div>
-      <div style="color:#15803d;">• 드라이버 지급: <b>현장 수령</b></div>
-      <div style="color:#dc2626;font-weight:700;">• 회사 납입금: <b>$${r.owner}</b></div>
-    </div>`;
-    input.value = 0;
-  } else {
-    html=`<div style="background:#eff6ff;border:1.5px solid #93c5fd;border-radius:8px;padding:8px 10px;">
-      <div style="font-weight:700;color:#1e40af;margin-bottom:4px;">🌃 ${typeLabel} (${seats||'인승 선택 필요'})</div>
-      <div style="color:#1d4ed8;">• 여행사 청구: <b>$${r.ta}</b></div>
-      <div style="color:#1d4ed8;">• 드라이버 지급: <b>$${r.dr}</b></div>
-      <div style="color:#dc2626;font-weight:700;">• 회사 납입금: <b>$${r.owner}</b></div>
-    </div>`;
-    input.value = r.dr;
+
+  if(type==='none'){
+    if(input) input.value = 0;
+    calcTotal();
+    // 야경 없음 안내
+    const items = [{
+      type: 'no',
+      title: '❌ 야간투어 미선택',
+      sub: '가이드 옵션 / 여행사 포함 약식 / 한국 선결제 중 해당 시 선택하세요'
+    }];
+    renderHintBox(hintEl, items);
+    _lastOTToastKey = '';
+    updateOTHint(true);
+    return;
   }
-  info.innerHTML = html;
-  info.style.display = 'block';
+
+  // 야경 선택 시 OT 초기화
+  selectOTAmount(0);
+  showToast('🌃 야경 선택 — OT $0 (추가 운행 시 버튼으로 신청 가능)', 'info');
+
+  const r = getNightRate();
+  const typeLabel = {
+    guide_opt:   '가이드 옵션 (현장 수령)',
+    agency_incl: '여행사 포함 약식',
+    prepaid_opt: '옵션 — 한국 선결제'
+  }[type] || type;
+
+  const items = [];
+
+  if(!r){
+    items.push({ type:'warn',
+      title: '⚠️ 야간투어 요율 없음 — 인승을 먼저 선택하세요',
+      sub: typeLabel
+    });
+    if(input) input.value = 0;
+  } else if(type==='guide_opt'){
+    items.push({ type:'apply',
+      title: '✅ 야간투어 적용 — ' + typeLabel + ' (' + seatsLabel + ')',
+      sub: '여행사 청구: $0 (가이드 현장 수령) · 드라이버: 현장 수령 · 회사 납입: $' + r.owner
+    });
+    if(input) input.value = 0;
+  } else {
+    items.push({ type:'apply',
+      title: '✅ 야간투어 적용 — ' + typeLabel + ' (' + seatsLabel + ')',
+      sub: '여행사 청구: $' + r.ta + ' · 드라이버 지급: $' + r.dr + ' · 회사 납입: $' + r.owner
+    });
+    if(input) input.value = r.dr;
+  }
+
+  // OT 힌트: 야경 선택 시 추가 운행 OT 안내
+  const otRate = isLarge ? 40 : 30;
+  items.push({ type:'info',
+    title: '⏱ 추가 운행 발생 시 OT 별도 신청 가능',
+    sub: seatsLabel + ' $' + otRate + '/h · 아래 OT 버튼에서 선택하세요'
+  });
+
+  renderHintBox(hintEl, items);
   calcTotal();
+  updateOTHint(); // OT 힌트도 야경 상태 반영
 }
 function selectWash(amt){
   document.getElementById('f-wash').value = amt;
@@ -5502,7 +5525,7 @@ function updateSurchargeOptions(){
   // 조기출발 버튼 요금 갱신 (인승에 따라 $30 or $40)
   updateEarlyBtn();
   selectEarly(0); // 인승 변경 시 초기화
-  // 야간투어: 인승 변경 시 요율 표시 갱신
+  // 야간투어: 인승 변경 시 요율 표시 갱신 (힌트 포함)
   onNightChange();
 
   // Service Charge
