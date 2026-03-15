@@ -4412,8 +4412,8 @@ function updateHotelHint(){
 
   const pickupSurch  = isSurchargeHotel(pickup);
   const dropoffSurch = isSurchargeHotel(dropoff);
-  const pickupAP     = AIRPORT_PATTERN.test(pickup);
-  const dropoffAP    = AIRPORT_PATTERN.test(dropoff);
+  const pickupAP     = isAirportLocation(pickup);
+  const dropoffAP    = isAirportLocation(dropoff);
   const hasSurch     = pickupSurch || dropoffSurch;
   const items        = [];
 
@@ -4730,6 +4730,17 @@ function isSurchargeHotel(name){
   return h?.Surcharge_Area ? h.Surcharge_Area.trim()!=='' : false;
 }
 
+// 픽업/드롭오프가 "공항"인지 판단
+// 호텔 목록에 있는 이름(HOLIDAY INN AIRPORT 등)은 공항이 아닌 호텔로 처리
+function isAirportLocation(name){
+  if(!name) return false;
+  if(!AIRPORT_PATTERN.test(name)) return false;
+  // 호텔 목록에 있으면 공항이 아님 (공항 근처 호텔)
+  const inHotelList = (MASTER.hotels||[]).some(h=>h.Hotel_Name===name);
+  if(inHotelList) return false;
+  return true;
+}
+
 // 픽업/드롭 변경될 때마다 호출 — 호텔 서차지 + Early 통합 알림
 function checkHotelSurchargeHint(){
   // pickup-drop-hint는 비워두고 hotel-hint-box로 통합
@@ -4807,8 +4818,8 @@ function autoFillDRSurcharges(force){
     // 전역 isSurchargeHotel 사용 (로컬 function 선언 hoisting 문제 방지)
     const pickupSurch  = isSurchargeHotel(pickup);
     const dropoffSurch = isSurchargeHotel(dropoff);
-    const pickupAP     = AIRPORT_PATTERN.test(pickup);
-    const dropoffAP    = AIRPORT_PATTERN.test(dropoff);
+    const pickupAP     = isAirportLocation(pickup);
+    const dropoffAP    = isAirportLocation(dropoff);
 
     let targetHotel = 0;
     if(pickupSurch && dropoffSurch){
@@ -4830,8 +4841,8 @@ function autoFillDRSurcharges(force){
   if((force || curEarly === 0) && pickup && dropoff && startVal){
     const [h, m] = startVal.split(':').map(Number);
     const totalMin = h*60 + m;
-    const pickupAP  = AIRPORT_PATTERN.test(pickup);
-    const dropoffAP = AIRPORT_PATTERN.test(dropoff);
+    const pickupAP  = isAirportLocation(pickup);
+    const dropoffAP = isAirportLocation(dropoff);
     const hotelToAP = !pickupAP && dropoffAP;  // 호텔→공항 Early
     const apToHotel = pickupAP && !dropoffAP;  // 공항→호텔 Late
 
@@ -5010,7 +5021,7 @@ function _updateAutoFillBanner(){
   // 호텔 서차지 안내
   if(pickup || dropoff){
     const ps=isSurchargeHotel(pickup), ds=isSurchargeHotel(dropoff);
-    const pa=AIRPORT_PATTERN.test(pickup), da=AIRPORT_PATTERN.test(dropoff);
+    const pa=isAirportLocation(pickup), da=isAirportLocation(dropoff);
     if(ps||ds){
       const hotelOpts=HOTEL_OPTIONS[seats]||HOTEL_OPTIONS['21S'];
       const fullFee=hotelOpts.length?Math.max(...hotelOpts.map(o=>Number(o.val))):10;
@@ -5025,7 +5036,7 @@ function _updateAutoFillBanner(){
 
   // Early/Late 안내
   if(pickup && dropoff && startVal){
-    const pa=AIRPORT_PATTERN.test(pickup), da=AIRPORT_PATTERN.test(dropoff);
+    const pa=isAirportLocation(pickup), da=isAirportLocation(dropoff);
     const [h,m]=startVal.split(':').map(Number);
     const tMin=h*60+m;
     const rate=(seats==='40S'||seats==='50S')?40:30;
@@ -5239,9 +5250,17 @@ function onOTInput(){
 }
 function selectOTAmount(amt){
   document.getElementById('f-ot').value = amt;
-  // 선택된 버튼 강조
-  document.querySelectorAll('[id^="ot-btn-"]').forEach(b=>{
-    const selected = parseInt(b.id.replace('ot-btn-','')) === amt;
+  // 선택된 버튼 강조 (정확히 일치하는 버튼, 없으면 가장 가까운 버튼)
+  const btns = [...document.querySelectorAll('[id^="ot-btn-"]')];
+  const vals = btns.map(b=>parseInt(b.id.replace('ot-btn-','')));
+  // 정확 일치 우선, 없으면 가장 가까운 값 버튼 강조
+  let matchVal = vals.includes(amt) ? amt : null;
+  if(matchVal === null && amt > 0){
+    matchVal = vals.filter(v=>v>0).reduce((a,b)=>Math.abs(b-amt)<Math.abs(a-amt)?b:a, vals[1]||amt);
+  }
+  btns.forEach(b=>{
+    const bVal = parseInt(b.id.replace('ot-btn-',''));
+    const selected = (amt===0 && bVal===0) || (amt>0 && bVal===matchVal);
     b.style.background = selected ? 'var(--accent)' : 'var(--surface2)';
     b.style.color      = selected ? 'white' : 'var(--text)';
     b.style.borderColor= selected ? 'var(--accent)' : 'var(--border)';
@@ -5400,8 +5419,8 @@ function updateEarlyHint(){
   const dropoff  = (document.getElementById('dr-dropoff')?.value || '').trim();
   const seats    = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
 
-  const pickupIsAirport  = AIRPORT_PATTERN.test(pickup);
-  const dropoffIsAirport = AIRPORT_PATTERN.test(dropoff);
+  const pickupIsAirport  = isAirportLocation(pickup);
+  const dropoffIsAirport = isAirportLocation(dropoff);
   const hotelToAirport   = !pickupIsAirport && dropoffIsAirport;
   const airportToHotel   = pickupIsAirport  && !dropoffIsAirport;
 
