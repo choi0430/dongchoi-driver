@@ -639,7 +639,6 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div class="form-row mb14">
           <div class="form-group" style="flex:1;">
             <label class="form-label">OT 요금 <span style="font-size:11px;color:var(--muted);" id="ot-rate-hint"></span></label>
-            <div style="font-size:10px;color:#f97316;font-weight:600;margin-bottom:4px;">⚠️ OT는 1시간 단위 올림 청구 (예: 0.5h → 1h로 적용)</div>
             <div id="ot-btn-group" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
             <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-ot" placeholder="0" oninput="onOTInput()"></div>
             <div id="ot-hint-box" style="display:none;margin-top:6px;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.6;"></div>
@@ -4587,13 +4586,8 @@ function updateOTHint(fromEndTime){
   if(!st){
     // 인승 미선택 시 힌트 숨김
     if(!seats){ renderHintBox(hintBox, []); return; }
-    // 인승 선택 시 해당 인승 요율만 표시
-    const otRate0 = getOTRate(null, seats);
-    const items0 = [];
-    items0.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:seats+' 요율: $'+otRate0+'/h · 1시간 단위 올림 · 15분 waive' });
-    const maxH0 = att ? getMaxHours(att) : null;
-    if(maxH0) items0.push({ type:'info', title:'⏱ 코스 기준 시간: '+maxH0+'시간', sub:'출발 시간 입력 시 OT 적용 여부 자동 계산' });
-    renderHintBox(hintBox, items0);
+    // 시간 미입력 시 힌트 숨김
+    renderHintBox(hintBox, []);
     return;
   }
 
@@ -4611,20 +4605,7 @@ function updateOTHint(fromEndTime){
     renderHintBox(hintBox, []);
     return;
   }
-  items.push({ type:'info', title:'🕗 OT 기준: 20:15 이후 또는 코스 기준시간 초과', sub:seats+' 드라이버 OT 요율: $'+otRate+'/h · 1시간 단위 올림 · 15분 waive 적용' });
-
-  // ② 코스 기준 max_hours 초과 조건
-  if(maxH){
-    const maxMin   = startMin + maxH*60;
-    const waiveMin = maxMin + WAIVE;
-    const hh  = String(Math.floor(maxMin/60)%24).padStart(2,'0');
-    const mm  = String(maxMin%60).padStart(2,'0');
-    const hwh = String(Math.floor(waiveMin/60)%24).padStart(2,'0');
-    const hwm = String(waiveMin%60).padStart(2,'0');
-    items.push({ type:'info', title:'⏱ 코스 '+maxH+'h 초과 OT 기준: '+hh+':'+mm, sub:'15분 waive 후 '+hwh+':'+hwm+'부터 OT 적용' });
-  }
-
-  // ③ 종료 시간 있으면 실제 OT 계산
+  // ③ 종료 시간 있으면 실제 OT 계산 + 코스 기준 안내
   if(et){
     const [eh,em] = et.split(':').map(Number);
     let totalMin = (eh*60+em) - startMin;
@@ -4638,6 +4619,16 @@ function updateOTHint(fromEndTime){
     if(maxH){ const wm2 = maxH*60+WAIVE; if(totalMin > wm2) durOT = (totalMin-wm2)/60; }
 
     const effOT = Math.max(pm8OT, durOT);
+    // OT 없을 때만 코스 기준 시간 안내 표시
+    if(effOT === 0 && maxH){
+      const maxMin   = startMin + maxH*60;
+      const waiveMin = maxMin + WAIVE;
+      const hh  = String(Math.floor(maxMin/60)%24).padStart(2,'0');
+      const hmm = String(maxMin%60).padStart(2,'0');
+      const hwh = String(Math.floor(waiveMin/60)%24).padStart(2,'0');
+      const hwm = String(waiveMin%60).padStart(2,'0');
+      items.push({ type:'info', title:'⏱ 코스 '+maxH+'h · OT 없음', sub:hh+':'+hmm+' 까지 · waive 후 '+hwh+':'+hwm+'부터 OT' });
+    }
     if(effOT > 0 && otRate){
       const effOT_ceil = Math.ceil(effOT);
       const otAmt = effOT_ceil * otRate;
