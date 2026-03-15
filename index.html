@@ -583,7 +583,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">픽업 장소</label>
             <div class="sdd-wrap" id="sdd-pickup-wrap">
               <input class="sdd-input" id="dr-pickup" placeholder="픽업" autocomplete="off"
-                oninput="sddFilter('pickup')" onfocus="sddOpen('pickup')" onblur="sddBlur('pickup');checkHotelSurchargeHint();updateHotelHint();updateDistHint();updateEarlyHint();autoFillDRSurcharges();">
+                oninput="sddFilter('pickup')" onfocus="sddOpen('pickup')" onblur="sddBlur('pickup');autoFillDRSurcharges(true);updateEarlyHint();updateDistHint();">
               <div class="sdd-dropdown" id="sdd-pickup-list"></div>
             </div>
           </div>
@@ -591,7 +591,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
             <label class="form-label">드롭 장소</label>
             <div class="sdd-wrap" id="sdd-dropoff-wrap">
               <input class="sdd-input" id="dr-dropoff" placeholder="드롭" autocomplete="off"
-                oninput="sddFilter('dropoff')" onfocus="sddOpen('dropoff')" onblur="sddBlur('dropoff');checkHotelSurchargeHint();updateHotelHint();updateDistHint();updateEarlyHint();autoFillDRSurcharges();">
+                oninput="sddFilter('dropoff')" onfocus="sddOpen('dropoff')" onblur="sddBlur('dropoff');autoFillDRSurcharges(true);updateEarlyHint();updateDistHint();">
               <div class="sdd-dropdown" id="sdd-dropoff-list"></div>
             </div>
           </div>
@@ -709,7 +709,7 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           <input type="hidden" id="f-night-type" value="none">
           <!-- 아래 옵션은 JS에서 cselBuild로 구성 -->
 <!-- 야간투어 옵션은 initNightCsel()으로 구성 -->
-          <div id="night-hint-box" style="margin-top:6px;"></div>
+          <div id="night-hint-box" style="display:none;"></div>
           <input type="hidden" id="f-night" value="0">
         </div>
         <div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:10px 12px;margin-bottom:14px;">
@@ -1888,7 +1888,7 @@ function sddSelect(key, value) {
     const found = GUIDE_LIST.find(g=>g.name===value);
     if(found && window.currentGuidePhone !== undefined) window.currentGuidePhone = found.mobile;
   }
-  if(key==='pickup'||key==='dropoff'){ checkHotelSurchargeHint(); updateHotelHint(); updateEarlyHint(); autoFillDRSurcharges(); }
+  if(key==='pickup'||key==='dropoff'){ checkHotelSurchargeHint(); autoFillDRSurcharges(true); updateEarlyHint(); }
   // 코스 선택 시 요금/OT 자동 계산
   if(key==='attraction'){ autoRate(); onAttractionChange(); autoFillDRSurcharges(); updateSvcHint(); updateOTHint(); }
   // 차량 선택 시 실제 인승 힌트 표시 (요청 인승 dr-seats는 건드리지 않음)
@@ -3492,7 +3492,7 @@ function submitDailyReport(){
   selectWash(0);
   selectMeal(0);
   const ntEl=document.getElementById('f-night-type');if(ntEl)ntEl.value='none'; cselSetValue('f-night-type','none');
-  const niEl=document.getElementById('night-hint-box');if(niEl){niEl.style.display='none';niEl.innerHTML='';}
+  // night-hint-box는 항상 숨겨있음
   const nfEl=document.getElementById('f-night');if(nfEl)nfEl.value=0;
   ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
   selectTrailer(0); // 트레일러 초기화
@@ -4811,16 +4811,23 @@ function autoFillDRSurcharges(force){
       targetHotel = fullFee;  // 서차지 호텔 ↔ 일반장소 → 전액
     }
     if(targetHotel > 0 && String(targetHotel) !== String(curHotel)){
-      // HOTEL_OPTIONS에 해당 값이 있는 경우만 세팅
       const valid = hotelOpts.find(o=>Number(o.val)===targetHotel);
       if(valid){
-        cselSetValue('f-hotel-select', String(targetHotel));
+        // hidden input 직접 세팅
+        const hidEl = document.getElementById('f-hotel-select');
+        if(hidEl) hidEl.value = String(targetHotel);
+        // 버튼 레이블 + data-value 업데이트
+        const btn = document.querySelector('.csel-btn[data-csel="f-hotel-select"]');
+        if(btn){ btn.textContent = valid.label; btn.dataset.value = String(targetHotel); }
+        // dropdown item 강조
+        const drop = document.getElementById('csel-drop-f-hotel-select');
+        if(drop) drop.querySelectorAll('.csel-item').forEach(i=>{
+          i.classList.toggle('selected', i.dataset.val===String(targetHotel));
+        });
         calcTotal();
-        updateHotelHint(); // 힌트 즉시 업데이트
       }
-    } else {
-      updateHotelHint(); // 변경 없어도 힌트는 갱신
     }
+    updateHotelHint();
   }
 
   // ── 2) Early / Late 서차지 ──────────────────────────────
@@ -5390,9 +5397,9 @@ function onNightChange(){
     sub: seatsLabel + ' $' + otRate + '/h · 아래 OT 버튼에서 선택하세요'
   });
 
-  renderHintBox(hintEl, items);
+  // 야간투어 힌트 표시 안 함
   calcTotal();
-  updateOTHint(); // OT 힌트도 야경 상태 반영
+  updateOTHint();
 }
 function selectWash(amt){
   document.getElementById('f-wash').value = amt;
