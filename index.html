@@ -404,6 +404,12 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
     <span class="pill pill-blue" id="today-report-count">0건</span>
   </div>
   <div id="today-reports-list"></div>
+  <!-- Last shift PDF re-download button -->
+  <div id="last-shift-pdf-btn" style="display:none;padding:0 12px 10px;">
+    <button onclick="redownloadLastShiftPDF()" style="width:100%;background:#eff6ff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:12px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+      📄 <span>마지막 시프트 리포트 PDF 다시 보기</span>
+    </button>
+  </div>
 
   <!-- QUICK NAV -->
   <div style="padding:0 12px 8px;">
@@ -3393,6 +3399,8 @@ async function completePre(){
     localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
   }
   showToast(`✅ ${rego} Pre Departure 완료 Complete`,'success');
+  // PDF 저장 프롬프트 (서명 포함 리포트)
+  setTimeout(()=>showPdfPrompt(shift, 'pre'), 800);
   // ── Google Sheets 자동 전송 (Pre Departure) ──
   postToSheetsWithRetry('save_predeparture', {
     Driver: currentDriver?.name || '',
@@ -3988,12 +3996,16 @@ function submitEndShift(){
     Remarks: shift.damage || ''
   });
 
+  // 완료된 시프트를 PDF용으로 복사 (localStorage에 보관, 이후 필요 시 접근)
+  const completedShiftSnapshot = JSON.parse(JSON.stringify(shift));
   activeShifts = activeShifts.filter(s=>s.id!==editingShiftId);
   showToast(`🏁 ${shift.rego} End of Shift 완료`,'success');
   // 드라이버별 저장
   if(currentDriver?.name) {
     localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
     localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
+    // 마지막 완료 시프트 저장 (PDF 재생성 대비)
+    localStorage.setItem('lastShift_'+currentDriver.name, JSON.stringify(completedShiftSnapshot));
   }
   renderShiftSection();
   renderTodayReports();
@@ -4001,6 +4013,8 @@ function submitEndShift(){
   runSync(false);
   startAutoSync();
   showPage('home');
+  // PDF 저장 프롬프트 (홈 이동 후 잠시 후 표시)
+  setTimeout(()=>showPdfPrompt(completedShiftSnapshot, 'eos'), 600);
 }
 
 // ═══════════════════════════════════════════════
@@ -4322,6 +4336,21 @@ function renderTodayReports(){
         ${r.tourcode?`<span class="report-tag">🏷 ${r.tourcode}</span>`:''}
       </div>
     </div>`).join('');
+  // Show re-download button if last completed shift exists
+  const lastShiftBtn = document.getElementById('last-shift-pdf-btn');
+  if (lastShiftBtn) {
+    const savedShift = localStorage.getItem('lastShift_'+(currentDriver?.name||''));
+    lastShiftBtn.style.display = savedShift ? 'block' : 'none';
+  }
+}
+
+function redownloadLastShiftPDF() {
+  const saved = localStorage.getItem('lastShift_'+(currentDriver?.name||''));
+  if (!saved) { showToast('저장된 시프트 리포트가 없습니다', 'error'); return; }
+  try {
+    const shift = JSON.parse(saved);
+    openShiftReport(shift, 'eos');
+  } catch(e) { showToast('리포트 불러오기 실패', 'error'); }
 }
 
 // ═══════════════════════════════════════
@@ -7614,6 +7643,244 @@ function busMount(prefix, targetId) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// SHIFT REPORT — Print-to-PDF (Pre Departure / End of Shift)
+// Opens a new window with a formatted, print-ready report.
+// Supports Korean text + embedded signature image on all devices.
+// ═══════════════════════════════════════════════════════════════════
+
+let _pdfShift = null;   // shift object queued for PDF
+let _pdfType  = null;   // 'pre' | 'eos'
+
+function showPdfPrompt(shift, type) {
+  _pdfShift = shift;
+  _pdfType  = type;
+  const title  = type === 'pre' ? '✅ Pre Departure 완료' : '🏁 End of Shift 완료';
+  const desc   = type === 'pre'
+    ? '📋 Pre Departure 리포트를 PDF로 저장하시겠습니까?'
+    : '📋 전체 시프트 리포트를 PDF로 저장하시겠습니까?';
+  document.getElementById('pdf-prompt-title').textContent = title;
+  document.getElementById('pdf-prompt-desc').textContent  = desc;
+  document.getElementById('pdf-prompt-modal').style.display = 'flex';
+}
+
+function closePdfModal() {
+  document.getElementById('pdf-prompt-modal').style.display = 'none';
+  _pdfShift = null; _pdfType = null;
+}
+
+function doPdfDownload() {
+  if (_pdfShift && _pdfType) openShiftReport(_pdfShift, _pdfType);
+  closePdfModal();
+}
+
+function openShiftReport(shift, type) {
+  const driver    = currentDriver?.name || shift.driver || '';
+  const isPre     = type === 'pre';
+  const typeLabel = isPre ? 'PRE DEPARTURE REPORT' : 'END OF SHIFT REPORT';
+  const dateStr   = (isPre ? fmtDate(shift.date) : (fmtDate(shift.endDate) || fmtDate(shift.date))) || todayDisplay();
+
+  // -- Vehicle checks rows --
+  function buildChecks(checks) {
+    if (!checks || !checks.length) return '<div style="color:#aaa;font-size:12px;padding:4px 0;">점검 기록 없음</div>';
+    return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">' +
+      checks.map(c => {
+        const ok = c.pass !== false;
+        const col = ok ? '#f0fdf4' : '#fef2f2';
+        const dot = ok ? '#16a34a' : '#dc2626';
+        const lbl = c.name || '';
+        const kr  = c.kr  ? ` <span style="font-size:10px;color:#888;">${c.kr}</span>` : '';
+        return `<div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:7px;background:${col};font-size:12px;font-weight:600;">
+          <div style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0;"></div>
+          <span>${lbl}${kr}</span>
+        </div>`;
+      }).join('') + '</div>';
+  }
+
+  // -- Daily reports table --
+  function buildDRTable() {
+    const drs = shift.dailyReports || [];
+    if (!drs.length) return '<div style="color:#aaa;font-size:12px;padding:4px 0;">Daily Report 없음</div>';
+    const rows = drs.map((r, i) => {
+      const kmRange = (r.kmStart && r.kmEnd) ? `${r.kmStart} → ${r.kmEnd}` : '—';
+      const total   = r.total != null ? `$${Number(r.total).toFixed(2)}` : '—';
+      const dr      = r.dr    != null ? `$${Number(r.dr).toFixed(2)}`    : '—';
+      return `<tr style="${i%2===1?'background:#f8fafc':''}">
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;">${i+1}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;">${r.agency||'—'}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;">${r.attraction||'—'}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;">${kmRange}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;font-weight:700;color:#1a56db;">${total}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;color:#059669;">${dr}</td>
+      </tr>`;
+    }).join('');
+    const totTA  = drs.reduce((s,r)=>s+(r.total||0), 0);
+    const totDR  = drs.reduce((s,r)=>s+(r.dr||0),    0);
+    return `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead><tr style="background:#f0f4ff;">
+        <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">#</th>
+        <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">여행사</th>
+        <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">관광지</th>
+        <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">KM</th>
+        <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">TA 청구</th>
+        <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">DR 지급</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr style="background:#f8fafc;font-weight:700;">
+        <td colspan="4" style="padding:8px;font-size:12px;border-top:2px solid #e5e7eb;">합계 Total</td>
+        <td style="padding:8px;border-top:2px solid #e5e7eb;color:#1a56db;">$${totTA.toFixed(2)}</td>
+        <td style="padding:8px;border-top:2px solid #e5e7eb;color:#059669;">$${totDR.toFixed(2)}</td>
+      </tr></tfoot>
+    </table>`;
+  }
+
+  // -- Signature image --
+  function sigImg(dataUrl) {
+    if (!dataUrl || dataUrl.length < 50) return '<div style="color:#aaa;font-size:12px;padding:20px 0;text-align:center;">서명 없음</div>';
+    return `<img src="${dataUrl}" style="max-height:90px;max-width:100%;object-fit:contain;" alt="Signature">`;
+  }
+
+  // -- Field helper --
+  function field(label, value, bold=false) {
+    return `<div style="margin-bottom:10px;">
+      <div style="font-size:10px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px;">${label}</div>
+      <div style="font-size:14px;font-weight:${bold?700:500};color:#1a1a1a;">${value||'—'}</div>
+    </div>`;
+  }
+  function row2(left, right) {
+    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:4px;">${left}${right}</div>`;
+  }
+  function sectionTitle(t) {
+    return `<div style="background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;padding:6px 12px;border-radius:6px;margin:16px 0 10px;">${t}</div>`;
+  }
+
+  // -- Build Pre Departure section --
+  const preSection = `
+    ${sectionTitle('🚦 Pre Departure 출발 전 점검')}
+    ${row2(field('날짜 Date', fmtDate(shift.date)), field('차량 Rego', shift.rego, true))}
+    ${row2(field('드라이버 Driver', driver, true), field('출발 KM Start KM', shift.startKm ? shift.startKm.toLocaleString() + ' km' : '—'))}
+    ${row2(field('출발 시간 Start Time', shift.startTime||'—'), field('연료 Fuel', shift.fuel||'—'))}
+    ${field('비고 Remarks', shift.remarks||'—')}
+    ${sectionTitle('🔍 차량 점검 Pre-Shift Vehicle Check')}
+    <div style="margin-bottom:10px;">${buildChecks(shift.preChecks)}</div>
+    ${sectionTitle('✍️ 드라이버 서명 Pre Departure Signature')}
+    <div style="border:1.5px solid #e5e7eb;border-radius:10px;padding:12px;text-align:center;min-height:70px;display:flex;align-items:center;justify-content:center;">
+      ${sigImg(shift.preSignature)}
+    </div>
+    <div style="font-size:10px;color:#aaa;margin-top:4px;text-align:right;">서명일시: ${fmtDate(shift.date)||dateStr}</div>
+  `;
+
+  // -- Build End of Shift section --
+  const eosSection = isPre ? '' : `
+    ${sectionTitle('🏁 End of Shift 운행 종료')}
+    ${row2(field('종료 날짜 End Date', fmtDate(shift.endDate)||fmtDate(shift.date)), field('종료 KM End KM', shift.endKm ? Number(shift.endKm).toLocaleString() + ' km' : '—', true))}
+    ${row2(field('종료 시간 End Time', shift.endTime||'—'), field('전체 주행거리 Total KM', (shift.startKm && shift.endKm) ? (Number(shift.endKm)-Number(shift.startKm)).toLocaleString()+' km' : '—'))}
+    ${field('손상/사고 Damage / Incident', shift.damage||'—')}
+    ${sectionTitle('📋 일일 리포트 Daily Reports')}
+    ${buildDRTable()}
+    ${sectionTitle('🔍 차량 점검 Post-Shift Vehicle Check')}
+    <div style="margin-bottom:10px;">${buildChecks(shift.endChecks)}</div>
+    ${sectionTitle('✅ 확인 사항 Declarations')}
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+      ${[['🚌 승객 미탑승 확인','Passenger Check'],['🔍 분실물 확인','Lost Property Check'],['🅿️ 차량 주차/잠금 확인','Vehicle Secured']].map(([kr,en])=>`
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:7px 10px;background:#f0fdf4;border-radius:7px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#16a34a;flex-shrink:0;"></div>
+          <span style="font-weight:600;">${kr}</span> <span style="color:#888;">${en}</span>
+        </div>`).join('')}
+    </div>
+    ${sectionTitle('✍️ 드라이버 서명 End of Shift Signature')}
+    <div style="border:1.5px solid #e5e7eb;border-radius:10px;padding:12px;text-align:center;min-height:70px;display:flex;align-items:center;justify-content:center;">
+      ${sigImg(shift.eosSignature)}
+    </div>
+    <div style="font-size:10px;color:#aaa;margin-top:4px;text-align:right;">서명일시: ${fmtDate(shift.endDate)||fmtDate(shift.date)||dateStr}</div>
+  `;
+
+  const now = new Date();
+  const submittedAt = `${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>DONG CHOI PTY LTD — ${typeLabel}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif; color:#1a1a1a; background:#fff; padding-bottom:80px; }
+    @media print {
+      body { padding-bottom:0; }
+      .no-print { display:none !important; }
+      @page { margin:12mm; }
+    }
+  </style>
+</head>
+<body>
+  <!-- HEADER -->
+  <div style="background:linear-gradient(135deg,#1a56db,#2563eb);color:white;padding:20px 20px 16px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:1px;opacity:0.85;text-transform:uppercase;">DONG CHOI PTY LTD</div>
+    <div style="font-size:20px;font-weight:800;margin-top:4px;letter-spacing:0.3px;">${typeLabel}</div>
+    <div style="font-size:12px;opacity:0.85;margin-top:6px;">
+      ${driver} &nbsp;·&nbsp; ${shift.rego} &nbsp;·&nbsp; ${dateStr}
+    </div>
+  </div>
+
+  <!-- CONTENT -->
+  <div style="padding:0 16px;">
+    ${preSection}
+    ${eosSection}
+  </div>
+
+  <!-- FOOTER -->
+  <div style="margin:20px 16px 0;padding-top:12px;border-top:1px solid #e5e7eb;font-size:10px;color:#aaa;">
+    제출일시 Submitted: ${submittedAt} &nbsp;|&nbsp; DONG CHOI PTY LTD Fleet Management System
+  </div>
+
+  <!-- PRINT BUTTON (hidden when printing) -->
+  <div class="no-print" style="position:fixed;bottom:20px;left:0;right:0;display:flex;gap:10px;justify-content:center;padding:0 16px;">
+    <button onclick="window.close()" style="flex:1;max-width:140px;background:#f0f4ff;color:#1a56db;border:2px solid #bfdbfe;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;">✕ 닫기</button>
+    <button onclick="window.print()" style="flex:2;max-width:220px;background:#1a56db;color:white;border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(26,86,219,0.35);">🖨️ PDF 저장 / 인쇄</button>
+  </div>
+
+  <script>
+    // Auto-open print dialog after a short delay (so content renders first)
+    // Remove auto-print to let user review first — they can tap the button
+  </script>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank');
+  if (w) {
+    w.document.write(html);
+    w.document.close();
+  } else {
+    // Fallback: create blob and navigate
+    const blob = new Blob([html], {type:'text/html'});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+  }
+}
+
 </script>
+
+<!-- PDF Prompt Modal (bottom sheet) -->
+<div id="pdf-prompt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9900;align-items:flex-end;justify-content:center;">
+  <div style="background:#fff;border-radius:20px 20px 0 0;padding:24px 20px 32px;width:100%;max-width:480px;animation:slideUp 0.25s ease;">
+    <div style="width:36px;height:4px;background:#e5e7eb;border-radius:2px;margin:0 auto 20px;"></div>
+    <div id="pdf-prompt-title" style="font-size:18px;font-weight:800;color:#1a1a1a;margin-bottom:8px;">✅ 완료</div>
+    <div id="pdf-prompt-desc" style="font-size:13px;color:#666;margin-bottom:24px;line-height:1.5;">리포트를 PDF로 저장하시겠습니까?</div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="closePdfModal()" style="flex:1;background:#f0f4ff;color:#1a56db;border:none;border-radius:12px;padding:15px;font-size:14px;font-weight:700;cursor:pointer;">나중에</button>
+      <button onclick="doPdfDownload()" style="flex:2;background:#1a56db;color:white;border:none;border-radius:12px;padding:15px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(26,86,219,0.3);">📄 리포트 보기 / 저장</button>
+    </div>
+  </div>
+</div>
+<style>
+  @keyframes slideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
+</style>
+
 </body>
 </html>
