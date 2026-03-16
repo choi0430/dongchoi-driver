@@ -3250,6 +3250,33 @@ function goStep(n){
         step3.dataset.draftListener = '1';
       }
     }, 150);
+    // Pre Departure 값으로 날짜·차량 자동 입력 (draft 복원 후 250ms에 실행)
+    setTimeout(()=>{
+      const curShift = activeShifts.find(s=>s.id===editingShiftId);
+      if(!curShift) return;
+      const dateEl = document.getElementById('end-date');
+      const regoEl = document.getElementById('end-rego');
+      const startKmEl = document.getElementById('end-start-km-ref');
+      // 날짜: Pre Departure 날짜로 항상 채움
+      if(dateEl) dateEl.value = fmtDate(curShift.date) || todayDisplay();
+      // 차량: Pre Departure 차량으로 항상 채움 (읽기 전용)
+      if(regoEl){
+        regoEl.value = curShift.rego || '';
+        regoEl.readOnly = true;
+        regoEl.style.background = 'var(--surface2,#f0f4ff)';
+        regoEl.style.color = 'var(--text)';
+        regoEl.title = 'Pre Departure에서 선택된 차량';
+      }
+      // 출발 KM 참고값 표시
+      if(startKmEl){
+        if(curShift.startKm){
+          startKmEl.textContent = '출발 KM: ' + curShift.startKm.toLocaleString();
+          startKmEl.style.display = 'inline';
+        } else {
+          startKmEl.textContent = '';
+        }
+      }
+    }, 250);
   }
 }
 
@@ -3539,6 +3566,19 @@ function submitDailyReport(){
   calcTotal();
   const total = parseFloat(document.getElementById('t-ta').textContent.replace('$',''))||0;
   const svcLabel = (()=>{ const b=document.querySelector('.csel-btn[data-csel="f-svc-select"]'); return b?b.textContent.trim():''; })();
+  const _kmStartRaw = document.getElementById('dr-km-start').value;
+  const _kmEndRaw   = document.getElementById('dr-km-end').value;
+  const _kmSt = parseInt(_kmStartRaw) || 0;
+  const _kmEn = parseInt(_kmEndRaw)   || 0;
+  // KM 유효성 검사: Pre Departure ≤ DR 시작 KM < DR 마친 KM
+  if (_kmSt && shift.startKm && _kmSt < shift.startKm) {
+    showToast(`⚠️ 시작 KM(${_kmSt.toLocaleString()})은 Pre Departure KM(${shift.startKm.toLocaleString()}) 이상이어야 합니다`, 'error');
+    return;
+  }
+  if (_kmSt && _kmEn && _kmEn <= _kmSt) {
+    showToast(`⚠️ 마친 KM(${_kmEn.toLocaleString()})은 시작 KM(${_kmSt.toLocaleString()})보다 커야 합니다`, 'error');
+    return;
+  }
   const report = {
     id: 'dr_'+Date.now(),
     date: document.getElementById('dr-date').value,
@@ -3547,8 +3587,8 @@ function submitDailyReport(){
     agency, attraction:att,
     pickup: document.getElementById('dr-pickup').value,
     dropoff: document.getElementById('dr-dropoff').value,
-    kmStart: document.getElementById('dr-km-start').value,
-    kmEnd: document.getElementById('dr-km-end').value,
+    kmStart: _kmStartRaw,
+    kmEnd:   _kmEndRaw,
     timeStart: document.getElementById('dr-start').value,
     timeEnd: document.getElementById('dr-end').value,
     guide: document.getElementById('dr-guide').value,
@@ -3898,7 +3938,14 @@ function submitEndShift(){
   if(isSigEmpty('sig-canvas')){showToast('✏️ 드라이버 서명을 해주세요. Driver signature required.','error');return;}
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(!shift){return;}
-  shift.endKm = parseInt(km);
+  // KM 유효성 검사: Daily Report 마친 KM ≤ End of Shift KM
+  const _endKmVal = parseInt(km);
+  const _lastDR = shift.dailyReports?.length ? shift.dailyReports[shift.dailyReports.length - 1] : null;
+  if (_lastDR && _lastDR.kmEnd && _endKmVal < parseInt(_lastDR.kmEnd)) {
+    showToast(`⚠️ 종료 KM(${_endKmVal.toLocaleString()})은 마지막 Daily Report 마친 KM(${parseInt(_lastDR.kmEnd).toLocaleString()}) 이상이어야 합니다`, 'error');
+    return;
+  }
+  shift.endKm = _endKmVal;
   shift.endTime = document.getElementById('end-time').value;
   shift.endDate = document.getElementById('end-date')?.value || fmtDate(shift.date) || todayDisplay();
   shift.endFuel = '';
@@ -5128,11 +5175,10 @@ function _updateAutoFillBanner(){
     const pa=isAirportLocation(pickup), da=isAirportLocation(dropoff);
     if(ps||ds){
       const hotelOpts=HOTEL_OPTIONS[seats]||HOTEL_OPTIONS['21S'];
-      const fullFee=hotelOpts.length?Math.max(...hotelOpts.map(o=>Number(o.val))):10;
-      const halfFee=Math.round(fullFee/2);
-      let fee=0;
-      if(ps&&ds) fee=fullFee;
-      else fee=halfFee;  // 서차지 호텔 ↔ 공항 or 일반장소 → 편도 반액
+      const fullFee =hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 20;
+      // 편도 금액: HOTEL_OPTIONS 두 번째 항목에서 직접 읽음 (21/25S→$10, 40/50S→$15)
+      const halfFee =hotelOpts.length>=2 ? Number(hotelOpts[1]?.val||0) : Math.round(fullFee/2);
+      const fee = (ps&&ds) ? fullFee : halfFee;
       lines.push('🏨 호텔 서차지: <b>$'+fee+'</b> 자동 선택됨'+(ps&&ds?' (양쪽)':' (편도)'));
     }
   }
