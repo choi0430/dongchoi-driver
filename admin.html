@@ -1094,15 +1094,17 @@ function getSydneyOffsetMs(date) {
 function parseSheetTime(ts) {
   if(!ts) return '';
   const s = String(ts).trim();
-  if(s.includes('1899') || s.includes('30/12')) return '';
+  // dd/MM/yyyy 형식 날짜이면 시간 아님
+  if(s.includes('30/12')) return '';
+  // 이미 HH:MM 형식이면 그대로
   if(/^\d{1,2}:\d{2}$/.test(s)) return s.padStart(5,'0').slice(0,5);
-  // ISO timestamp (구글 시트 시간값)
+  // ISO timestamp — Google Sheets 시간 전용 셀은 "1899-12-29T..." 형식으로 전달됨 (UTC)
+  // 빈 셀은 Date 아닌 ""로 오므로 위 !ts 조건에서 이미 처리됨
   if(s.includes('T')) {
     const d = new Date(s);
     if(!isNaN(d)) {
-      // UTC+10 고정 (구글 시트가 AEST 기준으로 직렬화)
       const offsetH = Math.round(getSydneyOffsetMs(d) / 3600000);
-      const h  = (d.getUTCHours() + offsetH) % 24;
+      const h  = ((d.getUTCHours() + offsetH) % 24 + 24) % 24;
       const mn = String(d.getUTCMinutes()).padStart(2,'0');
       return String(h).padStart(2,'0') + ':' + mn;
     }
@@ -4476,10 +4478,15 @@ async function ensureReportsCache() {
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if (json.ok && json.rows) {
-      // Date를 ISO(YYYY-MM-DD)로 정규화
+      // Date를 ISO(YYYY-MM-DD)로 정규화, 시간 파싱
       _reportsCache = json.rows.map(r => {
         const iso = parseToISO(r.Date || '');
-        return { ...r, _isoDate: iso };
+        return {
+          ...r,
+          _isoDate:   iso,
+          _timeStart: parseSheetTime(r.Time_Start),
+          _timeEnd:   parseSheetTime(r.Time_End),
+        };
       });
     }
   } catch(e) { console.warn('리포트 캐시 로드 실패:', e); }
@@ -4631,14 +4638,25 @@ async function renderWage(){
       (weekReports.length>0 ?
         '<div style="margin-top:10px;border-top:1px solid var(--b2);padding-top:10px;">'+
           '<div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:6px;">리포트 내역</div>'+
-          weekReports.map(r=>
-            '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--b2);">'+
-              '<span style="color:var(--t2);">'+fmtDate(r.Date||r._isoDate)+' '+escH(r.Rego||'')+'</span>'+
-              '<span style="color:var(--t2);">'+escH(r.Attraction||r.Agency||'')+'</span>'+
-              '<span style="color:var(--gn);font-weight:700;">$'+(parseFloat(r.DR_Cost)||0).toLocaleString()+'</span>'+
-              ((parseFloat(r.Night_Owner)||0)>0 ? '<span style="color:var(--rd);font-size:11px;font-weight:700;"> -$'+(parseFloat(r.Night_Owner)||0).toLocaleString()+'</span>' : '')+
-            '</div>'
-          ).join('')+
+          weekReports.map(r=>{
+            const tS = r._timeStart || parseSheetTime(r.Time_Start);
+            const tE = r._timeEnd   || parseSheetTime(r.Time_End);
+            const dur = calcDuration(tS, tE);
+            const timeStr = tS ? (tS + (tE ? ' ~ ' + tE : '') + (dur ? '  (' + dur + ')' : '')) : '';
+            return '<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;margin-bottom:5px;">'+
+              '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+                '<div>'+
+                  '<div style="font-size:12px;font-weight:700;color:var(--t1);">'+escH(r.Attraction||r.TA_Name||r.Agency||'')+'</div>'+
+                  '<div style="font-size:11px;color:var(--t3);margin-top:1px;">'+fmtDate(r.Date||r._isoDate)+(r.Rego?' · '+escH(r.Rego):'')+'</div>'+
+                  (timeStr ? '<div style="font-size:11px;color:var(--ac);margin-top:2px;">⏱ '+timeStr+'</div>' : '')+
+                '</div>'+
+                '<div style="text-align:right;">'+
+                  '<div style="font-size:14px;font-weight:800;color:var(--gn);">$'+(parseFloat(r.DR_Cost)||0).toLocaleString()+'</div>'+
+                  ((parseFloat(r.Night_Owner)||0)>0 ? '<div style="font-size:11px;color:var(--rd);font-weight:700;">-$'+(parseFloat(r.Night_Owner)||0).toLocaleString()+'</div>' : '')+
+                '</div>'+
+              '</div>'+
+            '</div>';
+          }).join('')+
         '</div>' : '')+
     '</div>';
 
