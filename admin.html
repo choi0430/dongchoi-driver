@@ -3013,16 +3013,21 @@ function calcInvRow(r) {
   }
 
   // ── Airport Parking Fee ──
-  // 픽업지가 공항인 경우: 21/25S $30, 40/50S $40 추가 청구 (TA only)
+  // 픽업지가 공항인 경우에만 청구: 21/25S $30, 40/50S $40
+  // (dropoff=Airport는 승객을 내려주는 것이므로 주차비 없음)
   const pickupVal  = String(r.Pickup  || '').trim();
-  const dropoffVal = String(r.Dropoff || '').trim();
-  // 공항 패턴: SYD, AIRPORT, KINGSFORD, MASCOT 등
-  const apPattern = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
-  const hasAirport = apPattern.test(pickupVal) || apPattern.test(dropoffVal);
-  const parkingFee = hasAirport ? (seatNum >= 40 ? 40 : 30) : 0;
+  const apPattern  = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
+  const autoParking = apPattern.test(pickupVal) ? (seatNum >= 40 ? 40 : 30) : 0;
+
+  // 행별 주차비 수동 override (localStorage: '1'=강제추가, '0'=강제제외, null=자동)
+  const _pkKey = 'dcpk_' + (r._iso||String(r.Date||'')).slice(0,10) + '_' + (r.Rego||'') + '_' + (r.Attraction||'').replace(/\s+/g,'').slice(0,8);
+  const _pkOv  = localStorage.getItem(_pkKey);
+  const parkingFee = _pkOv === '1' ? (seatNum >= 40 ? 40 : 30)
+                   : _pkOv === '0' ? 0
+                   : autoParking;
 
   const total = baseRate + ot + hotel + dist + earlyTA + parkingFee;
-  return { baseRate, ot, hotel, dist, earlyTA, parkingFee, total, rateSource };
+  return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking, _pkKey, total, rateSource };
 }
 async function initInvoice() {
   _invReports = null; // 항상 최신 리포트 재로드
@@ -3234,6 +3239,19 @@ function renderInvPreview(rows, agency, from, to) {
       const srcBadge = c.rateSource === 'price_table'
         ? `<span style="font-size:9px;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 5px;margin-left:4px;">요금표</span>`
         : `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;">SVC</span>`;
+      // 주차비 토글 상태
+      const _pkOv = localStorage.getItem(c._pkKey);
+      const pkBtnLabel = c.parkingFee > 0
+        ? `🅿️ 주차비 제외`
+        : `🅿️ 주차비 추가`;
+      const pkBtnStyle = c.parkingFee > 0
+        ? `font-size:10px;padding:3px 8px;background:#fef9c3;color:#92400e;border:1px solid #fde68a;border-radius:6px;cursor:pointer;`
+        : `font-size:10px;padding:3px 8px;background:var(--sf3);color:var(--t3);border:1px solid var(--b2);border-radius:6px;cursor:pointer;`;
+      const pkManualNote = _pkOv === '1' ? ` <span style="font-size:9px;color:#16a34a;">(수동추가)</span>`
+                         : _pkOv === '0' ? ` <span style="font-size:9px;color:#ef4444;">(수동제외)</span>` : '';
+      // pickup/dropoff 표시
+      const pdStr = (r.Pickup||r.Dropoff)
+        ? `<div style="font-size:10px;color:var(--t3);">📍 ${escH(r.Pickup||'')}${r.Dropoff&&r.Dropoff!==r.Pickup?' → '+escH(r.Dropoff):''}</div>` : '';
       return `
       <div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:6px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;">
@@ -3242,13 +3260,19 @@ function renderInvPreview(rows, agency, from, to) {
             <div style="font-size:11px;color:var(--t2);margin-top:2px;">${escH(r.Attraction||'—')}</div>
             <div style="font-size:10px;color:var(--t3);margin-top:2px;">기본: $${c.baseRate.toLocaleString()} &nbsp;·&nbsp; 드라이버: ${escH(r.Driver||'—')}</div>
             ${r.Tour_Code ? `<div style="font-size:10px;color:var(--t3);">코드: ${escH(r.Tour_Code)}</div>` : ''}
-            ${r._timeStart||r._timeEnd ? `<div style="font-size:10px;color:var(--t3);">${r._timeStart||''} → ${r._timeEnd||''}</div>` : ''}
+            ${r._timeStart||r._timeEnd ? `<div style="font-size:10px;color:var(--t3);">⏱ ${r._timeStart||''}${r._timeEnd?' ~ '+r._timeEnd:''}</div>` : ''}
+            ${pdStr}
+            <!-- 주차비 토글 버튼 -->
+            <div style="margin-top:6px;">
+              <button onclick="toggleParkingOverride('${escH(c._pkKey)}', ${c.autoParking||0}, '${escH(agency)}', '${from}', '${to}')"
+                style="${pkBtnStyle}">${pkBtnLabel}</button>${pkManualNote}
+            </div>
           </div>
           <div style="text-align:right;flex-shrink:0;margin-left:8px;">
             <div style="font-size:14px;font-weight:800;color:var(--gn);">$${c.total.toLocaleString()}</div>
-            ${c.earlyTA? `<div style="font-size:10px;color:var(--or);">+Early $${c.earlyTA}</div>` : ''}
-            ${c.ot    ? `<div style="font-size:10px;color:var(--or);">+OT $${c.ot}</div>` : ''}
-            ${c.hotel ? `<div style="font-size:10px;color:var(--ac);">+호텔 $${c.hotel}</div>` : ''}
+            ${c.earlyTA     ? `<div style="font-size:10px;color:var(--or);">+Early $${c.earlyTA}</div>` : ''}
+            ${c.ot          ? `<div style="font-size:10px;color:var(--or);">+OT $${c.ot}</div>` : ''}
+            ${c.hotel       ? `<div style="font-size:10px;color:var(--ac);">+호텔 $${c.hotel}</div>` : ''}
             ${c.dist        ? `<div style="font-size:10px;color:var(--ac);">+거리 $${c.dist}</div>` : ''}
             ${c.parkingFee  ? `<div style="font-size:10px;color:var(--or);">+공항주차 $${c.parkingFee}</div>` : ''}
             ${km            ? `<div style="font-size:10px;color:var(--t3);">${km}km</div>` : ''}
@@ -3259,7 +3283,21 @@ function renderInvPreview(rows, agency, from, to) {
   `;
 }
 
-// ═══════════════════════════════════════
+// ─────────────────────────────────────────
+// 행별 주차비 override 토글
+// ─────────────────────────────────────────
+function toggleParkingOverride(pkKey, autoParking, agency, from, to) {
+  const cur = localStorage.getItem(pkKey);
+  if      (cur === '1') localStorage.setItem(pkKey, '0');  // 강제 추가 → 강제 제외
+  else if (cur === '0') localStorage.removeItem(pkKey);    // 강제 제외 → 자동
+  else if (autoParking > 0) localStorage.setItem(pkKey, '0'); // 자동 있음 → 강제 제외
+  else                  localStorage.setItem(pkKey, '1');  // 자동 없음 → 강제 추가
+  // 미리보기 갱신
+  if (agency && from && to) {
+    const rows = _buildInvRows(agency, from, to);
+    renderInvPreview(rows, agency, from, to);
+  }
+}
 
 // ─────────────────────────────────────────
 // INVOICE 그룹 모드 & 이메일 발송
