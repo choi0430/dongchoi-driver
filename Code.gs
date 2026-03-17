@@ -529,7 +529,13 @@ function addMasterRow(sheetName, data) {
     const sheet = ensureSheet(ss, sheetName);
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
-    const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+    // 정확한 키 먼저, 없으면 정규화 키로 fallback
+    const normMap = buildNormMap(data);
+    const row = headers.map(h => {
+      if (data[h] !== undefined) return data[h];
+      const nk = normalizeKey(h);
+      return normMap[nk] !== undefined ? normMap[nk] : '';
+    });
     sheet.appendRow(row);
 
     return {ok: true, row: sheet.getLastRow()};
@@ -566,6 +572,18 @@ function addPriceClientAgency(agencyName, rows) {
   }
 }
 
+// 열 이름 정규화: 공백/하이픈 → 언더스코어, 소문자 변환
+function normalizeKey(k) {
+  return String(k).toLowerCase().replace(/[\s\-]+/g, '_');
+}
+
+// data 객체를 정규화 키로 조회하는 맵 생성
+function buildNormMap(data) {
+  const m = {};
+  Object.keys(data).forEach(k => { m[normalizeKey(k)] = data[k]; });
+  return m;
+}
+
 function updateMasterRow(sheetName, rowIndex, data) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -575,7 +593,13 @@ function updateMasterRow(sheetName, rowIndex, data) {
     const ri = parseInt(rowIndex);
     if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
 
-    const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+    // 정확한 키 먼저, 없으면 정규화 키로 fallback (공백↔언더스코어 불일치 허용)
+    const normMap = buildNormMap(data);
+    const row = headers.map(h => {
+      if (data[h] !== undefined) return data[h];
+      const nk = normalizeKey(h);
+      return normMap[nk] !== undefined ? normMap[nk] : '';
+    });
     sheet.getRange(ri, 1, 1, row.length).setValues([row]);
 
     return {ok: true};
