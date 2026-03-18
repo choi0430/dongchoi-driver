@@ -4644,6 +4644,9 @@ const DR_CACHE_TTL = 3 * 60 * 1000;
 
 async function loadDR(force=false){
   if(!force && _drCache && Date.now()-_drCacheTime < DR_CACHE_TTL){ renderDR(); return; }
+  // 로딩 인디케이터 표시
+  const listEl = document.getElementById('dr-list');
+  if(listEl) listEl.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);">⏳ 운행 리포트 불러오는 중...</div>';
   try{
     const res  = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
@@ -4653,8 +4656,14 @@ async function loadDR(force=false){
       _drCacheTime = Date.now();
       // _reportsCache도 동기화 (급여 계산용)
       _reportsCache = _drCache.map(r=>({ ...r, _isoDate: parseToISO(r.Date||'') }));
+    } else {
+      throw new Error(json.msg || json.error || '데이터를 받을 수 없습니다');
     }
-  }catch(e){ toast('리포트 로드 실패: '+e.message,'er'); }
+  }catch(e){
+    toast('리포트 로드 실패: '+e.message,'er');
+    if(listEl) listEl.innerHTML='<div style="text-align:center;padding:30px;color:var(--rd);font-size:13px;">❌ 리포트 로드 실패<br><span style="font-size:11px;color:var(--t3);">'+escH(e.message)+'</span><br><button class="btn bac sm" style="margin-top:10px;" onclick="loadDR(true)">🔄 다시 시도</button></div>';
+    return;
+  }
   renderDR();
 }
 
@@ -6571,6 +6580,16 @@ function openShiftPdfAdmin(r, type) {
       </div>
     </div>`;
 
+  // 서명 이미지 HTML
+  const sigHtml = r.Signature
+    ? sec('✍️ Driver Signature 드라이버 서명') +
+      `<div style="background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:10px;padding:14px 16px;text-align:center;">
+        <img src="${r.Signature}" style="max-height:90px;max-width:100%;object-fit:contain;" alt="Signature">
+        <div style="font-size:10px;color:#aaa;margin-top:6px;">서명일시: ${h(r.Submitted||fmtDate(r.Date)||'—')}</div>
+      </div>`
+    : sec('✍️ Driver Signature 드라이버 서명') +
+      `<div style="background:#f9fafb;border:1.5px dashed #d1d5db;border-radius:10px;padding:20px;text-align:center;color:#aaa;font-size:12px;">서명 데이터 없음 (이전 제출 건)</div>`;
+
   const body = isPre
     ? sec('🚦 Pre Departure 출발 전 점검') +
       row2f(field('날짜 Date', fmtDate(r.Date)||r.Date), field('차량 Rego', r.Rego)) +
@@ -6579,13 +6598,15 @@ function openShiftPdfAdmin(r, type) {
       field('출발 시간 Start Time', parseSheetTime(r.Start_Time)||r.Start_Time) +
       field('비고 Remarks', r.Remarks) +
       checksHtml +
-      preDeclHtml
+      preDeclHtml +
+      sigHtml
     : sec('🏁 End of Shift 운행 종료') +
       row2f(field('날짜 Date', fmtDate(r.Date)||r.Date), field('차량 Rego', r.Rego)) +
       row2f(field('드라이버 Driver', r.Driver), field('종료 KM End KM', r.End_KM)) +
       row2f(field('종료 시간 End Time', parseSheetTime(r.End_Time)||r.End_Time), field('연료 Fuel End', r.Fuel_End)) +
       field('비고 Remarks', r.Remarks) +
-      eosDeclHtml;
+      eosDeclHtml +
+      sigHtml;
 
   const html = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
