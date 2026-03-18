@@ -1704,6 +1704,16 @@ function loadMasterCache() {
 
 function applyMasterData(data) {
   MASTER.drivers     = (data.M_Drivers   || []);
+  // ★ GAS 드라이버 목록을 localStorage에 캐시 (오프라인 폴백용)
+  try {
+    if(MASTER.drivers.length > 0) {
+      localStorage.setItem('dc_drivers', JSON.stringify(MASTER.drivers.map(d=>({
+        name: d.Name_KR||'', Name_KR: d.Name_KR||'', Name_EN: d.Name_EN||'',
+        initials: d.Initials||'', Initials: d.Initials||'',
+        phone: d.Phone||'', Phone: d.Phone||'', pin: d.PIN||'1234', PIN: d.PIN||'1234'
+      }))));
+    }
+  } catch(e) {}
   MASTER.guides      = (data.M_Guides    || []);
   MASTER.vehicles    = (data.M_Vehicles  || []).map(v=>({...v, Transmission: v.Transmission||'Auto'}));
   // 여행사 목록 = M_Clients + M_PriceClient Agency 합집합
@@ -1819,7 +1829,16 @@ function fixPhone(p) {
 }
 
 function useFallbackMaster() {
-  MASTER.drivers = CONTACTS.filter(c=>c.type==='driver').map(c=>({Name_KR:c.name,Name_EN:c.name,Initials:c.initials,Phone:c.phone,PIN:'1234',Active:'Y'}));
+  // ★ 드라이버는 하드코딩 CONTACTS를 사용하지 않음 — GAS M_Drivers가 유일한 소스
+  // localStorage 캐시가 있으면 그것을 사용, 없으면 빈 배열 유지
+  if(MASTER.drivers.length === 0) {
+    try {
+      const cached = JSON.parse(localStorage.getItem('dc_drivers') || '[]');
+      if(cached.length > 0) {
+        MASTER.drivers = cached.map(c=>({Name_KR:c.name||c.Name_KR||'',Name_EN:c.Name_EN||'',Initials:c.initials||c.Initials||'',Phone:c.phone||c.Phone||'',PIN:c.pin||c.PIN||'1234',Active:'Y'}));
+      }
+    } catch(e) {}
+  }
   MASTER.guides  = CONTACTS.filter(c=>c.type==='guide').map(c=>({Name:c.name,Initials:c.initials,Phone:c.phone,Type:'프리랜서',Active:'Y'}));
 }
 
@@ -1889,13 +1908,8 @@ function rebuildDriverList() {
   if(MASTER.drivers.length === 0) return;
   const loginList = document.getElementById('driver-list');
   if(!loginList) return;
-  const storedDrivers = JSON.parse(localStorage.getItem('dc_drivers') || '[]');
-  const allDrivers = [...MASTER.drivers];
-  storedDrivers.forEach(sd => {
-    if(!allDrivers.find(d => d.Initials === sd.initials)) {
-      allDrivers.push({Name_KR:sd.name,Initials:sd.initials,Phone:sd.phone,PIN:sd.pin||'1234',Active:'Y'});
-    }
-  });
+  // ★ GAS M_Drivers만 사용 (Active='Y'인 드라이버만 표시)
+  const allDrivers = MASTER.drivers.filter(d => !d.Active || d.Active.toUpperCase() === 'Y');
   loginList.innerHTML = allDrivers.map(d => {
     const dispName = d.Name_KR || d.Name_EN || d.Initials;
     const colors = ['#d97706','#1a56db','#0e9f6e','#7e3af2','#e02424'];
@@ -2526,16 +2540,13 @@ function buildLoginSelect() {
   if (!sel) return;
   sel.innerHTML = '<option value="" style="background:#1e293b">— 선택하세요 —</option>';
 
-  // 1) 기본 CONTACTS 드라이버 (driver 또는 driver-guide 타입)
-  let driverList = CONTACTS.filter(c => c.type === 'driver' || c.type === 'driver-guide').map(d => {
-    const nameKr = d.name.includes('(') ? d.name.split('(')[0].trim() : d.name;
-    const nameEn = d.name.includes('(') ? d.name.split('(')[1].replace(')','').trim() : d.name;
-    return { nameKr, nameEn, initials: d.initials, display: d.name };
-  });
+  // ★ GAS M_Drivers를 단일 소스로 사용 (하드코딩 CONTACTS 드라이버 제거)
+  let driverList = [];
 
-  // 2) Google Sheets M_Drivers 병합 (로그인 후 MASTER에 로드된 경우)
+  // 1) Google Sheets M_Drivers (관리자 앱에서 관리하는 공식 드라이버 목록)
   try {
     (MASTER.drivers || []).forEach(d => {
+      if(d.Active && d.Active.toUpperCase() !== 'Y') return; // 비활성 드라이버 제외
       const nameKr = d.Name_KR || d.Name_EN || '';
       const nameEn = d.Name_EN || '';
       const display = nameKr ? nameKr + ' (' + nameEn + ')' : nameEn;
@@ -2546,20 +2557,21 @@ function buildLoginSelect() {
     });
   } catch(e) {}
 
-  // 3) Admin 앱에서 추가된 드라이버(localStorage) 병합
-  try {
-    const extra = JSON.parse(localStorage.getItem('dc_drivers') || '[]');
-    extra.forEach(d => {
-      const nameKr = d.Name_KR || d.Name_EN || '';
-      const nameEn = d.Name_EN || '';
-      const display = nameKr ? nameKr + ' (' + nameEn + ')' : nameEn;
-      const initials = nameEn.trim().split(' ').filter(Boolean).map(w=>w[0]).join('').toUpperCase().slice(0,2) || '??';
-      // 중복 제거
-      if (!driverList.find(x => x.nameKr === nameKr)) {
-        driverList.push({ nameKr, nameEn, initials, display });
-      }
-    });
-  } catch(e) {}
+  // 2) MASTER가 아직 로드되지 않은 경우 localStorage 캐시 사용 (임시 폴백)
+  if(driverList.length === 0) {
+    try {
+      const extra = JSON.parse(localStorage.getItem('dc_drivers') || '[]');
+      extra.forEach(d => {
+        const nameKr = d.Name_KR || d.name || d.Name_EN || '';
+        const nameEn = d.Name_EN || '';
+        const display = nameKr ? nameKr + (nameEn ? ' (' + nameEn + ')' : '') : nameEn;
+        const initials = d.initials || d.Initials || nameEn.trim().split(' ').filter(Boolean).map(w=>w[0]).join('').toUpperCase().slice(0,2) || '??';
+        if (!driverList.find(x => x.nameKr === nameKr)) {
+          driverList.push({ nameKr, nameEn, initials, display });
+        }
+      });
+    } catch(e) {}
+  }
 
   driverList.forEach(d => {
     const opt = document.createElement('option');
@@ -7143,7 +7155,17 @@ async function syncMaster(){
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_all_masters',{signal:controller.signal});
     const json = await res.json();
     if(json.ok){
-      if(json.drivers)  MASTER.drivers  = json.drivers;
+      if(json.drivers) {
+        MASTER.drivers = json.drivers;
+        rebuildDriverList();
+        buildLoginSelect();
+        // localStorage 캐시 갱신
+        try { localStorage.setItem('dc_drivers', JSON.stringify(MASTER.drivers.map(d=>({
+          name:d.Name_KR||'',Name_KR:d.Name_KR||'',Name_EN:d.Name_EN||'',
+          initials:d.Initials||'',Initials:d.Initials||'',
+          phone:d.Phone||'',Phone:d.Phone||'',pin:d.PIN||'1234',PIN:d.PIN||'1234'
+        })))); } catch(e) {}
+      }
       if(json.vehicles) MASTER.vehicles = json.vehicles.map(v=>({...v,Transmission:v.Transmission||'Auto'}));
       if(json.agencies) MASTER.agencies = json.agencies;
       if(json.courses)  MASTER.courses  = json.courses;
