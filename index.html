@@ -458,7 +458,13 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
       <div class="card-head"><span class="card-title">🔑 Pre Departure</span><span class="pill pill-blue">출발 전</span></div>
       <div class="card-body">
         <div class="form-row mb14">
-          <div class="form-group"><label class="form-label">날짜<span class="req">*</span></label><input type="text" class="form-input" id="pre-date" placeholder="dd/mm/yyyy"></div>
+          <div class="form-group"><label class="form-label">날짜<span class="req">*</span></label>
+            <div style="display:flex;gap:6px;align-items:center;position:relative;">
+              <input type="text" class="form-input" id="pre-date" placeholder="dd/mm/yyyy" style="flex:1;">
+              <button type="button" onclick="openDatePicker('pre-date')" title="날짜 선택" style="padding:0 11px;height:44px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:17px;cursor:pointer;flex-shrink:0;">📅</button>
+              <input type="date" id="pre-date-native" style="position:absolute;right:0;top:0;width:44px;height:44px;opacity:0;pointer-events:none;" onchange="setDateFromPicker('pre-date-native','pre-date')">
+            </div>
+          </div>
           <div class="form-group"><label class="form-label">출발 시간</label><input type="time" class="form-input" id="pre-time"></div>
         </div>
         <div class="form-row mb14">
@@ -543,7 +549,11 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
           </div>
           <div class="form-group">
             <label class="form-label">날짜</label>
-            <input type="text" class="form-input" id="dr-date" placeholder="dd/mm/yyyy">
+            <div style="display:flex;gap:6px;align-items:center;position:relative;">
+              <input type="text" class="form-input" id="dr-date" placeholder="dd/mm/yyyy" style="flex:1;">
+              <button type="button" onclick="openDatePicker('dr-date')" title="날짜 선택" style="padding:0 11px;height:44px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:17px;cursor:pointer;flex-shrink:0;">📅</button>
+              <input type="date" id="dr-date-native" style="position:absolute;right:0;top:0;width:44px;height:44px;opacity:0;pointer-events:none;" onchange="setDateFromPicker('dr-date-native','dr-date')">
+            </div>
           </div>
         </div>
         <div class="form-row mb14">
@@ -808,7 +818,11 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
         <div class="form-row mb14">
           <div class="form-group">
             <label class="form-label">날짜 <span style="font-size:10px;color:var(--accent);font-weight:600;">Pre Departure 기준</span></label>
-            <input type="text" class="form-input" id="end-date" placeholder="dd/mm/yyyy">
+            <div style="display:flex;gap:6px;align-items:center;position:relative;">
+              <input type="text" class="form-input" id="end-date" placeholder="dd/mm/yyyy" style="flex:1;">
+              <button type="button" onclick="openDatePicker('end-date')" title="날짜 선택" style="padding:0 11px;height:44px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:17px;cursor:pointer;flex-shrink:0;">📅</button>
+              <input type="date" id="end-date-native" style="position:absolute;right:0;top:0;width:44px;height:44px;opacity:0;pointer-events:none;" onchange="setDateFromPicker('end-date-native','end-date')">
+            </div>
           </div>
           <div class="form-group"><label class="form-label">종료 시간</label><input type="time" class="form-input" id="end-time"></div>
         </div>
@@ -1618,6 +1632,35 @@ function todayDisplay() {
   const n = new Date();
   return String(n.getDate()).padStart(2,'0') + '/' +
     String(n.getMonth()+1).padStart(2,'0') + '/' + n.getFullYear();
+}
+
+// ── 날짜 피커 헬퍼 (과거 날짜 포함 선택 가능) ─────────────────────────
+// dd/mm/yyyy ↔ YYYY-MM-DD 변환
+function _ddmmToISO(ddmm) {
+  if(!ddmm) return '';
+  const p = ddmm.trim().split('/');
+  if(p.length===3) return p[2]+'-'+p[1]+'-'+p[0];
+  return '';
+}
+// 📅 버튼 클릭 → 네이티브 date picker 열기
+function openDatePicker(textId) {
+  const nativeEl = document.getElementById(textId + '-native');
+  if(!nativeEl) return;
+  // 현재 텍스트 값(dd/mm/yyyy)을 네이티브 피커에 동기화
+  const cur = document.getElementById(textId)?.value || '';
+  const iso = _ddmmToISO(cur);
+  if(iso) nativeEl.value = iso;
+  nativeEl.style.pointerEvents = 'auto';
+  nativeEl.focus();
+  try { nativeEl.showPicker(); } catch(e) { nativeEl.click(); }
+  nativeEl.style.pointerEvents = 'none';
+}
+// 날짜 피커 변경 → 텍스트 인풋에 dd/mm/yyyy 형식으로 반영
+function setDateFromPicker(nativeId, textId) {
+  const v = document.getElementById(nativeId)?.value; // YYYY-MM-DD
+  if(!v) return;
+  const [y, m, d] = v.split('-');
+  document.getElementById(textId).value = d+'/'+m+'/'+y;
 }
 
 // ── 마스터 데이터 로드 (Google Sheets) ──
@@ -3104,6 +3147,16 @@ document.getElementById('today-label').textContent = new Date().toLocaleDateStri
 document.getElementById('pre-date').value = todayDisplay();
   loadMasterData(); // Google Sheets 마스터 데이터 로드
 document.getElementById('dr-date').value = todayDisplay();
+// 네이티브 date picker 초기값 세팅 (오늘 날짜, YYYY-MM-DD)
+(function(){
+  const todayISO = (()=>{
+    const n=new Date();
+    return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
+  })();
+  ['pre-date-native','dr-date-native','end-date-native'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value=todayISO;
+  });
+})();
 
 initChecks();
 renderShiftSection();
@@ -3354,10 +3407,12 @@ async function completePre(){
   if(isSigEmpty('pre-sig-canvas')){showToast('✏️ 드라이버 서명을 해주세요. Driver signature required.','error');return;}
 
   // ── 차량 중복 운행 체크 ──
-  // 1) 같은 드라이버가 이미 해당 차량으로 운행 중인지 (로컬 체크)
-  const alreadyMine = activeShifts.some(s => s.rego === rego);
+  // 1) 같은 드라이버가 이미 해당 날짜·차량으로 운행 중인지 (로컬 체크)
+  // 과거 날짜로 입력할 때는 날짜가 다르면 허용
+  const selectedDate = document.getElementById('pre-date')?.value || todayDisplay();
+  const alreadyMine = activeShifts.some(s => s.rego === rego && s.date === selectedDate);
   if(alreadyMine){
-    const myShift = activeShifts.find(s => s.rego === rego);
+    const myShift = activeShifts.find(s => s.rego === rego && s.date === selectedDate);
     showLockedVehicleModal(rego, {driver: currentDriver?.name||'나', date: myShift?.date||'', startTime: myShift?.startTime||''});
     return;
   }
