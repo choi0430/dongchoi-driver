@@ -1209,6 +1209,7 @@ let _adminReady = false; // 데이터 준비 완료 플래그
 
 function doAdminLogout(){
   localStorage.removeItem('dc_admin_session');
+  sessionStorage.removeItem('adminAuthenticated');
   ST.pin=''; if(typeof upP==='function') upP();
   document.getElementById('sm').classList.remove('on');
   document.getElementById('sl').classList.add('on');
@@ -1677,7 +1678,10 @@ function deleteDefect(id){
 // VEHICLE
 // ═══════════════════════════════════════
 async function rV(q=''){
-  if(!q){await syncVehicles();}
+  if(!q){
+    document.getElementById('vlist').innerHTML='<div style="text-align:center;padding:24px;color:var(--t3)">⏳ 불러오는 중...</div>';
+    await syncVehicles();
+  }
   const list=DB.V.filter(v=>!q||v.Rego?.toLowerCase().includes(q.toLowerCase())||v.Make?.toLowerCase().includes(q.toLowerCase()));
   document.getElementById('vcnt').textContent=`총 ${DB.V.length}대 · 표시 ${list.length}`;
   document.getElementById('vlist').innerHTML=list.map(v=>{
@@ -1696,7 +1700,10 @@ async function rV(q=''){
 // DRIVER
 // ═══════════════════════════════════════
 async function rD(q=''){
-  if(!q){await syncDrivers();}
+  if(!q){
+    document.getElementById('dlist').innerHTML='<div style="text-align:center;padding:24px;color:var(--t3)">⏳ 불러오는 중...</div>';
+    await syncDrivers();
+  }
   const list=DB.D.filter(d=>!q||d.Name_EN?.toLowerCase().includes(q.toLowerCase())||(d.Name_KR&&d.Name_KR.includes(q)));
   document.getElementById('dcnt').textContent=`총 ${DB.D.length}명 · 표시 ${list.length}`;
   document.getElementById('dlist').innerHTML=list.map(d=>{
@@ -1715,7 +1722,10 @@ async function rD(q=''){
 // CLIENT
 // ═══════════════════════════════════════
 async function rC(q=''){
-  if(!q){await syncClients();}
+  if(!q){
+    document.getElementById('clist').innerHTML='<div style="text-align:center;padding:24px;color:var(--t3)">⏳ 불러오는 중...</div>';
+    await syncClients();
+  }
   const list=DB.C.filter(c=>!q||c.Name?.toLowerCase().includes(q.toLowerCase()));
   document.getElementById('ccnt').textContent=`총 ${DB.C.length}개사`;
   document.getElementById('clist').innerHTML=list.map(c=>{
@@ -6047,8 +6057,8 @@ function renderShiftTab() {
     const tab = _shiftCurrentTab;
     const dateStr = fmtDate(r.Date)||r.Date||'—';
     const detail = isPre
-      ? `출발 ${r.Start_Time||'—'} · KM ${r.Start_KM||'—'} · 연료 ${r.Fuel||'—'}`
-      : `종료 ${r.End_Time||'—'} · KM ${r.End_KM||'—'} · 연료 ${r.Fuel_End||'—'}`;
+      ? `출발 ${parseSheetTime(r.Start_Time)||'—'} · KM ${r.Start_KM||'—'} · 연료 ${r.Fuel||'—'}`
+      : `종료 ${parseSheetTime(r.End_Time)||'—'} · KM ${r.End_KM||'—'} · 연료 ${r.Fuel_End||'—'}`;
     return `<div class="crd" style="margin-bottom:10px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
@@ -6153,14 +6163,14 @@ function openShiftPdfAdmin(r, type) {
       row2f(field('날짜 Date', fmtDate(r.Date)||r.Date), field('차량 Rego', r.Rego)) +
       row2f(field('드라이버 Driver', r.Driver), field('좌석 수 Seats', r.Seats)) +
       row2f(field('출발 KM Start KM', r.Start_KM), field('연료 Fuel', r.Fuel)) +
-      field('출발 시간 Start Time', r.Start_Time) +
+      field('출발 시간 Start Time', parseSheetTime(r.Start_Time)||r.Start_Time) +
       field('비고 Remarks', r.Remarks) +
       checksHtml +
       preDeclHtml
     : sec('🏁 End of Shift 운행 종료') +
       row2f(field('날짜 Date', fmtDate(r.Date)||r.Date), field('차량 Rego', r.Rego)) +
       row2f(field('드라이버 Driver', r.Driver), field('종료 KM End KM', r.End_KM)) +
-      row2f(field('종료 시간 End Time', r.End_Time), field('연료 Fuel End', r.Fuel_End)) +
+      row2f(field('종료 시간 End Time', parseSheetTime(r.End_Time)||r.End_Time), field('연료 Fuel End', r.Fuel_End)) +
       field('비고 Remarks', r.Remarks) +
       eosDeclHtml;
 
@@ -6245,6 +6255,8 @@ async function saveShiftEdit() {
   const isPre = _shiftEditType === 'pre';
   const rowIndex = _shiftEditRow._rowIndex;
   const g = id => document.getElementById(id)?.value||'';
+  const _saveBtn = document.querySelector('#shift-edit-modal button[onclick="saveShiftEdit()"]');
+  if(_saveBtn){ _saveBtn.disabled=true; _saveBtn.textContent='⏳ 저장 중...'; }
 
   const data = isPre
     ? { Submitted: _shiftEditRow.Submitted||'', Driver: g('se-driver'), Date: g('se-date'),
@@ -6270,7 +6282,10 @@ async function saveShiftEdit() {
     closeShiftEdit();
     renderShiftTab();
     toast('✅ 저장 완료','ok');
-  } catch(e) { toast('❌ 저장 실패: '+e.message,'er'); }
+  } catch(e) {
+    toast('❌ 저장 실패: '+e.message,'er');
+    if(_saveBtn){ _saveBtn.disabled=false; _saveBtn.textContent='💾 저장'; }
+  }
 }
 
 // ── 삭제 ──

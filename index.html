@@ -3050,6 +3050,9 @@ async function submitMotReport() {
     return;
   }
   if (!rego) { alert('차량 번호(Rego)를 입력하세요.'); return; }
+  const _motBtn = document.querySelector('button[onclick="submitMotReport()"]');
+  if(_motBtn){ _motBtn.disabled=true; _motBtn.textContent='⏳ 제출 중...'; }
+  try {
 
   const driverChecks  = getMotChecks(MOT_DRIVER_CHECKS);
   const vehicleChecks = getMotChecks(MOT_VEHICLE_CHECKS);
@@ -3106,6 +3109,9 @@ async function submitMotReport() {
     grounded:'🚫 운행 정지', infringement:'💳 인프링먼트'
   }[result]||result;
   alert(`✅ MOT 검사 기록이 저장되었습니다.\n결과: ${resultLabel}${failedItems.length>0?'\n⚠️ NO 항목: '+failedItems.length+'건':''}`);
+  } finally {
+    if(_motBtn){ _motBtn.disabled=false; _motBtn.textContent='📤 MOT 검사 기록 제출'; }
+  }
 }
 
 function renderMotHistory() {
@@ -3639,6 +3645,8 @@ function submitDailyReport(){
   const att = document.getElementById('dr-attraction').value;
   if(!agency){ showToast('⚠️ 여행사를 입력하세요','error'); return; }
   if(!att){ showToast('⚠️ 관광지를 선택하세요','error'); return; }
+  const _drBtn = document.querySelector('button[onclick="submitDailyReport()"]');
+  if(_drBtn){ _drBtn.disabled=true; _drBtn.textContent='⏳ 저장 중...'; }
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(!shift){ showToast('⚠️ Pre Departure를 먼저 완료하세요','error'); return; }
   if(!editingShiftId){ showToast('⚠️ editingShiftId 없음','error'); return; }
@@ -4009,6 +4017,8 @@ const SHEET_URL = APPS_SCRIPT_URL; // alias
 function submitEndShift(){
   const km = document.getElementById('end-km').value;
   if(!km){showToast('종료 KM을 입력하세요. End KM required.','error');return;}
+  const _eosBtn = document.querySelector('button[onclick="submitEndShift()"]');
+  if(_eosBtn){ _eosBtn.disabled=true; _eosBtn.textContent='⏳ 완료 중...'; }
   // Passenger & lost property check
   if(!document.getElementById('eos-pax-check').checked){showToast('🚌 승객 탑승 여부를 확인하세요. Passenger check required.','error');return;}
   if(!document.getElementById('eos-lost-check').checked){showToast('🔍 분실물 확인을 완료하세요. Lost property check required.','error');return;}
@@ -6315,6 +6325,8 @@ function submitDefectReport(){
 
   if(!rego){ showToast('차량을 선택하세요','error'); return; }
   if(!desc){ showToast('결함 내용을 입력하세요','error'); return; }
+  const _defBtn = document.querySelector('button[onclick="submitDefectReport()"]');
+  if(_defBtn){ _defBtn.disabled=true; _defBtn.textContent='⏳ 제출 중...'; }
 
   const shift = JSON.parse(localStorage.getItem('currentShift')||'{}');
   const driver = shift.driverName || localStorage.getItem('driverName') || '';
@@ -6344,6 +6356,7 @@ function submitDefectReport(){
 
   const sev = {low:'🟢 낮음', medium:'🟡 중간', high:'🔴 높음'}[severity]||'';
   showToast(`⚠️ 결함 리포트 제출 완료 (${sev})`,'success');
+  if(_defBtn){ _defBtn.disabled=false; _defBtn.textContent='📤 결함 리포트 제출'; }
 }
 
 function renderMyDefects(){
@@ -8060,7 +8073,10 @@ function renderMyPastShifts() {
   all = all.slice(0, 30);
 
   if (headEl) headEl.style.display = all.length ? 'flex' : 'none';
-  if (!all.length) { listEl.innerHTML = ''; return; }
+  if (!all.length) {
+    listEl.innerHTML = '<div style="text-align:center;padding:24px 12px;color:#9ca3af;font-size:13px;">📋 기록이 없습니다</div>';
+    return;
+  }
 
   listEl.innerHTML = all.map(r=>{
     const isPre = r._type === 'pre';
@@ -8070,8 +8086,8 @@ function renderMyPastShifts() {
       ? `<span style="background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;">🚦 Pre Departure</span>`
       : `<span style="background:#f0fdf4;color:#15803d;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;">🏁 End of Shift</span>`;
     const sub = isPre
-      ? `출발 ${r.Start_Time||'—'} · KM ${r.Start_KM||'—'}`
-      : `종료 ${r.End_Time||'—'} · KM ${r.End_KM||'—'}`;
+      ? `출발 ${parseSheetTime(r.Start_Time)||'—'} · KM ${r.Start_KM||'—'}`
+      : `종료 ${parseSheetTime(r.End_Time)||'—'} · KM ${r.End_KM||'—'}`;
     return `<div style="background:white;border-radius:12px;padding:12px;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
