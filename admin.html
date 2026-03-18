@@ -664,7 +664,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 <div class="pg" id="pdr">
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">📋 운행 리포트</div><div class="ssb">Daily Report 조회·수정·삭제</div></div>
-    <button class="btn bgh sm" onclick="loadDR(true)">🔄 새로고침</button>
+    <div style="display:flex;gap:6px;">
+      <button class="btn bgh sm" onclick="exportDrCsv()" title="현재 필터 기준 CSV 내보내기">📥 CSV</button>
+      <button class="btn bgh sm" onclick="loadDR(true)">🔄 새로고침</button>
+    </div>
   </div>
   <!-- 필터 -->
   <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
@@ -833,6 +836,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">💵 드라이버 급여</div><div class="ssb">지급 기록 관리</div></div>
     <div style="display:flex;gap:6px;">
+      <button class="btn bgh sm" onclick="exportWageCsv()" title="급여 전체 CSV 내보내기">📥 CSV</button>
       <button class="btn bgh sm" onclick="syncWagesNow()" title="구글 시트와 동기화">🔄 동기화</button>
       <button class="btn bac sm" onclick="openWageEntry(null)">+ 지급 추가</button>
     </div>
@@ -3622,16 +3626,104 @@ ${(DC_COMPANY.bank || localStorage.getItem('dc_bank')) ? `
   win.document.close();
 }
 
-// ─── 이메일 발송 ───
-function emailInvoice() {
+// ═══════════════════════════════════════
+// UTILITY: CSV EXPORT
+// ═══════════════════════════════════════
+
+/** 현재 로그인한 관리자 계정명 */
+function getAdminUser() {
+  return localStorage.getItem('dc_admin_session') || 'admin';
+}
+
+/**
+ * CSV 문자열을 파일로 다운로드
+ * @param {string} filename - 파일명 (예: "DR_Export_10-03-2026.csv")
+ * @param {string} csvStr   - CSV 내용 (UTF-8)
+ */
+function downloadCsv(filename, csvStr) {
+  const blob = new Blob(['\uFEFF' + csvStr], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+/** Daily Report 목록 → CSV 내보내기 (현재 필터 적용) */
+function exportDrCsv() {
+  const rows = _drCache || [];
+  if (!rows.length) { toast('내보낼 리포트가 없습니다', 'er'); return; }
+
+  // renderDR()과 동일한 필터 적용
+  const fd = (document.getElementById('dr-filter-driver')?.value||'').trim();
+  const fw = (document.getElementById('dr-filter-week')?.value||'').trim();
+  const fr = (document.getElementById('dr-filter-rego')?.value||'').trim();
+  let filtered = [...rows];
+  if (fd) filtered = filtered.filter(r => r.Driver === fd);
+  if (fr) filtered = filtered.filter(r => r.Rego === fr);
+  if (fw) {
+    filtered = filtered.filter(r => {
+      const iso = r._isoDate || parseToISO(r.Date || '');
+      return iso && iso.startsWith(fw.slice(0,7).replace('/','-'));
+    });
+  }
+
+  const headers = ['Submitted','Driver','Date','Rego','Seats','Agency','Attraction','Pickup','Dropoff',
+    'KM_Start','KM_End','Time_Start','Time_End','Guide','Tour_Code',
+    'SVC_Label','SVC_Charge','Hotel_Surcharge','Dist_Surcharge',
+    'OT','Trailer','Total_TA','DR_Cost','Toll','Toll_Personal',
+    'Fuel','Fuel_Personal','Early','Night_Type','Night_DR','Night_Owner',
+    'Wash','Meal','Tip','Etc','Remarks'];
+
+  const csvQ = v => `"${String(v||'').replace(/"/g,'""')}"`;
+  const csvRows = [headers.map(csvQ).join(',')];
+  filtered.forEach(r => {
+    csvRows.push(headers.map(h => csvQ(r[h]||'')).join(','));
+  });
+
+  const today = fmtDate(new Date().toISOString().slice(0,10))||'export';
+  downloadCsv(`DR_Export_${today.replace(/\//g,'-')}.csv`, csvRows.join('\r\n'));
+  toast(`📥 ${filtered.length}건 CSV 내보내기 완료`, 'ok');
+}
+
+/** 급여(Wages) 전체 → CSV 내보내기 */
+function exportWageCsv() {
+  const wages = getWages();
+  const allEntries = [];
+  Object.entries(wages).forEach(([drv, weeks]) => {
+    Object.entries(weeks).forEach(([ws, wk]) => {
+      (wk.entries || []).forEach(e => {
+        allEntries.push({
+          Driver: drv, WeekStart: ws,
+          Date: e.date || '', Amount: e.amount || 0,
+          PayMethod: e.method || '현금', Notes: e.note || ''
+        });
+      });
+    });
+  });
+
+  if (!allEntries.length) { toast('내보낼 급여 기록이 없습니다', 'er'); return; }
+  allEntries.sort((a,b) => (a.Driver+a.WeekStart+a.Date).localeCompare(b.Driver+b.WeekStart+b.Date));
+
+  const headers = ['Driver','WeekStart','Date','Amount','PayMethod','Notes'];
+  const csvQ = v => `"${String(v||'').replace(/"/g,'""')}"`;
+  const csvRows = [headers.map(csvQ).join(',')];
+  allEntries.forEach(r => csvRows.push(headers.map(h => csvQ(r[h]||'')).join(',')));
+
+  const today = fmtDate(new Date().toISOString().slice(0,10))||'export';
+  downloadCsv(`Wages_Export_${today.replace(/\//g,'-')}.csv`, csvRows.join('\r\n'));
+  toast(`📥 ${allEntries.length}건 급여 CSV 내보내기 완료`, 'ok');
+}
+
+// ─── 이메일 발송 (GAS MailApp) ───
+async function emailInvoice() {
   const agency = document.getElementById('inv-agency')?.value;
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
 
-  const client   = DB.C.find(c => c.Name === agency) || {};
-  const toEmail  = client.Email || '';
-  const invNum   = getInvNum(agency, from);
+  const client = DB.C.find(c => c.Name === agency) || {};
+  let toEmail  = (client.Email || '').trim();
+  const invNum = getInvNum(agency, from);
 
   const rows = _buildInvRows(agency, from, to);
   let grandTotal = 0;
@@ -3639,11 +3731,16 @@ function emailInvoice() {
 
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
 
-  const subject = encodeURIComponent(`Tax Invoice ${invNum} — ${agency} (${fd(from)} – ${fd(to)})`);
-  const body = encodeURIComponent(
+  if (!toEmail) {
+    toEmail = (prompt(`${agency}의 이메일 주소를 입력하세요:\n(여행사 정보에 이메일을 등록하면 자동으로 불러옵니다)`, '') || '').trim();
+    if (!toEmail) return;
+  }
+
+  const subject = `Tax Invoice ${invNum} — ${agency} (${fd(from)} – ${fd(to)})`;
+  const body =
     `Dear ${agency},\n\n` +
     `Please find enclosed Tax Invoice ${invNum} for services provided during ${fd(from)} – ${fd(to)}.\n\n` +
-    `Invoice Total: $${grandTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})} (incl. GST)\n` +
+    `Invoice Total: $${grandTotal.toLocaleString('en-AU', {minimumFractionDigits:2, maximumFractionDigits:2})} (incl. GST)\n` +
     `Due Date: 14 days from invoice date\n` +
     `Reference: ${invNum}\n\n` +
     `Bank: ${DC_COMPANY.bank||''}\n` +
@@ -3651,17 +3748,39 @@ function emailInvoice() {
     `Account: ${DC_COMPANY.acc||''}\n` +
     `Account Name: ${DC_COMPANY.accname||DC_COMPANY.name||''}\n\n` +
     `Please don't hesitate to contact us if you have any queries.\n\n` +
-    `Kind regards,\n${DC_COMPANY.name||'Dong Choi Pty Ltd'}\n${DC_COMPANY.phone||''}\n${DC_COMPANY.email||''}`
-  );
+    `Kind regards,\n${DC_COMPANY.name||'Dong Choi Pty Ltd'}\n${DC_COMPANY.phone||''}\n${DC_COMPANY.email||''}`;
 
-  if (!toEmail) {
-    // 이메일 없으면 입력 프롬프트
-    const entered = prompt(`${agency}의 이메일 주소를 입력하세요:\n(여행사 정보에서 이메일을 등록하면 자동으로 불러옵니다)`, '');
-    if (!entered) return;
-    window.open(`mailto:${encodeURIComponent(entered)}?subject=${subject}&body=${body}`, '_blank');
-  } else {
-    window.open(`mailto:${encodeURIComponent(toEmail)}?subject=${subject}&body=${body}`, '_blank');
-    toast(`✉️ ${toEmail} 로 이메일 클라이언트 실행됨`, 'ok');
+  const emailBtn = document.querySelector('button[onclick="emailInvoice()"]');
+  if (emailBtn) { emailBtn.disabled = true; emailBtn.textContent = '⏳ 발송 중...'; }
+
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action:     'send_invoice_email',
+        to:         toEmail,
+        subject,
+        body,
+        senderName: DC_COMPANY.name || 'Dong Choi Pty Ltd',
+        _user:      getAdminUser()
+      })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json.ok) {
+      toast(`✉️ ${toEmail} 으로 인보이스 발송 완료`, 'ok');
+    } else {
+      throw new Error(json.error || '발송 실패');
+    }
+  } catch (e) {
+    // GAS 실패 시 mailto 폴백
+    toast(`⚠️ GAS 발송 실패 — 이메일 클라이언트로 대신 열기: ${e.message}`, 'er');
+    const s = encodeURIComponent(subject);
+    const b = encodeURIComponent(body);
+    window.open(`mailto:${encodeURIComponent(toEmail)}?subject=${s}&body=${b}`, '_blank');
+  } finally {
+    if (emailBtn) { emailBtn.disabled = false; emailBtn.textContent = '✉️ 이메일 발송'; }
   }
 }
 
@@ -4522,7 +4641,7 @@ async function saveDREdit(){
 
   try{
     const res  = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'update_report', sheet:'Daily_Report', rowIndex, data:sendData})});
+      body:JSON.stringify({action:'update_report', sheet:'Daily_Report', rowIndex, data:sendData, _user:getAdminUser()})});
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok) throw new Error(json.error||json.msg||'저장 실패');
@@ -4546,7 +4665,7 @@ async function deleteDR(rowIndex){
 
   try{
     const res  = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'delete_report', sheet:'Daily_Report', rowIndex})});
+      body:JSON.stringify({action:'delete_report', sheet:'Daily_Report', rowIndex, _user:getAdminUser()})});
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok) throw new Error(json.error||json.msg||'삭제 실패');
@@ -5913,7 +6032,7 @@ async function apiSaveMaster(sheetName, obj, isEdit, idx){
     toast((isEdit?'수정':'추가')+' 완료 ✓','ok');
 
     const action = isEdit ? 'update_master' : 'add_master';
-    const body = {action, sheet:sheetName, data:obj};
+    const body = {action, sheet:sheetName, data:obj, _user:getAdminUser()};
     if(isEdit) {
       // GAS에서 받은 _rowIndex를 우선 사용 (시트에 빈 행 있어도 정확)
       const sheetMap={M_Vehicles:'V',M_Drivers:'D',M_Clients:'C',M_Guides:'G',M_Hotels:'H'};
@@ -5935,7 +6054,7 @@ async function apiDeleteMaster(sheetName, rowIndex){
     await fetch(APPS_SCRIPT_URL, {
       method:'POST',
       headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'delete_master', sheet:sheetName, rowIndex})
+      body:JSON.stringify({action:'delete_master', sheet:sheetName, rowIndex, _user:getAdminUser()})
     });
   } catch(e){ console.error('apiDeleteMaster error:', e); }
 }
@@ -6270,7 +6389,7 @@ async function saveShiftEdit() {
   const sheet = isPre ? 'Pre_Departure' : 'End_of_Shift';
   try {
     const res  = await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
-      body: JSON.stringify({action:'update_report', sheet, rowIndex, data}) });
+      body: JSON.stringify({action:'update_report', sheet, rowIndex, data, _user:getAdminUser()}) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (!json.ok) throw new Error(json.error||json.msg||'저장 실패');
@@ -6299,7 +6418,7 @@ async function deleteShiftReport(rowIndex, type) {
   const sheet = type==='pre' ? 'Pre_Departure' : 'End_of_Shift';
   try {
     const res  = await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
-      body: JSON.stringify({action:'delete_report', sheet, rowIndex}) });
+      body: JSON.stringify({action:'delete_report', sheet, rowIndex, _user:getAdminUser()}) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (!json.ok) throw new Error(json.error||json.msg||'삭제 실패');
