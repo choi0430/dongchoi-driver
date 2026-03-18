@@ -542,6 +542,17 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 리포트 미리보기 -->
   <div id="inv-preview" style="padding:0 14px 14px"></div>
 
+  <!-- 인보이스 발행 이력 -->
+  <div style="padding:0 14px 14px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:12px;font-weight:800;color:var(--t1);letter-spacing:.3px;">📜 발행 이력</div>
+      <button class="btn bgh sm" onclick="loadInvHistory(true)" style="font-size:11px;padding:4px 10px;">🔄 새로고침</button>
+    </div>
+    <div id="inv-history-list" style="max-height:400px;overflow-y:auto;">
+      <div style="text-align:center;padding:16px;color:var(--t3);font-size:12px;">⏳ 이력을 불러오려면 🔄 새로고침을 누르세요</div>
+    </div>
+  </div>
+
   <!-- 인보이스 항목 추가/편집 모달 -->
   <div id="inv-item-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center;padding:16px;">
     <div style="background:var(--sf);border-radius:16px;padding:18px;width:100%;max-width:400px;max-height:90vh;overflow-y:auto;">
@@ -3112,6 +3123,9 @@ async function initInvoice() {
   // 기본 기간: 이번 달
   if (!document.getElementById('inv-from').value) setInvPeriod('thismonth');
   else loadInvReports();
+
+  // 이력 로드
+  loadInvHistory(false);
 }
 
 async function populateInvAgency() {
@@ -3288,65 +3302,89 @@ function renderInvPreview(rows, agency, from, to) {
           <button id="inv-grp-tour" class="btn bgh sm" style="flex:1;font-size:11px;" onclick="setInvGroupMode('tour')">🗺 투어코드</button>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <button onclick="generateInvoice()" class="btn bac" style="font-size:13px;padding:11px;">
-          📄 Invoice 생성
-        </button>
-        <button onclick="emailInvoice()" class="btn" style="font-size:13px;padding:11px;background:#0ea5e9;color:white;">
-          ✉️ 이메일 발송
-        </button>
-      </div>
     </div>
 
-    <!-- 리포트 내역 -->
-    <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:6px;padding:0 2px;">리포트 내역</div>
-    ${rows.map(r => {
+    <!-- 항목별 상세 테이블 (수정 가능) -->
+    <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:6px;padding:0 2px;display:flex;justify-content:space-between;align-items:center;">
+      <span>📋 항목 상세 (${rows.length}건)</span>
+      <label style="font-size:10px;font-weight:400;display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="checkbox" id="inv-edit-toggle" onchange="_invEditMode=this.checked;_refreshInvPreview();" ${_invEditMode?'checked':''}>
+        ✏️ 수정모드
+      </label>
+    </div>
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:12px;">
+    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+      <thead>
+        <tr style="background:var(--sf3);">
+          <th style="padding:7px 6px;text-align:left;font-weight:700;color:var(--t2);white-space:nowrap;border-bottom:2px solid var(--bd);">날짜</th>
+          <th style="padding:7px 6px;text-align:left;font-weight:700;color:var(--t2);border-bottom:2px solid var(--bd);">서비스/차량</th>
+          <th style="padding:7px 6px;text-align:right;font-weight:700;color:var(--t2);white-space:nowrap;border-bottom:2px solid var(--bd);">기본</th>
+          <th style="padding:7px 6px;text-align:right;font-weight:700;color:var(--t2);white-space:nowrap;border-bottom:2px solid var(--bd);">OT</th>
+          <th style="padding:7px 6px;text-align:right;font-weight:700;color:var(--t2);white-space:nowrap;border-bottom:2px solid var(--bd);">부가</th>
+          <th style="padding:7px 6px;text-align:right;font-weight:700;color:var(--gn);white-space:nowrap;border-bottom:2px solid var(--bd);">합계</th>
+        </tr>
+      </thead>
+      <tbody>
+    ${rows.map((r, ri) => {
       const c   = calcInvRow(r);
-      const km  = (r.KM_Start && r.KM_End) ? Math.abs((parseInt(r.KM_End)||0)-(parseInt(r.KM_Start)||0)) : 0;
+      const rowKey = _invRowKey(r, ri);
+      const ov  = _invOverrides[rowKey] || {};
+      const oBase = ov.base !== undefined ? ov.base : c.baseRate;
+      const oOT   = ov.ot   !== undefined ? ov.ot   : c.ot;
+      const oExtra = ov.extra!== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0));
+      const oTotal = oBase + oOT + oExtra;
+      const isOverridden = ov.base !== undefined || ov.ot !== undefined || ov.extra !== undefined;
+      const excl = _invExcludes[rowKey];
+      const exclStyle = excl ? 'opacity:0.35;text-decoration:line-through;' : '';
       const srcBadge = c.rateSource === 'price_table'
-        ? `<span style="font-size:9px;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 5px;margin-left:4px;">요금표</span>`
-        : `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;">SVC</span>`;
-      // 주차비 토글 상태
-      const _pkOv = localStorage.getItem(c._pkKey);
-      const pkBtnLabel = c.parkingFee > 0
-        ? `🅿️ 주차비 제외`
-        : `🅿️ 주차비 추가`;
-      const pkBtnStyle = c.parkingFee > 0
-        ? `font-size:10px;padding:3px 8px;background:#fef9c3;color:#92400e;border:1px solid #fde68a;border-radius:6px;cursor:pointer;`
-        : `font-size:10px;padding:3px 8px;background:var(--sf3);color:var(--t3);border:1px solid var(--b2);border-radius:6px;cursor:pointer;`;
-      const pkManualNote = _pkOv === '1' ? ` <span style="font-size:9px;color:#16a34a;">(수동추가)</span>`
-                         : _pkOv === '0' ? ` <span style="font-size:9px;color:#ef4444;">(수동제외)</span>` : '';
-      // pickup/dropoff 표시
-      const pdStr = (r.Pickup||r.Dropoff)
-        ? `<div style="font-size:10px;color:var(--t3);">📍 ${escH(r.Pickup||'')}${r.Dropoff&&r.Dropoff!==r.Pickup?' → '+escH(r.Dropoff):''}</div>` : '';
-      return `
-      <div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:6px;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(r._iso)} &nbsp;·&nbsp; ${escH(r.Rego||'—')}${r.Seats?` <span style="font-size:10px;color:var(--t3);">(${escH(r.Seats)})</span>`:''}${srcBadge}</div>
-            <div style="font-size:11px;color:var(--t2);margin-top:2px;">${escH(r.Attraction||'—')}</div>
-            <div style="font-size:10px;color:var(--t3);margin-top:2px;">기본: $${c.baseRate.toLocaleString()} &nbsp;·&nbsp; 드라이버: ${escH(r.Driver||'—')}</div>
-            ${r.Tour_Code ? `<div style="font-size:10px;color:var(--t3);">코드: ${escH(r.Tour_Code)}</div>` : ''}
-            ${r._timeStart||r._timeEnd ? `<div style="font-size:10px;color:var(--t3);">⏱ ${r._timeStart||''}${r._timeEnd?' ~ '+r._timeEnd:''}</div>` : ''}
-            ${pdStr}
-            <!-- 주차비 토글 버튼 -->
-            <div style="margin-top:6px;">
-              <button onclick="toggleParkingOverride('${escH(c._pkKey)}', ${c.autoParking||0}, '${escH(agency)}', '${from}', '${to}')"
-                style="${pkBtnStyle}">${pkBtnLabel}</button>${pkManualNote}
-            </div>
-          </div>
-          <div style="text-align:right;flex-shrink:0;margin-left:8px;">
-            <div style="font-size:14px;font-weight:800;color:var(--gn);">$${c.total.toLocaleString()}</div>
-            ${c.earlyTA     ? `<div style="font-size:10px;color:var(--or);">+Early $${c.earlyTA}</div>` : ''}
-            ${c.ot          ? `<div style="font-size:10px;color:var(--or);">+OT $${c.ot}</div>` : ''}
-            ${c.hotel       ? `<div style="font-size:10px;color:var(--ac);">+호텔 $${c.hotel}</div>` : ''}
-            ${c.dist        ? `<div style="font-size:10px;color:var(--ac);">+거리 $${c.dist}</div>` : ''}
-            ${c.parkingFee  ? `<div style="font-size:10px;color:var(--or);">+공항주차 $${c.parkingFee}</div>` : ''}
-            ${km            ? `<div style="font-size:10px;color:var(--t3);">${km}km</div>` : ''}
-          </div>
-        </div>
-      </div>`;
+        ? `<span style="font-size:9px;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 5px;">표</span>`
+        : `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;">SVC</span>`;
+      const manualBadge = r._manual ? `<span style="font-size:9px;background:#e0e7ff;color:#3730a3;border-radius:4px;padding:1px 5px;">수동</span>` : '';
+      const ovBadge = isOverridden ? `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;">수정됨</span>` : '';
+      return `<tr style="border-bottom:1px solid var(--bd);${exclStyle}" data-inv-row="${ri}">
+        <td style="padding:6px;white-space:nowrap;vertical-align:top;">
+          ${fmtDate(r._iso)}
+          ${_invEditMode ? `<div style="margin-top:3px;"><button onclick="_toggleInvExclude('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid ${excl?'#86efac':'#fecaca'};background:${excl?'#f0fdf4':'#fef2f2'};color:${excl?'#166534':'#ef4444'};cursor:pointer;">${excl?'포함':'제외'}</button></div>` : ''}
+        </td>
+        <td style="padding:6px;vertical-align:top;">
+          <div style="font-weight:600;">${escH(r.Attraction||'—')}</div>
+          <div style="font-size:10px;color:var(--t3);">${escH(r.Rego||'—')}${r.Seats?' ('+escH(r.Seats)+')':''} ${srcBadge} ${manualBadge} ${ovBadge}</div>
+          <div style="font-size:10px;color:var(--t3);">${escH(r.Driver||'—')}${r.Tour_Code?' · '+escH(r.Tour_Code):''}</div>
+          ${r._timeStart||r._timeEnd ? `<div style="font-size:10px;color:var(--t3);">⏱ ${r._timeStart||''}${r._timeEnd?' ~ '+r._timeEnd:''}</div>` : ''}
+        </td>
+        ${_invEditMode && !excl ? `
+        <td style="padding:4px 2px;text-align:right;vertical-align:top;"><input type="number" value="${oBase}" step="1" style="width:60px;text-align:right;font-size:11px;padding:3px 4px;border:1px solid var(--bd);border-radius:5px;background:var(--sf);" onchange="_setInvOverride('${escH(rowKey)}','base',this.value,'${escH(agency)}','${from}','${to}')"></td>
+        <td style="padding:4px 2px;text-align:right;vertical-align:top;"><input type="number" value="${oOT}" step="1" style="width:50px;text-align:right;font-size:11px;padding:3px 4px;border:1px solid var(--bd);border-radius:5px;background:var(--sf);" onchange="_setInvOverride('${escH(rowKey)}','ot',this.value,'${escH(agency)}','${from}','${to}')"></td>
+        <td style="padding:4px 2px;text-align:right;vertical-align:top;"><input type="number" value="${oExtra}" step="1" style="width:50px;text-align:right;font-size:11px;padding:3px 4px;border:1px solid var(--bd);border-radius:5px;background:var(--sf);" onchange="_setInvOverride('${escH(rowKey)}','extra',this.value,'${escH(agency)}','${from}','${to}')"></td>
+        ` : `
+        <td style="padding:6px;text-align:right;white-space:nowrap;">$${oBase.toLocaleString()}</td>
+        <td style="padding:6px;text-align:right;white-space:nowrap;">$${oOT.toLocaleString()}</td>
+        <td style="padding:6px;text-align:right;white-space:nowrap;">$${oExtra.toLocaleString()}</td>
+        `}
+        <td style="padding:6px;text-align:right;font-weight:800;color:var(--gn);white-space:nowrap;">$${oTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      </tr>`;
     }).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="background:var(--sf3);font-weight:800;">
+          <td colspan="5" style="padding:8px 6px;text-align:right;color:var(--t1);">TOTAL (incl. GST)</td>
+          <td style="padding:8px 6px;text-align:right;color:var(--gn);font-size:14px;">$${_calcInvGrandTotal(rows).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        </tr>
+      </tfoot>
+    </table>
+    </div>
+    <!-- 저장 버튼 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px;">
+      <button onclick="saveInvoiceToSheet()" class="btn" style="font-size:12px;padding:10px;background:#6d28d9;color:white;font-weight:700;">
+        💾 저장
+      </button>
+      <button onclick="generateInvoice()" class="btn bac" style="font-size:12px;padding:10px;font-weight:700;">
+        📄 생성
+      </button>
+      <button onclick="emailInvoice()" class="btn" style="font-size:12px;padding:10px;background:#0ea5e9;color:white;font-weight:700;">
+        ✉️ 발송
+      </button>
+    </div>
   `;
 }
 
@@ -3364,6 +3402,222 @@ function toggleParkingOverride(pkKey, autoParking, agency, from, to) {
     const rows = _buildInvRows(agency, from, to);
     renderInvPreview(rows, agency, from, to);
   }
+}
+
+// ─────────────────────────────────────────
+// INVOICE 항목 수정 (오버라이드) 관리
+// ─────────────────────────────────────────
+let _invEditMode   = false;           // 수정 모드 토글
+let _invOverrides  = {};              // { rowKey: { base?, ot?, extra? } }
+let _invExcludes   = {};              // { rowKey: true } — 제외된 항목
+let _invHistoryCache = null;          // 인보이스 이력 캐시
+
+// 항목 고유 키 (날짜+차량+인덱스)
+function _invRowKey(r, idx) {
+  return (r._iso||r.Date||'') + '_' + (r.Rego||'') + '_' + idx;
+}
+
+// 오버라이드 설정
+function _setInvOverride(rowKey, field, value, agency, from, to) {
+  if (!_invOverrides[rowKey]) _invOverrides[rowKey] = {};
+  _invOverrides[rowKey][field] = parseFloat(value) || 0;
+  // 합계 업데이트만 (전체 재렌더 않음 — 성능)
+  _updateInvTotals(agency, from, to);
+}
+
+// 제외 토글
+function _toggleInvExclude(rowKey, agency, from, to) {
+  if (_invExcludes[rowKey]) delete _invExcludes[rowKey];
+  else _invExcludes[rowKey] = true;
+  _refreshInvPreview();
+}
+
+// 합계 계산 (오버라이드 + 제외 반영)
+function _calcInvGrandTotal(rows) {
+  let total = 0;
+  rows.forEach((r, ri) => {
+    const rowKey = _invRowKey(r, ri);
+    if (_invExcludes[rowKey]) return;
+    const c = calcInvRow(r);
+    const ov = _invOverrides[rowKey] || {};
+    const oBase  = ov.base  !== undefined ? ov.base  : c.baseRate;
+    const oOT    = ov.ot    !== undefined ? ov.ot    : c.ot;
+    const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0));
+    total += oBase + oOT + oExtra;
+  });
+  return roundMoney(total);
+}
+
+// 합계 DOM 업데이트 (재렌더 없이)
+function _updateInvTotals(agency, from, to) {
+  const rows = _buildInvRows(agency, from, to);
+  const gt = _calcInvGrandTotal(rows);
+  const tfoot = document.querySelector('#inv-preview tfoot td:last-child');
+  if (tfoot) tfoot.textContent = '$' + gt.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+// ─── 인보이스 GAS 시트 저장 ───
+async function saveInvoiceToSheet() {
+  const agency = document.getElementById('inv-agency')?.value;
+  const from   = document.getElementById('inv-from')?.value;
+  const to     = document.getElementById('inv-to')?.value;
+  if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요','er'); return; }
+
+  const rows = _buildInvRows(agency, from, to);
+  if (!rows.length) { toast('항목이 없습니다','er'); return; }
+
+  const grandTotal = _calcInvGrandTotal(rows);
+  const gst   = roundMoney(grandTotal / 11);
+  const exGST = roundMoney(grandTotal - gst);
+  const invNum = getInvNum(agency, from);
+
+  // 항목 요약 JSON (DR 항목)
+  const itemsSummary = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)] && !r._manual).map((r,ri) => {
+    const c  = calcInvRow(r);
+    const ov = _invOverrides[_invRowKey(r,ri)] || {};
+    return {
+      date: r._iso, rego: r.Rego, tour: r.Attraction, seats: r.Seats, driver: r.Driver,
+      base: ov.base !== undefined ? ov.base : c.baseRate,
+      ot:   ov.ot   !== undefined ? ov.ot   : c.ot,
+      extra:ov.extra!== undefined ? ov.extra : (c.earlyTA+c.hotel+c.dist+(c.parkingFee||0)),
+      overridden: !!(ov.base !== undefined || ov.ot !== undefined || ov.extra !== undefined)
+    };
+  });
+
+  // 수동 항목 JSON
+  const manualKey = 'dc_inv_manual_' + agency + '_' + from.slice(0,7);
+  const manualItems = JSON.parse(localStorage.getItem(manualKey)||'[]');
+
+  const data = {
+    InvNumber:   invNum,
+    Agency:      agency,
+    PeriodFrom:  from,
+    PeriodTo:    to,
+    GrandTotal:  grandTotal,
+    GST:         gst,
+    ExGST:       exGST,
+    Status:      'issued',
+    IssuedDate:  '',   // GAS에서 자동 설정
+    Items:       JSON.stringify(itemsSummary).slice(0,49000),
+    ManualItems: JSON.stringify(manualItems).slice(0,49000),
+    Notes:       `${rows.length}건, 그룹:${_invGroupMode}`,
+    CreatedBy:   getAdminUser()
+  };
+
+  const btn = document.querySelector('button[onclick="saveInvoiceToSheet()"]');
+  if (btn) { btn.disabled=true; btn.textContent='⏳ 저장 중...'; }
+
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'save_invoice', data, _user:getAdminUser()})
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error||'저장 실패');
+    // localStorage 발행 기록도 동기화
+    localStorage.setItem(`dc_inv_issued_${invNum}`, new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}));
+    toast(`✅ 인보이스 ${invNum} 저장 완료`,'ok');
+    _invHistoryCache = null; // 캐시 무효화
+    _refreshInvPreview();
+  } catch(e) {
+    toast('❌ 저장 실패: '+e.message,'er');
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent='💾 저장'; }
+  }
+}
+
+// ─── 인보이스 이력 목록 ───
+async function loadInvHistory(forceReload) {
+  const listEl = document.getElementById('inv-history-list');
+  if (!listEl) return;
+
+  if (!_invHistoryCache || forceReload) {
+    listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);">⏳ 이력 불러오는 중...</div>';
+    try {
+      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+      const json = await res.json();
+      if (json.ok) _invHistoryCache = (json.rows||[]).reverse(); // 최신순
+      else throw new Error(json.error);
+    } catch(e) {
+      listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--rd);">이력 로드 실패</div>';
+      return;
+    }
+  }
+
+  renderInvHistory();
+}
+
+function renderInvHistory() {
+  const listEl = document.getElementById('inv-history-list');
+  if (!listEl || !_invHistoryCache) return;
+
+  if (_invHistoryCache.length === 0) {
+    listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3);font-size:12px;">발행된 인보이스가 없습니다</div>';
+    return;
+  }
+
+  const statusMap = {
+    'issued':  {label:'발행', bg:'#dbeafe', color:'#1e40af', icon:'📄'},
+    'emailed': {label:'발송', bg:'#e0f2fe', color:'#0369a1', icon:'✉️'},
+    'paid':    {label:'결제완료', bg:'#dcfce7', color:'#166534', icon:'✅'},
+    'cancelled':{label:'취소', bg:'#fee2e2', color:'#991b1b', icon:'❌'}
+  };
+
+  listEl.innerHTML = _invHistoryCache.map(inv => {
+    const st  = statusMap[inv.Status] || statusMap['issued'];
+    const amt = parseFloat(inv.GrandTotal)||0;
+    return `
+    <div style="background:var(--sf2);border-radius:10px;padding:11px 12px;margin-bottom:6px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+            <span style="font-size:12px;font-weight:800;color:var(--t1);">${escH(inv.InvNumber||'—')}</span>
+            <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${st.bg};color:${st.color};font-weight:700;">${st.icon} ${st.label}</span>
+          </div>
+          <div style="font-size:11px;color:var(--t2);">${escH(inv.Agency||'—')}</div>
+          <div style="font-size:10px;color:var(--t3);">${fmtDate(inv.PeriodFrom)||inv.PeriodFrom||''} ~ ${fmtDate(inv.PeriodTo)||inv.PeriodTo||''}</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:2px;">발행: ${inv.IssuedDate||'—'}${inv.EmailSentDate?' · 발송:'+inv.EmailSentDate:''}${inv.PaidDate?' · 결제:'+inv.PaidDate:''}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;margin-left:8px;">
+          <div style="font-size:15px;font-weight:800;color:var(--gn);">$${amt.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+          <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap;">
+            ${inv.Status!=='paid'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','paid','PaidDate')" style="font-size:10px;padding:3px 7px;border-radius:5px;border:1px solid #86efac;background:#f0fdf4;color:#166534;cursor:pointer;font-weight:600;">✅결제</button>`:''}
+            ${inv.Status==='issued'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','emailed','EmailSentDate')" style="font-size:10px;padding:3px 7px;border-radius:5px;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;cursor:pointer;font-weight:600;">✉️발송</button>`:''}
+            ${inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','cancelled','')" style="font-size:10px;padding:3px 7px;border-radius:5px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:600;">❌취소</button>`:''}
+            <button onclick="deleteInvoiceRecord('${escH(inv.InvNumber)}')" style="font-size:10px;padding:3px 7px;border-radius:5px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:600;">🗑삭제</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function updateInvStatus(invNumber, status, field) {
+  if (!confirm(`인보이스 ${invNumber} 상태를 "${status}"로 변경하시겠습니까?`)) return;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'update_invoice_status', invNumber, status, field, _user:getAdminUser()})
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error||'상태 변경 실패');
+    toast(`✅ ${invNumber} → ${status}`,'ok');
+    await loadInvHistory(true);
+  } catch(e) { toast('❌ '+e.message,'er'); }
+}
+
+async function deleteInvoiceRecord(invNumber) {
+  if (!confirm(`인보이스 ${invNumber}을(를) 완전히 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'delete_invoice', invNumber, _user:getAdminUser()})
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error||'삭제 실패');
+    toast(`🗑️ ${invNumber} 삭제 완료`,'ok');
+    await loadInvHistory(true);
+  } catch(e) { toast('❌ '+e.message,'er'); }
 }
 
 // ─────────────────────────────────────────
@@ -3403,15 +3657,16 @@ async function generateInvoice() {
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
 
-  const rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
+  let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
+  // 제외된 항목 필터
+  rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
 
   const client  = DB.C.find(c => c.Name === agency) || {};
   const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
-  let grandTotal = 0;
-  rows.forEach(r => { grandTotal += calcInvRow(r).total; });
+  let grandTotal = _calcInvGrandTotal(_buildInvRows(agency, from, to));
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
 
@@ -3470,17 +3725,22 @@ async function generateInvoice() {
 
   function _makeTableRow(r, fd) {
     const c   = calcInvRow(r);
+    // 오버라이드 반영 — generateInvoice에서도 수정된 금액 적용
+    const ri  = rows.indexOf(r);
+    const rk  = _invRowKey(r, ri >= 0 ? ri : 0);
+    const ov  = _invOverrides[rk] || {};
+    const oBase  = ov.base  !== undefined ? ov.base  : c.baseRate;
+    const oOT    = ov.ot    !== undefined ? ov.ot    : c.ot;
+    const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0));
+    const oTotal = oBase + oOT + oExtra;
     const extras = [
-      c.earlyTA     ? `Early/Late Surcharge $${c.earlyTA.toLocaleString()}` : '',
-      c.ot          ? `OT $${c.ot.toLocaleString()}` : '',
-      c.hotel       ? `Hotel Surcharge $${c.hotel.toLocaleString()}` : '',
-      c.dist        ? `Distance Surcharge $${c.dist.toLocaleString()}` : '',
-      c.parkingFee  ? `Airport Parking Fee $${c.parkingFee.toLocaleString()}` : '',
+      oOT          ? `OT $${oOT.toLocaleString()}` : '',
+      oExtra > oOT ? `Surcharges $${(oExtra-oOT).toLocaleString()}` : '',
     ].filter(Boolean).join(' · ');
     const timeStr = r._timeStart || r._timeEnd ? (r._timeStart||'') + (r._timeEnd ? ' - '+r._timeEnd : '') : '-';
     const baseLabel = c.rateSource === 'price_table'
-      ? '<div style="font-size:10px;color:#166534;margin-top:2px;">Rate Table $'+c.baseRate.toLocaleString()+'</div>'
-      : '<div style="font-size:10px;color:#92400e;margin-top:2px;">SVC $'+c.baseRate.toLocaleString()+'</div>';
+      ? '<div style="font-size:10px;color:#166534;margin-top:2px;">Rate Table $'+oBase.toLocaleString()+'</div>'
+      : '<div style="font-size:10px;color:#92400e;margin-top:2px;">SVC $'+oBase.toLocaleString()+'</div>';
     const seatsStr = r.Seats ? ' ('+escH(r.Seats)+')' : '';
     const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">'+extras+'</td></tr>' : '';
     return '<tr>' +
@@ -3489,7 +3749,7 @@ async function generateInvoice() {
       '<td>'+escH(r.Rego||'-')+'</td>' +
       '<td style="color:#64748b;white-space:nowrap;font-size:11px;">'+timeStr+'</td>' +
       '<td style="color:#64748b">'+escH(r.Tour_Code||'-')+'</td>' +
-      '<td style="font-weight:700">$'+c.total.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})+'</td>' +
+      '<td style="font-weight:700">$'+oTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})+'</td>' +
       '</tr>' + extrasRow;
   }
 
@@ -3611,7 +3871,7 @@ async function generateInvoice() {
   </div>
   <div class="inv-total-row grand">
     <span>Total Due</span>
-    <span>$${totalTA.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+    <span>$${grandTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
   </div>
 </div>
 ${(DC_COMPANY.bank || localStorage.getItem('dc_bank')) ? `
