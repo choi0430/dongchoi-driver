@@ -1715,6 +1715,12 @@ function applyMasterData(data) {
     }
   } catch(e) {}
   MASTER.guides      = (data.M_Guides    || []);
+  // ★ GAS 가이드 목록을 localStorage에 캐시
+  try {
+    if(MASTER.guides.length > 0) {
+      localStorage.setItem('dc_guides', JSON.stringify(MASTER.guides));
+    }
+  } catch(e) {}
   MASTER.vehicles    = (data.M_Vehicles  || []).map(v=>({...v, Transmission: v.Transmission||'Auto'}));
   // 여행사 목록 = M_Clients + M_PriceClient Agency 합집합
   // M_Clients에 없는 여행사도 요금표(M_PriceClient)에 있으면 포함
@@ -1736,6 +1742,12 @@ function applyMasterData(data) {
       max_hours: r.max_hours || ''
     }));
   MASTER.hotels      = (data.M_Hotels      || []);
+  // ★ GAS 호텔 목록을 localStorage에 캐시
+  try {
+    if(MASTER.hotels.length > 0) {
+      localStorage.setItem('dc_hotels', JSON.stringify(MASTER.hotels));
+    }
+  } catch(e) {}
   MASTER.priceClient = (data.M_PriceClient || []);
   MASTER.priceDriver = (data.M_PriceDriver || []);
 }
@@ -1829,8 +1841,7 @@ function fixPhone(p) {
 }
 
 function useFallbackMaster() {
-  // ★ 드라이버는 하드코딩 CONTACTS를 사용하지 않음 — GAS M_Drivers가 유일한 소스
-  // localStorage 캐시가 있으면 그것을 사용, 없으면 빈 배열 유지
+  // ★ 모든 데이터는 GAS가 유일한 소스 — localStorage 캐시를 폴백으로 사용
   if(MASTER.drivers.length === 0) {
     try {
       const cached = JSON.parse(localStorage.getItem('dc_drivers') || '[]');
@@ -1839,7 +1850,18 @@ function useFallbackMaster() {
       }
     } catch(e) {}
   }
-  MASTER.guides  = CONTACTS.filter(c=>c.type==='guide').map(c=>({Name:c.name,Initials:c.initials,Phone:c.phone,Type:'프리랜서',Active:'Y'}));
+  if(MASTER.guides.length === 0) {
+    try {
+      const cached = JSON.parse(localStorage.getItem('dc_guides') || '[]');
+      if(cached.length > 0) { MASTER.guides = cached; }
+    } catch(e) {}
+  }
+  if(MASTER.hotels.length === 0) {
+    try {
+      const cached = JSON.parse(localStorage.getItem('dc_hotels') || '[]');
+      if(cached.length > 0) { MASTER.hotels = cached; }
+    } catch(e) {}
+  }
 }
 
 function populateMasterSelects() {
@@ -1925,9 +1947,11 @@ function rebuildDriverList() {
 // ═══════════════════════════════════════
 // HOTEL & GUIDE DATA
 // ═══════════════════════════════════════
-const HOTEL_LIST = ["AIRPORT", "ALPHA EASTER CREEK", "AMORA JAMISON", "ARCHER RESORT", "ATURA EASTERN CREEK", "CKS AIRPORT", "COURTYARD NORTH RYDE", "CROWNE PLAZA CANBERRA", "CRUISE TERMINAL", "FOUR SEASONS", "FULLERTON HOTEL SYDNEY", "HILTON SYDNEY", "HOLIDAY INN & SUITES PARRAMATTA", "HOLIDAY INN AIRPORT", "HOLIDAY INN EXPRESS AIRPORT", "HOLIDAY INN MACQUARIE PARK", "HOLIDAY INN PARRAMATTA", "HOLIDAY INN POTTS POINT", "HOLIDAY INN WARWICK FARM", "HUNTS LIVERPOOL", "HYATT REGENCY SYDNEY", "IBIS OLYMPIC PARK", "IBIS STYLE THE ENTRANCE", "IBIS SYDNEY WORLD SQUARE", "INTERCONTINENTAL SYDNEY", "MACQUARIE 4 STAR", "MERCURE AIRPORT", "MERCURE BANKSTOWN", "MERCURE BLACKTOWN", "MERCURE CANBERRA", "MERCURE KOOINDAH", "MERCURE MACQUARIE PARK", "MERCURE NEWCASTLE", "MERCURE PARRAMATTA", "MERCURE PENRITH", "MERCURE SYDNEY", "MERITON KENT ST", "MILLER NORTH SYDNEY", "MOXY AIRPORT", "Mantra parramatta", "NESUTO PARRAMATTA", "NOVOTEL AIRPORT", "NOVOTEL BRIGHTON BEACH", "NOVOTEL OLYMPIC PARK", "NOVOTEL PARRAMATTA", "OAKS SYDNEY NORTH RYDE", "Other:", "PARK HYATT SYDNEY", "PARK ROYAL DARLING HABOUR", "PARKHAVEN", "PARKROYAL PARRAMATTA", "PULLMAN AIRPORT", "PULLMAN HYDE PARK", "PULLMAN OLYMPIC PARK", "PUTNEY", "QUEST BELLA VISTA", "QUEST MACQUARIE PARK", "RAMADA CABRAMATTA", "ROYAL PACIFIC LANE COVE", "RYDGES BANKSTOWN", "RYDGES NORWEST", "RYDGES PARRAMATTA", "RYDGES WORLD SQUARE", "SHERATON", "SOFITEL DARLING HABOUR", "SOFITEL SYDNEY WENTWORTH", "STAMFORD PLAZA AIRPORT", "SYDNEY HARBOUR MARRIOTT", "THE TANK STREAM HOTEL", "TRAVELODGE AIRPORT", "VISY DIOR"];
-const HOTEL_LIST_OBJ = [{"name": "AIRPORT", "sub": ""}, {"name": "ALPHA EASTER CREEK", "sub": "Brabham Dr, and/1 Peter Brock Dr, Eastern Creek NSW 2766"}, {"name": "AMORA JAMISON", "sub": "11 Jamison St, Sydney NSW 2000"}, {"name": "ARCHER RESORT", "sub": "Cnr Princes Highway &, Kalandar St, Nowra NSW 2541"}, {"name": "ATURA EASTERN CREEK", "sub": "32 Cricketers Arms Rd, Prospect NSW 2148"}, {"name": "CKS AIRPORT", "sub": "35 Levey St, Wolli Creek NSW 2205"}, {"name": "COURTYARD NORTH RYDE", "sub": "7/11 Talavera Rd, North Ryde NSW 2113"}, {"name": "CROWNE PLAZA CANBERRA", "sub": "1 Binara St, Canberra ACT 2601"}, {"name": "CRUISE TERMINAL", "sub": "130 Argyle St, The Rocks NSW 2000"}, {"name": "FOUR SEASONS", "sub": "199 George St, The Rocks NSW 2000"}, {"name": "FULLERTON HOTEL SYDNEY", "sub": "Lobby Level/1 Martin Pl, Sydney NSW 2000"}, {"name": "HILTON SYDNEY", "sub": "488 George St, Sydney NSW 2000"}, {"name": "HOLIDAY INN & SUITES PARRAMATTA", "sub": "100 Marsden St, Parramatta NSW 2150"}, {"name": "HOLIDAY INN AIRPORT", "sub": "Corner of O'Riordan Street &, Bourke Rd, Mascot NSW 2020"}, {"name": "HOLIDAY INN EXPRESS AIRPORT", "sub": "2/12 Sarah St, Mascot NSW 2020"}, {"name": "HOLIDAY INN MACQUARIE PARK", "sub": "10 Byfield St, Macquarie Park NSW 2113"}, {"name": "HOLIDAY INN PARRAMATTA", "sub": "18-40 Anderson St, Parramatta NSW 2150"}, {"name": "HOLIDAY INN POTTS POINT", "sub": "203 Victoria St, Potts Point NSW 2011"}, {"name": "HOLIDAY INN WARWICK FARM", "sub": "355 Hume Hwy, Warwick Farm NSW 2170"}, {"name": "HUNTS LIVERPOOL", "sub": "2415 Camden Valley Way, Casula NSW 2170"}, {"name": "HYATT REGENCY SYDNEY", "sub": "161 Sussex St, Sydney NSW 2000"}, {"name": "IBIS OLYMPIC PARK", "sub": "8 Edwin Flack Ave, Sydney Olympic Park NSW 2127"}, {"name": "IBIS STYLE THE ENTRANCE", "sub": "315 Central Coast Hwy, The Entrance NSW 2261"}, {"name": "IBIS SYDNEY WORLD SQUARE", "sub": "382/384 Pitt St, Sydney NSW 2000"}, {"name": "INTERCONTINENTAL SYDNEY", "sub": "117 Macquarie St, Sydney NSW 2000"}, {"name": "MACQUARIE 4 STAR", "sub": "458 Lake Rd, Argenton NSW 2284"}, {"name": "MERCURE AIRPORT", "sub": "22 Levey St, Wolli Creek NSW 2205"}, {"name": "MERCURE BANKSTOWN", "sub": "Entry From, 8 Greenfield Parade, 6 Mona St, Bankstown NSW"}, {"name": "MERCURE BLACKTOWN", "sub": "170 Reservoir Rd, Arndell Park NSW 2148"}, {"name": "MERCURE CANBERRA", "sub": "Corner Of Ainslie And, Limestone Ave, Braddon ACT 2612"}, {"name": "MERCURE KOOINDAH", "sub": "40 Kooindah Blvd, Wyong NSW 2259"}, {"name": "MERCURE MACQUARIE PARK", "sub": "81 Talavera Rd, North Ryde NSW 2113"}, {"name": "MERCURE NEWCASTLE", "sub": "12 Steel St, Newcastle West NSW 2302"}, {"name": "MERCURE PARRAMATTA", "sub": "106 Hassall St, Rosehill NSW 2142"}, {"name": "MERCURE PENRITH", "sub": "Panthers Pl, Penrith NSW 2750"}, {"name": "MERCURE SYDNEY", "sub": "818/820 George St, Chippendale NSW 2000"}, {"name": "MERITON KENT ST", "sub": "528 Kent St, Sydney NSW 2000"}, {"name": "MILLER NORTH SYDNEY", "sub": "54 McLaren St, North Sydney NSW 2060"}, {"name": "MOXY AIRPORT", "sub": "56 Baxter Rd, Mascot NSW 2020"}, {"name": "Mantra parramatta", "sub": ""}, {"name": "NESUTO PARRAMATTA", "sub": "110-114 James Ruse Dr, Parramatta NSW 2142"}, {"name": "NOVOTEL AIRPORT", "sub": "22 Levey St, Wolli Creek NSW 2205"}, {"name": "NOVOTEL BRIGHTON BEACH", "sub": "2 Princess St, Brighton-Le-Sands NSW 2216"}, {"name": "NOVOTEL OLYMPIC PARK", "sub": "11A Olympic Blvd, Sydney Olympic Park NSW 2127"}, {"name": "NOVOTEL PARRAMATTA", "sub": "350 Church St, Parramatta NSW 2150"}, {"name": "OAKS SYDNEY NORTH RYDE", "sub": "58-62 Delhi Road, North Ryde, NSW 2113"}, {"name": "Other:", "sub": ""}, {"name": "PARK HYATT SYDNEY", "sub": "7 Hickson Rd, The Rocks NSW 2000"}, {"name": "PARK ROYAL DARLING HABOUR", "sub": "150 Day St, Sydney NSW 2000"}, {"name": "PARKHAVEN", "sub": "150-152 Kinghorne St, Nowra NSW 2541"}, {"name": "PARKROYAL PARRAMATTA", "sub": "30 Phillip St, Parramatta NSW 2150"}, {"name": "PULLMAN AIRPORT", "sub": "191 O'Riordan St, Mascot NSW 2020"}, {"name": "PULLMAN HYDE PARK", "sub": "36 College St, Darlinghurst NSW 2010"}, {"name": "PULLMAN OLYMPIC PARK", "sub": "Olympic Blvd, Sydney Olympic Park NSW 2127"}, {"name": "PUTNEY", "sub": ""}, {"name": "QUEST BELLA VISTA", "sub": "24 Norbrik Dr, Bella Vista NSW 2153"}, {"name": "QUEST MACQUARIE PARK", "sub": "71 Epping Rd, Macquarie Park NSW 2113"}, {"name": "RAMADA CABRAMATTA", "sub": "161 Hume Hwy, Cabramatta NSW 2166"}, {"name": "ROYAL PACIFIC LANE COVE", "sub": "472 Pacific Hwy, Lane Cove North NSW 2066"}, {"name": "RYDGES BANKSTOWN", "sub": "874 Hume Hwy, Bass Hill NSW 2197"}, {"name": "RYDGES NORWEST", "sub": "1 Columbia Ct, Norwest NSW 2153"}, {"name": "RYDGES PARRAMATTA", "sub": "116-118 James Ruse Dr, Rosehill NSW 2142"}, {"name": "RYDGES WORLD SQUARE", "sub": "389 Pitt St, Sydney NSW 2000"}, {"name": "SHERATON", "sub": "161 Elizabeth St, Sydney NSW 2000"}, {"name": "SOFITEL DARLING HABOUR", "sub": "Sofitel Sydney Darling Harbour, 12 Darling Dr, Sydney NSW 2000"}, {"name": "SOFITEL SYDNEY WENTWORTH", "sub": "101 Phillip St, Sydney NSW 2000"}, {"name": "STAMFORD PLAZA AIRPORT", "sub": "241 O'Riordan St, Mascot NSW 2020"}, {"name": "SYDNEY HARBOUR MARRIOTT", "sub": "30 Pitt St, Sydney NSW 2000"}, {"name": "THE TANK STREAM HOTEL", "sub": "97-99 Pitt St, Sydney NSW 2000"}, {"name": "TRAVELODGE AIRPORT", "sub": "289 King St, Mascot NSW 2020"}, {"name": "VISY DIOR", "sub": ""}];
-let GUIDE_LIST = [{"id": "SG001", "name": "AARON", "mobile": "0405907800"}, {"id": "SG002", "name": "DAVID LIM", "mobile": "0458770116"}, {"id": "SG003", "name": "KATE KIM", "mobile": "0405124545"}, {"id": "SG004", "name": "간호영", "mobile": "0412410579"}, {"id": "SG005", "name": "강명근", "mobile": "0430016313"}, {"id": "SG006", "name": "강병구", "mobile": "0434550868"}, {"id": "SG007", "name": "강신재", "mobile": "0419288757"}, {"id": "SG008", "name": "강신호", "mobile": "0404659118"}, {"id": "SG009", "name": "강영식", "mobile": "0451339623"}, {"id": "SG010", "name": "강재욱", "mobile": "0478101137"}, {"id": "SG011", "name": "강현석", "mobile": "0467749718"}, {"id": "SG012", "name": "고영민", "mobile": "0420956612"}, {"id": "SG013", "name": "곽병우", "mobile": "0434576095"}, {"id": "SG014", "name": "곽철우", "mobile": "0414283337"}, {"id": "SG015", "name": "구자혁", "mobile": "0425497171"}, {"id": "SG016", "name": "구현모", "mobile": "0431612348"}, {"id": "SG017", "name": "권철중", "mobile": "0411456649"}, {"id": "SG018", "name": "금동수", "mobile": "0408022687"}, {"id": "SG019", "name": "기명선", "mobile": "0488369693"}, {"id": "SG020", "name": "김강래", "mobile": "0449965003"}, {"id": "SG021", "name": "김경남", "mobile": "0414553952"}, {"id": "SG022", "name": "김경례", "mobile": "0452108253"}, {"id": "SG023", "name": "김광훈", "mobile": "0433518664"}, {"id": "SG024", "name": "김규현", "mobile": "0450220225"}, {"id": "SG025", "name": "김기산", "mobile": "0405451461"}, {"id": "SG026", "name": "김기홍", "mobile": "0416272970"}, {"id": "SG027", "name": "김남걸", "mobile": "0413510726"}, {"id": "SG028", "name": "김동기", "mobile": "0411720986"}, {"id": "SG029", "name": "김동혁", "mobile": "0420508225"}, {"id": "SG030", "name": "김동환", "mobile": "0404849405"}, {"id": "SG031", "name": "김명근", "mobile": "0477794233"}, {"id": "SG032", "name": "김미성", "mobile": "0493375586"}, {"id": "SG033", "name": "김미정", "mobile": "0410207770"}, {"id": "SG034", "name": "김민규", "mobile": "0405710733"}, {"id": "SG035", "name": "김민우", "mobile": "0434637456"}, {"id": "SG036", "name": "김병곤", "mobile": "0450736332"}, {"id": "SG037", "name": "김병기", "mobile": "0402143535"}, {"id": "SG038", "name": "김상근", "mobile": "0433815234"}, {"id": "SG039", "name": "김상린", "mobile": "0425695858"}, {"id": "SG040", "name": "김상완", "mobile": "0425291477"}, {"id": "SG041", "name": "김선주", "mobile": "0428433566"}, {"id": "SG042", "name": "김성미", "mobile": "0426900184"}, {"id": "SG043", "name": "김세준", "mobile": "0401907304"}, {"id": "SG044", "name": "김수지", "mobile": "0423986989"}, {"id": "SG045", "name": "김승기", "mobile": "0431367393"}, {"id": "SG046", "name": "김영민", "mobile": "0405509508"}, {"id": "SG047", "name": "김영재", "mobile": "0403574707"}, {"id": "SG048", "name": "김영철", "mobile": "0407815625"}, {"id": "SG049", "name": "김용구", "mobile": "0434014808"}, {"id": "SG050", "name": "김용채", "mobile": "0400805600"}, {"id": "SG051", "name": "김재숙", "mobile": "0416041016"}, {"id": "SG052", "name": "김재언", "mobile": "0410480817"}, {"id": "SG053", "name": "김정목", "mobile": "0406300300"}, {"id": "SG054", "name": "김정연", "mobile": "0403106092"}, {"id": "SG055", "name": "김정호", "mobile": "0420737900"}, {"id": "SG056", "name": "김제우", "mobile": "0450769686"}, {"id": "SG057", "name": "김종무", "mobile": "0425200862"}, {"id": "SG058", "name": "김종완", "mobile": "0430107555"}, {"id": "SG059", "name": "김진영", "mobile": "0425305309"}, {"id": "SG060", "name": "김진희", "mobile": "0430624916"}, {"id": "SG061", "name": "김창섭", "mobile": "0481213948"}, {"id": "SG062", "name": "김창수", "mobile": "0411120188"}, {"id": "SG063", "name": "김창현", "mobile": "0433134541"}, {"id": "SG064", "name": "김풍중", "mobile": "0452024848"}, {"id": "SG065", "name": "김학재", "mobile": "0408815625"}, {"id": "SG066", "name": "김현주", "mobile": "0401282607"}, {"id": "SG067", "name": "김현준", "mobile": "0404864533"}, {"id": "SG068", "name": "김형석", "mobile": "0492859872"}, {"id": "SG069", "name": "김혜선(sunny)", "mobile": "0452063030"}, {"id": "SG070", "name": "김휘", "mobile": "0435919070"}, {"id": "SG071", "name": "김희석", "mobile": "0432045640"}, {"id": "SG072", "name": "나광배", "mobile": "0403166616"}, {"id": "SG073", "name": "나용현", "mobile": "0410720550"}, {"id": "SG074", "name": "노원재", "mobile": "0433992099"}, {"id": "SG075", "name": "노홍", "mobile": "0403346076"}, {"id": "SG076", "name": "도원진", "mobile": "0424620421"}, {"id": "SG077", "name": "레이첼", "mobile": "0413526820"}, {"id": "SG078", "name": "류대현", "mobile": "0414800177"}, {"id": "SG079", "name": "류후근", "mobile": "0410336493"}, {"id": "SG080", "name": "마재용", "mobile": "0430577351"}, {"id": "SG081", "name": "박경빈", "mobile": "0402523679"}, {"id": "SG082", "name": "박규리", "mobile": "0456787088"}, {"id": "SG083", "name": "박다솔", "mobile": "0493167666"}, {"id": "SG084", "name": "박상규", "mobile": "0433126100"}, {"id": "SG085", "name": "박소라", "mobile": "0410348413"}, {"id": "SG086", "name": "박승섭", "mobile": "0410612960"}, {"id": "SG087", "name": "박재민", "mobile": "0430711300"}, {"id": "SG088", "name": "박재욱", "mobile": "0430220123"}, {"id": "SG089", "name": "박정훈", "mobile": "0402128884"}, {"id": "SG090", "name": "박준형", "mobile": "0425808032"}, {"id": "SG091", "name": "박현미", "mobile": "0401594929"}, {"id": "SG092", "name": "박현서", "mobile": "0450414331"}, {"id": "SG093", "name": "백경탁", "mobile": "0476201518"}, {"id": "SG094", "name": "백선규", "mobile": "0413516567"}, {"id": "SG095", "name": "성택", "mobile": "0411668803"}, {"id": "SG096", "name": "손수영", "mobile": "0411494909"}, {"id": "SG097", "name": "송동호", "mobile": "0420733123"}, {"id": "SG098", "name": "송인태", "mobile": "0413749293"}, {"id": "SG099", "name": "송주영", "mobile": "0403534377"}, {"id": "SG100", "name": "송태희", "mobile": "0430347829"}, {"id": "SG101", "name": "송호현", "mobile": "0449050420"}, {"id": "SG102", "name": "송화영", "mobile": "0431216321"}, {"id": "SG103", "name": "신명선", "mobile": "0426142525"}, {"id": "SG104", "name": "안형준", "mobile": "0430234766"}, {"id": "SG105", "name": "안훈석", "mobile": "0450910274"}, {"id": "SG106", "name": "양경모", "mobile": "0433930291"}, {"id": "SG107", "name": "에스더", "mobile": "0437707892"}, {"id": "SG108", "name": "오덕산", "mobile": "0415430815"}, {"id": "SG109", "name": "오세일", "mobile": "0433131470"}, {"id": "SG110", "name": "오승철", "mobile": "0497843678"}, {"id": "SG111", "name": "오영돈", "mobile": "0405453107"}, {"id": "SG112", "name": "옥재우", "mobile": "0425276391"}, {"id": "SG113", "name": "유성림", "mobile": "0401709808"}, {"id": "SG114", "name": "유성훈", "mobile": "0410344733"}, {"id": "SG115", "name": "유연숙", "mobile": "0433030259"}, {"id": "SG116", "name": "유영진", "mobile": "0423229310"}, {"id": "SG117", "name": "유종필", "mobile": "0430153379"}, {"id": "SG118", "name": "유지은", "mobile": "0403898838"}, {"id": "SG119", "name": "유청희", "mobile": "0451230990"}, {"id": "SG120", "name": "유태식", "mobile": "0452664042"}, {"id": "SG121", "name": "윤규리", "mobile": "0413957601"}, {"id": "SG122", "name": "윤미경", "mobile": "0425271073"}, {"id": "SG123", "name": "윤수민", "mobile": "0410651699"}, {"id": "SG124", "name": "윤영일", "mobile": "0425217634"}, {"id": "SG125", "name": "윤진원", "mobile": "0406336337"}, {"id": "SG126", "name": "윤호인", "mobile": "0415 007 109"}, {"id": "SG127", "name": "이강면", "mobile": "0426104269"}, {"id": "SG128", "name": "이동기", "mobile": "0414900183"}, {"id": "SG129", "name": "이명원", "mobile": "0452274067"}, {"id": "SG130", "name": "이미연", "mobile": "0429462215"}, {"id": "SG131", "name": "이붕래", "mobile": "0420771281"}, {"id": "SG132", "name": "이상욱", "mobile": "0425240346"}, {"id": "SG133", "name": "이수정(Jessie)", "mobile": "0422011875"}, {"id": "SG134", "name": "이승진", "mobile": "0402658298"}, {"id": "SG135", "name": "이승현", "mobile": "0426177133"}, {"id": "SG136", "name": "이양한", "mobile": "0452418912"}, {"id": "SG137", "name": "이원호", "mobile": "0417699155"}, {"id": "SG138", "name": "이은영", "mobile": "0425812960"}, {"id": "SG139", "name": "이은화", "mobile": "0430023211"}, {"id": "SG140", "name": "이재령", "mobile": "0403126110"}, {"id": "SG141", "name": "이재원", "mobile": "0426717712"}, {"id": "SG142", "name": "이정훈", "mobile": "0497024311"}, {"id": "SG143", "name": "이지수", "mobile": "0426700339"}, {"id": "SG144", "name": "이지영", "mobile": "0410640518"}, {"id": "SG145", "name": "이진태", "mobile": "0433234812"}, {"id": "SG146", "name": "이채룡", "mobile": "0431468373"}, {"id": "SG147", "name": "이한울", "mobile": "0431435336"}, {"id": "SG148", "name": "이현재", "mobile": "0412141665"}, {"id": "SG149", "name": "이훈", "mobile": "0423255900"}, {"id": "SG150", "name": "임미호", "mobile": "0433476398"}, {"id": "SG151", "name": "임소영", "mobile": "0402986000"}, {"id": "SG152", "name": "임한수", "mobile": "0425626103"}, {"id": "SG153", "name": "임현미", "mobile": "0404803799"}, {"id": "SG154", "name": "장덕호", "mobile": "0422670370"}, {"id": "SG155", "name": "장준혁", "mobile": "0418182307"}, {"id": "SG156", "name": "전상우", "mobile": "0416933349"}, {"id": "SG157", "name": "전혜련", "mobile": "0458828277"}, {"id": "SG158", "name": "정규영", "mobile": "0452193245"}, {"id": "SG159", "name": "정성대", "mobile": "0421274116"}, {"id": "SG160", "name": "정연식", "mobile": "0415965550"}, {"id": "SG161", "name": "정진우", "mobile": "0423425809"}, {"id": "SG162", "name": "제니", "mobile": "0494055808"}, {"id": "SG163", "name": "제임스유", "mobile": "0452664042"}, {"id": "SG164", "name": "조병욱", "mobile": "0451031234"}, {"id": "SG165", "name": "존홍", "mobile": "0434576095"}, {"id": "SG166", "name": "진동현", "mobile": "0414330312"}, {"id": "SG167", "name": "채득현", "mobile": "0434280707"}, {"id": "SG168", "name": "천승현", "mobile": "0427276282"}, {"id": "SG169", "name": "최미숙 (미쉘)", "mobile": "0400351069"}, {"id": "SG170", "name": "최연주", "mobile": "0415745550"}, {"id": "SG171", "name": "최영수", "mobile": "0493903423"}, {"id": "SG172", "name": "최우진", "mobile": "0424188177"}, {"id": "SG173", "name": "최유성", "mobile": "0412423588"}, {"id": "SG174", "name": "최진우", "mobile": "0426899629"}, {"id": "SG175", "name": "최혁근", "mobile": "0430892592"}, {"id": "SG176", "name": "티나정", "mobile": "0404038709"}, {"id": "SG177", "name": "한정호", "mobile": "0421594472"}, {"id": "SG178", "name": "한주영", "mobile": "0413070891"}, {"id": "SG179", "name": "한현숙", "mobile": "0411042160"}, {"id": "SG180", "name": "허철호", "mobile": "0473616364"}, {"id": "SG181", "name": "홍윤석", "mobile": "0415123415"}, {"id": "SG182", "name": "홍채훈", "mobile": "0425150095"}, {"id": "SG183", "name": "황영애", "mobile": "0430314577"}];
+// ★ 하드코딩 제거 — GAS M_Hotels 시트에서 동적 로드 (localStorage 캐시 폴백)
+const HOTEL_LIST = [];
+const HOTEL_LIST_OBJ = [];
+// ★ 하드코딩 제거 — GAS M_Guides 시트에서 동적 로드 (localStorage 캐시 폴백)
+let GUIDE_LIST = [];
 
 // 사용자 추가 목록 (localStorage 저장)
 function getCustomHotels(){return [];} // MASTER.hotels에서 직접 관리
@@ -2208,199 +2232,13 @@ const CHECKS = [
   {en:'Clean Inside', kr:'내부 청결'},
 ];
 
+// ★ CONTACTS는 더 이상 하드코딩하지 않음 — GAS MASTER 데이터에서 동적 생성
+// populateContacts()에서 MASTER.drivers + MASTER.guides로 window.CONTACTS를 빌드
 const CONTACTS = [
-  {type:'driver',name:'최동철 (Dong Cheol Choi)',initials:'DC',phone:'0430175195',note:'HR · 면허 86일',color:'#d97706'},
-  {type:'driver',name:'고한식 (Han Sik KO)',initials:'HK',phone:'0432711687',note:'HR',color:'#1a56db'},
-  {type:'driver',name:'박재민 (Jae Min PARK)',initials:'JP',phone:'0430711300',note:'HR · Authority 만료!',color:'#e02424'},
-  {type:'driver',name:'유성훈 (Sung Hun YOO)',initials:'SY',phone:'0410344733',note:'LR · 면허 53일',color:'#d97706'},
-  {type:'driver',name:'유정훈 (Jeonghoon YOO)',initials:'JY',phone:'0433013430',note:'HR',color:'#1a56db'},
-  {type:'driver',name:'이우석 (Woo Suk LEE)',initials:'WL',phone:'0401545960',note:'—',color:'#1a56db'},
-  {type:'driver',name:'박진원 (Jin Weon Park)',initials:'JP',phone:'0452133771',note:'HR',color:'#1a56db'},
-  {type:'guide',name:'AARON',initials:'AA',phone:'0405907800',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'DAVID LIM',initials:'DA',phone:'0458770116',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'KATE KIM',initials:'KA',phone:'0405124545',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'간호영',initials:'간호',phone:'0412410579',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'강명근',initials:'강명',phone:'0430016313',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'강병구',initials:'강병',phone:'0434550868',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'강신재',initials:'강신',phone:'0419288757',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'강신호',initials:'강신',phone:'0404659118',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'강영식',initials:'강영',phone:'0451339623',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'강재욱',initials:'강재',phone:'0478101137',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'강현석',initials:'강현',phone:'0467749718',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'고영민',initials:'고영',phone:'0420956612',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'곽병우',initials:'곽병',phone:'0434576095',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'곽철우',initials:'곽철',phone:'0414283337',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'구자혁',initials:'구자',phone:'0425497171',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'구현모',initials:'구현',phone:'0431612348',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'권철중',initials:'권철',phone:'0411456649',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'금동수',initials:'금동',phone:'0408022687',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'기명선',initials:'기명',phone:'0488369693',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김강래',initials:'김강',phone:'0449965003',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김경남',initials:'김경',phone:'0414553952',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김경례',initials:'김경',phone:'0452108253',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김광훈',initials:'김광',phone:'0433518664',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김규현',initials:'김규',phone:'0450220225',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김기산',initials:'김기',phone:'0405451461',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김기홍',initials:'김기',phone:'0416272970',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김남걸',initials:'김남',phone:'0413510726',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김동기',initials:'김동',phone:'0411720986',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김동혁',initials:'김동',phone:'0420508225',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김동환',initials:'김동',phone:'0404849405',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김명근',initials:'김명',phone:'0477794233',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김미성',initials:'김미',phone:'0493375586',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김미정',initials:'김미',phone:'0410207770',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김민규',initials:'김민',phone:'0405710733',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김민우',initials:'김민',phone:'0434637456',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김병곤',initials:'김병',phone:'0450736332',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김병기',initials:'김병',phone:'0402143535',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김상근',initials:'김상',phone:'0433815234',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김상린',initials:'김상',phone:'0425695858',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김상완',initials:'김상',phone:'0425291477',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김선주',initials:'김선',phone:'0428433566',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김성미',initials:'김성',phone:'0426900184',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김세준',initials:'김세',phone:'0401907304',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김수지',initials:'김수',phone:'0423986989',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김승기',initials:'김승',phone:'0431367393',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김영민',initials:'김영',phone:'0405509508',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김영재',initials:'김영',phone:'0403574707',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김영철',initials:'김영',phone:'0407815625',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김용구',initials:'김용',phone:'0434014808',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김용채',initials:'김용',phone:'0400805600',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김재숙',initials:'김재',phone:'0416041016',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김재언',initials:'김재',phone:'0410480817',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김정목',initials:'김정',phone:'0406300300',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김정연',initials:'김정',phone:'0403106092',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김정호',initials:'김정',phone:'0420737900',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김제우',initials:'김제',phone:'0450769686',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김종무',initials:'김종',phone:'0425200862',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김종완',initials:'김종',phone:'0430107555',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김진영',initials:'김진',phone:'0425305309',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김진희',initials:'김진',phone:'0430624916',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김창섭',initials:'김창',phone:'0481213948',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김창수',initials:'김창',phone:'0411120188',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김창현',initials:'김창',phone:'0433134541',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김풍중',initials:'김풍',phone:'0452024848',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김학재',initials:'김학',phone:'0408815625',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김현주',initials:'김현',phone:'0401282607',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김현준',initials:'김현',phone:'0404864533',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김형석',initials:'김형',phone:'0492859872',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김혜선(sunny)',initials:'김혜',phone:'0452063030',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김휘',initials:'김휘',phone:'0435919070',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'김희석',initials:'김희',phone:'0432045640',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'나광배',initials:'나광',phone:'0403166616',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'나용현',initials:'나용',phone:'0410720550',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'노원재',initials:'노원',phone:'0433992099',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'노홍',initials:'노홍',phone:'0403346076',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'도원진',initials:'도원',phone:'0424620421',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'레이첼',initials:'레이',phone:'0413526820',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'류대현',initials:'류대',phone:'0414800177',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'류후근',initials:'류후',phone:'0410336493',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'마재용',initials:'마재',phone:'0430577351',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박경빈',initials:'박경',phone:'0402523679',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박규리',initials:'박규',phone:'0456787088',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박다솔',initials:'박다',phone:'0493167666',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박상규',initials:'박상',phone:'0433126100',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박소라',initials:'박소',phone:'0410348413',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박승섭',initials:'박승',phone:'0410612960',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박재민',initials:'박재',phone:'0430711300',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박재욱',initials:'박재',phone:'0430220123',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박정훈',initials:'박정',phone:'0402128884',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박준형',initials:'박준',phone:'0425808032',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박현미',initials:'박현',phone:'0401594929',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'박현서',initials:'박현',phone:'0450414331',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'백경탁',initials:'백경',phone:'0476201518',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'백선규',initials:'백선',phone:'0413516567',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'성택',initials:'성택',phone:'0411668803',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'손수영',initials:'손수',phone:'0411494909',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'송동호',initials:'송동',phone:'0420733123',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'송인태',initials:'송인',phone:'0413749293',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'송주영',initials:'송주',phone:'0403534377',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'송태희',initials:'송태',phone:'0430347829',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'송호현',initials:'송호',phone:'0449050420',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'송화영',initials:'송화',phone:'0431216321',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'신명선',initials:'신명',phone:'0426142525',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'안형준',initials:'안형',phone:'0430234766',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'안훈석',initials:'안훈',phone:'0450910274',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'양경모',initials:'양경',phone:'0433930291',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'에스더',initials:'에스',phone:'0437707892',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'오덕산',initials:'오덕',phone:'0415430815',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'오세일',initials:'오세',phone:'0433131470',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'오승철',initials:'오승',phone:'0497843678',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'오영돈',initials:'오영',phone:'0405453107',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'옥재우',initials:'옥재',phone:'0425276391',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'유성림',initials:'유성',phone:'0401709808',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'유성훈',initials:'유성',phone:'0410344733',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'유연숙',initials:'유연',phone:'0433030259',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'유영진',initials:'유영',phone:'0423229310',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'유종필',initials:'유종',phone:'0430153379',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'유지은',initials:'유지',phone:'0403898838',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'유청희',initials:'유청',phone:'0451230990',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'유태식',initials:'유태',phone:'0452664042',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'윤규리',initials:'윤규',phone:'0413957601',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'윤미경',initials:'윤미',phone:'0425271073',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'윤수민',initials:'윤수',phone:'0410651699',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'윤영일',initials:'윤영',phone:'0425217634',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'윤진원',initials:'윤진',phone:'0406336337',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'윤호인',initials:'윤호',phone:'0415 007 109',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이강면',initials:'이강',phone:'0426104269',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이동기',initials:'이동',phone:'0414900183',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이명원',initials:'이명',phone:'0452274067',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이미연',initials:'이미',phone:'0429462215',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이붕래',initials:'이붕',phone:'0420771281',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이상욱',initials:'이상',phone:'0425240346',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이수정(Jessie)',initials:'이수',phone:'0422011875',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이승진',initials:'이승',phone:'0402658298',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이승현',initials:'이승',phone:'0426177133',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이양한',initials:'이양',phone:'0452418912',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이원호',initials:'이원',phone:'0417699155',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이은영',initials:'이은',phone:'0425812960',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이은화',initials:'이은',phone:'0430023211',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이재령',initials:'이재',phone:'0403126110',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이재원',initials:'이재',phone:'0426717712',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이정훈',initials:'이정',phone:'0497024311',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이지수',initials:'이지',phone:'0426700339',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이지영',initials:'이지',phone:'0410640518',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이진태',initials:'이진',phone:'0433234812',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이채룡',initials:'이채',phone:'0431468373',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이한울',initials:'이한',phone:'0431435336',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이현재',initials:'이현',phone:'0412141665',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'이훈',initials:'이훈',phone:'0423255900',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'임미호',initials:'임미',phone:'0433476398',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'임소영',initials:'임소',phone:'0402986000',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'임한수',initials:'임한',phone:'0425626103',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'임현미',initials:'임현',phone:'0404803799',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'장덕호',initials:'장덕',phone:'0422670370',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'장준혁',initials:'장준',phone:'0418182307',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'전상우',initials:'전상',phone:'0416933349',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'전혜련',initials:'전혜',phone:'0458828277',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'정규영',initials:'정규',phone:'0452193245',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'정성대',initials:'정성',phone:'0421274116',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'정연식',initials:'정연',phone:'0415965550',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'정진우',initials:'정진',phone:'0423425809',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'제니',initials:'제니',phone:'0494055808',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'제임스유',initials:'제임',phone:'0452664042',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'조병욱',initials:'조병',phone:'0451031234',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'존홍',initials:'존홍',phone:'0434576095',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'진동현',initials:'진동',phone:'0414330312',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'채득현',initials:'채득',phone:'0434280707',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'천승현',initials:'천승',phone:'0427276282',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'최미숙 (미쉘)',initials:'최미',phone:'0400351069',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'최연주',initials:'최연',phone:'0415745550',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'최영수',initials:'최영',phone:'0493903423',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'최우진',initials:'최우',phone:'0424188177',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'최유성',initials:'최유',phone:'0412423588',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'최진우',initials:'최진',phone:'0426899629',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'최혁근',initials:'최혁',phone:'0430892592',note:'프리랜서',color:'#0e9f6e'},
-  {type:'driver-guide',name:'티나정 (Tina Jung)',initials:'TJ',phone:'0404038709',note:'드라이버·가이드',color:'#7e3af2'},
-  {type:'guide',name:'한정호',initials:'한정',phone:'0421594472',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'한주영',initials:'한주',phone:'0413070891',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'한현숙',initials:'한현',phone:'0411042160',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'허철호',initials:'허철',phone:'0473616364',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'홍윤석',initials:'홍윤',phone:'0415123415',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'홍채훈',initials:'홍채',phone:'0425150095',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'황영애',initials:'황영',phone:'0430314577',note:'프리랜서',color:'#0e9f6e'},
-  {type:'guide',name:'손수영',initials:'손수',phone:'',note:'프리랜서',color:'#0e9f6e'}
+  // 하드코딩 제거됨 — 아래 데이터는 populateContacts()가 MASTER 로드 후 자동 생성
+  // {type:'driver',name:'최동철 (Dong Cheol Choi)',initials:'DC',phone:'0430175195',note:'HR · 면허 86일',color:'#d97706'},
 ];
+
 
 // ── Google Sheets API 설정 ──
 // 구글 시트 시간 파싱: 1899-12-29T22:20:00.000Z → "08:20" (UTC+10, 24h)
