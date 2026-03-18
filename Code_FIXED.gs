@@ -59,7 +59,17 @@ const MASTER_HEADERS = {
   'Notices':    ['ID','Title','Content','Type','Date','Active'],
   'Audit_Log':  ['Timestamp','User','Action','Sheet','RowIndex','Summary'],
   'Invoices':   ['InvNumber','Agency','PeriodFrom','PeriodTo','GrandTotal','GST','ExGST',
-                 'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Notes','CreatedBy']
+                 'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Notes','CreatedBy'],
+  // ── 서비스 요금 옵션 (차량 좌석별) ──
+  'M_SvcOptions': ['VehicleSize','Label','Amount'],
+  // ── 호텔 서차지 옵션 ──
+  'M_HotelOptions': ['VehicleSize','Label','Amount'],
+  // ── 거리 서차지 옵션 ──
+  'M_DistOptions': ['VehicleSize','Label','Amount'],
+  // ── 야간투어 요금 ──
+  'M_NightRates': ['NightType','VehicleCategory','TA','DR','Owner'],
+  // ── 관광지 POI 정보 ──
+  'M_Attractions': ['Attraction','Emoji','POI_Icon','POI_Name','POI_Detail','POI_MapURL','Info']
 };
 
 // ── Tab Colors ──
@@ -68,7 +78,9 @@ const TAB_COLORS = {
   'M_Guides':'#0e9f6e','M_Hotels':'#e02424','M_PriceClient':'#0694a2',
   'M_PriceDriver':'#057a55','M_PriceSub':'#7c3aed','Sub_Rates':'#b45309',
   'Ledger':'#1e40af','Wages':'#065f46','MOT_Report':'#be185d','Notices':'#0369a1',
-  'Invoices':'#6d28d9'
+  'Invoices':'#6d28d9',
+  'M_SvcOptions':'#6366f1','M_HotelOptions':'#ec4899','M_DistOptions':'#f59e0b',
+  'M_NightRates':'#8b5cf6','M_Attractions':'#14b8a6'
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -235,6 +247,14 @@ function doPost(e) {
 
       case 'replace_master':
         return cors(replaceMasterSheet(payload.sheet, payload.rows));
+
+      // ── 가이드 전화번호 일괄 업데이트 ──
+      case 'bulk_update_guide_phones': {
+        const r = bulkUpdateGuidePhones(payload.guides || []);
+        if (r.ok) appendAuditLog(_user, 'bulk_update_guide_phones', 'M_Guides', '',
+          `${r.updated}명 전화번호 업데이트`);
+        return cors(r);
+      }
 
       case 'init_masters':
         return cors(initAllMasters());
@@ -420,7 +440,8 @@ function getMaster(sheetName) {
 function getAllMasters() {
   try {
     const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
-                    'M_PriceClient', 'M_PriceDriver', 'M_PriceSub'];
+                    'M_PriceClient', 'M_PriceDriver', 'M_PriceSub',
+                    'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions'];
     const result = {};
 
     sheets.forEach(name => {
@@ -1347,6 +1368,48 @@ function sendInvoiceEmail(payload) {
       `인보이스 이메일 발송 → ${to} | ${subject}`);
 
     return { ok: true, to: to };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 가이드 전화번호 일괄 업데이트
+// guides: [{ Guide_Name: '...', Mobile: '...' }, ...]
+// 기존 M_Guides의 Guide_Name과 매칭하여 Mobile 컬럼을 업데이트
+// ═══════════════════════════════════════════════════════════════════════════
+function bulkUpdateGuidePhones(guides) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'M_Guides');
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { ok: false, msg: 'M_Guides 시트에 데이터 없음' };
+
+    const headers = data[0];
+    const nameCol = headers.indexOf('Guide_Name') !== -1 ? headers.indexOf('Guide_Name')
+                  : headers.indexOf('Guide Name') !== -1 ? headers.indexOf('Guide Name')
+                  : headers.indexOf('Name') !== -1 ? headers.indexOf('Name') : -1;
+    const mobileCol = headers.indexOf('Mobile') !== -1 ? headers.indexOf('Mobile')
+                    : headers.indexOf('Phone') !== -1 ? headers.indexOf('Phone') : -1;
+
+    if (nameCol === -1 || mobileCol === -1) return { ok: false, msg: 'Guide_Name 또는 Mobile 컬럼 없음' };
+
+    const guideMap = {};
+    guides.forEach(g => { if (g.Guide_Name && g.Mobile) guideMap[g.Guide_Name.trim()] = g.Mobile; });
+
+    let updated = 0;
+    for (let i = 1; i < data.length; i++) {
+      const name = String(data[i][nameCol] || '').trim();
+      if (name && guideMap[name]) {
+        const currentMobile = String(data[i][mobileCol] || '').trim();
+        if (!currentMobile) {  // 빈 셀만 업데이트
+          sheet.getRange(i + 1, mobileCol + 1).setValue(guideMap[name]);
+          updated++;
+        }
+      }
+    }
+
+    return { ok: true, updated, total: guides.length };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }

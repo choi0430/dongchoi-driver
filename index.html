@@ -1750,6 +1750,82 @@ function applyMasterData(data) {
   } catch(e) {}
   MASTER.priceClient = (data.M_PriceClient || []);
   MASTER.priceDriver = (data.M_PriceDriver || []);
+
+  // ★ 서비스 요금 옵션 (M_SvcOptions → SVC_OPTIONS 오버라이드)
+  const svcRows = data.M_SvcOptions || [];
+  if(svcRows.length > 0) {
+    const newSvc = {};
+    svcRows.forEach(r => {
+      const size = r.VehicleSize; if(!size) return;
+      if(!newSvc[size]) newSvc[size] = [];
+      newSvc[size].push({ val: String(r.Amount||'0'), label: r.Label||'' });
+    });
+    // OTHER 옵션 자동 추가
+    Object.keys(newSvc).forEach(k => {
+      if(!newSvc[k].find(o=>o.val==='OTHER')) newSvc[k].push({val:'OTHER', label:'직접 입력 (OTHER)'});
+    });
+    if(Object.keys(newSvc).length > 0) Object.assign(SVC_OPTIONS, newSvc);
+  }
+
+  // ★ 호텔 서차지 옵션 (M_HotelOptions → HOTEL_OPTIONS 오버라이드)
+  const hoRows = data.M_HotelOptions || [];
+  if(hoRows.length > 0) {
+    const newHo = {};
+    hoRows.forEach(r => {
+      const size = r.VehicleSize; if(!size) return;
+      if(!newHo[size]) newHo[size] = [];
+      newHo[size].push({ val: String(r.Amount||'0'), label: r.Label||'', dr: Number(r.Amount)||0 });
+    });
+    if(Object.keys(newHo).length > 0) Object.assign(HOTEL_OPTIONS, newHo);
+  }
+
+  // ★ 거리 서차지 옵션 (M_DistOptions → DIST_OPTIONS 오버라이드)
+  const distRows = data.M_DistOptions || [];
+  if(distRows.length > 0) {
+    const newDist = {};
+    distRows.forEach(r => {
+      const size = r.VehicleSize; if(!size) return;
+      if(!newDist[size]) newDist[size] = [];
+      newDist[size].push({ val: String(r.Amount||'0'), label: r.Label||'', dr: Number(r.Amount)||0 });
+    });
+    if(Object.keys(newDist).length > 0) Object.assign(DIST_OPTIONS, newDist);
+  }
+
+  // ★ 야간투어 요금 (M_NightRates → NIGHT_RATES 오버라이드)
+  const nightRows = data.M_NightRates || [];
+  if(nightRows.length > 0) {
+    nightRows.forEach(r => {
+      const type = r.NightType, cat = r.VehicleCategory;
+      if(!type || !cat) return;
+      if(!NIGHT_RATES[type]) NIGHT_RATES[type] = {};
+      NIGHT_RATES[type][cat] = { ta: Number(r.TA)||0, dr: Number(r.DR)||0, owner: Number(r.Owner)||0 };
+    });
+  }
+
+  // ★ 관광지 POI (M_Attractions → ATTRACTIONS 오버라이드)
+  const attrRows = data.M_Attractions || [];
+  if(attrRows.length > 0) {
+    const attrMap = {};
+    attrRows.forEach(r => {
+      const name = r.Attraction; if(!name) return;
+      if(!attrMap[name]) attrMap[name] = { name, emoji: r.Emoji||'📍', pois:[], info:'' };
+      if(r.POI_Name) {
+        attrMap[name].pois.push({ icon: r.POI_Icon||'📌', name: r.POI_Name, detail: r.POI_Detail||'', map: r.POI_MapURL||'' });
+      }
+      if(r.Info) attrMap[name].info = r.Info;
+    });
+    const newArr = Object.values(attrMap);
+    if(newArr.length > 0) { ATTRACTIONS.length = 0; ATTRACTIONS.push(...newArr); }
+  }
+
+  // ★ localStorage에 요금/관광지 데이터 캐시
+  try {
+    if(svcRows.length)   localStorage.setItem('dc_svcOptions', JSON.stringify(SVC_OPTIONS));
+    if(hoRows.length)    localStorage.setItem('dc_hotelOptions', JSON.stringify(HOTEL_OPTIONS));
+    if(distRows.length)  localStorage.setItem('dc_distOptions', JSON.stringify(DIST_OPTIONS));
+    if(nightRows.length) localStorage.setItem('dc_nightRates', JSON.stringify(NIGHT_RATES));
+    if(attrRows.length)  localStorage.setItem('dc_attractions', JSON.stringify(ATTRACTIONS));
+  } catch(e) {}
 }
 
 function showMasterRetryBtn() {
@@ -1862,6 +1938,19 @@ function useFallbackMaster() {
       if(cached.length > 0) { MASTER.hotels = cached; }
     } catch(e) {}
   }
+  // ★ 요금/관광지 캐시 복원
+  try {
+    const cachedSvc = localStorage.getItem('dc_svcOptions');
+    if(cachedSvc) Object.assign(SVC_OPTIONS, JSON.parse(cachedSvc));
+    const cachedHo = localStorage.getItem('dc_hotelOptions');
+    if(cachedHo) Object.assign(HOTEL_OPTIONS, JSON.parse(cachedHo));
+    const cachedDist = localStorage.getItem('dc_distOptions');
+    if(cachedDist) Object.assign(DIST_OPTIONS, JSON.parse(cachedDist));
+    const cachedNight = localStorage.getItem('dc_nightRates');
+    if(cachedNight) Object.assign(NIGHT_RATES, JSON.parse(cachedNight));
+    const cachedAttr = localStorage.getItem('dc_attractions');
+    if(cachedAttr) { const arr = JSON.parse(cachedAttr); if(arr.length > 0) { ATTRACTIONS.length=0; ATTRACTIONS.push(...arr); } }
+  } catch(e) {}
 }
 
 function populateMasterSelects() {
@@ -2427,6 +2516,7 @@ function buildLoginSelect() {
   }
 }
 
+// ★ ATTRACTIONS: GAS M_Attractions 시트에서 오버라이드됨 (아래는 폴백 기본값)
 const ATTRACTIONS = [
   {name:'Blue Mountains',emoji:'⛰️',pois:[
     {icon:'🅿️',name:'Scenic World 주차장',detail:'Violet St, Katoomba NSW 2780',map:'https://maps.google.com/?q=Scenic+World+Katoomba'},
@@ -2563,6 +2653,7 @@ const SALARY_DATA = [
   {week:'19/01/26–25/01/26',total:0,paid:0,balance:0},
 ];
 
+// ★ RATES: M_PriceDriver 시트가 로드되면 자동 대체됨 (아래는 폴백 기본값)
 const RATES = {
   'AIRPORT TRANSFER':{ta:270,dr:90},
   'BLUE MOUNTAINS':{ta:800,dr:250},
@@ -5223,6 +5314,7 @@ function _updateAutoFillBanner(){
 // SURCHARGE & SERVICE CHARGE ENUM LOGIC
 // ═══════════════════════════════════════
 
+// ★ SVC_OPTIONS: GAS M_SvcOptions 시트에서 오버라이드됨 (아래는 폴백 기본값)
 const SVC_OPTIONS = {
   '21S': [
     {val:'0',   label:'$0 — 없음'},
@@ -5269,6 +5361,7 @@ const SVC_OPTIONS = {
 // val = TA 청구액, dr = 드라이버 지급액
 // 호텔 서차지: val = 드라이버 지급액 기준
 // 21/25S: 편도 $10, 양쪽 $20 / 40/50S: 편도 $15, 양쪽 $30
+// ★ HOTEL_OPTIONS: GAS M_HotelOptions 시트에서 오버라이드됨 (아래는 폴백 기본값)
 const HOTEL_OPTIONS = {
   '21S': [{val:'0',label:'$0',dr:0},{val:'10',label:'$10 — 편도',dr:10},{val:'20',label:'$20 — 양쪽',dr:20}],
   '25S': [{val:'0',label:'$0',dr:0},{val:'10',label:'$10 — 편도',dr:10},{val:'20',label:'$20 — 양쪽',dr:20}],
@@ -5278,6 +5371,7 @@ const HOTEL_OPTIONS = {
 
 // 거리 서차지: val = 드라이버 지급액 기준
 // 21/25S: $30 / 40/50S: $40
+// ★ DIST_OPTIONS: GAS M_DistOptions 시트에서 오버라이드됨 (아래는 폴백 기본값)
 const DIST_OPTIONS = {
   '21S': [{val:'0',label:'$0 — 없음',dr:0},{val:'30',label:'$30 — 거리 서차지',dr:30}],
   '25S': [{val:'0',label:'$0 — 없음',dr:0},{val:'30',label:'$30 — 거리 서차지',dr:30}],
@@ -5491,6 +5585,7 @@ function selectEarly(amt){
   saveDailyDraft();
 }
 // 야간투어 요율 테이블
+// ★ NIGHT_RATES: GAS M_NightRates 시트에서 오버라이드됨 (아래는 폴백 기본값)
 const NIGHT_RATES = {
   guide_opt:   { small:{ ta:0,   dr:0,   owner:50  }, large:{ ta:0,   dr:0,   owner:100 } },
   agency_incl: { small:{ ta:250, dr:200, owner:50  }, large:{ ta:350, dr:300, owner:50  } },
