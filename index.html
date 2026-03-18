@@ -411,6 +411,13 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
     </button>
   </div>
 
+  <!-- PAST SHIFT REPORTS -->
+  <div id="past-reports-head" style="display:none;padding:0 12px;display:flex;align-items:center;justify-content:space-between;margin-top:16px;">
+    <div style="font-weight:700;font-size:14px;">📁 지난 운행 일지</div>
+    <button onclick="loadMyPastShifts(true)" style="font-size:11px;background:var(--surface,#f8fafc);color:var(--muted,#6b7280);border:1px solid #e5e7eb;border-radius:8px;padding:4px 10px;cursor:pointer;">🔄 새로고침</button>
+  </div>
+  <div id="past-reports-list" style="padding:6px 12px 0;"></div>
+
   <!-- QUICK NAV -->
   <div style="padding:0 12px 8px;">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -2828,6 +2835,9 @@ function doLogin() {
   renderTodayReports();
   renderSalary();
   initMyInfoPage();
+  // 지난 운행 일지 로드 (비동기)
+  _myPastShiftsLoaded = false;
+  loadMyPastShifts();
 }
 
 function showLoginError(msg) {
@@ -2864,6 +2874,11 @@ function doLogout() {
   activeShifts = [];
   todayReports = [];
   editingShiftId = null;
+  _myPastShifts = {pre:[], eos:[]};
+  _myPastShiftsLoaded = false;
+  document.getElementById('past-reports-list').innerHTML = '';
+  const prh = document.getElementById('past-reports-head');
+  if (prh) prh.style.display = 'none';
   // PIN/선택 초기화
   document.getElementById('login-driver-select').value = '';
   [0,1,2,3].forEach(i => { document.getElementById('pin-'+i).value = ''; });
@@ -3204,6 +3219,8 @@ function autoRestoreSession() {
     renderTodayReports();
     renderSalary();
     initMyInfoPage();
+    _myPastShiftsLoaded = false;
+    loadMyPastShifts();
 
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
@@ -7916,6 +7933,162 @@ function openShiftReport(shift, type) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// PAST SHIFT REPORTS — Driver View
+// ═══════════════════════════════════════════════════════════════════════
+
+let _myPastShifts = {pre: [], eos: []};
+let _myPastShiftsLoaded = false;
+
+async function loadMyPastShifts(force=false) {
+  if (!currentDriver?.name) return;
+  if (!force && _myPastShiftsLoaded) { renderMyPastShifts(); return; }
+
+  const headEl = document.getElementById('past-reports-head');
+  const listEl = document.getElementById('past-reports-list');
+  if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">⏳ 불러오는 중...</div>';
+  if (headEl) headEl.style.display = 'flex';
+
+  try {
+    const [preRes, eosRes] = await Promise.all([
+      fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Pre_Departure').then(r=>r.json()).catch(()=>({ok:false})),
+      fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=End_of_Shift').then(r=>r.json()).catch(()=>({ok:false}))
+    ]);
+
+    const myName = currentDriver.name;
+    if (preRes.ok) _myPastShifts.pre = (preRes.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})).filter(r=>r.Driver===myName);
+    if (eosRes.ok) _myPastShifts.eos = (eosRes.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})).filter(r=>r.Driver===myName);
+    _myPastShiftsLoaded = true;
+  } catch(e) {
+    if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:12px;color:#ef4444;font-size:12px;">❌ 로드 실패</div>';
+    return;
+  }
+  renderMyPastShifts();
+}
+
+function _parseDDMMYYYYDriver(s) {
+  if (!s) return 0;
+  const p = String(s).trim().split('/');
+  if (p.length===3) { const d=new Date(p[2],p[1]-1,p[0]); return isNaN(d)?0:d.getTime(); }
+  const d=new Date(s); return isNaN(d)?0:d.getTime();
+}
+
+function renderMyPastShifts() {
+  const listEl = document.getElementById('past-reports-list');
+  const headEl = document.getElementById('past-reports-head');
+  if (!listEl) return;
+
+  const preItems = _myPastShifts.pre.map(r=>({...r, _type:'pre'}));
+  const eosItems = _myPastShifts.eos.map(r=>({...r, _type:'eos'}));
+  let all = [...preItems, ...eosItems];
+  all.sort((a,b)=>_parseDDMMYYYYDriver(b.Date)-_parseDDMMYYYYDriver(a.Date));
+  // Show max 30 most recent
+  all = all.slice(0, 30);
+
+  if (headEl) headEl.style.display = all.length ? 'flex' : 'none';
+  if (!all.length) { listEl.innerHTML = ''; return; }
+
+  listEl.innerHTML = all.map(r=>{
+    const isPre = r._type === 'pre';
+    const ri = r._rowIndex;
+    const tp = r._type;
+    const badge = isPre
+      ? `<span style="background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;">🚦 Pre Departure</span>`
+      : `<span style="background:#f0fdf4;color:#15803d;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;">🏁 End of Shift</span>`;
+    const sub = isPre
+      ? `출발 ${r.Start_Time||'—'} · KM ${r.Start_KM||'—'}`
+      : `종료 ${r.End_Time||'—'} · KM ${r.End_KM||'—'}`;
+    return `<div style="background:white;border-radius:12px;padding:12px;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">${badge}</div>
+          <div style="font-size:13px;font-weight:700;color:#1a1a1a;">${fmtDate(r.Date)||r.Date||'—'} · ${r.Rego||'—'}</div>
+          <div style="font-size:11px;color:#9ca3af;margin-top:2px;">${sub}</div>
+          ${r.Remarks?`<div style="font-size:11px;color:#9ca3af;font-style:italic;margin-top:2px;">${r.Remarks}</div>`:''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;">
+          <button onclick="openPastShiftPdf(${ri},'${tp}')" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:none;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer;white-space:nowrap;">📄 PDF</button>
+          <button onclick="openCorrectionModal(${ri},'${tp}')" style="font-size:11px;background:#fff7ed;color:#c2410c;border:none;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer;white-space:nowrap;">✏️ 수정요청</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openPastShiftPdf(rowIndex, type) {
+  const cache = type==='pre' ? _myPastShifts.pre : _myPastShifts.eos;
+  const r = cache.find(x=>x._rowIndex===rowIndex);
+  if (!r) { showToast('리포트를 찾을 수 없습니다','error'); return; }
+
+  const isPre = type==='pre';
+  // Build a shift-like object and use the existing openShiftReport function
+  const shift = isPre
+    ? { date: r.Date, rego: r.Rego, driver: r.Driver, seats: r.Seats,
+        startKm: r.Start_KM ? Number(r.Start_KM) : null,
+        fuel: r.Fuel, startTime: r.Start_Time, remarks: r.Remarks,
+        preChecks: (() => { try { return r.Check_Results ? JSON.parse(r.Check_Results) : []; } catch(e){return[];} })(),
+        preSignature: '' }
+    : { date: r.Date, endDate: r.Date, rego: r.Rego, driver: r.Driver,
+        endKm: r.End_KM ? Number(r.End_KM) : null,
+        endTime: r.End_Time, fuel: r.Fuel, remarks: r.Remarks,
+        dailyReports: [], endChecks: [], eosSignature: '' };
+
+  openShiftReport(shift, isPre ? 'pre' : 'eos');
+}
+
+// ── 수정 요청 ──
+let _correctionTarget = null;
+
+function openCorrectionModal(rowIndex, type) {
+  const cache = type==='pre' ? _myPastShifts.pre : _myPastShifts.eos;
+  const r = cache.find(x=>x._rowIndex===rowIndex);
+  if (!r) return;
+  _correctionTarget = {r, type};
+
+  const typeLabel = type==='pre' ? 'Pre Departure' : 'End of Shift';
+  document.getElementById('correction-info').innerHTML =
+    `<strong>${typeLabel}</strong> · ${fmtDate(r.Date)||r.Date||'—'} · ${r.Rego||'—'}`;
+  document.getElementById('correction-desc').value = '';
+  document.getElementById('correction-modal').style.display = 'flex';
+}
+
+function closeCorrectionModal() {
+  document.getElementById('correction-modal').style.display = 'none';
+  _correctionTarget = null;
+}
+
+async function submitCorrectionRequest() {
+  if (!_correctionTarget) return;
+  const {r, type} = _correctionTarget;
+  const desc = (document.getElementById('correction-desc')?.value||'').trim();
+  if (!desc) { showToast('수정 내용을 입력해주세요','error'); return; }
+
+  const btn = document.querySelector('#correction-modal button[onclick="submitCorrectionRequest()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '전송 중...'; }
+
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action: 'save_correction_request',
+        reportType: type==='pre' ? 'Pre_Departure' : 'End_of_Shift',
+        driver: currentDriver?.name || r.Driver || '',
+        date: r.Date || '',
+        rego: r.Rego || '',
+        description: desc
+      })
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error||'전송 실패');
+    closeCorrectionModal();
+    showToast('✅ 수정 요청이 전송되었습니다','success');
+  } catch(e) {
+    showToast('❌ 전송 실패: '+e.message,'error');
+    if (btn) { btn.disabled = false; btn.textContent = '📨 요청 전송'; }
+  }
+}
+
 </script>
 
 <!-- PDF Prompt Modal (bottom sheet) -->
@@ -7933,6 +8106,20 @@ function openShiftReport(shift, type) {
 <style>
   @keyframes slideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
 </style>
+
+<!-- CORRECTION REQUEST MODAL -->
+<div id="correction-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9950;align-items:flex-end;justify-content:center;">
+  <div style="background:#fff;border-radius:20px 20px 0 0;padding:24px 20px 36px;width:100%;max-width:480px;animation:slideUp 0.25s ease;">
+    <div style="width:36px;height:4px;background:#e5e7eb;border-radius:2px;margin:0 auto 18px;"></div>
+    <div style="font-size:18px;font-weight:800;color:#1a1a1a;margin-bottom:6px;">✏️ 수정 요청</div>
+    <div id="correction-info" style="font-size:12px;color:#666;margin-bottom:14px;line-height:1.4;"></div>
+    <textarea id="correction-desc" placeholder="수정이 필요한 내용을 자세히 작성해주세요..." style="width:100%;min-height:100px;border:1.5px solid #e5e7eb;border-radius:12px;padding:12px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button onclick="closeCorrectionModal()" style="flex:1;background:#f0f4ff;color:#1a56db;border:none;border-radius:12px;padding:15px;font-size:14px;font-weight:700;cursor:pointer;">취소</button>
+      <button onclick="submitCorrectionRequest()" style="flex:2;background:#1a56db;color:white;border:none;border-radius:12px;padding:15px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(26,86,219,0.3);">📨 요청 전송</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>

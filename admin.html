@@ -978,6 +978,38 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </div>
 </div>
 
+
+<!-- SHIFT REPORTS PAGE -->
+<div class="pg" id="pshift">
+  <div class="shd" style="padding-top:8px">
+    <div>
+      <div class="stl">🚌 운행 일지</div>
+      <div class="ssb">Pre Departure &amp; End of Shift 기록</div>
+    </div>
+    <button class="btn bac sm" onclick="loadShiftReports(true)">🔄 새로고침</button>
+  </div>
+
+  <!-- 탭: Pre Departure / End of Shift -->
+  <div style="display:flex;gap:0;padding:10px 14px 0;">
+    <button id="shift-tab-pre" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;margin-bottom:0;" onclick="setShiftTab('pre')">🚦 Pre Departure</button>
+    <button id="shift-tab-eos" class="btn bac sm" style="border-radius:0 8px 8px 0;margin-bottom:0;" onclick="setShiftTab('eos')">🏁 End of Shift</button>
+  </div>
+
+  <!-- 필터 -->
+  <div style="padding:10px 14px 0;display:flex;gap:6px;flex-wrap:wrap;">
+    <select id="shift-filter-driver" class="profit-sel" style="flex:1;min-width:110px;" onchange="renderShiftTab()">
+      <option value="">전체 드라이버</option>
+    </select>
+    <select id="shift-filter-rego" class="profit-sel" style="flex:1;min-width:90px;" onchange="renderShiftTab()">
+      <option value="">전체 차량</option>
+    </select>
+    <input type="text" id="shift-filter-date" class="profit-sel" placeholder="날짜 필터 (dd/mm)" style="flex:1;min-width:110px;" oninput="renderShiftTab()">
+  </div>
+
+  <!-- 리포트 리스트 -->
+  <div id="shift-list" style="padding:10px 14px 80px;"></div>
+</div>
+
 </div><!-- /cont -->
 
 <!-- BOTTOM NAV -->
@@ -992,6 +1024,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div class="ni" id="nsub" onclick="nv('psub','nsub');rSub()"><div class="nie">🤝</div><div class="nil">서브</div></div>
   <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div></div>
   <div class="ni" id="ndr" onclick="nv('pdr','ndr');loadDR()"><div class="nie">📋</div><div class="nil">리포트</div></div>
+  <div class="ni" id="nshift" onclick="nv('pshift','nshift');loadShiftReports()"><div class="nie">🚌</div><div class="nil">운행일지</div></div>
   <div class="ni" id="nmot" onclick="nv('pmot','nmot');rMot()"><div class="nie">🚔</div><div class="nil">MOT</div></div>
   <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
   <div class="ni" id="ninv" onclick="nv('pinv','ninv');initInvoice()"><div class="nie">🧾</div><div class="nil">인보이스</div></div>
@@ -1035,6 +1068,19 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div class="mft">
     <button class="btn bgh" style="flex:1" onclick="document.getElementById('cdm').classList.remove('on')">취소</button>
     <button class="btn brd" style="flex:2" onclick="execDel()">삭제</button>
+  </div>
+</div>
+</div>
+
+<!-- SHIFT EDIT MODAL -->
+<div class="movl" id="shift-edit-modal" onclick="if(event.target===this)closeShiftEdit()">
+<div class="msh">
+  <div class="mhd"></div>
+  <div class="mtt" id="shift-edit-title">운행일지 수정</div>
+  <div id="shift-edit-body" style="overflow-y:auto;max-height:60vh;"></div>
+  <div class="mft">
+    <button class="btn bgh" style="flex:1" onclick="closeShiftEdit()">취소</button>
+    <button class="btn bac" style="flex:2" onclick="saveShiftEdit()">💾 저장</button>
   </div>
 </div>
 </div>
@@ -5900,6 +5946,313 @@ async function savePCToSheets(){
     await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'replace_master',sheet:'M_PriceClient',rows})});
   } catch(e){ console.error('savePCToSheets error:',e); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SHIFT REPORTS — Pre Departure & End of Shift History (Admin)
+// ═══════════════════════════════════════════════════════════════════════
+
+let _shiftCache = {pre: [], eos: []};
+let _shiftCacheTime = {pre: 0, eos: 0};
+let _shiftCurrentTab = 'pre';
+const SHIFT_CACHE_TTL = 2 * 60 * 1000;
+
+async function loadShiftReports(force=false) {
+  const now = Date.now();
+  const needPre = force || !_shiftCache.pre.length || now - _shiftCacheTime.pre > SHIFT_CACHE_TTL;
+  const needEos = force || !_shiftCache.eos.length || now - _shiftCacheTime.eos > SHIFT_CACHE_TTL;
+  if (!needPre && !needEos) { renderShiftTab(); return; }
+
+  const listEl = document.getElementById('shift-list');
+  if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">⏳ 불러오는 중...</div>';
+
+  try {
+    const fetches = [];
+    if (needPre) fetches.push(
+      fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Pre_Departure')
+        .then(r => r.json())
+        .then(j => { if(j.ok) { _shiftCache.pre = (j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})); _shiftCacheTime.pre = Date.now(); } })
+        .catch(()=>{})
+    );
+    if (needEos) fetches.push(
+      fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=End_of_Shift')
+        .then(r => r.json())
+        .then(j => { if(j.ok) { _shiftCache.eos = (j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})); _shiftCacheTime.eos = Date.now(); } })
+        .catch(()=>{})
+    );
+    await Promise.all(fetches);
+  } catch(e) {
+    if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:30px;color:#ef4444">❌ 로드 실패</div>';
+    return;
+  }
+
+  // 필터 드롭다운 채우기
+  const allRows = [..._shiftCache.pre, ..._shiftCache.eos];
+  const drivers = [...new Set(allRows.map(r=>r.Driver||'').filter(Boolean))].sort();
+  const regos   = [...new Set(allRows.map(r=>r.Rego||'').filter(Boolean))].sort();
+  const dSel = document.getElementById('shift-filter-driver');
+  const rSel = document.getElementById('shift-filter-rego');
+  if (dSel) {
+    const curD = dSel.value;
+    dSel.innerHTML = '<option value="">전체 드라이버</option>' +
+      drivers.map(d=>`<option value="${escH(d)}"${d===curD?' selected':''}>${escH(d)}</option>`).join('');
+  }
+  if (rSel) {
+    const curR = rSel.value;
+    rSel.innerHTML = '<option value="">전체 차량</option>' +
+      regos.map(r=>`<option value="${escH(r)}"${r===curR?' selected':''}>${escH(r)}</option>`).join('');
+  }
+  renderShiftTab();
+}
+
+function setShiftTab(tab) {
+  _shiftCurrentTab = tab;
+  document.getElementById('shift-tab-pre')?.classList.toggle('on', tab==='pre');
+  document.getElementById('shift-tab-eos')?.classList.toggle('on', tab==='eos');
+  renderShiftTab();
+}
+
+function _parseDDMMYYYY(s) {
+  if (!s) return 0;
+  const p = String(s).trim().split('/');
+  if (p.length === 3) { const d = new Date(p[2], p[1]-1, p[0]); return isNaN(d)?0:d.getTime(); }
+  const d = new Date(s); return isNaN(d)?0:d.getTime();
+}
+
+function renderShiftTab() {
+  const rows = _shiftCurrentTab === 'pre' ? _shiftCache.pre : _shiftCache.eos;
+  const fd = (document.getElementById('shift-filter-driver')?.value||'').trim();
+  const fr = (document.getElementById('shift-filter-rego')?.value||'').trim();
+  const fdt= (document.getElementById('shift-filter-date')?.value||'').toLowerCase().trim();
+
+  let filtered = rows.filter(r=>{
+    if (fd  && r.Driver!==fd) return false;
+    if (fr  && r.Rego!==fr)   return false;
+    if (fdt && !String(r.Date||'').toLowerCase().includes(fdt)) return false;
+    return true;
+  });
+  filtered.sort((a,b)=>_parseDDMMYYYY(b.Date)-_parseDDMMYYYY(a.Date));
+
+  const container = document.getElementById('shift-list');
+  if (!container) return;
+
+  if (!filtered.length) {
+    container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">기록이 없습니다</div>';
+    return;
+  }
+
+  const isPre = _shiftCurrentTab === 'pre';
+  container.innerHTML = filtered.map(r=>{
+    const ri = r._rowIndex;
+    const tab = _shiftCurrentTab;
+    const dateStr = fmtDate(r.Date)||r.Date||'—';
+    const detail = isPre
+      ? `출발 ${r.Start_Time||'—'} · KM ${r.Start_KM||'—'} · 연료 ${r.Fuel||'—'}`
+      : `종료 ${r.End_Time||'—'} · KM ${r.End_KM||'—'} · 연료 ${r.Fuel_End||'—'}`;
+    return `<div class="crd" style="margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;color:var(--t1);margin-bottom:2px;">${escH(r.Driver||'—')} · <span style="color:var(--ac)">${escH(r.Rego||'—')}</span></div>
+          <div style="font-size:12px;color:var(--t2);margin-bottom:3px;">${escH(dateStr)}</div>
+          <div style="font-size:11px;color:var(--t3);">${escH(detail)}</div>
+          ${r.Remarks?`<div style="font-size:11px;color:var(--t3);margin-top:3px;font-style:italic;">${escH(r.Remarks)}</div>`:''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;">
+          <button class="btn bac sm" onclick="viewShiftPdfAdmin(${ri},'${tab}')" style="font-size:11px;padding:5px 9px;white-space:nowrap;">📄 PDF</button>
+          <button class="btn bgh sm" onclick="openShiftEdit(${ri},'${tab}')" style="font-size:11px;padding:5px 9px;white-space:nowrap;">✏️ 수정</button>
+          <button class="btn brd sm" onclick="deleteShiftReport(${ri},'${tab}')" style="font-size:11px;padding:5px 9px;white-space:nowrap;">🗑 삭제</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── PDF 보기 ──
+function viewShiftPdfAdmin(rowIndex, type) {
+  const cache = type === 'pre' ? _shiftCache.pre : _shiftCache.eos;
+  const r = cache.find(x=>x._rowIndex===rowIndex);
+  if (!r) { toast('리포트를 찾을 수 없습니다','er'); return; }
+  openShiftPdfAdmin(r, type);
+}
+
+function openShiftPdfAdmin(r, type) {
+  const isPre = type === 'pre';
+  const typeLabel = isPre ? 'PRE DEPARTURE REPORT' : 'END OF SHIFT REPORT';
+  const h = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  function field(label, value) {
+    return `<div style="margin-bottom:10px;">
+      <div style="font-size:10px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px;">${label}</div>
+      <div style="font-size:14px;font-weight:500;color:#1a1a1a;">${h(value||'—')}</div>
+    </div>`;
+  }
+  function row2f(l,r2) { return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:4px;">${l}${r2}</div>`; }
+  function sec(t) { return `<div style="background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;padding:6px 12px;border-radius:6px;margin:16px 0 10px;">${t}</div>`; }
+
+  let checksHtml = '';
+  if (isPre && r.Check_Results) {
+    try {
+      const checks = typeof r.Check_Results==='string' ? JSON.parse(r.Check_Results) : r.Check_Results;
+      if (Array.isArray(checks) && checks.length) {
+        checksHtml = sec('🔍 차량 점검 Pre-Shift Vehicle Check') +
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">' +
+          checks.map(c=>{
+            const ok = c.pass!==false;
+            return `<div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:7px;background:${ok?'#f0fdf4':'#fef2f2'};font-size:12px;font-weight:600;">
+              <div style="width:8px;height:8px;border-radius:50%;background:${ok?'#16a34a':'#dc2626'};flex-shrink:0;"></div>
+              <span>${h(c.name||'')}${c.kr?` <span style="font-size:10px;color:#888;">${h(c.kr)}</span>`:''}</span>
+            </div>`;
+          }).join('') + '</div>';
+      }
+    } catch(e) {
+      checksHtml = sec('🔍 차량 점검') + `<div style="font-size:12px;color:#666;">${h(String(r.Check_Results))}</div>`;
+    }
+  }
+
+  const body = isPre
+    ? sec('🚦 Pre Departure 출발 전 점검') +
+      row2f(field('날짜 Date', fmtDate(r.Date)||r.Date), field('차량 Rego', r.Rego)) +
+      row2f(field('드라이버 Driver', r.Driver), field('좌석 수 Seats', r.Seats)) +
+      row2f(field('출발 KM Start KM', r.Start_KM), field('연료 Fuel', r.Fuel)) +
+      field('출발 시간 Start Time', r.Start_Time) +
+      field('비고 Remarks', r.Remarks) +
+      checksHtml
+    : sec('🏁 End of Shift 운행 종료') +
+      row2f(field('날짜 Date', fmtDate(r.Date)||r.Date), field('차량 Rego', r.Rego)) +
+      row2f(field('드라이버 Driver', r.Driver), field('종료 KM End KM', r.End_KM)) +
+      row2f(field('종료 시간 End Time', r.End_Time), field('연료 Fuel End', r.Fuel_End)) +
+      field('비고 Remarks', r.Remarks);
+
+  const html = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>DONG CHOI PTY LTD — ${typeLabel}</title>
+<style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',sans-serif;color:#1a1a1a;background:#fff;padding-bottom:80px;}@media print{body{padding-bottom:0;}.no-print{display:none!important;}@page{margin:12mm;}}</style>
+</head><body>
+<div style="background:linear-gradient(135deg,#1a56db,#2563eb);color:white;padding:20px 20px 16px;">
+  <div style="font-size:11px;font-weight:600;letter-spacing:1px;opacity:0.85;text-transform:uppercase;">DONG CHOI PTY LTD</div>
+  <div style="font-size:20px;font-weight:800;margin-top:4px;">${typeLabel}</div>
+  <div style="font-size:12px;opacity:0.85;margin-top:6px;">${h(r.Driver||'—')} · ${h(r.Rego||'—')} · ${h(fmtDate(r.Date)||r.Date||'—')}</div>
+</div>
+<div style="padding:0 16px;">${body}</div>
+<div style="margin:20px 16px 0;padding-top:12px;border-top:1px solid #e5e7eb;font-size:10px;color:#aaa;">
+  제출일시 Submitted: ${h(r.Submitted||'—')} &nbsp;|&nbsp; DONG CHOI PTY LTD Fleet Management System
+</div>
+<div class="no-print" style="position:fixed;bottom:20px;left:0;right:0;display:flex;gap:10px;justify-content:center;padding:0 16px;">
+  <button onclick="window.close()" style="flex:1;max-width:140px;background:#f0f4ff;color:#1a56db;border:2px solid #bfdbfe;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;">✕ 닫기</button>
+  <button onclick="window.print()" style="flex:2;max-width:220px;background:#1a56db;color:white;border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(26,86,219,0.35);">🖨️ PDF 저장 / 인쇄</button>
+</div>
+</body></html>`;
+
+  const w = window.open('','_blank');
+  if (w) { w.document.write(html); w.document.close(); }
+  else {
+    const blob = new Blob([html],{type:'text/html'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.target='_blank'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  }
+}
+
+// ── 수정 모달 ──
+let _shiftEditRow  = null;
+let _shiftEditType = null;
+
+function openShiftEdit(rowIndex, type) {
+  const cache = type === 'pre' ? _shiftCache.pre : _shiftCache.eos;
+  const r = cache.find(x=>x._rowIndex===rowIndex);
+  if (!r) { toast('리포트를 찾을 수 없습니다','er'); return; }
+  _shiftEditRow  = r;
+  _shiftEditType = type;
+
+  const isPre = type === 'pre';
+  document.getElementById('shift-edit-title').textContent = isPre ? '🚦 Pre Departure 수정' : '🏁 End of Shift 수정';
+
+  const inp = (id, label, val, tp='text') =>
+    `<div style="margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:600;color:var(--t3);margin-bottom:4px;">${label}</div>
+      <input id="${id}" type="${tp}" class="form-input" value="${escH(String(val||''))}">
+    </div>`;
+
+  const body = isPre
+    ? inp('se-date',  '날짜 Date (dd/mm/yyyy)', r.Date||'') +
+      inp('se-driver','드라이버 Driver',          r.Driver||'') +
+      inp('se-rego',  '차량 Rego',                r.Rego||'') +
+      inp('se-seats', '좌석 수 Seats',             r.Seats||'','number') +
+      inp('se-skm',   '출발 KM Start KM',          r.Start_KM||'','number') +
+      inp('se-fuel',  '연료 Fuel',                 r.Fuel||'') +
+      inp('se-stime', '출발 시간 Start Time',       r.Start_Time||'') +
+      inp('se-rem',   '비고 Remarks',               r.Remarks||'')
+    : inp('se-date',  '날짜 Date (dd/mm/yyyy)', r.Date||'') +
+      inp('se-driver','드라이버 Driver',          r.Driver||'') +
+      inp('se-rego',  '차량 Rego',                r.Rego||'') +
+      inp('se-ekm',   '종료 KM End KM',            r.End_KM||'','number') +
+      inp('se-etime', '종료 시간 End Time',         r.End_Time||'') +
+      inp('se-fuel',  '연료 End Fuel',              r.Fuel_End||'') +
+      inp('se-rem',   '비고 Remarks',               r.Remarks||'');
+
+  document.getElementById('shift-edit-body').innerHTML = body;
+  document.getElementById('shift-edit-modal').classList.add('on');
+}
+
+function closeShiftEdit() {
+  document.getElementById('shift-edit-modal').classList.remove('on');
+  _shiftEditRow = null; _shiftEditType = null;
+}
+
+async function saveShiftEdit() {
+  if (!_shiftEditRow || !_shiftEditType) return;
+  const isPre = _shiftEditType === 'pre';
+  const rowIndex = _shiftEditRow._rowIndex;
+  const g = id => document.getElementById(id)?.value||'';
+
+  const data = isPre
+    ? { Submitted: _shiftEditRow.Submitted||'', Driver: g('se-driver'), Date: g('se-date'),
+        Rego: g('se-rego'), Seats: g('se-seats'), Start_KM: g('se-skm'),
+        Fuel: g('se-fuel'), Start_Time: g('se-stime'),
+        Check_Results: _shiftEditRow.Check_Results||'', Remarks: g('se-rem') }
+    : { Submitted: _shiftEditRow.Submitted||'', Driver: g('se-driver'), Date: g('se-date'),
+        Rego: g('se-rego'), End_KM: g('se-ekm'), End_Time: g('se-etime'),
+        Fuel_End: g('se-fuel'), Remarks: g('se-rem') };
+
+  const sheet = isPre ? 'Pre_Departure' : 'End_of_Shift';
+  try {
+    const res  = await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'update_report', sheet, rowIndex, data}) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error||json.msg||'저장 실패');
+
+    const cache = isPre ? _shiftCache.pre : _shiftCache.eos;
+    const idx = cache.findIndex(x=>x._rowIndex===rowIndex);
+    if (idx!==-1) cache[idx] = {...data, _rowIndex: rowIndex};
+
+    closeShiftEdit();
+    renderShiftTab();
+    toast('✅ 저장 완료','ok');
+  } catch(e) { toast('❌ 저장 실패: '+e.message,'er'); }
+}
+
+// ── 삭제 ──
+async function deleteShiftReport(rowIndex, type) {
+  const cache = type==='pre' ? _shiftCache.pre : _shiftCache.eos;
+  const r = cache.find(x=>x._rowIndex===rowIndex);
+  if (!r) return;
+  const label = `${fmtDate(r.Date)||r.Date} · ${r.Driver} · ${r.Rego}`;
+  if (!confirm(`이 리포트를 삭제하시겠습니까?\n\n${label}`)) return;
+
+  const sheet = type==='pre' ? 'Pre_Departure' : 'End_of_Shift';
+  try {
+    const res  = await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'delete_report', sheet, rowIndex}) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error||json.msg||'삭제 실패');
+
+    const idx = cache.findIndex(x=>x._rowIndex===rowIndex);
+    if (idx!==-1) cache.splice(idx,1);
+    renderShiftTab();
+    toast('🗑️ 삭제 완료','ok');
+  } catch(e) { toast('❌ 삭제 실패: '+e.message,'er'); }
 }
 
 async function savePDToSheets(){

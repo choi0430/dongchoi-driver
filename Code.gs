@@ -189,6 +189,9 @@ function doPost(e) {
       case 'submit_mot':
         return cors(saveReport('MOT_Report', payload.data));
 
+      case 'save_correction_request':
+        return cors(saveCorrectionRequest(payload));
+
       // ── Master CRUD ──
       case 'add_master':
         return cors(addMasterRow(payload.sheet, payload.data));
@@ -883,6 +886,33 @@ function replaceNotices(rows) {
     }
 
     return {ok: true, count: rows ? rows.length : 0};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function saveCorrectionRequest(payload) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Notices');
+
+    const type    = payload.reportType || '';   // 'Pre_Departure' | 'End_of_Shift'
+    const driver  = payload.driver     || '';
+    const date    = payload.date       || '';
+    const rego    = payload.rego       || '';
+    const desc    = payload.description || '';
+
+    const typeLabel = type === 'Pre_Departure' ? 'Pre Departure'
+                    : type === 'End_of_Shift'  ? 'End of Shift'
+                    : type;
+
+    const id      = 'CR-' + Date.now();
+    const title   = '[수정요청] ' + typeLabel + ' · ' + driver + ' · ' + date + ' · ' + rego;
+    const content = desc;
+    const rowDate = Utilities.formatDate(new Date(), 'Australia/Sydney', 'dd/MM/yyyy');
+
+    sheet.appendRow([id, title, content, 'correction', rowDate, 'true']);
+    return {ok: true, id: id};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
