@@ -4947,21 +4947,32 @@ function openView(type, idx) {
     html += row('PIN', d.PIN||'');
 
   } else if(type === 'V') {
-    const yr = d['Manufacture Date'] || d.Manufacture_Date || '';
+    // 빈 값도 모두 표시 (수정 폼과 동일한 필드 구성)
+    const rowA = (label, val) => `<div style="background:var(--sf2);border-radius:10px;padding:10px 14px;margin-bottom:8px;">
+      <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">${escH(label)}</div>
+      <div style="font-size:14px;font-weight:600;color:${val?'var(--t1)':'var(--t3)'};word-break:break-all;">${val?escH(String(val)):'—'}</div>
+    </div>`;
+    const row2A = (fields) => `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">` +
+      fields.map(([label,val])=>`<div style="background:var(--sf2);border-radius:10px;padding:10px 14px;">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">${escH(label)}</div>
+        <div style="font-size:14px;font-weight:600;color:${val?'var(--t1)':'var(--t3)'};">${val?escH(String(val)):'—'}</div>
+      </div>`).join('') + `</div>`;
+    const yr = d.Manufacture_Date || d['Manufacture Date'] || '';
+    const engNum = d.Engine_Number || d['Engine Number'] || '';
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🚌 차량 정보</div>`;
-    html += row2([['차량번호 (Rego)', d.Rego], ['상태', d.Current_Status]]);
-    html += row2([['제조사', d.Make], ['모델', d.Model]]);
-    html += row2([['연도', yr], ['좌석수', d.Capacity ? d.Capacity+'인승' : '']]);
-    html += row2([['변속기', d.Transmission], ['소유자', d.Owner]]);
+    html += row2A([['차량번호 (Rego)', d.Rego], ['상태', d.Current_Status]]);
+    html += row2A([['제조사', d.Make], ['모델', d.Model]]);
+    html += row2A([['연도', yr], ['좌석수', d.Capacity ? d.Capacity+'인승' : '']]);
+    html += row2A([['변속기', d.Transmission||'Auto'], ['소유자', d.Owner]]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">📅 만료일</div>`;
-    html += row2([['Rego 만료일', fmtDate(d.Rego_Date||'')], ['HVIS 만료일', fmtDate(d.HVIS_Date||'')]]);
+    html += row2A([['Rego 만료일', fmtDate(d.Rego_Date||'')], ['HVIS 만료일', fmtDate(d.HVIS_Date||'')]]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔧 정비</div>`;
-    html += row2([['현재 KM', d.Current_KM ? Number(d.Current_KM).toLocaleString()+' km' : ''],
-                  ['마지막 정비 KM', d.Last_Service_KM ? Number(d.Last_Service_KM).toLocaleString()+' km' : '']]);
-    html += row('정비 간격', d.Service_Interval ? Number(d.Service_Interval).toLocaleString()+' km' : '');
+    html += row2A([['현재 KM', d.Current_KM ? Number(d.Current_KM).toLocaleString()+' km' : ''],
+                   ['마지막 정비 KM', d.Last_Service_KM ? Number(d.Last_Service_KM).toLocaleString()+' km' : '']]);
+    html += rowA('정비 간격', d.Service_Interval ? Number(d.Service_Interval).toLocaleString()+' km' : '');
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔢 식별 번호</div>`;
-    html += row2([['VIN', d.VIN], ['Engine No.', d.Engine_Number||d['Engine Number']||'']]);
-    html += row('Accreditation', d.Accreditation);
+    html += row2A([['VIN', d.VIN], ['Engine No.', engNum]]);
+    html += rowA('Accreditation', d.Accreditation);
 
   } else if(type === 'C') {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🏢 여행사 정보</div>`;
@@ -5209,7 +5220,8 @@ function saveM(){
   if(t==='V'){
     if(!gv('f0')){toast('차량번호 필수','er');return}
     sheetName='M_Vehicles';
-    obj={Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),Manufacture_Date:gn('f4'),
+    obj={_rowIndex:ie?(DB.V[idx]?._rowIndex||null):null,
+         Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),Manufacture_Date:gn('f4'),
          Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:fmtDate(gv('f7')),HVIS_Date:fmtDate(gv('f8')),
          Current_KM:gn('f9'),Last_Service_KM:gn('f10'),Service_Interval:gn('f11')||10000,
          VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14'),Transmission:gv('f15')||'Auto'};
@@ -5520,13 +5532,18 @@ async function loadTab(sheet){
 async function syncVehicles(){
   const rows = await loadTab('M_Vehicles');
   if(!rows) return;
+  // 시트 헤더가 "Manufacture Date"(공백) or "Manufacture_Date"(언더스코어) 둘 다 지원
+  const rf=(r,...keys)=>{for(const k of keys){if(r[k]!==undefined&&r[k]!=='')return r[k];}return '';};
   DB.V = rows.map(r=>({
+    _rowIndex: r._rowIndex||null,
     Rego:r.Rego||'', Current_Status:r.Current_Status||'', Make:r.Make||'', Model:r.Model||'',
-    Manufacture_Date:r.Manufacture_Date||'', Capacity:r.Capacity||0, Owner:r.Owner||'',
+    Manufacture_Date: rf(r,'Manufacture_Date','Manufacture Date'),
+    Capacity:r.Capacity||0, Owner:r.Owner||'',
     Rego_Date:fmtDate(r.Rego_Date||''), HVIS_Date:fmtDate(r.HVIS_Date||''),
     Current_KM:r.Current_KM||0, Last_Service_KM:r.Last_Service_KM||0,
     Service_Interval:r.Service_Interval||10000,
-    VIN:r.VIN||'', Engine_Number:r.Engine_Number||'',
+    VIN:r.VIN||'',
+    Engine_Number: rf(r,'Engine_Number','Engine Number'),
     Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
   }));
   getSubVehicles().forEach(v=>{ if(v.Owner&&!DB.PS[v.Owner]) DB.PS[v.Owner]={}; });
@@ -5627,15 +5644,21 @@ async function loadAllFromSheets(){
     const d = json.data;
 
     // M_Vehicles → DB.V (GAS MASTER_HEADERS 필드명 그대로)
-    if(d.M_Vehicles?.length) DB.V = d.M_Vehicles.map(r=>({
-      Rego:r.Rego||'', Current_Status:r.Current_Status||'', Make:r.Make||'', Model:r.Model||'',
-      Manufacture_Date:r.Manufacture_Date||'', Capacity:r.Capacity||0, Owner:r.Owner||'',
-      Rego_Date:fmtDate(r.Rego_Date||''), HVIS_Date:fmtDate(r.HVIS_Date||''),
-      Current_KM:r.Current_KM||0, Last_Service_KM:r.Last_Service_KM||0,
-      Service_Interval:r.Service_Interval||10000,
-      VIN:r.VIN||'', Engine_Number:r.Engine_Number||'',
-      Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
-    }));
+    if(d.M_Vehicles?.length) {
+      const _rf=(r,...keys)=>{for(const k of keys){if(r[k]!==undefined&&r[k]!=='')return r[k];}return '';};
+      DB.V = d.M_Vehicles.map(r=>({
+        _rowIndex: r._rowIndex||null,
+        Rego:r.Rego||'', Current_Status:r.Current_Status||'', Make:r.Make||'', Model:r.Model||'',
+        Manufacture_Date: _rf(r,'Manufacture_Date','Manufacture Date'),
+        Capacity:r.Capacity||0, Owner:r.Owner||'',
+        Rego_Date:fmtDate(r.Rego_Date||''), HVIS_Date:fmtDate(r.HVIS_Date||''),
+        Current_KM:r.Current_KM||0, Last_Service_KM:r.Last_Service_KM||0,
+        Service_Interval:r.Service_Interval||10000,
+        VIN:r.VIN||'',
+        Engine_Number: _rf(r,'Engine_Number','Engine Number'),
+        Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
+      }));
+    }
 
     // M_Drivers → DB.D (GAS MASTER_HEADERS 필드명 그대로)
     if(d.M_Drivers?.length) DB.D = d.M_Drivers.map(r=>({
@@ -5808,7 +5831,13 @@ async function apiSaveMaster(sheetName, obj, isEdit, idx){
 
     const action = isEdit ? 'update_master' : 'add_master';
     const body = {action, sheet:sheetName, data:obj};
-    if(isEdit) body.rowIndex = idx + 2; // 헤더(1) + 0-based
+    if(isEdit) {
+      // GAS에서 받은 _rowIndex를 우선 사용 (시트에 빈 행 있어도 정확)
+      const sheetMap={M_Vehicles:'V',M_Drivers:'D',M_Clients:'C',M_Guides:'G',M_Hotels:'H'};
+      const dbKey = sheetMap[sheetName];
+      const storedRowIdx = dbKey ? DB[dbKey]?.[idx]?._rowIndex : null;
+      body.rowIndex = storedRowIdx || (idx + 2); // 헤더(1) + 0-based fallback
+    }
 
     await fetch(APPS_SCRIPT_URL, {
       method:'POST',

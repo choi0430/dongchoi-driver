@@ -308,11 +308,26 @@ function getMaster(sheetName) {
     if (data.length < 2) return {ok: true, sheet: sheetName, rows: []};
 
     const headers = data[0];
-    const rows = data.slice(1).map(row => {
+
+    // 시트 헤더(공백 포함 가능)를 MASTER_HEADERS 정규 키(언더스코어)로 매핑
+    // 예: "Manufacture Date" → "Manufacture_Date"
+    const canonicalHeaders = MASTER_HEADERS[sheetName];
+    const normToCanonical = {};
+    if (canonicalHeaders) {
+      canonicalHeaders.forEach(ch => {
+        normToCanonical[normalizeKey(ch)] = ch;
+      });
+    }
+
+    const rows = data.slice(1).map((row, rowIdx) => {
       const obj = {};
       headers.forEach((h, i) => {
-        obj[h] = row[i];
+        // 시트 헤더를 정규 키로 변환 (공백↔언더스코어 자동 처리)
+        const canonKey = (h && normToCanonical[normalizeKey(h)]) || h;
+        obj[canonKey] = row[i];
       });
+      // 행 번호 저장 (1-based 시트 행): 헤더(1) + rowIdx(0-based) + 1
+      obj._rowIndex = rowIdx + 2;
       return obj;
     });
 
