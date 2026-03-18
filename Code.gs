@@ -56,7 +56,8 @@ const MASTER_HEADERS = {
   'Sub_Rates':  ['Rego','Tour','seats_21','seats_25','seats_40','seats_50'],
   'Ledger':     ['RowID','Date','Rego','Tour','TA','SubTotal','MyDr','Extra','OT','Trailer','Hotel','Note'],
   'Wages':      ['RowID','Driver','WeekStart','Date','Amount','PayMethod','Notes'],
-  'Notices':    ['ID','Title','Content','Type','Date','Active']
+  'Notices':    ['ID','Title','Content','Type','Date','Active'],
+  'Audit_Log':  ['Timestamp','User','Action','Sheet','RowIndex','Summary']
 };
 
 // ── Tab Colors ──
@@ -168,17 +169,26 @@ function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
     const action = payload.action;
+    const _user  = payload._user || 'unknown';
 
     switch (action) {
       // ── Report Operations ──
       case 'save_report':
         return cors(saveReport('Daily_Report', payload.data));
 
-      case 'update_report':
-        return cors(updateReport(payload.sheet, payload.rowIndex, payload.data));
+      case 'update_report': {
+        const r = updateReport(payload.sheet, payload.rowIndex, payload.data);
+        if (r.ok) appendAuditLog(_user, 'update_report', payload.sheet, payload.rowIndex,
+          'Driver:' + (payload.data.Driver||'') + ' Date:' + (payload.data.Date||''));
+        return cors(r);
+      }
 
-      case 'delete_report':
-        return cors(deleteReport(payload.sheet, payload.rowIndex));
+      case 'delete_report': {
+        const r = deleteReport(payload.sheet, payload.rowIndex);
+        if (r.ok) appendAuditLog(_user, 'delete_report', payload.sheet, payload.rowIndex,
+          'row ' + payload.rowIndex + ' 삭제');
+        return cors(r);
+      }
 
       case 'save_predeparture':
         return cors(saveReport('Pre_Departure', payload.data));
@@ -193,23 +203,39 @@ function doPost(e) {
         return cors(saveCorrectionRequest(payload));
 
       // ── Master CRUD ──
-      case 'add_master':
-        return cors(addMasterRow(payload.sheet, payload.data));
+      case 'add_master': {
+        const r = addMasterRow(payload.sheet, payload.data);
+        if (r.ok) appendAuditLog(_user, 'add_master', payload.sheet, r.row || '',
+          '새 항목 추가: ' + JSON.stringify(payload.data).slice(0, 200));
+        return cors(r);
+      }
 
       case 'add_price_client_agency':
         return cors(addPriceClientAgency(payload.agency, payload.rows));
 
-      case 'update_master':
-        return cors(updateMasterRow(payload.sheet, payload.rowIndex, payload.data));
+      case 'update_master': {
+        const r = updateMasterRow(payload.sheet, payload.rowIndex, payload.data);
+        if (r.ok) appendAuditLog(_user, 'update_master', payload.sheet, payload.rowIndex,
+          JSON.stringify(payload.data).slice(0, 300));
+        return cors(r);
+      }
 
-      case 'delete_master':
-        return cors(deleteMasterRow(payload.sheet, payload.rowIndex));
+      case 'delete_master': {
+        const r = deleteMasterRow(payload.sheet, payload.rowIndex);
+        if (r.ok) appendAuditLog(_user, 'delete_master', payload.sheet, payload.rowIndex,
+          'row ' + payload.rowIndex + ' 삭제');
+        return cors(r);
+      }
 
       case 'replace_master':
         return cors(replaceMasterSheet(payload.sheet, payload.rows));
 
       case 'init_masters':
         return cors(initAllMasters());
+
+      // ── Invoice Email ──
+      case 'send_invoice_email':
+        return cors(sendInvoiceEmail({...payload, _user}));
 
       // ── Sub_Rates & M_PriceSub ──
       case 'replace_sub_rates':
@@ -219,27 +245,51 @@ function doPost(e) {
         return cors(replaceMasterSheet('M_PriceSub', payload.rows));
 
       // ── Ledger CRUD ──
-      case 'add_ledger':
-        return cors(addMasterRow('Ledger', payload.data));
+      case 'add_ledger': {
+        const r = addMasterRow('Ledger', payload.data);
+        if (r.ok) appendAuditLog(_user, 'add_ledger', 'Ledger', r.row || '',
+          'Date:' + (payload.data.Date||'') + ' Tour:' + (payload.data.Tour||''));
+        return cors(r);
+      }
 
-      case 'update_ledger':
-        return cors(updateMasterRow('Ledger', payload.rowIndex, payload.data));
+      case 'update_ledger': {
+        const r = updateMasterRow('Ledger', payload.rowIndex, payload.data);
+        if (r.ok) appendAuditLog(_user, 'update_ledger', 'Ledger', payload.rowIndex,
+          JSON.stringify(payload.data).slice(0, 200));
+        return cors(r);
+      }
 
-      case 'delete_ledger':
-        return cors(deleteMasterRow('Ledger', payload.rowIndex));
+      case 'delete_ledger': {
+        const r = deleteMasterRow('Ledger', payload.rowIndex);
+        if (r.ok) appendAuditLog(_user, 'delete_ledger', 'Ledger', payload.rowIndex,
+          'row ' + payload.rowIndex + ' 삭제');
+        return cors(r);
+      }
 
       case 'replace_ledger':
         return cors(replaceMasterSheet('Ledger', payload.rows));
 
       // ── Wages CRUD ──
-      case 'add_wage':
-        return cors(addWage(payload.data));
+      case 'add_wage': {
+        const r = addWage(payload.data);
+        if (r.ok) appendAuditLog(_user, 'add_wage', 'Wages', r.row || '',
+          'Driver:' + (payload.data.Driver||'') + ' Amount:' + (payload.data.Amount||''));
+        return cors(r);
+      }
 
-      case 'update_wage':
-        return cors(updateWage(payload.rowIndex, payload.data));
+      case 'update_wage': {
+        const r = updateWage(payload.rowIndex, payload.data);
+        if (r.ok) appendAuditLog(_user, 'update_wage', 'Wages', payload.rowIndex,
+          JSON.stringify(payload.data).slice(0, 200));
+        return cors(r);
+      }
 
-      case 'delete_wage':
-        return cors(deleteWage(payload.rowIndex));
+      case 'delete_wage': {
+        const r = deleteWage(payload.rowIndex);
+        if (r.ok) appendAuditLog(_user, 'delete_wage', 'Wages', payload.rowIndex,
+          'row ' + payload.rowIndex + ' 삭제');
+        return cors(r);
+      }
 
       case 'replace_wages':
         return cors(replaceWages(payload.rows));
@@ -1056,6 +1106,89 @@ function getMaxKMPerRego() {
     scanSheet('End_of_Shift',  ['End_KM']);
 
     return { ok: true, kmMap };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDIT TRAIL
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 변경 이력을 Audit_Log 시트에 한 행 추가
+ * @param {string} user      - 관리자 계정 (dc_admin_session)
+ * @param {string} action    - 작업 종류 (update_report, delete_master 등)
+ * @param {string} sheet     - 대상 시트명
+ * @param {number|string} rowIndex - 대상 행 번호 (없으면 '')
+ * @param {string} summary   - 변경 내용 요약 (JSON string 또는 free text)
+ */
+function appendAuditLog(user, action, sheet, rowIndex, summary) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let logSheet = ss.getSheetByName('Audit_Log');
+    if (!logSheet) {
+      logSheet = ss.insertSheet('Audit_Log');
+      const headers = MASTER_HEADERS['Audit_Log'];
+      logSheet.getRange(1, 1, 1, headers.length).setValues([headers])
+        .setBackground('#374151').setFontColor('white').setFontWeight('bold');
+      logSheet.setFrozenRows(1);
+      logSheet.setColumnWidth(1, 160);  // Timestamp
+      logSheet.setColumnWidth(6, 400);  // Summary
+    }
+
+    // 시드니 현지 시각 문자열
+    const now = new Date();
+    const sydFmt = Utilities.formatDate(now, 'Australia/Sydney', 'dd/MM/yyyy HH:mm:ss');
+
+    logSheet.appendRow([
+      sydFmt,
+      user || 'unknown',
+      action || '',
+      sheet || '',
+      rowIndex || '',
+      typeof summary === 'string' ? summary.slice(0, 500) : JSON.stringify(summary).slice(0, 500)
+    ]);
+  } catch (e) {
+    // 감사 로그 실패는 무시 (메인 작업 방해하지 않음)
+    console.warn('appendAuditLog error:', e.toString());
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INVOICE EMAIL (GAS MailApp)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 인보이스 이메일 발송
+ * payload: { to, subject, body, cc, _user }
+ */
+function sendInvoiceEmail(payload) {
+  try {
+    const to      = (payload.to || '').trim();
+    const subject = (payload.subject || '').trim();
+    const body    = (payload.body || '').trim();
+    const cc      = (payload.cc || '').trim();
+    const name    = payload.senderName || 'Dong Choi Pty Ltd';
+
+    if (!to)      return { ok: false, error: '수신자 이메일이 없습니다 (to is empty)' };
+    if (!subject) return { ok: false, error: '제목이 없습니다 (subject is empty)' };
+
+    const mailOptions = {
+      to:      to,
+      subject: subject,
+      body:    body,
+      name:    name
+    };
+    if (cc) mailOptions.cc = cc;
+
+    MailApp.sendEmail(mailOptions);
+
+    // 감사 로그
+    appendAuditLog(payload._user, 'send_invoice_email', '—', '—',
+      `인보이스 이메일 발송 → ${to} | ${subject}`);
+
+    return { ok: true, to: to };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
