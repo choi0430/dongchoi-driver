@@ -7755,18 +7755,25 @@ function openShiftReport(shift, type) {
   // -- Vehicle checks rows --
   function buildChecks(checks) {
     if (!checks || !checks.length) return '<div style="color:#aaa;font-size:12px;padding:4px 0;">점검 기록 없음</div>';
-    return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">' +
-      checks.map(c => {
-        const ok = c.pass !== false;
-        const col = ok ? '#f0fdf4' : '#fef2f2';
-        const dot = ok ? '#16a34a' : '#dc2626';
-        const lbl = c.name || '';
-        const kr  = c.kr  ? ` <span style="font-size:10px;color:#888;">${c.kr}</span>` : '';
-        return `<div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:7px;background:${col};font-size:12px;font-weight:600;">
-          <div style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0;"></div>
-          <span>${lbl}${kr}</span>
-        </div>`;
-      }).join('') + '</div>';
+    const failCount = checks.filter(c => c.pass === false).length;
+    const rows = checks.map(c => {
+      const ok = c.pass !== false;
+      const bg      = ok ? '#f0fdf4' : '#fef2f2';
+      const border  = ok ? '#86efac' : '#fca5a5';
+      const badge   = ok ? '✅ PASS' : '❌ FAIL';
+      const badgeC  = ok ? '#15803d' : '#b91c1c';
+      const badgeBg = ok ? '#dcfce7' : '#fee2e2';
+      const name    = c.name || '';
+      const kr      = c.kr   ? ` <span style="font-size:10px;color:#777;font-weight:400;">(${c.kr})</span>` : '';
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:8px;background:${bg};border:1.5px solid ${border};margin-bottom:4px;">
+        <span style="font-size:12px;font-weight:600;color:#1a1a1a;">${name}${kr}</span>
+        <span style="font-size:11px;font-weight:800;color:${badgeC};background:${badgeBg};padding:3px 9px;border-radius:5px;letter-spacing:0.5px;white-space:nowrap;">${badge}</span>
+      </div>`;
+    }).join('');
+    const warn = failCount > 0
+      ? `<div style="margin-top:6px;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:8px 10px;font-size:11px;color:#b91c1c;font-weight:700;">⚠️ ${failCount}개 항목 FAIL — 관리자 확인 필요 / ${failCount} item(s) FAILED — requires attention</div>`
+      : '';
+    return `<div>${rows}${warn}</div>`;
   }
 
   // -- Daily reports table --
@@ -7835,6 +7842,15 @@ function openShiftReport(shift, type) {
     ${field('비고 Remarks', shift.remarks||'—')}
     ${sectionTitle('🔍 차량 점검 Pre-Shift Vehicle Check')}
     <div style="margin-bottom:10px;">${buildChecks(shift.preChecks)}</div>
+    ${sectionTitle('⚖️ Safety Declaration 안전 서약')}
+    <div style="background:#fffbeb;border:1.5px solid #fbbf24;border-radius:10px;padding:14px 16px;margin-bottom:12px;">
+      <div style="font-size:13px;color:#1c1917;line-height:1.65;margin-bottom:8px;">I, <strong>${driver}</strong>, declare that I have had at least 7 hours of rest prior to this shift, and that I have not consumed any prohibited substances including drugs and alcohol. I declare that I hold a current driver's licence and bus driver authority card issued by TfNSW.</div>
+      <div style="font-size:12px;color:#57534e;line-height:1.6;margin-bottom:10px;font-style:italic;">본인은 이번 운행 전 최소 7시간 이상의 휴식을 취하였으며, 마약 및 알코올을 포함한 어떠한 금지 약물도 복용하지 않았음을 서약합니다. 본인은 TfNSW가 발급한 유효한 운전 면허증 및 버스 드라이버 자격증을 보유하고 있음을 서약합니다.</div>
+      <div style="display:flex;align-items:center;gap:8px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:7px;padding:8px 10px;">
+        <span style="font-size:16px;">✅</span>
+        <span style="font-size:12px;font-weight:700;color:#15803d;">위 서약 내용을 확인하고 동의합니다. / I confirm and agree to the above declaration.</span>
+      </div>
+    </div>
     ${sectionTitle('✍️ 드라이버 서명 Pre Departure Signature')}
     <div style="border:1.5px solid #e5e7eb;border-radius:10px;padding:12px;text-align:center;min-height:70px;display:flex;align-items:center;justify-content:center;">
       ${sigImg(shift.preSignature)}
@@ -7852,13 +7868,21 @@ function openShiftReport(shift, type) {
     ${buildDRTable()}
     ${sectionTitle('🔍 차량 점검 Post-Shift Vehicle Check')}
     <div style="margin-bottom:10px;">${buildChecks(shift.endChecks)}</div>
-    ${sectionTitle('✅ 확인 사항 Declarations')}
-    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
-      ${[['🚌 승객 미탑승 확인','Passenger Check'],['🔍 분실물 확인','Lost Property Check'],['🅿️ 차량 주차/잠금 확인','Vehicle Secured']].map(([kr,en])=>`
-        <div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:7px 10px;background:#f0fdf4;border-radius:7px;">
-          <div style="width:8px;height:8px;border-radius:50%;background:#16a34a;flex-shrink:0;"></div>
-          <span style="font-weight:600;">${kr}</span> <span style="color:#888;">${en}</span>
-        </div>`).join('')}
+    ${sectionTitle('📋 End of Shift Declaration 종료 서약')}
+    <div style="background:#fffbeb;border:1.5px solid #fbbf24;border-radius:10px;padding:14px 16px;margin-bottom:12px;">
+      <div style="font-size:13px;color:#1c1917;line-height:1.65;margin-bottom:8px;">I, <strong>${driver}</strong>, confirm that all end of shift checks have been completed, all passengers have disembarked, the vehicle has been checked for lost property, and the vehicle is secured.</div>
+      <div style="font-size:12px;color:#57534e;line-height:1.6;margin-bottom:10px;font-style:italic;">본인은 모든 운행 종료 확인 절차를 완료하였으며, 모든 승객이 하차하였고, 차량 내 분실물 여부를 확인하였으며, 차량이 안전하게 잠금 처리되었음을 서약합니다.</div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;">
+        ${[['🚌 승객 미탑승 확인','Passenger Check — All passengers disembarked'],['🔍 분실물 확인','Lost Property Check — Vehicle checked'],['🅿️ 차량 주차/잠금 확인','Vehicle Secured — Parked and locked']].map(([kr,en])=>`
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:7px;">
+            <span style="font-size:12px;font-weight:600;color:#1a1a1a;">${kr} <span style="font-weight:400;color:#666;font-size:11px;">${en}</span></span>
+            <span style="font-size:11px;font-weight:800;color:#15803d;background:#dcfce7;padding:3px 9px;border-radius:5px;white-space:nowrap;">✅ PASS</span>
+          </div>`).join('')}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:7px;padding:8px 10px;">
+        <span style="font-size:16px;">✅</span>
+        <span style="font-size:12px;font-weight:700;color:#15803d;">위 내용을 확인하고 동의합니다. / I confirm and agree to the above declaration.</span>
+      </div>
     </div>
     ${sectionTitle('✍️ 드라이버 서명 End of Shift Signature')}
     <div style="border:1.5px solid #e5e7eb;border-radius:10px;padding:12px;text-align:center;min-height:70px;display:flex;align-items:center;justify-content:center;">
