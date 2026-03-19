@@ -57,7 +57,12 @@ const MASTER_HEADERS = {
   'Ledger':     ['RowID','Date','Rego','Tour','TA','SubTotal','MyDr','Extra','OT','Trailer','Hotel','Note'],
   'Wages':      ['RowID','Driver','WeekStart','Date','Amount','PayMethod','Notes'],
   'Notices':    ['ID','Title','Content','Type','Date','Active'],
-  'Audit_Log':  ['Timestamp','User','Action','Sheet','RowIndex','Summary']
+  'Audit_Log':  ['Timestamp','User','Action','Sheet','RowIndex','Summary'],
+  'M_SvcOptions':   ['VehicleSize','Amount','Label'],
+  'M_HotelOptions': ['VehicleSize','Amount','Label'],
+  'M_DistOptions':  ['VehicleSize','Amount','Label'],
+  'M_NightRates':   ['NightType','VehicleCategory','TA','DR','Owner'],
+  'M_Attractions':  ['Attraction','Emoji','POI_Icon','POI_Name','POI_Detail','POI_MapURL','Info']
 };
 
 // ── Tab Colors ──
@@ -393,7 +398,8 @@ function getMaster(sheetName) {
 function getAllMasters() {
   try {
     const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
-                    'M_PriceClient', 'M_PriceDriver', 'M_PriceSub'];
+                    'M_PriceClient', 'M_PriceDriver', 'M_PriceSub',
+                    'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions'];
     const result = {};
 
     sheets.forEach(name => {
