@@ -1051,7 +1051,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div class="ni" id="nsub" onclick="nv('psub','nsub');rSub()"><div class="nie">🤝</div><div class="nil">서브</div></div>
   <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div></div>
   <div class="ni" id="ndr" onclick="nv('pdr','ndr');loadDR()"><div class="nie">📋</div><div class="nil">리포트</div></div>
-  <div class="ni" id="nshift" onclick="try{nv('pshift','nshift');loadShiftReports()}catch(e){alert('nshift err:'+e.message)}"><div class="nie">🚌</div><div class="nil">운행일지</div></div>
+  <div class="ni" id="nshift" onclick="nv('pshift','nshift');loadShiftReports()"><div class="nie">🚌</div><div class="nil">운행일지</div></div>
   <div class="ni" id="nmot" onclick="nv('pmot','nmot');rMot()"><div class="nie">🚔</div><div class="nil">MOT</div></div>
   <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
   <div class="ni" id="ninv" onclick="nv('pinv','ninv');initInvoice()"><div class="nie">🧾</div><div class="nil">인보이스</div></div>
@@ -6376,42 +6376,32 @@ async function loadShiftReports(force=false) {
   const listEl = document.getElementById('shift-list');
   if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">⏳ 불러오는 중...</div>';
 
-  // 강제 완료 타이머: 15초 후 무조건 렌더링
-  let done = false;
-  const safetyTimer = setTimeout(()=>{
-    if(done) return; done=true;
-    toast('⏱ 15초 타임아웃 — 캐시 데이터로 표시','er');
-    _finishShiftLoad();
-  }, 15000);
-
-  let preErr='', eosErr='';
   try {
-    const ac = typeof AbortController!=='undefined' ? new AbortController() : null;
-    const sig = ac ? {signal:ac.signal} : {};
-    setTimeout(()=>{ if(ac) ac.abort(); }, 14000);
-
-    const fetches = [];
-    if (needPre) fetches.push(
-      fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Pre_Departure', sig)
-        .then(r=>r.json())
-        .then(j=>{if(j.ok){_shiftCache.pre=(j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2}));_shiftCacheTime.pre=Date.now();}})
-        .catch(e=>{preErr=e.name==='AbortError'?'timeout':e.message;})
-    );
-    if (needEos) fetches.push(
-      fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=End_of_Shift', sig)
-        .then(r=>r.json())
-        .then(j=>{if(j.ok){_shiftCache.eos=(j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2}));_shiftCacheTime.eos=Date.now();}})
-        .catch(e=>{eosErr=e.name==='AbortError'?'timeout':e.message;})
-    );
-    await Promise.all(fetches);
-  } catch(e) { preErr=preErr||e.message; }
-
-  if(!done) {
-    done=true; clearTimeout(safetyTimer);
-    const msg = (preErr||eosErr) ? `P:${preErr||'ok'} E:${eosErr||'ok'}` : `✅ ${_shiftCache.pre.length+_shiftCache.eos.length}건 로드`;
-    toast(msg, (preErr||eosErr)?'er':'ok');
-    _finishShiftLoad();
+    if (needPre) {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Pre_Departure');
+      if (!res.ok) throw new Error('Pre HTTP ' + res.status);
+      const json = await res.json();
+      if (json.ok) {
+        _shiftCache.pre = (json.rows||[]).map((r,i)=>({...r, _rowIndex:i+2}));
+        _shiftCacheTime.pre = Date.now();
+      }
+    }
+    if (needEos) {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=End_of_Shift');
+      if (!res.ok) throw new Error('EOS HTTP ' + res.status);
+      const json = await res.json();
+      if (json.ok) {
+        _shiftCache.eos = (json.rows||[]).map((r,i)=>({...r, _rowIndex:i+2}));
+        _shiftCacheTime.eos = Date.now();
+      }
+    }
+  } catch(e) {
+    toast('운행일지 로드 실패: '+e.message, 'er');
+    if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--rd);font-size:13px;">❌ 로드 실패<br><span style="font-size:11px;color:var(--t3);">'+escH(e.message)+'</span><br><button class="btn bac sm" style="margin-top:10px;" onclick="loadShiftReports(true)">🔄 다시 시도</button></div>';
+    return;
   }
+
+  _finishShiftLoad();
 }
 
 function _finishShiftLoad() {
