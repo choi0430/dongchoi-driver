@@ -6375,30 +6375,30 @@ async function loadShiftReports(force=false) {
   const listEl = document.getElementById('shift-list');
   if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">⏳ 불러오는 중...</div>';
 
-  // 15초 타임아웃 헬퍼
-  function fetchWithTimeout(url, ms=15000) {
-    return Promise.race([
-      fetch(url).then(r=>r.json()),
-      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))
-    ]);
-  }
-
+  let preOk=false, eosOk=false, preErr='', eosErr='';
   try {
     const fetches = [];
     if (needPre) fetches.push(
-      fetchWithTimeout(APPS_SCRIPT_URL + '?action=get_reports&sheet=Pre_Departure')
-        .then(j => { if(j.ok) { _shiftCache.pre = (j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})); _shiftCacheTime.pre = Date.now(); } })
-        .catch(e=>{ console.warn('Pre_Departure fetch failed:', e); })
+      fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Pre_Departure')
+        .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(j=>{ preOk=true; if(j.ok){ _shiftCache.pre=(j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})); _shiftCacheTime.pre=Date.now(); } else { preErr='notOk'; } })
+        .catch(e=>{ preErr=e.message||String(e); })
     );
     if (needEos) fetches.push(
-      fetchWithTimeout(APPS_SCRIPT_URL + '?action=get_reports&sheet=End_of_Shift')
-        .then(j => { if(j.ok) { _shiftCache.eos = (j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})); _shiftCacheTime.eos = Date.now(); } })
-        .catch(e=>{ console.warn('End_of_Shift fetch failed:', e); })
+      fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=End_of_Shift')
+        .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(j=>{ eosOk=true; if(j.ok){ _shiftCache.eos=(j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})); _shiftCacheTime.eos=Date.now(); } else { eosErr='notOk'; } })
+        .catch(e=>{ eosErr=e.message||String(e); })
     );
-    await Promise.all(fetches);
+    await Promise.race([
+      Promise.all(fetches),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('TIMEOUT')),20000))
+    ]);
   } catch(e) {
-    console.error('loadShiftReports error:', e);
+    if(e.message==='TIMEOUT'){ preErr=preErr||'timeout'; eosErr=eosErr||'timeout'; }
   }
+  const dbg=`P:${preOk?'✅':'❌'}${preErr?' '+preErr:''}(${_shiftCache.pre.length}) E:${eosOk?'✅':'❌'}${eosErr?' '+eosErr:''}(${_shiftCache.eos.length})`;
+  toast(dbg,(preOk||eosOk)?'ok':'er');
 
   // 필터 드롭다운 채우기
   const allRows = [..._shiftCache.pre, ..._shiftCache.eos];
