@@ -1915,6 +1915,14 @@ function fixPhone(p) {
   if(s.length === 10) return s;         // 정상
   return s;
 }
+// tel:/sms: 링크용 +61 국제포맷
+function telPhone(p) {
+  const s = fixPhone(p);
+  if(!s) return '';
+  if(s.startsWith('0')) return '+61' + s.substring(1);
+  if(s.startsWith('+')) return s;
+  return '+61' + s;
+}
 
 function useFallbackMaster() {
   // ★ 모든 데이터는 GAS가 유일한 소스 — localStorage 캐시를 폴백으로 사용
@@ -3759,7 +3767,7 @@ function loadMyInfoToForm() {
   const fields = {
     'mi-name-en':  saved.nameEN   || d.Name_EN  || d.Name || '',
     'mi-name-kr':  saved.nameKR   || d.Name_KR  || '',
-    'mi-mobile':   saved.mobile   || d.Mobile_1 || d.Mobile || '',
+    'mi-mobile':   saved.mobile   || d.Phone || d.Mobile_1 || d.Mobile || '',
     'mi-lic-class':saved.licClass || d.License_Class || '',
     'mi-address':  saved.address  || d.Address  || '',
     'mi-suburb':   saved.suburb   || d.Suburb   || '',
@@ -3879,7 +3887,7 @@ function updateMyInfoView(data) {
   const nameEN = data.nameEN || d.Name_EN || d.Name || currentDriver?.name || '';
   const nameKR = data.nameKR || d.Name_KR || '';
   const licClass = data.licClass || d.License_Class || '';
-  const mobile  = data.mobile  || d.Mobile_1 || '';
+  const mobile  = data.mobile  || d.Phone || d.Mobile_1 || '';
   const nokName = data.nokName || d.NEXT_OF_KIN || '';
   const nokPhone= data.nokPhone|| d.Moblie_2  || '';
   const licExp  = data.licExp  || d.License_Expiry  || '–';
@@ -6109,8 +6117,8 @@ function renderContactItem(c){
         ${c.phone ? `<div class="contact-sub" style="color:var(--accent);font-family:'DM Mono',monospace;font-size:12px;margin-top:2px;">${c.phone}</div>` : ''}
       </div>
       <div class="contact-actions">
-        ${c.phone ? `<a href="tel:${c.phone}" class="contact-btn contact-btn-call" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">📞</a>` : ''}
-        ${c.phone ? `<a href="sms:${c.phone}" class="contact-btn contact-btn-msg" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">💬</a>` : ''}
+        ${c.phone ? `<a href="tel:${telPhone(c.phone)}" class="contact-btn contact-btn-call" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">📞</a>` : ''}
+        ${c.phone ? `<a href="sms:${telPhone(c.phone)}" class="contact-btn contact-btn-msg" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">💬</a>` : ''}
       </div>
     </div>`;
   }
@@ -6127,8 +6135,8 @@ function renderContactItem(c){
         ${c.phone ? `<div class="contact-sub" style="color:var(--accent);font-family:'DM Mono',monospace;font-size:12px;margin-top:2px;">${c.phone}</div>` : ''}
       </div>
       <div class="contact-actions">
-        ${c.phone ? `<a href="tel:${c.phone}" class="contact-btn contact-btn-call" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">📞</a>` : ''}
-        ${c.phone ? `<a href="sms:${c.phone}" class="contact-btn contact-btn-msg" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">💬</a>` : ''}
+        ${c.phone ? `<a href="tel:${telPhone(c.phone)}" class="contact-btn contact-btn-call" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">📞</a>` : ''}
+        ${c.phone ? `<a href="sms:${telPhone(c.phone)}" class="contact-btn contact-btn-msg" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">💬</a>` : ''}
       </div>
     </div>`;
   }
@@ -6142,8 +6150,8 @@ function renderContactItem(c){
       ${c.phone ? `<div class="contact-sub" style="color:var(--accent);font-family:'DM Mono',monospace;font-size:12px;margin-top:2px;">${c.phone}</div>` : ''}
     </div>
     <div class="contact-actions">
-      ${c.phone ? `<a href="tel:${c.phone}" class="contact-btn contact-btn-call" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">📞</a>` : ''}
-      ${c.phone ? `<a href="sms:${c.phone}" class="contact-btn contact-btn-msg" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">💬</a>` : ''}
+      ${c.phone ? `<a href="tel:${telPhone(c.phone)}" class="contact-btn contact-btn-call" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">📞</a>` : ''}
+      ${c.phone ? `<a href="sms:${telPhone(c.phone)}" class="contact-btn contact-btn-msg" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">💬</a>` : ''}
     </div>
   </div>`;
 }
