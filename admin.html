@@ -1738,7 +1738,7 @@ async function rD(q=''){
     return`<div class="mrow">
       <div class="mav" style="color:var(--or)">${ini(d.Name_EN)}</div>
       <div class="min"><div class="mnm">${d.Name_KR||''} <span style="color:var(--t3);font-size:12px">${d.Name_EN}</span></div>
-        <div class="msb">${d.Mobile_1||'연락처없음'} · ${d.License_Class||'—'}</div>
+        <div class="msb">${(d.Phone||d.Mobile_1||'연락처없음')} · ${d.License_Class||'—'}</div>
         <div class="mtg">${etag(d.License_Expiry,'면허')}${etag(d.Authority_Expiry,'인가')}</div>
       </div>
       <div class="mac"><button class="btn bac xs" onclick="openView('D',${i})">보기</button><button class="btn bgh xs" onclick="openM('D',${i})">수정</button><button class="btn brd xs" onclick="cDel('D',${i},'${esc(d.Name_EN)}')">삭제</button></div>
@@ -1761,7 +1761,7 @@ async function rC(q=''){
     return`<div class="mrow">
       <div class="mav" style="color:var(--gn);font-size:10px">${c.Name?.slice(0,2).toUpperCase()||'??'}</div>
       <div class="min"><div class="mnm">${c.Name||'(이름없음)'}</div>
-        <div class="msb">ID: ${c.ClientID}${c.Mobile?' · '+c.Mobile:''}</div>
+        <div class="msb">ID: ${c.ClientID}${(c.Phone||c.Mobile)?' · '+(c.Phone||c.Mobile):''}</div>
         ${hasPrc?'<span class="tag tg" style="margin-top:4px;display:inline-flex">요금표 있음</span>':'<span class="tag ty" style="margin-top:4px;display:inline-flex">요금표 없음</span>'}
       </div>
       <div class="mac">
@@ -1778,16 +1778,16 @@ async function rC(q=''){
 // ═══════════════════════════════════════
 async function rG(q=''){
   if(!q){await syncGuides();}
-  const list=DB.G.filter(g=>!q||g.Guide_Name?.toLowerCase().includes(q.toLowerCase())||g.Mobile?.includes(q));
+  const list=DB.G.filter(g=>!q||(g.Name||g.Guide_Name||'')?.toLowerCase().includes(q.toLowerCase())||(g.Phone||g.Mobile||'')?.includes(q));
   document.getElementById('gcnt').textContent=`총 ${DB.G.length}명 · 표시 ${list.length}`;
   document.getElementById('glist').innerHTML=list.map(g=>{
     const i=DB.G.indexOf(g);
     return`<div class="mrow">
-      <div class="mav" style="color:var(--pu);font-size:10px">${g.Guide_Name?.slice(0,2).toUpperCase()||'??'}</div>
-      <div class="min"><div class="mnm">${g.Guide_Name}</div>
-        <div class="msb">${g.GuideID} · ${g.Mobile||'연락처없음'}${g.Agency?' · '+g.Agency:''}</div>
+      <div class="mav" style="color:var(--pu);font-size:10px">${(g.Name||g.Guide_Name||'')?.slice(0,2).toUpperCase()||'??'}</div>
+      <div class="min"><div class="mnm">${g.Name||g.Guide_Name||''}</div>
+        <div class="msb">${g.GuideID} · ${(g.Phone||g.Mobile||'연락처없음')}${g.Agency?' · '+g.Agency:''}</div>
       </div>
-      <div class="mac"><button class="btn bac xs" onclick="openView('G',${i})">보기</button><button class="btn bgh xs" onclick="openM('G',${i})">수정</button><button class="btn brd xs" onclick="cDel('G',${i},'${esc(g.Guide_Name)}')">삭제</button></div>
+      <div class="mac"><button class="btn bac xs" onclick="openView('G',${i})">보기</button><button class="btn bgh xs" onclick="openM('G',${i})">수정</button><button class="btn brd xs" onclick="cDel('G',${i},'${esc(g.Name||g.Guide_Name||'')}')">삭제</button></div>
     </div>`}).join('')||nores();
 }
 
@@ -5402,7 +5402,7 @@ function openView(type, idx) {
     const authNo    = d.Authority_No || d['Authority_#'] || '';
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">👤 기본 정보</div>`;
     html += row2A([['영문 이름', d.Name_EN], ['한글 이름', d.Name_KR]]);
-    html += row2A([['이메일 (DriverID)', d.DriverID], ['연락처', d.Mobile_1]]);
+    html += row2A([['이메일 (DriverID)', d.DriverID], ['연락처', d.Phone||d.Mobile_1]]);
     html += rowA('비상연락처 (Next of Kin)', nextOfKin);
     // PIN: 보안상 마스킹 표시
     html += rowA('PIN', d.PIN ? '••••' : '');
@@ -5447,7 +5447,7 @@ function openView(type, idx) {
   } else if(type === 'C') {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🏢 여행사 정보</div>`;
     html += row2([['여행사명', d.Name], ['Client ID', d.ClientID]]);
-    html += row2([['연락처', d.Mobile], ['이메일', d.Email]]);
+    html += row2([['연락처', d.Phone||d.Mobile], ['이메일', d.Email]]);
     html += row('주소', d.Address);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🏦 계좌 정보</div>`;
     html += row2([['은행', d.Bank_Name], ['BSB', d.BSB]]);
@@ -5458,7 +5458,7 @@ function openView(type, idx) {
   } else if(type === 'G') {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🎤 가이드 정보</div>`;
     html += row2([['Guide ID', d.GuideID], ['가이드명', d.Guide_Name]]);
-    html += row2([['연락처', d.Mobile], ['이메일', d.Email]]);
+    html += row2([['연락처', d.Phone||d.Mobile], ['이메일', d.Email]]);
     html += row('소속 여행사', d.Agency);
     html += row('비고', d.Remarks);
   }
@@ -5533,7 +5533,7 @@ function openM(type,idx){
       <div class="fr"><label class="fl">🔑 PIN 번호 (4자리)</label><input class="fi" id="f15" value="${d.PIN||''}" placeholder="예) 1234" maxlength="4" inputmode="numeric" style="font-size:18px;letter-spacing:4px;font-weight:700;"></div>
       <div class="fr"><label class="fl">이메일 (DriverID)*</label><input class="fi" id="f2" value="${d.DriverID||''}"></div>
       <div class="fr2">
-        <div><label class="fl">연락처</label><input class="fi" id="f3" value="${d.Mobile_1||''}"></div>
+        <div><label class="fl">연락처</label><input class="fi" id="f3" value="${d.Phone||d.Mobile_1||''}"></div>
         <div><label class="fl">비상연락처</label><input class="fi" id="f4" value="${nextOfKin}"></div></div>
       <div class="fr2">
         <div><label class="fl">면허 등급</label><div class="fsw"><select class="fs" id="f5">
@@ -5558,7 +5558,7 @@ function openM(type,idx){
     h=`<div class="fr"><label class="fl">여행사명*</label><input class="fi" id="f0" value="${d.Name||''}" placeholder="Hana Tour Pty Ltd"></div>
       <div class="fr"><label class="fl">Client ID</label><input class="fi" id="f1" value="${d.ClientID||''}" placeholder="자동생성"></div>
       <div class="fr2">
-        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${d.Mobile||''}"></div>
+        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${d.Phone||d.Mobile||''}"></div>
         <div><label class="fl">이메일 (Invoice용)</label><input class="fi" id="f2b" value="${d.Email||''}" placeholder="billing@agencyname.com.au"></div>
       </div>
       <div class="fr"><label class="fl">주소</label><input class="fi" id="f3" value="${d.Address||''}"></div>
@@ -5572,7 +5572,7 @@ function openM(type,idx){
         <div><label class="fl">Guide ID</label><input class="fi" id="f0" value="${d.GuideID||''}"></div>
         <div><label class="fl">가이드명*</label><input class="fi" id="f1" value="${d.Guide_Name||''}"></div></div>
       <div class="fr2">
-        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${d.Mobile||''}"></div>
+        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${d.Phone||d.Mobile||''}"></div>
         <div><label class="fl">소속 여행사</label><input class="fi" id="f3" value="${d.Agency||''}"></div></div>
       <div class="fr"><label class="fl">이메일</label><input class="fi" id="f4" value="${d.Email||''}"></div>
       <div class="fr"><label class="fl">비고</label><textarea class="fta" id="f5">${d.Remarks||''}</textarea></div>`;
