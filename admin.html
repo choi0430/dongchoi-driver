@@ -6368,7 +6368,6 @@ let _shiftCurrentTab = 'pre';
 const SHIFT_CACHE_TTL = 2 * 60 * 1000;
 
 async function loadShiftReports(force=false) {
-  alert('SHIFT LOAD START force='+force);
   const now = Date.now();
   const needPre = force || !_shiftCache.pre.length || now - _shiftCacheTime.pre > SHIFT_CACHE_TTL;
   const needEos = force || !_shiftCache.eos.length || now - _shiftCacheTime.eos > SHIFT_CACHE_TTL;
@@ -6377,37 +6376,45 @@ async function loadShiftReports(force=false) {
   const listEl = document.getElementById('shift-list');
   if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">⏳ 불러오는 중...</div>';
 
-  function xhrGet(url) {
-    return new Promise((resolve, reject) => {
-      const x = new XMLHttpRequest();
-      x.open('GET', url, true);
-      x.timeout = 20000;
-      x.onload = function() { try { resolve(JSON.parse(x.responseText)); } catch(e) { reject(new Error('parse:'+x.status)); } };
-      x.onerror = function() { reject(new Error('network')); };
-      x.ontimeout = function() { reject(new Error('timeout')); };
-      x.send();
-    });
-  }
+  // 강제 완료 타이머: 15초 후 무조건 렌더링
+  let done = false;
+  const safetyTimer = setTimeout(()=>{
+    if(done) return; done=true;
+    toast('⏱ 15초 타임아웃 — 캐시 데이터로 표시','er');
+    _finishShiftLoad();
+  }, 15000);
 
-  let preOk=false, eosOk=false, preErr='', eosErr='';
+  let preErr='', eosErr='';
   try {
+    const ac = typeof AbortController!=='undefined' ? new AbortController() : null;
+    const sig = ac ? {signal:ac.signal} : {};
+    setTimeout(()=>{ if(ac) ac.abort(); }, 14000);
+
     const fetches = [];
     if (needPre) fetches.push(
-      xhrGet(APPS_SCRIPT_URL + '?action=get_reports&sheet=Pre_Departure')
-        .then(j=>{ preOk=true; if(j.ok){ _shiftCache.pre=(j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})); _shiftCacheTime.pre=Date.now(); } else { preErr='notOk'; } })
-        .catch(e=>{ preErr=e.message||String(e); })
+      fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Pre_Departure', sig)
+        .then(r=>r.json())
+        .then(j=>{if(j.ok){_shiftCache.pre=(j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2}));_shiftCacheTime.pre=Date.now();}})
+        .catch(e=>{preErr=e.name==='AbortError'?'timeout':e.message;})
     );
     if (needEos) fetches.push(
-      xhrGet(APPS_SCRIPT_URL + '?action=get_reports&sheet=End_of_Shift')
-        .then(j=>{ eosOk=true; if(j.ok){ _shiftCache.eos=(j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})); _shiftCacheTime.eos=Date.now(); } else { eosErr='notOk'; } })
-        .catch(e=>{ eosErr=e.message||String(e); })
+      fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=End_of_Shift', sig)
+        .then(r=>r.json())
+        .then(j=>{if(j.ok){_shiftCache.eos=(j.rows||[]).map((r,i)=>({...r,_rowIndex:i+2}));_shiftCacheTime.eos=Date.now();}})
+        .catch(e=>{eosErr=e.name==='AbortError'?'timeout':e.message;})
     );
     await Promise.all(fetches);
-  } catch(e) {
-    preErr=preErr||e.message; eosErr=eosErr||e.message;
+  } catch(e) { preErr=preErr||e.message; }
+
+  if(!done) {
+    done=true; clearTimeout(safetyTimer);
+    const msg = (preErr||eosErr) ? `P:${preErr||'ok'} E:${eosErr||'ok'}` : `✅ ${_shiftCache.pre.length+_shiftCache.eos.length}건 로드`;
+    toast(msg, (preErr||eosErr)?'er':'ok');
+    _finishShiftLoad();
   }
-  const dbg=`P:${preOk?'✅':'❌'}${preErr?' '+preErr:''}(${_shiftCache.pre.length}) E:${eosOk?'✅':'❌'}${eosErr?' '+eosErr:''}(${_shiftCache.eos.length})`;
-  toast(dbg,(preOk||eosOk)?'ok':'er');
+}
+
+function _finishShiftLoad() {
 
   // 필터 드롭다운 채우기
   const allRows = [..._shiftCache.pre, ..._shiftCache.eos];
@@ -6447,6 +6454,7 @@ async function loadShiftReports(force=false) {
   renderShiftTab();
 
   // 데이터가 전혀 없으면 안내
+  const listEl = document.getElementById('shift-list');
   if (!allRows.length && listEl) {
     listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">📋 기록이 없습니다 — 네트워크를 확인하고 🔄 새로고침을 눌러주세요</div>';
   }
