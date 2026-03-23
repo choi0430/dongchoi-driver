@@ -44,8 +44,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .tbl{font-family:var(--fd);font-size:17px;font-weight:800;letter-spacing:1px;color:var(--ac)}
 .tbl span{color:var(--t2);font-weight:400}
 .tbdg{background:var(--acd);border:1px solid var(--ac);color:var(--ac);border-radius:20px;padding:3px 13px;font-size:10px;font-weight:700;font-family:var(--fd);letter-spacing:1px}
-.bnav{background:var(--s1);border-top:1px solid var(--b1);display:flex;flex-shrink:0;padding-bottom:var(--sb)}
-.ni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:7px 2px 5px;gap:3px;cursor:pointer;color:var(--t3);transition:color .2s}
+.bnav{background:var(--s1);border-top:1px solid var(--b1);display:flex;flex-shrink:0;padding-bottom:var(--sb);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.bnav::-webkit-scrollbar{display:none}
+.bnav-group{display:flex;align-items:stretch;position:relative;padding:0 2px}
+.bnav-group:not(:last-child)::after{content:'';width:1px;background:var(--b2);margin:8px 0;flex-shrink:0}
+.bnav-group-label{position:absolute;top:1px;left:50%;transform:translateX(-50%);font-size:5px;font-weight:700;font-family:var(--fd);color:var(--t3);letter-spacing:.8px;white-space:nowrap;opacity:.5;text-transform:uppercase}
+.ni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:7px 2px 5px;gap:3px;cursor:pointer;color:var(--t3);transition:color .2s;min-width:48px}
 .ni.on{color:var(--ac)}
 .nie{font-size:17px;line-height:1}
 .nil{font-size:7px;font-weight:700;font-family:var(--fd);letter-spacing:.5px;white-space:nowrap}
@@ -552,7 +556,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <button class="btn bgh sm" onclick="loadInvHistory(true)" style="font-size:11px;padding:4px 10px;">🔄 새로고침</button>
     </div>
     <div id="inv-history-list" style="max-height:400px;overflow-y:auto;">
-      <div style="text-align:center;padding:16px;color:var(--t3);font-size:12px;">⏳ 이력을 불러오려면 🔄 새로고침을 누르세요</div>
+      <div style="text-align:center;padding:16px;color:var(--t3);font-size:12px;">⏳ 발행 이력 불러오는 중...</div>
     </div>
   </div>
 
@@ -1039,22 +1043,36 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
 </div><!-- /cont -->
 
-<!-- BOTTOM NAV -->
+<!-- BOTTOM NAV (카테고리 그룹핑) -->
 <div class="bnav">
-  <div class="ni on" id="ndash" onclick="nv('pdash','ndash');rDash()"><div class="nie">🏠</div><div class="nil">홈</div></div>
-  <div class="ni" id="nveh" onclick="nv('pveh','nveh');rV()"><div class="nie">🚌</div><div class="nil">차량</div></div>
-  <div class="ni" id="ndrv" onclick="nv('pdrv','ndrv');rD()"><div class="nie">👤</div><div class="nil">드라이버</div></div>
-  <div class="ni" id="ncli" onclick="nv('pcli','ncli');rC()"><div class="nie">🏢</div><div class="nil">여행사</div></div>
-  <div class="ni" id="ngui" onclick="nv('pgui','ngui');rG()"><div class="nie">🧭</div><div class="nil">가이드</div></div>
-  <div class="ni" id="nprc" onclick="nv('pprc','nprc');rP()"><div class="nie">💰</div><div class="nil">요금</div></div>
-  <div class="ni" id="nhtl" onclick="nv('phtl','nhtl');rH()"><div class="nie">🏨</div><div class="nil">호텔</div></div>
-  <div class="ni" id="nsub" onclick="nv('psub','nsub');rSub()"><div class="nie">🤝</div><div class="nil">서브</div></div>
-  <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div></div>
-  <div class="ni" id="ndr" onclick="nv('pdr','ndr');loadDR()"><div class="nie">📋</div><div class="nil">리포트</div></div>
-  <div class="ni" id="nshift" onclick="nv('pshift','nshift');loadShiftReports()"><div class="nie">🚌</div><div class="nil">운행일지</div></div>
-  <div class="ni" id="nmot" onclick="nv('pmot','nmot');rMot()"><div class="nie">🚔</div><div class="nil">MOT</div></div>
-  <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
-  <div class="ni" id="ninv" onclick="nv('pinv','ninv');initInvoice()"><div class="nie">🧾</div><div class="nil">인보이스</div></div>
+  <div class="bnav-group">
+    <div class="ni on" id="ndash" onclick="nv('pdash','ndash');rDash()"><div class="nie">🏠</div><div class="nil">홈</div></div>
+  </div>
+  <div class="bnav-group">
+    <div class="bnav-group-label">마스터</div>
+    <div class="ni" id="nveh" onclick="nv('pveh','nveh');rV()"><div class="nie">🚌</div><div class="nil">차량</div></div>
+    <div class="ni" id="ndrv" onclick="nv('pdrv','ndrv');rD()"><div class="nie">👤</div><div class="nil">드라이버</div></div>
+    <div class="ni" id="ncli" onclick="nv('pcli','ncli');rC()"><div class="nie">🏢</div><div class="nil">여행사</div></div>
+    <div class="ni" id="ngui" onclick="nv('pgui','ngui');rG()"><div class="nie">🧭</div><div class="nil">가이드</div></div>
+  </div>
+  <div class="bnav-group">
+    <div class="bnav-group-label">요금</div>
+    <div class="ni" id="nprc" onclick="nv('pprc','nprc');rP()"><div class="nie">💰</div><div class="nil">요금</div></div>
+    <div class="ni" id="nhtl" onclick="nv('phtl','nhtl');rH()"><div class="nie">🏨</div><div class="nil">호텔</div></div>
+    <div class="ni" id="nsub" onclick="nv('psub','nsub');rSub()"><div class="nie">🤝</div><div class="nil">서브</div></div>
+  </div>
+  <div class="bnav-group">
+    <div class="bnav-group-label">운행</div>
+    <div class="ni" id="ndr" onclick="nv('pdr','ndr');loadDR()"><div class="nie">📋</div><div class="nil">리포트</div></div>
+    <div class="ni" id="nshift" onclick="nv('pshift','nshift');loadShiftReports()"><div class="nie">🚌</div><div class="nil">운행일지</div></div>
+    <div class="ni" id="nmot" onclick="nv('pmot','nmot');rMot()"><div class="nie">🚔</div><div class="nil">MOT</div></div>
+  </div>
+  <div class="bnav-group">
+    <div class="bnav-group-label">정산</div>
+    <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
+    <div class="ni" id="ninv" onclick="nv('pinv','ninv');initInvoice()"><div class="nie">🧾</div><div class="nil">인보이스</div></div>
+    <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div></div>
+  </div>
 </div>
 </div><!-- /sm -->
 
@@ -3129,8 +3147,8 @@ async function initInvoice() {
   if (!document.getElementById('inv-from').value) setInvPeriod('thismonth');
   else loadInvReports();
 
-  // 이력 로드
-  loadInvHistory(false);
+  // 이력 로드 (탭 진입 시 자동 로드)
+  loadInvHistory(true);
 }
 
 async function populateInvAgency() {
@@ -3661,6 +3679,19 @@ async function generateInvoice() {
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
+
+  /* ── 개선: ABN 필수 검증 ── */
+  const _abnVal = (document.getElementById('inv-abn')?.value || '').replace(/\s/g,'');
+  if (!_abnVal || _abnVal.length !== 11 || !/^\d{11}$/.test(_abnVal)) {
+    toast('⚠️ ABN을 정확히 입력하세요 (11자리 숫자)', 'er');
+    /* 설정 패널 열기 */
+    const settingsBtn = document.getElementById('inv-settings-toggle');
+    if(settingsBtn && !document.getElementById('inv-settings-panel')?.style.display?.includes('block')){
+      settingsBtn.click();
+    }
+    document.getElementById('inv-abn')?.focus();
+    return;
+  }
 
   let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
   // 제외된 항목 필터
