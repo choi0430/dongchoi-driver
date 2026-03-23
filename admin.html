@@ -7395,7 +7395,42 @@ function openShiftPdfAdmin(r, type) {
   function row2f(l,r2) { return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:4px;">${l}${r2}</div>`; }
   function sec(t) { return `<div style="background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;padding:6px 12px;border-radius:6px;margin:16px 0 10px;">${t}</div>`; }
 
-  // Build check results section
+  // ── EOS 전용: 차량 점검 / Daily Reports / Damage / KM ──
+  let eosChecksHtml = '', eosDRHtml = '', eosDamageHtml = '', eosStartKM = '', eosTotalKM = '';
+  if (!isPre) {
+    if (r.Check_Results) {
+      try {
+        const ch = typeof r.Check_Results==='string' ? JSON.parse(r.Check_Results) : r.Check_Results;
+        if (Array.isArray(ch) && ch.length) {
+          const fc = ch.filter(c=>c.pass===false).length;
+          const rws = ch.map(c=>{const ok=c.pass!==false;return `<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:8px;background:${ok?'#f0fdf4':'#fef2f2'};border:1.5px solid ${ok?'#86efac':'#fca5a5'};margin-bottom:4px;">
+            <span style="font-size:12px;font-weight:600;color:#1a1a1a;">${h(c.name||'')}${c.kr?` <span style="font-size:10px;color:#777;">(${h(c.kr)})</span>`:''}</span>
+            <span style="font-size:11px;font-weight:800;color:${ok?'#15803d':'#b91c1c'};background:${ok?'#dcfce7':'#fee2e2'};padding:3px 9px;border-radius:5px;">${ok?'✅ PASS':'❌ FAIL'}</span>
+          </div>`;}).join('');
+          eosChecksHtml = sec('🔍 차량 점검 Post-Shift Vehicle Check') + `<div>${rws}${fc>0?`<div style="margin-top:6px;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:8px 10px;font-size:11px;color:#b91c1c;font-weight:700;">⚠️ ${fc}개 FAIL</div>`:''}</div>`;
+        }
+      } catch(e) { eosChecksHtml = sec('🔍 차량 점검') + `<div style="font-size:12px;color:#666;">${h(String(r.Check_Results))}</div>`; }
+    }
+    if (r.Daily_Reports) {
+      try {
+        const drs = typeof r.Daily_Reports==='string' ? JSON.parse(r.Daily_Reports) : r.Daily_Reports;
+        if (Array.isArray(drs) && drs.length) {
+          const dRw = drs.map((d,i)=>`<tr><td style="padding:6px 8px;border-bottom:1px solid #eee;">${i+1}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;">${h(d.agency||d.a||'')}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;">${h(d.attraction||'')}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;">${d.km||''}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;">$${Number(d.total||d.t||0).toFixed(2)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;">$${Number(d.dr||d.d||0).toFixed(2)}</td></tr>`).join('');
+          const tTA=drs.reduce((s,d)=>s+(d.total||d.t||0),0), tDR=drs.reduce((s,d)=>s+(d.dr||d.d||0),0);
+          eosDRHtml = sec('📋 일일 리포트 Daily Reports') +
+            `<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#f0f4ff;"><th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;border-bottom:2px solid #e5e7eb;">#</th><th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;border-bottom:2px solid #e5e7eb;">여행사</th><th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;border-bottom:2px solid #e5e7eb;">관광지</th><th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;border-bottom:2px solid #e5e7eb;">KM</th><th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;border-bottom:2px solid #e5e7eb;">TA</th><th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;border-bottom:2px solid #e5e7eb;">DR</th></tr></thead><tbody>${dRw}</tbody><tfoot><tr style="background:#f8fafc;font-weight:700;"><td colspan="4" style="padding:8px;border-top:2px solid #e5e7eb;">합계</td><td style="padding:8px;border-top:2px solid #e5e7eb;color:#1a56db;">$${tTA.toFixed(2)}</td><td style="padding:8px;border-top:2px solid #e5e7eb;color:#059669;">$${tDR.toFixed(2)}</td></tr></tfoot></table>`;
+        }
+      } catch(e) {}
+    }
+    if (r.Damage) eosDamageHtml = field('손상/사고 Damage', r.Damage);
+    if (r.Start_KM) {
+      eosStartKM = field('출발 KM Start KM', r.Start_KM);
+      const eN=Number(r.End_KM), sN=Number(r.Start_KM);
+      if(eN&&sN) eosTotalKM = field('전체 주행거리 Total KM', (eN-sN).toLocaleString()+' km');
+    }
+  }
+
+  // Build check results section (Pre)
   let checksHtml = '';
   if (isPre && r.Check_Results) {
     try {
@@ -7478,7 +7513,11 @@ function openShiftPdfAdmin(r, type) {
       row2f(field('날짜 Date', fmtDate(r.Date)||r.Date), field('차량 Rego', r.Rego)) +
       row2f(field('드라이버 Driver', r.Driver), field('종료 KM End KM', r.End_KM)) +
       row2f(field('종료 시간 End Time', parseSheetTime(r.End_Time)||r.End_Time), field('연료 Fuel End', r.Fuel_End)) +
+      (eosStartKM ? row2f(eosStartKM, eosTotalKM) : '') +
+      eosDamageHtml +
       field('비고 Remarks', r.Remarks) +
+      eosDRHtml +
+      eosChecksHtml +
       eosDeclHtml +
       sigHtml;
 

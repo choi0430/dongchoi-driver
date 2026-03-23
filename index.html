@@ -4075,14 +4075,27 @@ function submitEndShift(){
   };
 
   // ── Google Sheets 자동 전송 (End of Shift) ──
+  // Daily Reports → JSON 요약 (시트 저장용, 50K 셀 제한 고려)
+  const drSummary = (shift.dailyReports||[]).map(r => ({
+    agency: r.agency||'', attraction: r.attraction||'', tourCode: r.tourCode||'',
+    pax: r.pax||0, km: r.km||0, total: r.total||0, dr: r.dr||0,
+    timeStart: r.timeStart||'', timeEnd: r.timeEnd||''
+  }));
+  const drJson = JSON.stringify(drSummary);
+  const checksJson = JSON.stringify(shift.endChecks||[]);
+
   postToSheetsWithRetry('save_endofshift', {
     Driver: currentDriver?.name || '',
     Date: shift.endDate || fmtDate(shift.date) || todayDisplay(),
     Rego: shift.rego,
+    Start_KM: shift.startKm || '',
     End_KM: shift.endKm,
     End_Time: shift.endTime,
     Fuel_End: shift.endFuel,
-    Remarks: shift.damage || '',
+    Damage: shift.damage || '',
+    Check_Results: checksJson,
+    Daily_Reports: drJson.length < 45000 ? drJson : JSON.stringify(drSummary.map(r=>({a:r.agency,t:r.total,d:r.dr}))),
+    Remarks: shift.remarks || '',
     Signature: shift.eosSignature || ''
   });
 
@@ -8172,18 +8185,24 @@ function openPastShiftPdf(rowIndex, type) {
     const matchPre = _myPastShifts.pre.find(p =>
       p.Driver === r.Driver && p.Rego === r.Rego && p.Date === r.Date
     );
+    // Parse EOS-stored fields (new columns)
+    const eosChecks = (() => { try { return r.Check_Results ? JSON.parse(r.Check_Results) : []; } catch(e){return[];} })();
+    const eosDRs = (() => { try { return r.Daily_Reports ? JSON.parse(r.Daily_Reports) : []; } catch(e){return[];} })();
+
     const shift = {
       date: r.Date, endDate: r.Date, rego: r.Rego, driver: r.Driver,
+      startKm: r.Start_KM ? Number(r.Start_KM) : null,
       endKm: r.End_KM ? Number(r.End_KM) : null,
       endTime: parseSheetTime(r.End_Time)||r.End_Time||'',
       fuel: r.Fuel_End||r.Fuel||'', remarks: r.Remarks,
       eosSignature: r.Signature || '',
-      // EOS-only fields (no daily reports/checks stored in sheet)
-      dailyReports: [], endChecks: [], damage: r.Damage||''
+      damage: r.Damage || '',
+      endChecks: eosChecks,
+      dailyReports: eosDRs
     };
-    // Merge Pre data if found
+    // Merge Pre data if found (for Pre section display)
     if (matchPre) {
-      shift.startKm = matchPre.Start_KM ? Number(matchPre.Start_KM) : null;
+      if (!shift.startKm) shift.startKm = matchPre.Start_KM ? Number(matchPre.Start_KM) : null;
       shift.startTime = parseSheetTime(matchPre.Start_Time)||matchPre.Start_Time||'';
       shift.fuel = matchPre.Fuel || shift.fuel;
       shift.seats = matchPre.Seats;

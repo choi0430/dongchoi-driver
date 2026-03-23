@@ -28,7 +28,7 @@ const REPORT_HEADERS = {
                      'Wash','Meal','Tip','Etc','Remarks'],
   'Pre_Departure':  ['Submitted','Driver','Date','Rego','Seats','Start_KM','Fuel','Start_Time',
                      'Check_Results','Remarks','Signature'],
-  'End_of_Shift':   ['Submitted','Driver','Date','Rego','End_KM','End_Time','Fuel_End','Remarks','Signature'],
+  'End_of_Shift':   ['Submitted','Driver','Date','Rego','Start_KM','End_KM','End_Time','Fuel_End','Damage','Check_Results','Daily_Reports','Remarks','Signature'],
   'MOT_Report':     ['Submitted','Driver','Date','Time','Rego','Location','Officer','Type',
                      'Result','NoticeNum','Fine','Notes','FailedItems','Checks']
 };
