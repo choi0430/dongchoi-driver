@@ -7851,7 +7851,9 @@ function doPdfDownload() {
 function openShiftReport(shift, type) {
   const driver    = currentDriver?.name || shift.driver || '';
   const isPre     = type === 'pre';
-  const typeLabel = isPre ? 'PRE DEPARTURE REPORT' : 'END OF SHIFT REPORT';
+  const hasPre    = isPre || shift._hasPre || (shift.startKm != null && shift.preSignature);
+  const hasEos    = !isPre;
+  const typeLabel = isPre ? 'PRE DEPARTURE REPORT' : (hasPre ? 'FULL SHIFT REPORT' : 'END OF SHIFT REPORT');
   const dateStr   = (isPre ? fmtDate(shift.date) : (fmtDate(shift.endDate) || fmtDate(shift.date))) || todayDisplay();
 
   // -- Vehicle checks rows --
@@ -7917,8 +7919,12 @@ function openShiftReport(shift, type) {
 
   // -- Signature image --
   function sigImg(dataUrl) {
-    if (!dataUrl || dataUrl.length < 50) return '<div style="color:#aaa;font-size:12px;padding:20px 0;text-align:center;">서명 없음</div>';
-    return `<img src="${dataUrl}" style="max-height:90px;max-width:100%;object-fit:contain;" alt="Signature">`;
+    if (!dataUrl || dataUrl.length < 30) return '<div style="color:#aaa;font-size:12px;padding:20px 0;text-align:center;">서명 데이터 없음</div>';
+    // Check if base64 data is truncated (Google Sheets 50K cell limit)
+    if (dataUrl.length > 100 && !dataUrl.match(/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/)) {
+      return '<div style="color:#d97706;font-size:11px;padding:12px 0;text-align:center;">⚠️ 서명 데이터 손상 (Sheets 저장 제한 초과). 새 리포트부터 정상 저장됩니다.</div>';
+    }
+    return `<img src="${dataUrl}" style="max-height:90px;max-width:100%;object-fit:contain;" alt="Signature" onerror="this.outerHTML='<div style=\\'color:#d97706;font-size:11px;padding:12px;text-align:center;\\'>⚠️ 서명 이미지 로드 실패</div>'">`;
   }
 
   // -- Field helper --
@@ -7935,13 +7941,13 @@ function openShiftReport(shift, type) {
     return `<div style="background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;padding:6px 12px;border-radius:6px;margin:16px 0 10px;">${t}</div>`;
   }
 
-  // -- Build Pre Departure section --
-  const preSection = `
+  // -- Build Pre Departure section (only if Pre data exists) --
+  const preSection = hasPre ? `
     ${sectionTitle('🚦 Pre Departure 출발 전 점검')}
     ${row2(field('날짜 Date', fmtDate(shift.date)), field('차량 Rego', shift.rego, true))}
-    ${row2(field('드라이버 Driver', driver, true), field('출발 KM Start KM', shift.startKm ? shift.startKm.toLocaleString() + ' km' : '—'))}
+    ${row2(field('드라이버 Driver', driver, true), field('출발 KM Start KM', shift.startKm ? Number(shift.startKm).toLocaleString() + ' km' : '—'))}
     ${row2(field('출발 시간 Start Time', shift.startTime||'—'), field('연료 Fuel', shift.fuel||'—'))}
-    ${field('비고 Remarks', shift.remarks||'—')}
+    ${field('비고 Remarks', (isPre ? shift.remarks : shift.preRemarks)||shift.remarks||'—')}
     ${sectionTitle('🔍 차량 점검 Pre-Shift Vehicle Check')}
     <div style="margin-bottom:10px;">${buildChecks(shift.preChecks)}</div>
     ${sectionTitle('⚖️ Safety Declaration 안전 서약')}
@@ -7958,7 +7964,7 @@ function openShiftReport(shift, type) {
       ${sigImg(shift.preSignature)}
     </div>
     <div style="font-size:10px;color:#aaa;margin-top:4px;text-align:right;">서명일시: ${fmtDate(shift.date)||dateStr}</div>
-  `;
+  ` : '';
 
   // -- Build End of Shift section --
   const eosSection = isPre ? '' : `
@@ -8150,19 +8156,44 @@ function openPastShiftPdf(rowIndex, type) {
   if (!r) { showToast('리포트를 찾을 수 없습니다','error'); return; }
 
   const isPre = type==='pre';
-  // Build a shift-like object and use the existing openShiftReport function
-  const shift = isPre
-    ? { date: r.Date, rego: r.Rego, driver: r.Driver, seats: r.Seats,
-        startKm: r.Start_KM ? Number(r.Start_KM) : null,
-        fuel: r.Fuel, startTime: parseSheetTime(r.Start_Time)||r.Start_Time||'', remarks: r.Remarks,
-        preChecks: (() => { try { return r.Check_Results ? JSON.parse(r.Check_Results) : []; } catch(e){return[];} })(),
-        preSignature: r.Signature || '' }
-    : { date: r.Date, endDate: r.Date, rego: r.Rego, driver: r.Driver,
-        endKm: r.End_KM ? Number(r.End_KM) : null,
-        endTime: parseSheetTime(r.End_Time)||r.End_Time||'', fuel: r.Fuel_End||r.Fuel||'', remarks: r.Remarks,
-        dailyReports: [], endChecks: [], eosSignature: r.Signature || '' };
 
-  openShiftReport(shift, isPre ? 'pre' : 'eos');
+  if (isPre) {
+    // Pre Departure only
+    const shift = {
+      date: r.Date, rego: r.Rego, driver: r.Driver, seats: r.Seats,
+      startKm: r.Start_KM ? Number(r.Start_KM) : null,
+      fuel: r.Fuel, startTime: parseSheetTime(r.Start_Time)||r.Start_Time||'', remarks: r.Remarks,
+      preChecks: (() => { try { return r.Check_Results ? JSON.parse(r.Check_Results) : []; } catch(e){return[];} })(),
+      preSignature: r.Signature || ''
+    };
+    openShiftReport(shift, 'pre');
+  } else {
+    // End of Shift — try to find matching Pre record for complete report
+    const matchPre = _myPastShifts.pre.find(p =>
+      p.Driver === r.Driver && p.Rego === r.Rego && p.Date === r.Date
+    );
+    const shift = {
+      date: r.Date, endDate: r.Date, rego: r.Rego, driver: r.Driver,
+      endKm: r.End_KM ? Number(r.End_KM) : null,
+      endTime: parseSheetTime(r.End_Time)||r.End_Time||'',
+      fuel: r.Fuel_End||r.Fuel||'', remarks: r.Remarks,
+      eosSignature: r.Signature || '',
+      // EOS-only fields (no daily reports/checks stored in sheet)
+      dailyReports: [], endChecks: [], damage: r.Damage||''
+    };
+    // Merge Pre data if found
+    if (matchPre) {
+      shift.startKm = matchPre.Start_KM ? Number(matchPre.Start_KM) : null;
+      shift.startTime = parseSheetTime(matchPre.Start_Time)||matchPre.Start_Time||'';
+      shift.fuel = matchPre.Fuel || shift.fuel;
+      shift.seats = matchPre.Seats;
+      shift.preRemarks = matchPre.Remarks;
+      shift.preChecks = (() => { try { return matchPre.Check_Results ? JSON.parse(matchPre.Check_Results) : []; } catch(e){return[];} })();
+      shift.preSignature = matchPre.Signature || '';
+      shift._hasPre = true;
+    }
+    openShiftReport(shift, 'eos');
+  }
 }
 
 // ── 수정 요청 ──
