@@ -3442,8 +3442,6 @@ async function completePre(){
     localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
   }
   showToast(`✅ ${rego} Pre Departure 완료 Complete`,'success');
-  // PDF 저장 프롬프트 (서명 포함 리포트)
-  setTimeout(()=>showPdfPrompt(shift, 'pre'), 800);
   // ── Google Sheets 자동 전송 (Pre Departure) ──
   postToSheetsWithRetry('save_predeparture', {
     Driver: currentDriver?.name || '',
@@ -4087,8 +4085,7 @@ function submitEndShift(){
   runSync(false);
   startAutoSync();
   showPage('home');
-  // PDF 저장 프롬프트 (홈 이동 후 잠시 후 표시)
-  setTimeout(()=>showPdfPrompt(completedShiftSnapshot, 'eos'), 600);
+  showToast('✅ End of Shift 완료 — 이력에서 확인하세요','success');
 }
 
 // ═══════════════════════════════════════════════
@@ -8144,30 +8141,15 @@ async function submitCorrectionRequest() {
   const desc = (document.getElementById('correction-desc')?.value||'').trim();
   if (!desc) { showToast('수정 내용을 입력해주세요','error'); return; }
 
-  const btn = document.querySelector('#correction-modal button[onclick="submitCorrectionRequest()"]');
-  if (btn) { btn.disabled = true; btn.textContent = '전송 중...'; }
+  const typeLabel = type==='pre' ? 'Pre Departure' : 'End of Shift';
+  const driver = currentDriver?.name || r.Driver || '';
+  const msgText = `[DC Fleet 수정 요청]\n유형: ${typeLabel}\n드라이버: ${driver}\n날짜: ${r.Date||'—'}\n차량: ${r.Rego||'—'}\n\n수정 내용:\n${desc}`;
 
-  try {
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: {'Content-Type':'text/plain'},
-      body: JSON.stringify({
-        action: 'save_correction_request',
-        reportType: type==='pre' ? 'Pre_Departure' : 'End_of_Shift',
-        driver: currentDriver?.name || r.Driver || '',
-        date: r.Date || '',
-        rego: r.Rego || '',
-        description: desc
-      })
-    });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error||'전송 실패');
-    closeCorrectionModal();
-    showToast('✅ 수정 요청이 전송되었습니다','success');
-  } catch(e) {
-    showToast('❌ 전송 실패: '+e.message,'error');
-    if (btn) { btn.disabled = false; btn.textContent = '📨 요청 전송'; }
-  }
+  // 클립보드에 복사 후 카카오톡 오픈채팅으로 이동
+  try { await navigator.clipboard.writeText(msgText); } catch(e) {}
+  closeCorrectionModal();
+  showToast('📋 수정 요청 내용이 복사되었습니다. 카카오톡에서 붙여넣기 해주세요','success');
+  setTimeout(()=>{ window.open('https://open.kakao.com/o/gwqO8ili','_blank'); }, 500);
 }
 
 </script>
@@ -8197,7 +8179,7 @@ async function submitCorrectionRequest() {
     <textarea id="correction-desc" placeholder="수정이 필요한 내용을 자세히 작성해주세요..." style="width:100%;min-height:100px;border:1.5px solid #e5e7eb;border-radius:12px;padding:12px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button onclick="closeCorrectionModal()" style="flex:1;background:#f0f4ff;color:#1a56db;border:none;border-radius:12px;padding:15px;font-size:14px;font-weight:700;cursor:pointer;">취소</button>
-      <button onclick="submitCorrectionRequest()" style="flex:2;background:#1a56db;color:white;border:none;border-radius:12px;padding:15px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(26,86,219,0.3);">📨 요청 전송</button>
+      <button onclick="submitCorrectionRequest()" style="flex:2;background:#FEE500;color:#3C1E1E;border:none;border-radius:12px;padding:15px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(254,229,0,0.4);">💬 카카오톡으로 수정 요청</button>
     </div>
   </div>
 </div>
