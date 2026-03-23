@@ -1856,12 +1856,14 @@ async function loadMasterData() {
   // ① 캐시 우선 적용 (즉시 UI 반응)
   const cached = loadMasterCache();
   if (cached) {
-    applyMasterData(cached);
+    try {
+      applyMasterData(cached);
+      setMsg('캐시 데이터 적용 중...');
+      setBar(40);
+      populateMasterSelects();
+      populateContacts();
+    } catch(cacheErr) { console.warn('캐시 적용 실패:', cacheErr); }
     _masterReady = true;
-    setMsg('캐시 데이터 적용 중...');
-    setBar(40);
-    populateMasterSelects();
-    populateContacts();
     buildLoginSelect(); // ← MASTER 로드 후 드라이버 목록 갱신
   }
 
@@ -1878,28 +1880,31 @@ async function loadMasterData() {
     setBar(80);
 
     if (data.ok && data.data) {
-      applyMasterData(data.data);
-      saveMasterCache(data.data);           // 캐시 저장
+      try {
+        applyMasterData(data.data);
+        saveMasterCache(data.data);           // 캐시 저장
+        setMsg('✅ 데이터 로드 완료 (가이드 ' + MASTER.guides.length + '명)');
+        populateMasterSelects();
+        populateContacts();
+      } catch(applyErr) { console.warn('데이터 적용 실패:', applyErr); setMsg('⚠️ 데이터 적용 오류'); }
       _masterReady = true;
-      setMsg('✅ 데이터 로드 완료 (가이드 ' + MASTER.guides.length + '명)');
-      populateMasterSelects();
-      populateContacts();
       buildLoginSelect(); // ← MASTER 최신 데이터로 드라이버 목록 갱신
     } else {
-      if (!cached) { setMsg('⚠️ 시트 연결 실패 — 기본 데이터 사용'); useFallbackMaster(); _masterReady = true; buildLoginSelect(); }
+      if (!cached) { setMsg('⚠️ 시트 연결 실패 — 기본 데이터 사용'); useFallbackMaster(); }
       else { setMsg('⚠️ 최신 데이터 조회 실패 — 캐시 사용 중'); }
+      _masterReady = true;
+      buildLoginSelect();
     }
   } catch(e) {
     console.warn('마스터 로드 실패:', e);
     if (!cached) {
-      // 캐시도 없으면 fallback + 재시도 버튼
       useFallbackMaster();
-      _masterReady = true;
-      buildLoginSelect();
       showMasterRetryBtn();
     } else {
       setMsg('⚠️ 오프라인 — 캐시 데이터 사용 중');
     }
+    _masterReady = true;
+    buildLoginSelect();
   }
 
   setBar(100);
@@ -2737,8 +2742,9 @@ function doLogin() {
   const pin = [0,1,2,3].map(i => document.getElementById('pin-'+i).value).join('');
   if(pin.length < 4){ showLoginError('PIN 4자리를 입력하세요'); return; }
 
-  // MASTER 데이터 아직 로드 중이면 최대 5초 대기 후 재시도
-  if(!_masterReady) {
+  // MASTER 데이터 아직 로드 중이면 최대 5초 대기 후 재시도 (1회만)
+  if(!_masterReady && !window._loginRetried) {
+    window._loginRetried = true;
     const loginBtn = document.querySelector('#login-screen button[onclick="doLogin()"]');
     if(loginBtn) { loginBtn.disabled = true; loginBtn.textContent = '⏳ 데이터 로드 중...'; }
     let waited = 0;
@@ -2747,11 +2753,14 @@ function doLogin() {
       if(_masterReady || waited >= 5000) {
         clearInterval(wait);
         if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = '🔐 로그인'; }
-        doLogin(); // 준비 완료 후 자동 재시도
+        if(!_masterReady) { _masterReady = true; useFallbackMaster(); buildLoginSelect(); }
+        window._loginRetried = false;
+        doLogin();
       }
     }, 100);
     return;
   }
+  window._loginRetried = false;
 
   const correctPin = getDriverPin(name);
   if(pin !== correctPin){ showLoginError('PIN 번호가 틀렸습니다'); return; }
