@@ -441,7 +441,8 @@ function getAllMasters() {
   try {
     const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
                     'M_PriceClient', 'M_PriceDriver', 'M_PriceSub',
-                    'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions'];
+                    'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions',
+                    'Sub_Rates', 'Ledger', 'MOT_Report'];
     const result = {};
 
     sheets.forEach(name => {
