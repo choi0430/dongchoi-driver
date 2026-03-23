@@ -1041,6 +1041,80 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div id="shift-list" style="padding:8px 14px 80px;"></div>
 </div>
 
+<!-- BALANCE PAGE (잔액 관리) -->
+<div class="pg" id="pbal">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">📊 거래처 잔액</div><div class="ssb">여행사 · 외주 · 드라이버 잔액 관리</div></div>
+    <button class="btn bgh sm" onclick="syncBalanceData(true)">🔄 동기화</button>
+  </div>
+
+  <!-- 3-way 탭 -->
+  <div style="display:flex;gap:0;padding:10px 14px 0;">
+    <button id="bal-tab-agency" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;" onclick="showBalTab('agency')">🏢 여행사</button>
+    <button id="bal-tab-sub" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="showBalTab('sub')">🚌 외주(SUB)</button>
+    <button id="bal-tab-wage" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="showBalTab('wage')">👤 드라이버</button>
+  </div>
+
+  <!-- ═══ TOUR AGENCY BALANCE ═══ -->
+  <div id="bal-view-agency">
+    <div id="bal-agency-summary" style="padding:10px 14px 0;"></div>
+    <div style="padding:6px 14px 0;display:flex;gap:6px;align-items:center;">
+      <input type="text" id="bal-agency-search" class="profit-finp" placeholder="여행사 검색..." oninput="renderBalAgencyList()" style="flex:1;font-size:12px;">
+      <button class="btn bac sm" onclick="openBalTxnModal('agency',null)">+ 거래 추가</button>
+    </div>
+    <div id="bal-agency-list" style="padding:8px 14px 80px;"></div>
+  </div>
+
+  <!-- ═══ OUTSOURCING (SUB) BALANCE ═══ -->
+  <div id="bal-view-sub" style="display:none;">
+    <div id="bal-sub-summary" style="padding:10px 14px 0;"></div>
+    <div style="padding:6px 14px 0;display:flex;gap:6px;align-items:center;">
+      <input type="text" id="bal-sub-search" class="profit-finp" placeholder="서브 회사 검색..." oninput="renderBalSubList()" style="flex:1;font-size:12px;">
+      <button class="btn bac sm" onclick="openBalTxnModal('sub',null)">+ 거래 추가</button>
+    </div>
+    <div id="bal-sub-list" style="padding:8px 14px 80px;"></div>
+  </div>
+
+  <!-- ═══ DRIVER WAGE BALANCE ═══ -->
+  <div id="bal-view-wage" style="display:none;">
+    <div id="bal-wage-summary" style="padding:10px 14px 0;"></div>
+    <div style="padding:6px 14px 0;display:flex;gap:6px;align-items:center;">
+      <input type="text" id="bal-wage-search" class="profit-finp" placeholder="드라이버 검색..." oninput="renderBalWageList()" style="flex:1;font-size:12px;">
+      <button class="btn bac sm" onclick="openBalTxnModal('wage',null)">+ 지급 추가</button>
+    </div>
+    <div id="bal-wage-list" style="padding:8px 14px 80px;"></div>
+  </div>
+</div>
+
+<!-- BALANCE DETAIL MODAL -->
+<div class="movl" id="bal-detail-modal" onclick="if(event.target===this)closeBalDetail()" style="display:none;">
+<div class="msh" style="max-height:90vh;overflow:hidden;display:flex;flex-direction:column;">
+  <div class="mhd"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px 8px;">
+    <div id="bal-detail-title" class="mtt" style="padding:0;margin:0;font-size:16px;">상세 내역</div>
+    <button class="btn bac sm" id="bal-detail-add-btn" onclick="openBalTxnModal(window._balDetailType,null)">+ 추가</button>
+  </div>
+  <div id="bal-detail-summary" style="padding:0 4px 8px;"></div>
+  <div id="bal-detail-body" style="overflow-y:auto;flex:1;padding:0 4px 12px;"></div>
+  <div style="padding:8px 4px 0;border-top:1px solid var(--b1);">
+    <button class="btn bgh" style="width:100%;padding:12px;" onclick="closeBalDetail()">닫기</button>
+  </div>
+</div>
+</div>
+
+<!-- BALANCE TRANSACTION MODAL -->
+<div class="movl" id="bal-txn-modal" onclick="if(event.target===this)closeBalTxnModal()" style="display:none;">
+<div class="msh">
+  <div class="mhd"></div>
+  <div class="mtt" id="bal-txn-title">거래 추가</div>
+  <div id="bal-txn-body" style="max-height:60vh;overflow-y:auto;"></div>
+  <div class="mft">
+    <button class="btn bgh" style="flex:1" onclick="closeBalTxnModal()">취소</button>
+    <button class="btn bac" style="flex:2" onclick="saveBalTxn()">💾 저장</button>
+  </div>
+</div>
+</div>
+
 </div><!-- /cont -->
 
 <!-- BOTTOM NAV (카테고리 그룹핑) -->
@@ -1069,6 +1143,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </div>
   <div class="bnav-group">
     <div class="bnav-group-label">정산</div>
+    <div class="ni" id="nbal" onclick="nv('pbal','nbal');initBalance()"><div class="nie">📊</div><div class="nil">잔액</div></div>
     <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
     <div class="ni" id="ninv" onclick="nv('pinv','ninv');initInvoice()"><div class="nie">🧾</div><div class="nil">인보이스</div></div>
     <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div></div>
@@ -1305,6 +1380,7 @@ function nv(pg,ni){
     pdr:   ()=>renderDR(),
     pmot:  ()=>rMot(),
     pwage: ()=>rWage(ST.curWageDriver),
+    pbal:  ()=>renderBalance(),
     pinv:  ()=>initInvoice(),
     pnotice: ()=>loadNoticesFromGAS(),
   };
@@ -1321,6 +1397,7 @@ function nv(pg,ni){
     pdr:   ()=>loadDR(true),
     pmot:  ()=>{ _motLastSync=0; return rMot(true); },
     pwage: ()=>{ _wagesLastSync=0; return loadWagesFromSheet(true).then(()=>rWage(ST.curWageDriver)); },
+    pbal:  ()=>syncBalanceData(true).then(renderBalance),
     pinv:  ()=>initInvoice(),
     pnotice: ()=>loadNoticesFromGAS(),
   };
@@ -2755,7 +2832,576 @@ function deleteLedgerEntry(idx){
 }
 
 
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// BALANCE MODULE (거래처 잔액 관리: 여행사 / 외주 SUB / 드라이버)
+// ═══════════════════════════════════════════════════════════════════
+let _balAgencyTxns = [];   // Agency_Txn rows from sheet
+let _balSubTxns = [];      // SUB_Txn rows from sheet
+let _balWageTxns = [];     // Driver wage DR/CR from Wages+Ledger
+let _balTab = 'agency';
+let _balDetailType = '';   // 'agency'|'sub'|'wage'
+let _balDetailName = '';
+let _balEditIdx = null;    // editing txn index (null=add)
+let _balLoaded = false;
+
+function showBalTab(tab){
+  _balTab = tab;
+  ['agency','sub','wage'].forEach(t=>{
+    const v = document.getElementById('bal-view-'+t);
+    const b = document.getElementById('bal-tab-'+t);
+    if(v) v.style.display = t===tab?'':'none';
+    if(b) b.classList.toggle('on', t===tab);
+  });
+  renderBalance();
+}
+
+async function initBalance(){
+  if(!_balLoaded) await syncBalanceData(false);
+  renderBalance();
+}
+
+async function syncBalanceData(force){
+  try {
+    const [agRes, subRes] = await Promise.all([
+      fetch(APPS_SCRIPT_URL+'?action=get_agency_txn'),
+      fetch(APPS_SCRIPT_URL+'?action=get_sub_txn')
+    ]);
+    const agJson = await agRes.json();
+    const subJson = await subRes.json();
+    if(agJson.ok && agJson.rows) _balAgencyTxns = agJson.rows;
+    if(subJson.ok && subJson.rows) _balSubTxns = subJson.rows;
+    // Driver wage: derive from ledger MyDr + wages
+    _buildWageTxns();
+    _balLoaded = true;
+    if(force) toast('잔액 데이터 동기화 완료','ok');
+  } catch(e){
+    console.warn('Balance sync 실패:', e);
+    if(force) toast('동기화 실패: '+e.message,'err');
+  }
+}
+
+function _buildWageTxns(){
+  // Combine: Ledger entries (MyDr > 0) = DR (earned), Wages entries = CR (paid)
+  const txns = [];
+  // From ledger: driver earnings
+  const ledger = getLedger();
+  ledger.forEach(wk=>{
+    (wk.entries||[]).forEach(e=>{
+      if(!e.rego || !e.myDr) return;
+      // Find driver for this rego from vehicles
+      const veh = (ST.vehicles||[]).find(v=>v.Rego===e.rego);
+      const driver = e.driver || veh?._lastDriver || e.rego;
+      txns.push({type:'DR', driver:driver||e.rego, date:e.date, desc:e.tour||e.rego, amount:e.myDr, source:'ledger'});
+    });
+  });
+  // From wages: actual payments
+  const wages = safeGetLocal('admin_wages',[]);
+  wages.forEach(wk=>{
+    (wk.entries||[]).forEach(e=>{
+      if(!e.driver || !e.amount) return;
+      txns.push({type:'CR', driver:e.driver, date:e.date, desc:e.note||e.payMethod||'급여 지급', amount:e.amount, source:'wage'});
+    });
+  });
+  _balWageTxns = txns;
+}
+
+function renderBalance(){
+  if(_balTab==='agency') renderBalAgencyList();
+  else if(_balTab==='sub') renderBalSubList();
+  else renderBalWageList();
+}
+
+// ── AGENCY BALANCE ──
+function _agencyBalances(){
+  const map = {};
+  _balAgencyTxns.forEach(t=>{
+    const name = t.Agency||'Unknown';
+    if(!map[name]) map[name]={name, dr:0, cr:0};
+    map[name].dr += Number(t.DR)||0;
+    map[name].cr += Number(t.CR)||0;
+  });
+  return Object.values(map).map(a=>({...a, balance: a.dr - a.cr})).sort((a,b)=>b.balance-a.balance);
+}
+
+function renderBalAgencyList(){
+  const search = (document.getElementById('bal-agency-search')?.value||'').toLowerCase();
+  const balances = _agencyBalances().filter(a=> !search || a.name.toLowerCase().includes(search));
+  const totalDR = balances.reduce((s,a)=>s+a.dr,0);
+  const totalCR = balances.reduce((s,a)=>s+a.cr,0);
+  const totalBal = totalDR - totalCR;
+
+  document.getElementById('bal-agency-summary').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+      <div style="background:var(--acd);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 청구 (DR)</div>
+        <div style="font-size:15px;font-weight:700;color:var(--ac);font-family:var(--fn);">$${totalDR.toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+      <div style="background:var(--gnd);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 수금 (CR)</div>
+        <div style="font-size:15px;font-weight:700;color:var(--gn);font-family:var(--fn);">$${totalCR.toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+      <div style="background:${totalBal>0?'var(--ord)':'var(--gnd)'};border:1px solid ${totalBal>0?'rgba(249,115,22,.2)':'rgba(34,197,94,.2)'};border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">미수금 잔액</div>
+        <div style="font-size:15px;font-weight:700;color:${totalBal>0?'var(--or)':'var(--gn)'};font-family:var(--fn);">$${totalBal.toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--t3);margin-top:6px;">총 ${balances.length}개 여행사</div>`;
+
+  const list = document.getElementById('bal-agency-list');
+  if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">거래 내역이 없습니다</div>'; return; }
+
+  list.innerHTML = balances.map(a=>`
+    <div onclick="openBalDetail('agency','${a.name.replace(/'/g,"\\'")}')" style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-weight:700;font-size:13px;">${a.name}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:2px;">DR $${a.dr.toLocaleString('en',{minimumFractionDigits:2})} / CR $${a.cr.toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--or)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
+        <div style="font-size:9px;color:var(--t3);">${a.balance>0?'미수금':'정산 완료'}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ── SUB (OUTSOURCING) BALANCE ──
+function _subBalances(){
+  const map = {};
+  _balSubTxns.forEach(t=>{
+    const name = t.SubCompany||'Unknown';
+    const cat = t.Category||'Outsourcing';
+    if(!map[name]) map[name]={name, dr:0, cr:0, wageDr:0, wageCr:0};
+    if(cat==='Wage'){
+      map[name].wageDr += Number(t.DR)||0;
+      map[name].wageCr += Number(t.CR)||0;
+    } else {
+      map[name].dr += Number(t.DR)||0;
+      map[name].cr += Number(t.CR)||0;
+    }
+  });
+  return Object.values(map).map(a=>{
+    const outsourcingBal = a.dr - a.cr;
+    const wageBal = a.wageDr - a.wageCr;
+    return {...a, outsourcingBal, wageBal, balance: outsourcingBal + wageBal};
+  }).sort((a,b)=>b.balance-a.balance);
+}
+
+function renderBalSubList(){
+  const search = (document.getElementById('bal-sub-search')?.value||'').toLowerCase();
+  const balances = _subBalances().filter(a=> !search || a.name.toLowerCase().includes(search));
+  const totalBal = balances.reduce((s,a)=>s+a.balance,0);
+  const totalDR = balances.reduce((s,a)=>s+a.dr+a.wageDr,0);
+  const totalCR = balances.reduce((s,a)=>s+a.cr+a.wageCr,0);
+
+  document.getElementById('bal-sub-summary').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+      <div style="background:var(--acd);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 발생 (DR)</div>
+        <div style="font-size:15px;font-weight:700;color:var(--ac);font-family:var(--fn);">$${totalDR.toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+      <div style="background:var(--gnd);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 지급 (CR)</div>
+        <div style="font-size:15px;font-weight:700;color:var(--gn);font-family:var(--fn);">$${totalCR.toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+      <div style="background:${totalBal>0?'var(--rdd)':'var(--gnd)'};border:1px solid ${totalBal>0?'rgba(239,68,68,.2)':'rgba(34,197,94,.2)'};border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">미지급 잔액</div>
+        <div style="font-size:15px;font-weight:700;color:${totalBal>0?'var(--rd)':'var(--gn)'};font-family:var(--fn);">$${Math.abs(totalBal).toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--t3);margin-top:6px;">총 ${balances.length}개 서브 회사</div>`;
+
+  const list = document.getElementById('bal-sub-list');
+  if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">거래 내역이 없습니다</div>'; return; }
+
+  list.innerHTML = balances.map(a=>`
+    <div onclick="openBalDetail('sub','${a.name.replace(/'/g,"\\'")}')" style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-weight:700;font-size:13px;">${a.name}</div>
+        <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--rd)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px;font-size:10px;color:var(--t3);">
+        <div>외주: DR $${a.dr.toLocaleString()} / CR $${a.cr.toLocaleString()} = <span style="color:${a.outsourcingBal>0?'var(--or)':'var(--gn)'}">$${a.outsourcingBal.toLocaleString()}</span></div>
+        <div>급여: DR $${a.wageDr.toLocaleString()} / CR $${a.wageCr.toLocaleString()} = <span style="color:${a.wageBal>0?'var(--or)':'var(--gn)'}">$${a.wageBal.toLocaleString()}</span></div>
+      </div>
+    </div>`).join('');
+}
+
+// ── DRIVER WAGE BALANCE ──
+function _wageBalances(){
+  const map = {};
+  _balWageTxns.forEach(t=>{
+    const name = t.driver||'Unknown';
+    if(!map[name]) map[name]={name, dr:0, cr:0};
+    if(t.type==='DR') map[name].dr += Number(t.amount)||0;
+    else map[name].cr += Number(t.amount)||0;
+  });
+  return Object.values(map).map(a=>({...a, balance: a.dr - a.cr})).sort((a,b)=>b.balance-a.balance);
+}
+
+function renderBalWageList(){
+  const search = (document.getElementById('bal-wage-search')?.value||'').toLowerCase();
+  const balances = _wageBalances().filter(a=> !search || a.name.toLowerCase().includes(search));
+  const totalDR = balances.reduce((s,a)=>s+a.dr,0);
+  const totalCR = balances.reduce((s,a)=>s+a.cr,0);
+  const totalBal = totalDR - totalCR;
+
+  document.getElementById('bal-wage-summary').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+      <div style="background:var(--acd);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 발생 (DR)</div>
+        <div style="font-size:15px;font-weight:700;color:var(--ac);font-family:var(--fn);">$${totalDR.toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+      <div style="background:var(--gnd);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 지급 (CR)</div>
+        <div style="font-size:15px;font-weight:700;color:var(--gn);font-family:var(--fn);">$${totalCR.toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+      <div style="background:${totalBal>0?'var(--ord)':'var(--gnd)'};border:1px solid ${totalBal>0?'rgba(249,115,22,.2)':'rgba(34,197,94,.2)'};border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">미지급 잔액</div>
+        <div style="font-size:15px;font-weight:700;color:${totalBal>0?'var(--or)':'var(--gn)'};font-family:var(--fn);">$${Math.abs(totalBal).toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--t3);margin-top:6px;">총 ${balances.length}명 드라이버</div>`;
+
+  const list = document.getElementById('bal-wage-list');
+  if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">급여 내역이 없습니다</div>'; return; }
+
+  list.innerHTML = balances.map(a=>`
+    <div onclick="openBalDetail('wage','${a.name.replace(/'/g,"\\'")}')" style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-weight:700;font-size:13px;">${a.name}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:2px;">발생 $${a.dr.toLocaleString('en',{minimumFractionDigits:2})} / 지급 $${a.cr.toLocaleString('en',{minimumFractionDigits:2})}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--or)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
+        <div style="font-size:9px;color:var(--t3);">${a.balance>0?'미지급':'정산 완료'}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ── DETAIL VIEW ──
+function openBalDetail(type, name){
+  window._balDetailType = type;
+  _balDetailName = name;
+  const modal = document.getElementById('bal-detail-modal');
+  modal.style.display = 'flex';
+  document.getElementById('bal-detail-title').textContent =
+    type==='agency' ? '🏢 '+name+' 거래 내역' :
+    type==='sub' ? '🚌 '+name+' 거래 내역' : '👤 '+name+' 급여 내역';
+  renderBalDetail();
+}
+
+function closeBalDetail(){
+  document.getElementById('bal-detail-modal').style.display='none';
+}
+
+function renderBalDetail(){
+  const type = window._balDetailType;
+  const name = _balDetailName;
+  let rows = [];
+  let html = '';
+
+  if(type==='agency'){
+    rows = _balAgencyTxns.filter(t=>(t.Agency||'')=== name).sort((a,b)=>(b.Date||'').localeCompare(a.Date||''));
+    const dr = rows.reduce((s,r)=>s+(Number(r.DR)||0),0);
+    const cr = rows.reduce((s,r)=>s+(Number(r.CR)||0),0);
+    document.getElementById('bal-detail-summary').innerHTML = `
+      <div style="display:flex;gap:10px;font-size:12px;font-family:var(--fn);">
+        <span style="color:var(--ac);">DR $${dr.toLocaleString('en',{minimumFractionDigits:2})}</span>
+        <span style="color:var(--gn);">CR $${cr.toLocaleString('en',{minimumFractionDigits:2})}</span>
+        <span style="color:${(dr-cr)>0?'var(--or)':'var(--gn)'};">잔액 $${(dr-cr).toLocaleString('en',{minimumFractionDigits:2})}</span>
+      </div>`;
+    html = `<table style="width:100%;font-size:11px;border-collapse:collapse;">
+      <thead><tr style="border-bottom:1px solid var(--b2);color:var(--t3);font-size:10px;">
+        <th style="text-align:left;padding:6px 4px;">날짜</th>
+        <th style="text-align:left;padding:6px 4px;">인보이스</th>
+        <th style="text-align:left;padding:6px 4px;">투어</th>
+        <th style="text-align:right;padding:6px 4px;">DR</th>
+        <th style="text-align:right;padding:6px 4px;">CR</th>
+        <th style="text-align:center;padding:6px 2px;">⚙</th>
+      </tr></thead><tbody>`;
+    rows.forEach((r,i)=>{
+      const realIdx = _balAgencyTxns.indexOf(r);
+      html += `<tr style="border-bottom:1px solid var(--b1);">
+        <td style="padding:6px 4px;white-space:nowrap;">${r.Date||'—'}</td>
+        <td style="padding:6px 4px;">${r.InvoiceID||'—'}</td>
+        <td style="padding:6px 4px;">${r.TourCode||'—'}</td>
+        <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+        <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+        <td style="padding:6px 2px;text-align:center;">
+          <span onclick="event.stopPropagation();openBalTxnModal('agency',${realIdx})" style="cursor:pointer;">✏️</span>
+          <span onclick="event.stopPropagation();deleteBalTxn('agency',${realIdx})" style="cursor:pointer;margin-left:2px;">🗑</span>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+
+  } else if(type==='sub'){
+    rows = _balSubTxns.filter(t=>(t.SubCompany||'')=== name).sort((a,b)=>(b.Date||'').localeCompare(a.Date||''));
+    const dr = rows.reduce((s,r)=>s+(Number(r.DR)||0),0);
+    const cr = rows.reduce((s,r)=>s+(Number(r.CR)||0),0);
+    document.getElementById('bal-detail-summary').innerHTML = `
+      <div style="display:flex;gap:10px;font-size:12px;font-family:var(--fn);">
+        <span style="color:var(--ac);">DR $${dr.toLocaleString('en',{minimumFractionDigits:2})}</span>
+        <span style="color:var(--gn);">CR $${cr.toLocaleString('en',{minimumFractionDigits:2})}</span>
+        <span style="color:${(dr-cr)>0?'var(--rd)':'var(--gn)'};">잔액 $${(dr-cr).toLocaleString('en',{minimumFractionDigits:2})}</span>
+      </div>`;
+    html = `<table style="width:100%;font-size:11px;border-collapse:collapse;">
+      <thead><tr style="border-bottom:1px solid var(--b2);color:var(--t3);font-size:10px;">
+        <th style="text-align:left;padding:6px 4px;">날짜</th>
+        <th style="text-align:left;padding:6px 4px;">구분</th>
+        <th style="text-align:left;padding:6px 4px;">설명</th>
+        <th style="text-align:right;padding:6px 4px;">DR</th>
+        <th style="text-align:right;padding:6px 4px;">CR</th>
+        <th style="text-align:center;padding:6px 2px;">⚙</th>
+      </tr></thead><tbody>`;
+    rows.forEach((r,i)=>{
+      const realIdx = _balSubTxns.indexOf(r);
+      const cat = r.Category==='Wage'?'급여':'외주';
+      html += `<tr style="border-bottom:1px solid var(--b1);">
+        <td style="padding:6px 4px;white-space:nowrap;">${r.Date||'—'}</td>
+        <td style="padding:6px 4px;"><span style="background:${r.Category==='Wage'?'var(--pud)':'var(--acd)'};padding:1px 6px;border-radius:4px;font-size:9px;">${cat}</span></td>
+        <td style="padding:6px 4px;">${r.Description||r.InvoiceNo||'—'}</td>
+        <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+        <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+        <td style="padding:6px 2px;text-align:center;">
+          <span onclick="event.stopPropagation();openBalTxnModal('sub',${realIdx})" style="cursor:pointer;">✏️</span>
+          <span onclick="event.stopPropagation();deleteBalTxn('sub',${realIdx})" style="cursor:pointer;margin-left:2px;">🗑</span>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+
+  } else { // wage
+    const drRows = _balWageTxns.filter(t=>t.driver===name && t.type==='DR');
+    const crRows = _balWageTxns.filter(t=>t.driver===name && t.type==='CR');
+    const dr = drRows.reduce((s,r)=>s+(Number(r.amount)||0),0);
+    const cr = crRows.reduce((s,r)=>s+(Number(r.amount)||0),0);
+    document.getElementById('bal-detail-summary').innerHTML = `
+      <div style="display:flex;gap:10px;font-size:12px;font-family:var(--fn);">
+        <span style="color:var(--ac);">발생 $${dr.toLocaleString('en',{minimumFractionDigits:2})}</span>
+        <span style="color:var(--gn);">지급 $${cr.toLocaleString('en',{minimumFractionDigits:2})}</span>
+        <span style="color:${(dr-cr)>0?'var(--or)':'var(--gn)'};">잔액 $${(dr-cr).toLocaleString('en',{minimumFractionDigits:2})}</span>
+      </div>`;
+    const all = [...drRows.map(r=>({...r,_sort:r.date})), ...crRows.map(r=>({...r,_sort:r.date}))].sort((a,b)=>(b._sort||'').localeCompare(a._sort||''));
+    html = `<table style="width:100%;font-size:11px;border-collapse:collapse;">
+      <thead><tr style="border-bottom:1px solid var(--b2);color:var(--t3);font-size:10px;">
+        <th style="text-align:left;padding:6px 4px;">날짜</th>
+        <th style="text-align:left;padding:6px 4px;">내용</th>
+        <th style="text-align:right;padding:6px 4px;">발생(DR)</th>
+        <th style="text-align:right;padding:6px 4px;">지급(CR)</th>
+      </tr></thead><tbody>`;
+    all.forEach(r=>{
+      html += `<tr style="border-bottom:1px solid var(--b1);">
+        <td style="padding:6px 4px;white-space:nowrap;">${r.date||'—'}</td>
+        <td style="padding:6px 4px;">${r.desc||'—'}</td>
+        <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${r.type==='DR'?'$'+Number(r.amount).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+        <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${r.type==='CR'?'$'+Number(r.amount).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    // Hide add button for wage (uses existing Wage entry system)
+    document.getElementById('bal-detail-add-btn').style.display='none';
+  }
+  if(type!=='wage') document.getElementById('bal-detail-add-btn').style.display='';
+  document.getElementById('bal-detail-body').innerHTML = html;
+}
+
+// ── TRANSACTION MODAL (ADD/EDIT) ──
+function openBalTxnModal(type, idx){
+  window._balDetailType = type;
+  _balEditIdx = idx;
+  const modal = document.getElementById('bal-txn-modal');
+  modal.style.display = 'flex';
+  const title = document.getElementById('bal-txn-title');
+  const body = document.getElementById('bal-txn-body');
+  let existing = null;
+
+  if(type==='agency'){
+    title.textContent = idx!==null ? '여행사 거래 수정' : '여행사 거래 추가';
+    if(idx!==null) existing = _balAgencyTxns[idx];
+    const agencies = [...new Set(_balAgencyTxns.map(t=>t.Agency).filter(Boolean))];
+    // Also include M_Clients
+    (ST.clients||[]).forEach(c=>{ if(c.Name && !agencies.includes(c.Name)) agencies.push(c.Name); });
+    body.innerHTML = `
+      <div style="display:grid;gap:10px;">
+        <div><div class="profit-finp-label" style="font-size:10px;color:var(--t3);margin-bottom:3px;">여행사</div>
+          <select id="btx-agency" class="profit-sel" style="width:100%;">
+            <option value="">-- 선택 --</option>
+            ${agencies.map(a=>`<option value="${a}" ${existing?.Agency===a?'selected':''}>${a}</option>`).join('')}
+            <option value="_NEW">+ 새 여행사 입력</option>
+          </select>
+          <input id="btx-agency-new" class="profit-finp" style="width:100%;margin-top:4px;display:none;" placeholder="새 여행사명">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">날짜</div><input type="date" id="btx-date" class="profit-finp" style="width:100%;" value="${existing?.Date||_todayISO()}"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">인보이스 ID</div><input id="btx-invid" class="profit-finp" style="width:100%;" value="${existing?.InvoiceID||''}" placeholder="INV-001"></div>
+        </div>
+        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">투어 코드</div><input id="btx-tour" class="profit-finp" style="width:100%;" value="${existing?.TourCode||''}" placeholder="예: BLUE MT"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">청구 (DR)</div><input type="number" id="btx-dr" class="profit-finp" style="width:100%;" value="${existing?.DR||''}" placeholder="0.00" step="0.01"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">수금 (CR)</div><input type="number" id="btx-cr" class="profit-finp" style="width:100%;" value="${existing?.CR||''}" placeholder="0.00" step="0.01"></div>
+        </div>
+        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">비고</div><input id="btx-remark" class="profit-finp" style="width:100%;" value="${existing?.Remark||''}" placeholder="메모"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">시작일</div><input type="date" id="btx-start" class="profit-finp" style="width:100%;" value="${existing?.StartDate||''}"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">종료일</div><input type="date" id="btx-finish" class="profit-finp" style="width:100%;" value="${existing?.FinishDate||''}"></div>
+        </div>
+        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">결제 기한 (DUE DATE)</div><input type="date" id="btx-due" class="profit-finp" style="width:100%;" value="${existing?.DueDate||''}"></div>
+      </div>`;
+    document.getElementById('btx-agency').addEventListener('change',function(){
+      document.getElementById('btx-agency-new').style.display = this.value==='_NEW'?'':'none';
+    });
+
+  } else if(type==='sub'){
+    title.textContent = idx!==null ? '외주 거래 수정' : '외주 거래 추가';
+    if(idx!==null) existing = _balSubTxns[idx];
+    const subs = [...new Set(_balSubTxns.map(t=>t.SubCompany).filter(Boolean))];
+    // Also include Sub_Rates companies
+    const srCompanies = [...new Set((ST.subRates||[]).map(r=>r.Rego).filter(Boolean))];
+    srCompanies.forEach(c=>{ if(!subs.includes(c)) subs.push(c); });
+    body.innerHTML = `
+      <div style="display:grid;gap:10px;">
+        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">서브 회사</div>
+          <select id="btx-sub" class="profit-sel" style="width:100%;">
+            <option value="">-- 선택 --</option>
+            ${subs.map(s=>`<option value="${s}" ${existing?.SubCompany===s?'selected':''}>${s}</option>`).join('')}
+            <option value="_NEW">+ 새 회사 입력</option>
+          </select>
+          <input id="btx-sub-new" class="profit-finp" style="width:100%;margin-top:4px;display:none;" placeholder="새 회사명">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">구분</div>
+            <select id="btx-cat" class="profit-sel" style="width:100%;">
+              <option value="Outsourcing" ${existing?.Category!=='Wage'?'selected':''}>외주 (Outsourcing)</option>
+              <option value="Wage" ${existing?.Category==='Wage'?'selected':''}>급여 (Wage)</option>
+            </select>
+          </div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">날짜</div><input type="date" id="btx-date" class="profit-finp" style="width:100%;" value="${existing?.Date||_todayISO()}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">인보이스 No</div><input id="btx-invno" class="profit-finp" style="width:100%;" value="${existing?.InvoiceNo||''}" placeholder="INV-001"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">설명</div><input id="btx-desc" class="profit-finp" style="width:100%;" value="${existing?.Description||''}" placeholder="설명"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">발생 (DR)</div><input type="number" id="btx-dr" class="profit-finp" style="width:100%;" value="${existing?.DR||''}" placeholder="0.00" step="0.01"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">지급 (CR)</div><input type="number" id="btx-cr" class="profit-finp" style="width:100%;" value="${existing?.CR||''}" placeholder="0.00" step="0.01"></div>
+        </div>
+        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">비고</div><input id="btx-remark" class="profit-finp" style="width:100%;" value="${existing?.Remark||''}" placeholder="메모"></div>
+      </div>`;
+    document.getElementById('btx-sub').addEventListener('change',function(){
+      document.getElementById('btx-sub-new').style.display = this.value==='_NEW'?'':'none';
+    });
+
+  } else { // wage — redirect to existing wage entry system
+    closeBalTxnModal();
+    nv('pwage','nwage');
+    rWage();
+    openWageEntry(null);
+    return;
+  }
+}
+
+function closeBalTxnModal(){
+  document.getElementById('bal-txn-modal').style.display='none';
+  _balEditIdx = null;
+}
+
+function _todayISO(){
+  const n=new Date();
+  return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
+}
+
+async function saveBalTxn(){
+  const type = window._balDetailType;
+  const idx = _balEditIdx;
+
+  if(type==='agency'){
+    let agency = document.getElementById('btx-agency').value;
+    if(agency==='_NEW') agency = document.getElementById('btx-agency-new').value.trim();
+    if(!agency){ toast('여행사를 선택하세요','err'); return; }
+    const dr = parseFloat(document.getElementById('btx-dr').value)||0;
+    const cr = parseFloat(document.getElementById('btx-cr').value)||0;
+    if(!dr && !cr){ toast('DR 또는 CR 금액을 입력하세요','err'); return; }
+    const row = {
+      Agency: agency,
+      Date: document.getElementById('btx-date').value||'',
+      InvoiceID: document.getElementById('btx-invid').value.trim()||'',
+      TourCode: document.getElementById('btx-tour').value.trim()||'',
+      DR: dr, CR: cr,
+      Remark: document.getElementById('btx-remark').value.trim()||'',
+      StartDate: document.getElementById('btx-start').value||'',
+      FinishDate: document.getElementById('btx-finish').value||'',
+      DueDate: document.getElementById('btx-due').value||''
+    };
+    try {
+      const action = idx!==null ? 'update_agency_txn' : 'add_agency_txn';
+      const payload = idx!==null ? {action, rowIndex: _balAgencyTxns[idx]._rowIndex, data:row} : {action, data:row};
+      const res = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
+      const json = await res.json();
+      if(!json.ok) throw new Error(json.error||'저장 실패');
+      if(idx!==null) Object.assign(_balAgencyTxns[idx], row);
+      else { row._rowIndex = json.rowIndex; _balAgencyTxns.push(row); }
+      toast('✅ 저장 완료','ok');
+    } catch(e){ toast('저장 실패: '+e.message,'err'); return; }
+
+  } else if(type==='sub'){
+    let sub = document.getElementById('btx-sub').value;
+    if(sub==='_NEW') sub = document.getElementById('btx-sub-new').value.trim();
+    if(!sub){ toast('서브 회사를 선택하세요','err'); return; }
+    const dr = parseFloat(document.getElementById('btx-dr').value)||0;
+    const cr = parseFloat(document.getElementById('btx-cr').value)||0;
+    if(!dr && !cr){ toast('DR 또는 CR 금액을 입력하세요','err'); return; }
+    const row = {
+      SubCompany: sub,
+      Category: document.getElementById('btx-cat').value||'Outsourcing',
+      Date: document.getElementById('btx-date').value||'',
+      InvoiceNo: document.getElementById('btx-invno').value.trim()||'',
+      Description: document.getElementById('btx-desc').value.trim()||'',
+      DR: dr, CR: cr,
+      Remark: document.getElementById('btx-remark').value.trim()||''
+    };
+    try {
+      const action = idx!==null ? 'update_sub_txn' : 'add_sub_txn';
+      const payload = idx!==null ? {action, rowIndex: _balSubTxns[idx]._rowIndex, data:row} : {action, data:row};
+      const res = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
+      const json = await res.json();
+      if(!json.ok) throw new Error(json.error||'저장 실패');
+      if(idx!==null) Object.assign(_balSubTxns[idx], row);
+      else { row._rowIndex = json.rowIndex; _balSubTxns.push(row); }
+      toast('✅ 저장 완료','ok');
+    } catch(e){ toast('저장 실패: '+e.message,'err'); return; }
+  }
+
+  closeBalTxnModal();
+  renderBalance();
+  // Also refresh detail view if open
+  if(document.getElementById('bal-detail-modal').style.display==='flex') renderBalDetail();
+}
+
+async function deleteBalTxn(type, idx){
+  if(!confirm('이 거래를 삭제하시겠습니까?')) return;
+  try {
+    if(type==='agency'){
+      const rowIndex = _balAgencyTxns[idx]?._rowIndex;
+      if(rowIndex){
+        await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'delete_agency_txn',rowIndex})});
+      }
+      _balAgencyTxns.splice(idx,1);
+    } else if(type==='sub'){
+      const rowIndex = _balSubTxns[idx]?._rowIndex;
+      if(rowIndex){
+        await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'delete_sub_txn',rowIndex})});
+      }
+      _balSubTxns.splice(idx,1);
+    }
+    toast('삭제 완료','ok');
+    renderBalance();
+    renderBalDetail();
+  } catch(e){ toast('삭제 실패: '+e.message,'err'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// END BALANCE MODULE
+// ═══════════════════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────
 // INVOICE 수동 항목 관리
@@ -6342,7 +6988,7 @@ async function loadAllFromSheets(){
     // DB.PS에 있는 회사가 어떤 차량 Owner에도 없으면 그대로 유지 (수동 추가 회사)
     // 동기화 완료 — 모든 탭 캐시 갱신
     const _now = Date.now();
-    window._tabLastSync = { pveh:_now, pdrv:_now, pcli:_now, pgui:_now, phtl:_now, pprc:_now, psub:_now };
+    window._tabLastSync = { pveh:_now, pdrv:_now, pcli:_now, pgui:_now, phtl:_now, pprc:_now, psub:_now, pbal:0 };
     window._psLastSync = _now;
     window._wagesLastSync = _now;
     // 동기화 시각 표시

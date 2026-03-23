@@ -60,6 +60,9 @@ const MASTER_HEADERS = {
   'Audit_Log':  ['Timestamp','User','Action','Sheet','RowIndex','Summary'],
   'Invoices':   ['InvNumber','Agency','PeriodFrom','PeriodTo','GrandTotal','GST','ExGST',
                  'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Notes','CreatedBy'],
+  // ── 거래처 잔액 관리 ──
+  'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','DR','CR','Remark','StartDate','FinishDate','DueDate'],
+  'SUB_Txn':    ['RowID','SubCompany','Category','Date','InvoiceNo','Description','DR','CR','Remark'],
   // ── 서비스 요금 옵션 (차량 좌석별) ──
   'M_SvcOptions': ['VehicleSize','Label','Amount'],
   // ── 호텔 서차지 옵션 ──
@@ -78,6 +81,7 @@ const TAB_COLORS = {
   'M_Guides':'#0e9f6e','M_Hotels':'#e02424','M_PriceClient':'#0694a2',
   'M_PriceDriver':'#057a55','M_PriceSub':'#7c3aed','Sub_Rates':'#b45309',
   'Ledger':'#1e40af','Wages':'#065f46','MOT_Report':'#be185d','Notices':'#0369a1',
+  'Agency_Txn':'#0891b2','SUB_Txn':'#a21caf',
   'Invoices':'#6d28d9',
   'M_SvcOptions':'#6366f1','M_HotelOptions':'#ec4899','M_DistOptions':'#f59e0b',
   'M_NightRates':'#8b5cf6','M_Attractions':'#14b8a6'
@@ -171,6 +175,12 @@ function doGet(e) {
 
       case 'get_max_km':
         return cors(getMaxKMPerRego());
+
+      case 'get_agency_txn':
+        return cors(getSheetRows('Agency_Txn'));
+
+      case 'get_sub_txn':
+        return cors(getSheetRows('SUB_Txn'));
 
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
@@ -341,6 +351,42 @@ function doPost(e) {
       case 'replace_wages':
         return cors(replaceWages(payload.rows));
 
+      // ── Agency_Txn CRUD ──
+      case 'add_agency_txn': {
+        const r = addMasterRow('Agency_Txn', payload.data);
+        if (r.ok) appendAuditLog(_user, 'add_agency_txn', 'Agency_Txn', r.row || '',
+          'Agency:' + (payload.data.Agency||'') + ' DR:' + (payload.data.DR||0));
+        return cors(r);
+      }
+      case 'update_agency_txn': {
+        const r = updateMasterRow('Agency_Txn', payload.rowIndex, payload.data);
+        if (r.ok) appendAuditLog(_user, 'update_agency_txn', 'Agency_Txn', payload.rowIndex, '');
+        return cors(r);
+      }
+      case 'delete_agency_txn': {
+        const r = deleteMasterRow('Agency_Txn', payload.rowIndex);
+        if (r.ok) appendAuditLog(_user, 'delete_agency_txn', 'Agency_Txn', payload.rowIndex, '');
+        return cors(r);
+      }
+
+      // ── SUB_Txn CRUD ──
+      case 'add_sub_txn': {
+        const r = addMasterRow('SUB_Txn', payload.data);
+        if (r.ok) appendAuditLog(_user, 'add_sub_txn', 'SUB_Txn', r.row || '',
+          'Sub:' + (payload.data.SubCompany||'') + ' DR:' + (payload.data.DR||0));
+        return cors(r);
+      }
+      case 'update_sub_txn': {
+        const r = updateMasterRow('SUB_Txn', payload.rowIndex, payload.data);
+        if (r.ok) appendAuditLog(_user, 'update_sub_txn', 'SUB_Txn', payload.rowIndex, '');
+        return cors(r);
+      }
+      case 'delete_sub_txn': {
+        const r = deleteMasterRow('SUB_Txn', payload.rowIndex);
+        if (r.ok) appendAuditLog(_user, 'delete_sub_txn', 'SUB_Txn', payload.rowIndex, '');
+        return cors(r);
+      }
+
       // ── Notices ──
       case 'save_notices':
         return cors(replaceNotices(payload.rows));
@@ -497,6 +543,16 @@ function getWagesSheet(driver) {
 function getNoticesSheet() {
   try {
     const r = getMaster('Notices');
+    return {ok: r.ok, rows: r.rows || []};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// Generic sheet rows getter (for Agency_Txn, SUB_Txn, etc.)
+function getSheetRows(sheetName) {
+  try {
+    const r = getMaster(sheetName);
     return {ok: r.ok, rows: r.rows || []};
   } catch (err) {
     return {ok: false, error: err.toString()};
