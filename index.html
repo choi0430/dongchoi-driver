@@ -2352,12 +2352,21 @@ function parseSheetTime(ts) {
   if(!ts) return '';
   const s = String(ts).trim();
   // dd/MM/yyyy 형식 날짜이면 시간 아님
-  if(s.includes('30/12')) return '';
+  if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return '';
   // 이미 HH:MM 형식이면 그대로
   if(/^\d{1,2}:\d{2}$/.test(s)) return s.padStart(5,'0').slice(0,5);
-  // ISO timestamp — Google Sheets 시간 전용 셀은 "1899-12-29T..." 형식으로 전달됨 (UTC)
-  // 빈 셀은 Date 아닌 ""로 오므로 위 !ts 조건에서 이미 처리됨
-  if(s.includes('T')) {
+  // ISO timestamp — Google Sheets 시간 전용 셀은 "1899-12-29T..." 또는 "1899-12-30T..." 형식으로 전달됨 (UTC)
+  if(s.includes('T') && s.includes('1899-12-')) {
+    const d = new Date(s);
+    if(!isNaN(d)) {
+      const offsetH = Math.round(getSydneyOffsetMs(d) / 3600000);
+      const h  = ((d.getUTCHours() + offsetH) % 24 + 24) % 24;
+      const mn = String(d.getUTCMinutes()).padStart(2,'0');
+      return String(h).padStart(2,'0') + ':' + mn;
+    }
+  }
+  // General ISO timestamp (not time-only)
+  if(s.includes('T') && !s.includes('1899')) {
     const d = new Date(s);
     if(!isNaN(d)) {
       const offsetH = Math.round(getSydneyOffsetMs(d) / 3600000);
@@ -7294,10 +7303,43 @@ function isSigEmpty(canvasId) {
   return !d.some(v => v !== 0);
 }
 
-// FIXED: Compress signature to prevent oversized data transmission
-  function getSigDataUrl(canvasId) {
+// Compress signature: resize to max 400x200 and use JPEG quality 0.4
+// Google Sheets cell limit is 50,000 chars; uncompressed PNG can exceed this
+function getSigDataUrl(canvasId) {
   const c = document.getElementById(canvasId);
-  return c ? c.toDataURL('image/png') : '';
+  if (!c) return '';
+  try {
+    // Create a smaller off-screen canvas for compression
+    const maxW = 400, maxH = 200;
+    const srcW = c.width, srcH = c.height;
+    const scale = Math.min(maxW / srcW, maxH / srcH, 1);
+    const dstW = Math.round(srcW * scale);
+    const dstH = Math.round(srcH * scale);
+    const tmp = document.createElement('canvas');
+    tmp.width = dstW;
+    tmp.height = dstH;
+    const ctx = tmp.getContext('2d');
+    // White background (JPEG has no transparency)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, dstW, dstH);
+    ctx.drawImage(c, 0, 0, dstW, dstH);
+    const dataUrl = tmp.toDataURL('image/jpeg', 0.4);
+    // Safety check: if still too large (>45KB text), reduce further
+    if (dataUrl.length > 45000) {
+      const tmp2 = document.createElement('canvas');
+      tmp2.width = Math.round(dstW * 0.5);
+      tmp2.height = Math.round(dstH * 0.5);
+      const ctx2 = tmp2.getContext('2d');
+      ctx2.fillStyle = '#ffffff';
+      ctx2.fillRect(0, 0, tmp2.width, tmp2.height);
+      ctx2.drawImage(tmp, 0, 0, tmp2.width, tmp2.height);
+      return tmp2.toDataURL('image/jpeg', 0.3);
+    }
+    return dataUrl;
+  } catch(e) {
+    console.warn('Signature compression failed, using fallback', e);
+    return c.toDataURL('image/jpeg', 0.3);
+  }
 }
 
 // Legacy compat
@@ -8112,12 +8154,12 @@ function openPastShiftPdf(rowIndex, type) {
   const shift = isPre
     ? { date: r.Date, rego: r.Rego, driver: r.Driver, seats: r.Seats,
         startKm: r.Start_KM ? Number(r.Start_KM) : null,
-        fuel: r.Fuel, startTime: r.Start_Time, remarks: r.Remarks,
+        fuel: r.Fuel, startTime: parseSheetTime(r.Start_Time)||r.Start_Time||'', remarks: r.Remarks,
         preChecks: (() => { try { return r.Check_Results ? JSON.parse(r.Check_Results) : []; } catch(e){return[];} })(),
         preSignature: r.Signature || '' }
     : { date: r.Date, endDate: r.Date, rego: r.Rego, driver: r.Driver,
         endKm: r.End_KM ? Number(r.End_KM) : null,
-        endTime: r.End_Time, fuel: r.Fuel, remarks: r.Remarks,
+        endTime: parseSheetTime(r.End_Time)||r.End_Time||'', fuel: r.Fuel_End||r.Fuel||'', remarks: r.Remarks,
         dailyReports: [], endChecks: [], eosSignature: r.Signature || '' };
 
   openShiftReport(shift, isPre ? 'pre' : 'eos');
