@@ -13,7 +13,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#f0f1f5;--s1:#ffffff;--s2:#f7f7fb;--s3:#ededf4;--sf2:#f0f1f5;
+  --bg:#f0f1f5;--s1:#ffffff;--s2:#f7f7fb;--s3:#ededf4;--sf:#ffffff;--sf2:#f0f1f5;--sf3:#f7f7fb;
   --b1:#e0e2ed;--b2:#cdd0de;--bd:#cdd0de;
   --ac:#4f46e5;--acd:rgba(79,70,229,.08);--acg:rgba(79,70,229,.18);
   --or:#ea580c;--ord:rgba(234,88,12,.08);
@@ -1680,15 +1680,51 @@ function deleteHvisBooking(id){
 function renderMaint(){
   var list=document.getElementById('maint-list');
   if(!list)return;
+
+  // ── 차량별 정비 상태 요약 카드 ──
+  var summaryHtml='<div style="margin-bottom:14px;">';
+  summaryHtml+='<div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:8px;">🚌 차량별 다음 정비</div>';
+  summaryHtml+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
+  DB.V.forEach(function(v){
+    if(!v.Rego||v.Current_Status==='Retired') return;
+    var curKM = Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0);
+    var lastSvc = Number(v.Last_Service_KM)||0;
+    var svcInt = Number(v.Service_Interval)||10000;
+    var nextSvcKM = lastSvc + svcInt;
+    var remainKM = nextSvcKM - curKM;
+    var urgColor = remainKM<=0?'var(--rd)':remainKM<=1000?'var(--or)':remainKM<=3000?'var(--yl)':'var(--gn)';
+    var urgLabel = remainKM<=0?'OVERDUE':remainKM<=1000?'긴급':remainKM<=3000?'주의':'양호';
+    summaryHtml+='<div style="background:var(--sf2);border-radius:10px;padding:10px 12px;border-left:3px solid '+urgColor+';">';
+    summaryHtml+='<div style="font-size:13px;font-weight:800;">'+v.Rego+'</div>';
+    summaryHtml+='<div style="font-size:11px;color:var(--t3);margin-top:2px;">현재 '+(curKM?curKM.toLocaleString():'—')+'km</div>';
+    summaryHtml+='<div style="font-size:14px;font-weight:700;color:'+urgColor+';margin-top:4px;">'
+      +(remainKM<=0?'초과 '+Math.abs(remainKM).toLocaleString()+'km':remainKM.toLocaleString()+'km 남음')+'</div>';
+    summaryHtml+='<div style="font-size:10px;color:var(--t3);">다음: '+nextSvcKM.toLocaleString()+'km ('+urgLabel+')</div>';
+    summaryHtml+='</div>';
+  });
+  summaryHtml+='</div></div>';
+
   var records=getMaintRecords().sort(function(a,b){return(b.date||'').localeCompare(a.date||'');});
-  if(!records.length){list.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">No maintenance records</div>';return;}
-  list.innerHTML=records.map(function(r){
+  if(!records.length){list.innerHTML=summaryHtml+'<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">No maintenance records</div>';return;}
+  list.innerHTML=summaryHtml+'<div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:8px;">📋 정비 이력</div>'+records.map(function(r){
+    var v=DB.V.find(function(vv){return vv.Rego===r.rego;});
+    var curKM=v?Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0):0;
+    var remainInfo='';
+    if(r.nextServiceKM && curKM){
+      var remain=r.nextServiceKM-curKM;
+      var remColor=remain<=0?'var(--rd)':remain<=1000?'var(--or)':'var(--gn)';
+      remainInfo='<div style="font-size:11px;color:'+remColor+';margin-top:2px;font-weight:700;">'
+        +(remain<=0?'⚠️ 초과 '+Math.abs(remain).toLocaleString()+'km':'✅ 남은 거리: '+remain.toLocaleString()+'km')
+        +' (다음: '+Number(r.nextServiceKM).toLocaleString()+'km)</div>';
+    } else if(r.nextServiceKM){
+      remainInfo='<div style="font-size:11px;color:var(--pu);margin-top:2px;">다음 정비: '+Number(r.nextServiceKM).toLocaleString()+'km</div>';
+    }
     return'<div style="background:var(--sf2);border-radius:10px;padding:12px;margin-bottom:8px;">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
       +'<div><div style="font-size:13px;font-weight:700;">'+fmtDate(r.date)+' — <span style="color:var(--ac);">'+r.rego+'</span></div>'
       +'<div style="font-size:12px;color:var(--t2);margin-top:3px;">'+(r.type||'')+' — '+(r.description||'')+'</div>'
       +'<div style="font-size:11px;color:var(--t3);margin-top:2px;">'+(r.km?Number(r.km).toLocaleString()+'km':'KM N/A')+' | '+(r.workshop||'Workshop N/A')+' | $'+(r.cost||0)+'</div>'
-      +(r.nextServiceKM?'<div style="font-size:11px;color:var(--pu);margin-top:2px;">Next service: '+Number(r.nextServiceKM).toLocaleString()+'km</div>':'')
+      +remainInfo
       +'</div><div style="display:flex;gap:4px;">'
       +'<button class="btn bac sm" style="font-size:10px;" onclick="openMaintEntry(\''+r.id+'\')">&#x270F;</button>'
       +'<button class="btn sm" style="font-size:10px;background:var(--rd-dim);color:var(--rd);" onclick="deleteMaint(\''+r.id+'\')">&#x1F5D1;</button>'
@@ -1812,7 +1848,16 @@ async function rV(q=''){
       <div class="mav" style="color:var(--ac);font-size:10px">${v.Rego}</div>
       <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}</div>
         <div class="msb">${v['Manufacture Date']||''}년 · ${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
-        <div class="mtg">${etag(v.Rego_Date,'Rego')}${etag(v.HVIS_Date,'HVIS')}${v.Last_Service_KM?`<span class="tag tb">정비: ${Number(v.Last_Service_KM).toLocaleString()}km</span>`:''}</div>
+        <div class="mtg">${etag(v.Rego_Date,'Rego')}${etag(v.HVIS_Date,'HVIS')}${(()=>{
+          const cKM=Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0);
+          const lKM=Number(v.Last_Service_KM)||0;
+          const iKM=Number(v.Service_Interval)||10000;
+          const remain=(lKM+iKM)-cKM;
+          if(!cKM&&!lKM) return '';
+          const col=remain<=0?'tr':remain<=1000?'to':remain<=3000?'ty':'tg';
+          const lbl=remain<=0?'초과 '+Math.abs(remain).toLocaleString()+'km':'정비: '+remain.toLocaleString()+'km';
+          return `<span class="tag ${col}">${lbl}</span>`;
+        })()}</div>
       </div>
       <div class="mac"><button class="btn bac xs" onclick="openView('V',${i})">보기</button><button class="btn bgh xs" onclick="openM('V',${i})">수정</button><button class="btn brd xs" onclick="cDel('V',${i},'${esc(v.Rego)}')">삭제</button></div>
     </div>`}).join('')||nores();
