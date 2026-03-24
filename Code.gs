@@ -38,7 +38,7 @@ const MASTER_HEADERS = {
   'M_Vehicles': ['Rego','Make','Model','Manufacture_Date','Capacity','Owner','Rego_Date','HVIS_Date',
                  'Current_KM','Last_Service_KM','Service_Interval','VIN','Engine_Number',
                  'Accreditation','Current_Status','Transmission'],
-  'M_Drivers':  ['Name_EN','Name_KR','DriverID','Mobile_1','NEXT_OF_KIN','License_Class',
+  'M_Drivers':  ['Name_KR','Name_EN','DriverID','Phone','NEXT_OF_KIN','License_Class',
                  'License_No','License_Expiry','Authority_No','Authority_Expiry',
                  'Address','Suburb','Bank_Name','BSB','Account_Number','PIN'],
   'M_Clients':  ['Name','ClientID','Mobile','Email','Address','Bank_Name','BSB','Account_Number'],
@@ -601,7 +601,23 @@ function addMasterRow(sheetName, data) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, sheetName);
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+    // data에 있는데 시트 헤더에 없는 키 → 자동 추가 (_rowIndex, _user 제외)
+    var skipKeys = ['_rowIndex', '_user'];
+    var newCols = Object.keys(data).filter(function(k) {
+      return skipKeys.indexOf(k) === -1 && headers.indexOf(k) === -1 && normalizeKey(k) !== normalizeKey('_rowIndex');
+    });
+    // 정규화 키로도 이미 존재하는지 확인
+    var existingNorm = headers.map(function(h){ return normalizeKey(h); });
+    newCols = newCols.filter(function(k) {
+      return existingNorm.indexOf(normalizeKey(k)) === -1;
+    });
+    if (newCols.length > 0) {
+      var startCol = headers.length + 1;
+      sheet.getRange(1, startCol, 1, newCols.length).setValues([newCols]);
+      headers = headers.concat(newCols);
+    }
 
     // 정확한 키 먼저, 없으면 정규화 키로 fallback
     const normMap = buildNormMap(data);
@@ -662,10 +678,26 @@ function updateMasterRow(sheetName, rowIndex, data) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, sheetName);
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
     const ri = parseInt(rowIndex);
     if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
+
+    // data에 있는데 시트 헤더에 없는 키 → 자동 추가 (_rowIndex, _user 제외)
+    var skipKeys = ['_rowIndex', '_user'];
+    var newCols = Object.keys(data).filter(function(k) {
+      return skipKeys.indexOf(k) === -1 && headers.indexOf(k) === -1;
+    });
+    // 정규화 키로도 이미 존재하는지 확인
+    var existingNorm = headers.map(function(h){ return normalizeKey(h); });
+    newCols = newCols.filter(function(k) {
+      return existingNorm.indexOf(normalizeKey(k)) === -1;
+    });
+    if (newCols.length > 0) {
+      var startCol = headers.length + 1;
+      sheet.getRange(1, startCol, 1, newCols.length).setValues([newCols]);
+      headers = headers.concat(newCols);
+    }
 
     // 정확한 키 먼저, 없으면 정규화 키로 fallback (공백↔언더스코어 불일치 허용)
     const normMap = buildNormMap(data);
@@ -892,7 +924,7 @@ function updateDriverInfo(driverName, data) {
     const nameKRIdx = headers.indexOf('Name_KR');
 
     const fieldMap = {
-      nameEN: 'Name_EN', nameKR: 'Name_KR', mobile: 'Mobile_1',
+      nameEN: 'Name_EN', nameKR: 'Name_KR', mobile: 'Phone',
       licClass: 'License_Class', licNo: 'License_No', licExp: 'License_Expiry',
       authNo: 'Authority_No', authExp: 'Authority_Expiry',
       nokName: 'NEXT_OF_KIN', address: 'Address', suburb: 'Suburb'
@@ -1027,7 +1059,7 @@ function fixPhoneNumbers() {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const targets = [
       {sheet: 'M_Guides', col: 'Mobile'},
-      {sheet: 'M_Drivers', col: 'Mobile_1'},
+      {sheet: 'M_Drivers', col: 'Phone'},
       {sheet: 'M_Hotels', col: 'Phone'}
     ];
 
