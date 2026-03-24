@@ -1951,6 +1951,20 @@ function fixPhone(p) {
   if(s.length === 10) return s;         // 정상
   return s;
 }
+// 행 객체에서 전화번호 필드를 탐색 (모든 가능한 키 변형 시도)
+function getPhoneFromRow(r){
+  const keys=['Mobile_1','Mobile 1','mobile_1','mobile 1',
+              'Phone','phone','Mobile','mobile',
+              'Mobile_2','Mobile 2','mobile_2','mobile 2',
+              'Moblie_2','Moblie 2'];
+  for(const k of keys){
+    const v=r[k];
+    if(v!==undefined&&v!==null&&v!==''&&v!==0){
+      return fixPhone(v);
+    }
+  }
+  return '';
+}
 // tel:/sms: 링크용 +61 국제포맷
 function telPhone(p) {
   const s = fixPhone(p);
@@ -2026,7 +2040,7 @@ function rebuildGuideList() {
     GUIDE_LIST = MASTER.guides.map((g,i) => ({
       id: 'SG' + String(i+1).padStart(3,'0'),
       name: g.Guide_Name || g.Name || g.name || '',
-      mobile: fixPhone(g.Mobile || g.Phone || '')
+      mobile: getPhoneFromRow(g)
     }));
   }
 }
@@ -2041,7 +2055,7 @@ function populateContacts() {
         type:'driver',
         name: d.Name_KR || d.Name_EN,
         initials: d.Initials,
-        phone: fixPhone(d.Mobile || d.Phone || ''),
+        phone: getPhoneFromRow(d),
         note: [d.License_Class, d.License_Expiry ? '면허 ' + fmtDate(String(d.License_Expiry)) : ''].filter(Boolean).join(' · ') || '—',
         color: ['#d97706','#1a56db','#0e9f6e','#7e3af2','#e02424','#0891b2','#be185d'][i % 7]
       })),
@@ -2049,7 +2063,7 @@ function populateContacts() {
         type:'guide',
         name: g.Guide_Name || g.Name || g.name || '',
         initials: g.Initials || String(g.Guide_Name||g.Name||'').substring(0,2).toUpperCase(),
-        phone: fixPhone(g.Mobile || g.Phone || ''),
+        phone: getPhoneFromRow(g),
         note: g.Type || '프리랜서',
         color:'#0e9f6e'
       }))
@@ -2139,7 +2153,7 @@ const SDD_CONFIG = {
           .filter(g => (g.Guide_Name||g.Name||'').trim() && g.Remarks !== '비활성')
           .map(g=>{
             const name = g.Guide_Name||g.Name||g.name||'';
-            const phone = fixPhone(g.Mobile||g.Phone||'');
+            const phone = getPhoneFromRow(g);
             const agency = g.Agency||g.Type||'';
             return {name, sub: [phone, agency].filter(Boolean).join(' · ')};
           })
@@ -3931,7 +3945,7 @@ function loadMyInfoToForm() {
   const fields = {
     'mi-name-en':  saved.nameEN   || d.Name_EN  || d.Name || '',
     'mi-name-kr':  saved.nameKR   || d.Name_KR  || '',
-    'mi-mobile':   saved.mobile   || d.Phone || d.Mobile_1 || d.Mobile || '',
+    'mi-mobile':   saved.mobile   || getPhoneFromRow(d) || '',
     'mi-lic-class':saved.licClass || d.License_Class || '',
     'mi-address':  saved.address  || d.Address  || '',
     'mi-suburb':   saved.suburb   || d.Suburb   || '',
@@ -4051,7 +4065,7 @@ function updateMyInfoView(data) {
   const nameEN = data.nameEN || d.Name_EN || d.Name || currentDriver?.name || '';
   const nameKR = data.nameKR || d.Name_KR || '';
   const licClass = data.licClass || d.License_Class || '';
-  const mobile  = data.mobile  || d.Phone || d.Mobile_1 || '';
+  const mobile  = data.mobile  || getPhoneFromRow(d) || '';
   const nokName = data.nokName || d.NEXT_OF_KIN || '';
   const nokPhone= data.nokPhone|| d.Moblie_2  || '';
   const licExp  = data.licExp  || d.License_Expiry  || '–';
