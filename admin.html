@@ -7015,12 +7015,15 @@ async function loadPSFromSheets(){
 
 async function loadTab(sheet){
   try {
-    const res = await fetch(APPS_SCRIPT_URL+'?action=get_master&sheet='+sheet);
+    const controller = new AbortController();
+    const tid = setTimeout(()=>controller.abort(), 25000);
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_master&sheet='+sheet, {signal:controller.signal});
+    clearTimeout(tid);
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok||!json.rows?.length) return null;
     return json.rows;
-  } catch(e){ return null; }
+  } catch(e){ console.warn('loadTab('+sheet+') failed:', e.message); return null; }
 }
 
 async function syncVehicles(){
@@ -7137,7 +7140,7 @@ async function loadAllFromSheets(){
   try {
     toast('📡 Google Sheets 로딩 중...','ok');
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000); // 15초 타임아웃
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30초 타임아웃 (GAS 콜드스타트 대비)
     const res = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters', { signal: controller.signal });
     clearTimeout(timeout);
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
@@ -7278,11 +7281,20 @@ async function loadAllFromSheets(){
     document.getElementById('sl').classList.remove('on');
     document.getElementById('sm').classList.add('on');
     document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
-    // 동기화 상태 업데이트 — 로딩 중에서 에러로 변경
+    rDash();
+    // 자동 재시도 (최대 2회)
+    if(!window._loadRetryCount) window._loadRetryCount = 0;
+    if(window._loadRetryCount < 2){
+      window._loadRetryCount++;
+      const _syncEl = document.getElementById('sync-status');
+      if(_syncEl) _syncEl.textContent = '🔄 재시도 중... (' + window._loadRetryCount + '/2)';
+      toast('⏳ 서버 응답 지연 — 자동 재시도 중...','ok');
+      setTimeout(()=>loadAllFromSheets(), 2000);
+      return;
+    }
     const _syncEl = document.getElementById('sync-status');
     if(_syncEl) _syncEl.textContent = '❌ 연결 실패 — 새로고침 또는 재시도하세요';
-    rDash();
-    const errMsg = e.name === 'AbortError' ? '⚠️ 서버 응답 시간 초과 (15초) — 새로고침하세요' : '⚠️ 오프라인 모드 (Sheets 연결 실패)';
+    const errMsg = e.name === 'AbortError' ? '⚠️ 서버 응답 시간 초과 — 새로고침하세요' : '⚠️ 오프라인 모드 (Sheets 연결 실패)';
     toast(errMsg,'er');
   }
 }

@@ -1879,8 +1879,8 @@ async function loadMasterData() {
     if (!cached) setBar(20);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000); // 20초 타임아웃 (GAS 콜드스타트 대비)
-    const res  = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters', { signal: controller.signal, redirect: 'follow' });
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30초 타임아웃 (GAS 콜드스타트 대비)
+    const res  = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters', { signal: controller.signal });
     clearTimeout(timeout);
     const data = await res.json();
     setBar(80);
@@ -1903,17 +1903,26 @@ async function loadMasterData() {
     }
   } catch(e) {
     console.warn('마스터 로드 실패:', e.name, e.message);
+    // 자동 재시도 (최대 2회)
+    if(!window._masterRetryCount) window._masterRetryCount = 0;
+    if(window._masterRetryCount < 2) {
+      window._masterRetryCount++;
+      setMsg('⏳ 서버 응답 지연 — 재시도 중 (' + window._masterRetryCount + '/2)...');
+      setBar(10);
+      await new Promise(r => setTimeout(r, 2000));
+      return loadMasterData(); // 재귀 재시도
+    }
     if (!cached) {
       useFallbackMaster();
       showMasterRetryBtn();
     } else {
-      const reason = e.name === 'AbortError' ? '서버 응답 지연' : '네트워크 오류';
-      setMsg('⚠️ ' + reason + ' — 캐시 데이터 사용 중 (기능 정상)');
+      setMsg('⚠️ 서버 연결 실패 — 캐시 데이터 사용 중 (기능 정상)');
     }
     _masterReady = true;
     buildLoginSelect();
   }
 
+  window._masterRetryCount = 0; // 성공 시 리셋
   setBar(100);
   await new Promise(r => setTimeout(r, cached ? 200 : 500));
   const overlay = document.getElementById('master-loading');
@@ -7284,7 +7293,7 @@ function setSyncBadge(state){ // 'syncing' | 'ok' | 'error'
 async function syncMaster(){
   try{
     const controller = new AbortController();
-    const tid = setTimeout(()=>controller.abort(), 10000);
+    const tid = setTimeout(()=>controller.abort(), 30000);
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_all_masters',{signal:controller.signal});
     clearTimeout(tid);
     const json = await res.json();
