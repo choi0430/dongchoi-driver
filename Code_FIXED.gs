@@ -53,7 +53,7 @@ const MASTER_HEADERS = {
   'M_PriceSub': ['SubCo','Course','max_hours','seats_21_rate','seats_21_ot',
                  'seats_25_rate','seats_25_ot','seats_40_rate','seats_40_ot',
                  'seats_50_rate','seats_50_ot'],
-  'Sub_Rates':  ['Rego','Tour','seats_21','seats_25','seats_40','seats_50'],
+  'Sub_Rates':  ['SubCo','Tour','seats_21','seats_25','seats_40','seats_50'],
   'Ledger':     ['RowID','Date','Rego','Tour','TA','SubTotal','MyDr','Extra','OT','Trailer','Hotel','Note'],
   'Wages':      ['RowID','Driver','WeekStart','Date','Amount','PayMethod','Notes'],
   'Notices':    ['ID','Title','Content','Type','Date','Active'],

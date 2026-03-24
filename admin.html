@@ -2083,6 +2083,11 @@ function getSubVehicles(){
 function getSubRates(){
   try { return safeGetLocal('admin_sub_rates', {}); } catch(e){ return {}; }
 }
+// 차량 Rego → Owner(서브 회사명) 조회 헬퍼
+function getOwnerByRego(rego){
+  const veh = DB.V.find(v=>v.Rego===rego);
+  return (veh?.Owner||'').trim();
+}
 async function loadSubRatesFromSheet(){
   try{
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_sub_rates');
@@ -2091,22 +2096,24 @@ async function loadSubRatesFromSheet(){
     if(!json.ok||!json.rows?.length) return;
     const rates={};
     json.rows.forEach(r=>{
-      if(!r.Rego||!r.Tour) return;
-      if(!rates[r.Rego]) rates[r.Rego]={};
-      rates[r.Rego][r.Tour]={'21':Number(r.seats_21)||0,'25':Number(r.seats_25)||0,'40':Number(r.seats_40)||0,'50':Number(r.seats_50)||0};
+      // SubCo 기준 (회사명별 요금)
+      const key = r.SubCo || r.Rego || ''; // 하위호환: 기존 Rego 데이터도 처리
+      if(!key||!r.Tour) return;
+      if(!rates[key]) rates[key]={};
+      rates[key][r.Tour]={'21':Number(r.seats_21)||0,'25':Number(r.seats_25)||0,'40':Number(r.seats_40)||0,'50':Number(r.seats_50)||0};
     });
     safeSetLocal('admin_sub_rates', rates);
   }catch(e){console.warn('서브 요금 로드 실패:',e);}
 }
 async function saveSubRates(){
-  const rego = ST.curSubVeh;
-  if(!rego){toast('차량을 선택하세요','er');return;}
+  const subCo = ST.curSub;
+  if(!subCo){toast('서브 회사를 선택하세요','er');return;}
   const rates = getSubRates();
-  if(!rates[rego]) rates[rego]={};
+  if(!rates[subCo]) rates[subCo]={};
   document.querySelectorAll('#subRatesTbody tr').forEach(tr=>{
     const tour = tr.dataset.tour;
     if(!tour) return;
-    rates[rego][tour]={
+    rates[subCo][tour]={
       '21': parseInt(tr.querySelector('[data-cap="21"]')?.value)||0,
       '25': parseInt(tr.querySelector('[data-cap="25"]')?.value)||0,
       '40': parseInt(tr.querySelector('[data-cap="40"]')?.value)||0,
@@ -2116,8 +2123,8 @@ async function saveSubRates(){
   safeSetLocal('admin_sub_rates', rates);
   try{
     const rows=[];
-    Object.entries(rates).forEach(([rg,tours])=>Object.entries(tours).forEach(([tour,caps])=>{
-      rows.push({Rego:rg,Tour:tour,seats_21:caps['21']||0,seats_25:caps['25']||0,seats_40:caps['40']||0,seats_50:caps['50']||0});
+    Object.entries(rates).forEach(([co,tours])=>Object.entries(tours).forEach(([tour,caps])=>{
+      rows.push({SubCo:co,Tour:tour,seats_21:caps['21']||0,seats_25:caps['25']||0,seats_40:caps['40']||0,seats_50:caps['50']||0});
     }));
     const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'replace_sub_rates',rows})});
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
@@ -2149,19 +2156,20 @@ async function rSub(){
 }
 
 function renderSubRates(){
-  const rego = ST.curSubVeh;
-  const veh = DB.V.find(v=>v.Rego===rego);
-  if(!veh){document.getElementById('subRatesTbody').innerHTML='<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--t3)">차량을 선택하세요</td></tr>';return;}
+  const subCo = ST.curSub;
+  if(!subCo){document.getElementById('subRatesTbody').innerHTML='<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--t3)">서브 회사를 선택하세요</td></tr>';return;}
+  // 이 서브 회사 소속 차량 목록 표시
+  const subVehs = DB.V.filter(v=>(v.Owner||'').trim()===subCo);
   document.getElementById('subOwnerInfo').innerHTML =
-    '<strong>차주:</strong> '+(veh.Owner||'미등록')+' &nbsp;|&nbsp; <strong>차량:</strong> '+veh.Make+' '+veh.Model+' ('+veh.Capacity+'석)';
+    '<strong>서브 회사:</strong> '+subCo+' &nbsp;|&nbsp; <strong>소속 차량:</strong> '+(subVehs.length>0 ? subVehs.map(v=>v.Rego+' ('+v.Capacity+'석)').join(', ') : '등록된 차량 없음');
   const rates = getSubRates();
-  const vRates = rates[rego]||{};
+  const coRates = rates[subCo]||{};
   // 모든 PD 투어 목록 사용
   const tours = Object.keys(DB.PD);
   const tbody = document.getElementById('subRatesTbody');
   tbody.innerHTML='';
   tours.forEach(tour=>{
-    const r = vRates[tour]||{};
+    const r = coRates[tour]||{};
     const tr = document.createElement('tr');
     tr.dataset.tour = tour;
     const delBtn = document.createElement('button');
@@ -2180,20 +2188,21 @@ function renderSubRates(){
 function addSubRate(){
   const tour = prompt('새 코스명 입력:');
   if(!tour || !tour.trim()) return;
-  const rego = ST.curSubVeh;
+  const subCo = ST.curSub;
+  if(!subCo){toast('서브 회사를 선택하세요','er');return;}
   const rates = getSubRates();
-  if(!rates[rego]) rates[rego]={};
-  if(rates[rego][tour]){toast('이미 존재하는 코스','er');return;}
-  rates[rego][tour]={'21':0,'25':0,'40':0,'50':0};
+  if(!rates[subCo]) rates[subCo]={};
+  if(rates[subCo][tour]){toast('이미 존재하는 코스','er');return;}
+  rates[subCo][tour]={'21':0,'25':0,'40':0,'50':0};
   safeSetLocal('admin_sub_rates', rates);
   renderSubRates();
 }
 
 function deleteSubRate(tour){
   if(!confirm('"'+tour+'" 코스를 삭제하시겠습니까?')) return;
-  const rego = ST.curSubVeh;
+  const subCo = ST.curSub;
   const rates = getSubRates();
-  if(rates[rego]) delete rates[rego][tour];
+  if(rates[subCo]) delete rates[subCo][tour];
   safeSetLocal('admin_sub_rates', rates);
   renderSubRates();
   toast('코스 삭제 완료','ok');
@@ -2255,10 +2264,13 @@ function calcProfit(){
     subOT = 0; subTrailer = 0; subHotel = 0;
     subTotal = ta;
   } else {
-    // 외부 SUB: Sub_Rates 테이블에서 요금 조회
+    // 외부 SUB: 회사명 기준 요금 조회 (Sub_Rates → M_PriceSub 순서로 fallback)
     const subRates = getSubRates();
-    const subR = subRates[rego]?.[tour]||{};
-    subBase = parseFloat(subR[capKey])||0;
+    const subOwner = getOwnerByRego(rego);
+    const subR = subRates[subOwner]?.[tour]||{};
+    // Sub_Rates 없으면 M_PriceSub에서 조회
+    const psRate = DB.PS[subOwner]?.[tour]?.[capKey]?.rate||0;
+    subBase = parseFloat(subR[capKey]) || psRate;
     const pdOT = DB.PD[tour]?.[capKey]?.ot||0;
     subOT = otH * pdOT;
     const subTrailerRate = parseInt(capKey)<=25 ? (DB.PD[tour]?.[capKey]?.trailer||0) : 0;
@@ -2638,10 +2650,12 @@ function ledgerAutoFill(){
     return;
   }
 
-  // 외부 SUB
+  // 외부 SUB (회사명 기준 요금 조회: Sub_Rates → M_PriceSub fallback)
   if(surcharges) surcharges.style.display = '';
   const subRates = getSubRates();
-  const base = parseFloat(subRates[rego]?.[tour]?.[capKey])||0;
+  const subOwner = getOwnerByRego(rego);
+  const psRate = DB.PS[subOwner]?.[tour]?.[capKey]?.rate||0;
+  const base = parseFloat(subRates[subOwner]?.[tour]?.[capKey]) || psRate;
   const otH = parseFloat(document.getElementById('le-ot2')?.value)||0;
   const pdOT = DB.PD[tour]?.[capKey]?.ot||0;
   const trailerAmt = parseFloat(document.getElementById('le-trailer2')?.value)||0;
@@ -2825,12 +2839,14 @@ async function importFromReports(){
     let subTotal = 0;
     if(isSub){
       const subRates = getSubRates();
-      const baseRate = parseFloat(subRates[rego]?.[attraction]?.[capKey])||0;
+      const subOwner = vehOwner; // 이미 vehOwner = Owner에서 가져옴
+      const psRate = DB.PS[subOwner]?.[attraction]?.[capKey]?.rate||0;
+      const baseRate = parseFloat(subRates[subOwner]?.[attraction]?.[capKey]) || psRate;
       // OT: 드라이버 OT금액(otAmt)을 드라이버 요율로 역산해 시간 구한 뒤 서브 요율 적용
       const pdOTRate  = DB.PD[attraction]?.[capKey]?.ot || (capNum>=40?40:30);
       const otHours   = pdOTRate>0 ? otAmt/pdOTRate : 0;
       // 서브 요율표에 별도 OT율이 없으면 드라이버 OT금액 그대로 사용
-      const subOTRate = parseFloat(subRates[rego]?.[attraction]?.['ot_'+capKey]) || pdOTRate;
+      const subOTRate = parseFloat(subRates[subOwner]?.[attraction]?.['ot_'+capKey]) || pdOTRate;
       const subOT     = otHours * subOTRate;
       subTotal = baseRate + subOT + trailerAmt + hotelAmt + distAmt;
       if(baseRate===0){
@@ -3346,8 +3362,8 @@ function openBalTxnModal(type, idx){
     title.textContent = idx!==null ? '외주 거래 수정' : '외주 거래 추가';
     if(idx!==null) existing = _balSubTxns[idx];
     const subs = [...new Set(_balSubTxns.map(t=>t.SubCompany).filter(Boolean))];
-    // Also include Sub_Rates companies
-    const srCompanies = [...new Set((ST.subRates||[]).map(r=>r.Rego).filter(Boolean))];
+    // Also include Sub_Rates companies (회사명 기준)
+    const srCompanies = Object.keys(getSubRates());
     srCompanies.forEach(c=>{ if(!subs.includes(c)) subs.push(c); });
     body.innerHTML = `
       <div style="display:grid;gap:10px;">
