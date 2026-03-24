@@ -1928,7 +1928,7 @@ async function rD(q=''){
     return`<div class="mrow">
       <div class="mav" style="color:var(--or)">${ini(d.Name_EN)}</div>
       <div class="min"><div class="mnm">${d.Name_KR||''} <span style="color:var(--t3);font-size:12px">${d.Name_EN}</span></div>
-        <div class="msb">${fixPhone(d.Phone||d.Mobile_1)||'연락처없음'} · ${d.License_Class||'—'}</div>
+        <div class="msb">${d.Phone||d.Mobile_1||'연락처없음'} · ${d.License_Class||'—'}</div>
         <div class="mtg">${etag(d.License_Expiry,'면허')}${etag(d.Authority_Expiry,'인가')}</div>
       </div>
       <div class="mac"><button class="btn bac xs" onclick="openView('D',${i})">보기</button><button class="btn bgh xs" onclick="openM('D',${i})">수정</button><button class="btn brd xs" onclick="cDel('D',${i},'${esc(d.Name_EN)}')">삭제</button></div>
@@ -1975,7 +1975,7 @@ async function rG(q=''){
     return`<div class="mrow">
       <div class="mav" style="color:var(--pu);font-size:10px">${(g.Name||g.Guide_Name||'')?.slice(0,2).toUpperCase()||'??'}</div>
       <div class="min"><div class="mnm">${g.Name||g.Guide_Name||''}</div>
-        <div class="msb">${g.GuideID} · ${fixPhone(g.Phone||g.Mobile)||'연락처없음'}${g.Agency?' · '+g.Agency:''}</div>
+        <div class="msb">${g.GuideID} · ${g.Phone||g.Mobile||'연락처없음'}${g.Agency?' · '+g.Agency:''}</div>
       </div>
       <div class="mac"><button class="btn bac xs" onclick="openView('G',${i})">보기</button><button class="btn bgh xs" onclick="openM('G',${i})">수정</button><button class="btn brd xs" onclick="cDel('G',${i},'${esc(g.Name||g.Guide_Name||'')}')">삭제</button></div>
     </div>`}).join('')||nores();
@@ -2578,6 +2578,20 @@ function fixPhone(p){
   if(!s) return '';
   if(s.length===9) return '0'+s;
   return s;
+}
+// 행 객체에서 전화번호 필드를 탐색 (모든 가능한 키 변형 시도)
+function getPhoneFromRow(r){
+  const keys=['Mobile_1','Mobile 1','mobile_1','mobile 1',
+              'Phone','phone','Mobile','mobile',
+              'Mobile_2','Mobile 2','mobile_2','mobile 2',
+              'Moblie_2','Moblie 2'];  // typo in sheet
+  for(const k of keys){
+    const v=r[k];
+    if(v!==undefined&&v!==null&&v!==''&&v!==0){
+      return fixPhone(v);
+    }
+  }
+  return '';
 }
 
 // ─── 건 추가/수정 모달 ─────────────────────
@@ -7063,30 +7077,34 @@ async function syncDrivers(){
   const rows = await loadTab('M_Drivers');
   if(!rows) return;
   const rf=(r,...keys)=>{for(const k of keys){if(r[k]!==undefined&&r[k]!=='')return r[k];}return '';};
-  DB.D = rows.map(r=>({
+  DB.D = rows.map(r=>{
+    const ph = getPhoneFromRow(r);
+    return {
     _rowIndex: r._rowIndex||null,
-    Name_EN:r.Name_EN||'', Name_KR:r.Name_KR||'', DriverID:r.DriverID||'',
-    Phone:fixPhone(r.Phone||r.Mobile_1||r.Mobile),
-    Mobile_1:fixPhone(r.Phone||r.Mobile_1||r.Mobile),
-    NEXT_OF_KIN: rf(r,'NEXT_OF_KIN','NEXT OF KIN'),
-    License_Class:r.License_Class||'',
-    License_No: rf(r,'License_No','License_#'),
-    License_Expiry:fmtDate(r.License_Expiry||''),
-    Authority_No: rf(r,'Authority_No','Authority_#'),
-    Authority_Expiry:fmtDate(r.Authority_Expiry||''),
+    Name_EN:rf(r,'Name_EN','Name EN')||'', Name_KR:rf(r,'Name_KR','Name KR')||'', DriverID:rf(r,'DriverID','Driver ID')||'',
+    Phone:ph,
+    Mobile_1:ph,
+    NEXT_OF_KIN: rf(r,'NEXT_OF_KIN','NEXT OF KIN','Next_of_Kin'),
+    License_Class:rf(r,'License_Class','License Class')||'',
+    License_No: rf(r,'License_No','License_#','License #'),
+    License_Expiry:fmtDate(rf(r,'License_Expiry','License Expiry')||''),
+    Authority_No: rf(r,'Authority_No','Authority_#','Authority #'),
+    Authority_Expiry:fmtDate(rf(r,'Authority_Expiry','Authority Expiry')||''),
     Address:r.Address||'', Suburb:r.Suburb||'',
-    Bank_Name:r.Bank_Name||'', BSB:r.BSB||'', Account_Number:r.Account_Number||'',
+    Bank_Name:rf(r,'Bank_Name','Bank Name')||'', BSB:r.BSB||'', Account_Number:rf(r,'Account_Number','Account Number')||'',
     PIN:r.PIN?String(r.PIN):''
-  }));
+  };});
 }
 
 async function syncClients(){
   const rows = await loadTab('M_Clients');
   if(!rows) return;
-  DB.C = rows.map(r=>({
-    Name:r.Name||'', ClientID:r.ClientID||'', Mobile:fixPhone(r.Phone||r.Mobile),Phone:fixPhone(r.Phone||r.Mobile), Email:r.Email||'',
-    Address:r.Address||'', Bank_Name:r.Bank_Name||'', BSB:r.BSB||'', Account_Number:r.Account_Number||''
-  }));
+  DB.C = rows.map(r=>{
+    const ph = getPhoneFromRow(r);
+    return {
+    Name:r.Name||'', ClientID:r.ClientID||'', Mobile:ph, Phone:ph, Email:r.Email||'',
+    Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||''
+  };});
   // PC 동기화
   Object.keys(DB.PC).forEach(ag=>{ if(!DB.C.find(c=>c.Name===ag)) DB.C.push({Name:ag,ClientID:Date.now().toString(16).slice(-8),Mobile:'',Address:'',Bank_Name:'',BSB:'',Account_Number:''}); });
   // DB.C→DB.PC 자동 슬롯 생성 제거 (삭제 후 복원 방지)
@@ -7095,10 +7113,14 @@ async function syncClients(){
 async function syncGuides(){
   const rows = await loadTab('M_Guides');
   if(!rows) return;
-  DB.G = rows.map(r=>({
-    GuideID:r.GuideID||'', Guide_Name:r.Guide_Name||r.Name||'',
-    Mobile:fixPhone(r.Mobile||r.Phone||r.phone), Phone:fixPhone(r.Mobile||r.Phone||r.phone), Agency:r.Agency||'', Email:r.Email||'', Remarks:r.Remarks||''
-  }));
+  const rf=(r,...keys)=>{for(const k of keys){if(r[k]!==undefined&&r[k]!=='')return r[k];}return '';};
+  DB.G = rows.map(r=>{
+    const ph = getPhoneFromRow(r);
+    return {
+    _rowIndex: r._rowIndex||null,
+    GuideID:rf(r,'GuideID','Guide ID')||'', Guide_Name:rf(r,'Guide_Name','Guide Name','Name')||'',
+    Mobile:ph, Phone:ph, Agency:r.Agency||'', Email:r.Email||'', Remarks:r.Remarks||''
+  };});
 }
 
 async function syncHotels(){
@@ -7182,33 +7204,40 @@ async function loadAllFromSheets(){
     // M_Drivers → DB.D (GAS MASTER_HEADERS 필드명 그대로)
     if(d.M_Drivers?.length) {
       const _rf2=(r,...keys)=>{for(const k of keys){if(r[k]!==undefined&&r[k]!=='')return r[k];}return '';};
-      DB.D = d.M_Drivers.map(r=>({
+      DB.D = d.M_Drivers.map(r=>{
+        const ph = getPhoneFromRow(r);
+        return {
         _rowIndex: r._rowIndex||null,
-        Name_EN:r.Name_EN||'', Name_KR:r.Name_KR||'', DriverID:r.DriverID||'',
-        Phone:r.Phone||r.Mobile_1||r.Mobile||'',
-        NEXT_OF_KIN: _rf2(r,'NEXT_OF_KIN','NEXT OF KIN'),
-        License_Class:r.License_Class||'',
-        License_No: _rf2(r,'License_No','License_#'),
-        License_Expiry:fmtDate(r.License_Expiry||''),
-        Authority_No: _rf2(r,'Authority_No','Authority_#'),
-        Authority_Expiry:fmtDate(r.Authority_Expiry||''),
+        Name_EN:_rf2(r,'Name_EN','Name EN')||'', Name_KR:_rf2(r,'Name_KR','Name KR')||'', DriverID:_rf2(r,'DriverID','Driver ID')||'',
+        Phone:ph, Mobile_1:ph,
+        NEXT_OF_KIN: _rf2(r,'NEXT_OF_KIN','NEXT OF KIN','Next_of_Kin'),
+        License_Class:_rf2(r,'License_Class','License Class')||'',
+        License_No: _rf2(r,'License_No','License_#','License #'),
+        License_Expiry:fmtDate(_rf2(r,'License_Expiry','License Expiry')||''),
+        Authority_No: _rf2(r,'Authority_No','Authority_#','Authority #'),
+        Authority_Expiry:fmtDate(_rf2(r,'Authority_Expiry','Authority Expiry')||''),
         Address:r.Address||'', Suburb:r.Suburb||'',
-        Bank_Name:r.Bank_Name||'', BSB:r.BSB||'', Account_Number:r.Account_Number||'',
+        Bank_Name:_rf2(r,'Bank_Name','Bank Name')||'', BSB:r.BSB||'', Account_Number:_rf2(r,'Account_Number','Account Number')||'',
         PIN:r.PIN?String(r.PIN):''
-      }));
+      };});
     }
 
     // M_Clients → DB.C
-    if(d.M_Clients?.length) DB.C = d.M_Clients.map(r=>({
-      Name:r.Name||'', ClientID:r.ClientID||'', Mobile:fixPhone(r.Phone||r.Mobile),Phone:fixPhone(r.Phone||r.Mobile), Email:r.Email||'',
-      Address:r.Address||'', Bank_Name:r.Bank_Name||'', BSB:r.BSB||'', Account_Number:r.Account_Number||''
-    }));
+    if(d.M_Clients?.length) DB.C = d.M_Clients.map(r=>{
+      const ph = getPhoneFromRow(r);
+      return {
+      Name:r.Name||'', ClientID:r.ClientID||'', Mobile:ph, Phone:ph, Email:r.Email||'',
+      Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||''
+    };});
 
     // M_Guides → DB.G (Mobile/Phone 두 컬럼명 모두 지원)
-    if(d.M_Guides?.length) DB.G = d.M_Guides.map(r=>({
-      GuideID:r.GuideID||'', Guide_Name:r.Guide_Name||r.Name||'',
-      Mobile:fixPhone(r.Mobile||r.Phone||r.phone), Phone:fixPhone(r.Mobile||r.Phone||r.phone), Agency:r.Agency||'', Email:r.Email||'', Remarks:r.Remarks||''
-    }));
+    if(d.M_Guides?.length) DB.G = d.M_Guides.map(r=>{
+      const ph = getPhoneFromRow(r);
+      return {
+      _rowIndex: r._rowIndex||null,
+      GuideID:r.GuideID||r['Guide ID']||'', Guide_Name:r.Guide_Name||r['Guide Name']||r.Name||'',
+      Mobile:ph, Phone:ph, Agency:r.Agency||'', Email:r.Email||'', Remarks:r.Remarks||''
+    };});
 
     // M_Hotels → DB.H
     if(d.M_Hotels?.length) DB.H = d.M_Hotels.map(r=>({
