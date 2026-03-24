@@ -1879,8 +1879,8 @@ async function loadMasterData() {
     if (!cached) setBar(20);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000); // 10초 타임아웃
-    const res  = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters', { signal: controller.signal });
+    const timeout = setTimeout(() => controller.abort(), 20000); // 20초 타임아웃 (GAS 콜드스타트 대비)
+    const res  = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters', { signal: controller.signal, redirect: 'follow' });
     clearTimeout(timeout);
     const data = await res.json();
     setBar(80);
@@ -1902,12 +1902,13 @@ async function loadMasterData() {
       buildLoginSelect();
     }
   } catch(e) {
-    console.warn('마스터 로드 실패:', e);
+    console.warn('마스터 로드 실패:', e.name, e.message);
     if (!cached) {
       useFallbackMaster();
       showMasterRetryBtn();
     } else {
-      setMsg('⚠️ 오프라인 — 캐시 데이터 사용 중');
+      const reason = e.name === 'AbortError' ? '서버 응답 지연' : '네트워크 오류';
+      setMsg('⚠️ ' + reason + ' — 캐시 데이터 사용 중 (기능 정상)');
     }
     _masterReady = true;
     buildLoginSelect();
@@ -7283,27 +7284,21 @@ function setSyncBadge(state){ // 'syncing' | 'ok' | 'error'
 async function syncMaster(){
   try{
     const controller = new AbortController();
-    setTimeout(()=>controller.abort(), 8000);
+    const tid = setTimeout(()=>controller.abort(), 10000);
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_all_masters',{signal:controller.signal});
+    clearTimeout(tid);
     const json = await res.json();
-    if(json.ok){
-      if(json.drivers) {
-        MASTER.drivers = json.drivers;
-        rebuildDriverList();
-        buildLoginSelect();
-        // localStorage 캐시 갱신
-        try { localStorage.setItem('dc_drivers', JSON.stringify(MASTER.drivers.map(d=>({
-          name:d.Name_KR||'',Name_KR:d.Name_KR||'',Name_EN:d.Name_EN||'',
-          initials:d.Initials||'',Initials:d.Initials||'',
-          phone:d.Phone||'',Phone:d.Phone||'',pin:d.PIN||'1234',PIN:d.PIN||'1234'
-        })))); } catch(e) {}
-      }
-      if(json.vehicles) MASTER.vehicles = json.vehicles.map(v=>({...v,Transmission:v.Transmission||'Auto'}));
-      if(json.agencies) MASTER.agencies = json.agencies;
-      if(json.courses)  MASTER.courses  = json.courses;
-      localStorage.setItem(MASTER_CACHE_KEY, JSON.stringify({ts:Date.now(), data:json}));
+    if(json.ok && json.data){
+      // applyMasterData 재사용 — json.data에 M_Drivers, M_Vehicles 등이 들어있음
+      applyMasterData(json.data);
+      saveMasterCache(json.data);
+      // UI 갱신
+      populateMasterSelects();
+      populateContacts();
+      rebuildDriverList();
+      buildLoginSelect();
     }
-  }catch(e){}
+  }catch(e){ console.warn('syncMaster 실패:', e.message); }
 }
 
 // 공지사항 GAS 로드
@@ -7345,19 +7340,21 @@ async function runSync(silent=true){
   if(!currentDriver) return;
   if(!silent) setSyncBadge('syncing');
   try{
-    await Promise.all([
+    // allSettled: 하나 실패해도 나머지는 계속 진행
+    const results = await Promise.allSettled([
       syncMaster(),
       syncNotices(),
       syncDRReports(),
       loadDriverWagesFromGAS(currentDriver.name),
       syncDefectReportsFromGAS()
     ]);
+    const failCount = results.filter(r=>r.status==='rejected').length;
     // 현재 열린 탭에 따라 재렌더링
     const activePage = document.querySelector('.page.active')?.id;
     if(activePage==='page-pay')    renderPay();
     if(activePage==='page-home')   { syncSalary(); renderTodayReports(); }
     _lastSyncTime = Date.now();
-    if(!silent) setSyncBadge('ok');
+    if(failCount >= results.length) setSyncBadge('error'); // 모두 실패한 경우만 오프라인
     else setSyncBadge('ok');
   }catch(e){
     setSyncBadge('error');
