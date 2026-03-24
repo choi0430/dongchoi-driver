@@ -395,6 +395,16 @@ html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-
 <!-- ══════ HOME ══════ -->
 <div class="page active" id="page-home">
 
+  <!-- SYNC STATUS + REFRESH -->
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px 0;">
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span id="sync-badge-top" style="font-size:11px;color:var(--muted);">—</span>
+    </div>
+    <button onclick="forceReloadDriver()" style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;color:#374151;cursor:pointer;display:flex;align-items:center;gap:4px;">
+      🔄 전체 새로고침
+    </button>
+  </div>
+
   <!-- NOTICE BANNER (dynamic - rendered by renderHomeBanner()) -->
   <div id="home-notice-banner"></div>
 
@@ -7278,15 +7288,37 @@ let _lastSyncTime = 0;
 
 // 동기화 상태 표시
 function setSyncBadge(state){ // 'syncing' | 'ok' | 'error'
-  const el = document.getElementById('sync-badge');
-  if(!el) return;
-  if(state==='syncing'){ el.textContent='🔄 동기화 중'; el.style.color='var(--muted)'; }
-  else if(state==='ok'){
-    const now = new Date();
-    el.textContent='✅ '+now.getHours()+':'+String(now.getMinutes()).padStart(2,'0')+' 동기화됨';
-    el.style.color='#16a34a';
+  const els = [document.getElementById('sync-badge'), document.getElementById('sync-badge-top')];
+  els.forEach(el=>{
+    if(!el) return;
+    if(state==='syncing'){ el.textContent='🔄 동기화 중'; el.style.color='var(--muted)'; }
+    else if(state==='ok'){
+      const now = new Date();
+      el.textContent='✅ '+now.getHours()+':'+String(now.getMinutes()).padStart(2,'0')+' 동기화됨';
+      el.style.color='#16a34a';
+    }
+    else { el.textContent='⚠️ 오프라인'; el.style.color='var(--orange)'; }
+  });
+}
+
+// 전체 강제 새로고침 (마스터+리포트+급여 모두 재로드)
+async function forceReloadDriver(){
+  setSyncBadge('syncing');
+  try {
+    // 캐시 모두 무효화
+    _drReportsCache = null;
+    _drCacheTime = 0;
+    window._masterRetryCount = 0;
+    // 마스터 재로드
+    await loadMasterData();
+    // 전체 동기화
+    if(currentDriver) await runSync(false);
+    setSyncBadge('ok');
+    if(typeof showToast==='function') showToast('✅ 전체 새로고침 완료', 'success');
+  } catch(e) {
+    setSyncBadge('error');
+    if(typeof showToast==='function') showToast('⚠️ 새로고침 실패: ' + e.message, 'error');
   }
-  else { el.textContent='⚠️ 오프라인'; el.style.color='var(--orange)'; }
 }
 
 // 마스터 데이터 (드라이버/차량/TA/코스) 재로드
