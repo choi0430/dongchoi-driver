@@ -4565,7 +4565,20 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
   const invNum = getInvNum(agency, from);
   const _todayD = new Date();
   const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
-  const _dueD   = new Date(); _dueD.setDate(_dueD.getDate()+14);
+  // Due date = 서비스 기간 종료일(to) 기준 다음 주 금요일
+  // 예: to=일요일(3/29) → 다음주 금요일(4/3), to=금요일(3/27) → 다음주 금요일(4/3)
+  const _dueD = (function(){
+    const d = new Date(to + 'T00:00:00');
+    // 이번 주 월요일 구하기
+    const day = d.getDay(); // 0=Sun..6=Sat
+    const diffToMon = day === 0 ? -6 : 1 - day;
+    const monday = new Date(d);
+    monday.setDate(monday.getDate() + diffToMon);
+    // 다음 주 금요일 = 이번 주 월요일 + 11일
+    const nextFri = new Date(monday);
+    nextFri.setDate(nextFri.getDate() + 11);
+    return nextFri;
+  })();
   const dueDateStr = String(_dueD.getDate()).padStart(2,'0')+'/'+String(_dueD.getMonth()+1).padStart(2,'0')+'/'+_dueD.getFullYear();
   const groupLabel = {date:'날짜순',week:'주별',tour:'투어코드별'}[_invGroupMode];
 
