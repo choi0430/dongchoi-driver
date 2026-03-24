@@ -4143,7 +4143,7 @@ function renderInvPreview(rows, agency, from, to) {
           <th style="padding:7px 6px;text-align:left;font-weight:700;color:var(--t2);border-bottom:2px solid var(--bd);">서비스/차량</th>
           <th style="padding:7px 6px;text-align:right;font-weight:700;color:var(--t2);white-space:nowrap;border-bottom:2px solid var(--bd);">기본</th>
           <th style="padding:7px 6px;text-align:right;font-weight:700;color:var(--t2);white-space:nowrap;border-bottom:2px solid var(--bd);">OT</th>
-          <th style="padding:7px 6px;text-align:right;font-weight:700;color:var(--t2);white-space:nowrap;border-bottom:2px solid var(--bd);">부가</th>
+          <th style="padding:7px 6px;text-align:right;font-weight:700;color:var(--t2);white-space:nowrap;border-bottom:2px solid var(--bd);">부가 상세</th>
           <th style="padding:7px 6px;text-align:right;font-weight:700;color:var(--gn);white-space:nowrap;border-bottom:2px solid var(--bd);">합계</th>
         </tr>
       </thead>
@@ -4174,6 +4174,7 @@ function renderInvPreview(rows, agency, from, to) {
           <div style="font-size:10px;color:var(--t3);">${escH(r.Rego||'—')}${r.Seats?' ('+escH(r.Seats)+')':''} ${srcBadge} ${manualBadge} ${ovBadge}</div>
           <div style="font-size:10px;color:var(--t3);">${escH(r.Driver||'—')}${r.Tour_Code?' · '+escH(r.Tour_Code):''}</div>
           ${r._timeStart||r._timeEnd ? `<div style="font-size:10px;color:var(--t3);">⏱ ${r._timeStart||''}${r._timeEnd?' ~ '+r._timeEnd:''}</div>` : ''}
+          ${r.Pickup||r.Dropoff ? `<div style="font-size:10px;color:var(--ac);margin-top:1px;">📍 ${escH(r.Pickup||'—')} → ${escH(r.Dropoff||'—')}</div>` : ''}
         </td>
         ${_invEditMode && !excl ? `
         <td style="padding:4px 2px;text-align:right;vertical-align:top;"><input type="number" value="${oBase}" step="1" style="width:60px;text-align:right;font-size:11px;padding:3px 4px;border:1px solid var(--bd);border-radius:5px;background:var(--sf);" onchange="_setInvOverride('${escH(rowKey)}','base',this.value,'${escH(agency)}','${from}','${to}')"></td>
@@ -4182,7 +4183,17 @@ function renderInvPreview(rows, agency, from, to) {
         ` : `
         <td style="padding:6px;text-align:right;white-space:nowrap;">$${oBase.toLocaleString()}</td>
         <td style="padding:6px;text-align:right;white-space:nowrap;">$${oOT.toLocaleString()}</td>
-        <td style="padding:6px;text-align:right;white-space:nowrap;">$${oExtra.toLocaleString()}</td>
+        <td style="padding:6px;text-align:right;white-space:nowrap;vertical-align:top;">
+          <div>$${oExtra.toLocaleString()}</div>
+          ${(()=>{
+            const parts = [];
+            if(c.hotel>0) parts.push('호텔 $'+c.hotel);
+            if(c.dist>0) parts.push('거리 $'+c.dist);
+            if(c.earlyTA>0) parts.push('Early $'+c.earlyTA);
+            if((c.parkingFee||0)>0) parts.push('주차 $'+c.parkingFee);
+            return parts.length ? '<div style="font-size:9px;color:var(--t3);margin-top:1px;">'+parts.join(' · ')+'</div>' : '';
+          })()}
+        </td>
         `}
         <td style="padding:6px;text-align:right;font-weight:800;color:var(--gn);white-space:nowrap;">$${oTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       </tr>`;
@@ -4625,15 +4636,22 @@ async function generateInvoice() {
     const oOT    = ov.ot    !== undefined ? ov.ot    : c.ot;
     const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0));
     const oTotal = oBase + oOT + oExtra;
+    const surParts = [];
+    if(c.hotel>0) surParts.push('Hotel $'+c.hotel);
+    if(c.dist>0) surParts.push('Distance $'+c.dist);
+    if(c.earlyTA>0) surParts.push('Early/Late $'+c.earlyTA);
+    if((c.parkingFee||0)>0) surParts.push('Parking $'+c.parkingFee);
     const extras = [
-      oOT          ? `OT $${oOT.toLocaleString()}` : '',
-      oExtra > oOT ? `Surcharges $${(oExtra-oOT).toLocaleString()}` : '',
+      oOT ? `OT $${oOT.toLocaleString()}` : '',
+      ...surParts,
     ].filter(Boolean).join(' · ');
     const timeStr = r._timeStart || r._timeEnd ? (r._timeStart||'') + (r._timeEnd ? ' - '+r._timeEnd : '') : '-';
+    const routeStr = (r.Pickup||r.Dropoff) ? escH(r.Pickup||'—')+' → '+escH(r.Dropoff||'—') : '';
     const baseLabel = c.rateSource === 'price_table'
       ? '<div style="font-size:10px;color:#166534;margin-top:2px;">Rate Table $'+oBase.toLocaleString()+'</div>'
       : '<div style="font-size:10px;color:#92400e;margin-top:2px;">SVC $'+oBase.toLocaleString()+'</div>';
     const seatsStr = r.Seats ? ' ('+escH(r.Seats)+')' : '';
+    const routeRow = routeStr ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#0369a1;font-size:10px;padding:0 6px 4px;">📍 '+routeStr+'</td></tr>' : '';
     const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">'+extras+'</td></tr>' : '';
     return '<tr>' +
       '<td style="white-space:nowrap">'+fd(r._iso||r.Date)+'</td>' +
@@ -4642,7 +4660,7 @@ async function generateInvoice() {
       '<td style="color:#64748b;white-space:nowrap;font-size:11px;">'+timeStr+'</td>' +
       '<td style="color:#64748b">'+escH(r.Tour_Code||'-')+'</td>' +
       '<td style="font-weight:700">$'+oTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})+'</td>' +
-      '</tr>' + extrasRow;
+      '</tr>' + routeRow + extrasRow;
   }
 
   // 그룹 모드 라벨
