@@ -187,6 +187,9 @@ function doGet(e) {
       case 'get_active_regos':
         return cors(getActiveRegos());
 
+      case 'get_my_shifts':
+        return cors(getMyShifts(driver));
+
       case 'get_max_km':
         return cors(getMaxKMPerRego());
 
@@ -644,6 +647,64 @@ function getActiveRegos() {
     });
 
     return {ok: true, regos: active};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ── 특정 드라이버의 미완료 shift 조회 (날짜 무관) ──
+function getMyShifts(driverName) {
+  try {
+    if (!driverName) return {ok: false, msg: 'driver param required'};
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const preSheet = ss.getSheetByName('Pre_Departure');
+    const eosSheet = ss.getSheetByName('End_of_Shift');
+    if (!preSheet) return {ok: true, shifts: []};
+
+    const preData = preSheet.getDataRange().getValues();
+    if (preData.length < 2) return {ok: true, shifts: []};
+    const preH = preData[0];
+
+    // 해당 드라이버의 Pre_Departure 기록 추출
+    const myPres = preData.slice(1).map(row => {
+      const obj = {};
+      preH.forEach((h, i) => obj[h] = row[i]);
+      return obj;
+    }).filter(r => String(r.Driver||'').trim() === driverName.trim());
+
+    // End_of_Shift 완료된 (Driver + Date + Rego) 조합 수집
+    const eosSet = new Set();
+    if (eosSheet && eosSheet.getLastRow() > 1) {
+      const eosData = eosSheet.getDataRange().getValues();
+      const eosH = eosData[0];
+      eosData.slice(1).forEach(row => {
+        const obj = {};
+        eosH.forEach((h, i) => obj[h] = row[i]);
+        if (String(obj.Driver||'').trim() === driverName.trim()) {
+          eosSet.add(String(obj.Rego).trim() + '|' + String(obj.Date).trim());
+        }
+      });
+    }
+
+    // 미완료 shift 필터링
+    const shifts = [];
+    const seen = new Set();
+    myPres.forEach(r => {
+      const key = String(r.Rego).trim() + '|' + String(r.Date).trim();
+      if (!eosSet.has(key) && !seen.has(key)) {
+        seen.add(key);
+        shifts.push({
+          rego: String(r.Rego).trim(),
+          date: String(r.Date).trim(),
+          seats: String(r.Seats || '').trim(),
+          startKm: Number(r.Start_KM) || 0,
+          startTime: String(r.Start_Time || '').trim(),
+          fuel: String(r.Fuel || '').trim()
+        });
+      }
+    });
+
+    return {ok: true, shifts};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }

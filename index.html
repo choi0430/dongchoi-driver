@@ -2829,6 +2829,67 @@ function doLogin() {
   // 지난 운행 일지 로드 (비동기)
   _myPastShiftsLoaded = false;
   loadMyPastShifts();
+  // ── 서버에서 미완료 shift 동기화 (비동기) ──
+  syncShiftsFromServer(name);
+}
+
+async function syncShiftsFromServer(driverName) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_my_shifts&driver=' + encodeURIComponent(driverName), { signal: controller.signal });
+    clearTimeout(timeout);
+    const json = await res.json();
+    if (!json.ok || !json.shifts) return;
+
+    const serverShifts = json.shifts;
+    if (serverShifts.length === 0 && activeShifts.length > 0) {
+      // 서버에 미완료 shift가 없으면 로컬도 정리
+      activeShifts = [];
+      editingShiftId = null;
+      localStorage.setItem('shifts_' + driverName, '[]');
+      renderShiftSection();
+      return;
+    }
+
+    // 서버 shift를 로컬 형식으로 변환하고 병합
+    let updated = false;
+    serverShifts.forEach(sv => {
+      const exists = activeShifts.some(ls =>
+        ls.rego === sv.rego && ls.date === sv.date
+      );
+      if (!exists) {
+        // 서버에는 있지만 로컬에 없는 shift → 추가
+        activeShifts.push({
+          id: sv.rego + '_' + sv.date.replace(/\//g, ''),
+          rego: sv.rego,
+          seats: sv.seats,
+          startKm: sv.startKm,
+          startTime: sv.startTime,
+          fuel: sv.fuel,
+          date: sv.date,
+          dailyReports: [],
+          _fromServer: true
+        });
+        updated = true;
+      }
+    });
+
+    // 로컬에만 있고 서버에 없는 shift 제거 (서버가 진실의 원천)
+    const serverKeys = new Set(serverShifts.map(s => s.rego + '|' + s.date));
+    const before = activeShifts.length;
+    activeShifts = activeShifts.filter(ls => serverKeys.has(ls.rego + '|' + ls.date));
+    if (activeShifts.length !== before) updated = true;
+
+    if (updated) {
+      if (activeShifts.length > 0) editingShiftId = activeShifts[activeShifts.length - 1].id;
+      else editingShiftId = null;
+      localStorage.setItem('shifts_' + driverName, JSON.stringify(activeShifts));
+      renderShiftSection();
+    }
+  } catch (e) {
+    console.warn('shift 서버 동기화 실패 (오프라인?):', e.message);
+  }
 }
 
 function showLoginError(msg) {
