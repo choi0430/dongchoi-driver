@@ -1124,7 +1124,10 @@ function updateDriverInfo(driverName, data) {
       nameEN: 'Name_EN', nameKR: 'Name_KR', mobile: 'Mobile_1',
       licClass: 'License_Class', licNo: 'License_No', licExp: 'License_Expiry',
       authNo: 'Authority_No', authExp: 'Authority_Expiry',
-      nokName: 'NEXT_OF_KIN', address: 'Address', suburb: 'Suburb'
+      wwcNo: 'WWC_No', wwcExp: 'WWC_Expiry',
+      nokName: 'NEXT_OF_KIN', nokPhone: 'Moblie_2',
+      address: 'Address', suburb: 'Suburb',
+      bank: 'Bank', bsb: 'BSB', account: 'Account'
     };
 
     for (let r = 1; r < sheetData.length; r++) {

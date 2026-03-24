@@ -2804,7 +2804,9 @@ function doLogin() {
   const correctPin = getDriverPin(name);
   if(pin !== correctPin){ showLoginError('PIN 번호가 틀렸습니다'); return; }
 
-  currentDriver = { name, initials, englishName: englishName || name };
+  // MASTER에서 전체 드라이버 정보 병합
+  const _masterDrv = MASTER.drivers?.find(d => d.Name_KR === name || d.Name_EN === name) || {};
+  currentDriver = { name, initials, englishName: englishName || name, ..._masterDrv };
   // 마지막 로그인 드라이버 저장
   localStorage.setItem('dc_last_driver', sel);
   localStorage.setItem('dc_session_' + name, '1'); // 세션 활성 마킹
@@ -3287,7 +3289,8 @@ function autoRestoreSession() {
       if (found) sel.value = lastSel;
     }
 
-    currentDriver = { name, initials: initials||'??', englishName: englishName||name };
+    const _masterDrvAuto = MASTER.drivers?.find(d => d.Name_KR === name || d.Name_EN === name) || {};
+    currentDriver = { name, initials: initials||'??', englishName: englishName||name, ..._masterDrvAuto };
     try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
     try { todayReports = JSON.parse(localStorage.getItem('reports_'+name)||'[]'); } catch(e){ todayReports=[]; }
     // ── 장기 미완료 shift 자동 정리 (48시간 초과) ──
