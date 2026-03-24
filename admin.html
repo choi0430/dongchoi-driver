@@ -4565,16 +4565,20 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
   const invNum = getInvNum(agency, from);
   const _todayD = new Date();
   const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
-  // Due date = 서비스 기간 종료일(to) 기준 다음 주 금요일
-  // 예: to=일요일(3/29) → 다음주 금요일(4/3), to=금요일(3/27) → 다음주 금요일(4/3)
+  // Due date — 거래처별 다른 규칙:
+  // TOUR HOJURO: 오늘 + 14일
+  // 그 외 (GENTRA LINK 등): 서비스 기간 종료일(to) 기준 다음 주 금요일
+  const _agUpper = agency.toUpperCase().trim();
   const _dueD = (function(){
+    if (_agUpper.includes('HOJURO') || _agUpper.includes('호주로')) {
+      const d = new Date(); d.setDate(d.getDate() + 14); return d;
+    }
+    // 다음 주 금요일 계산
     const d = new Date(to + 'T00:00:00');
-    // 이번 주 월요일 구하기
-    const day = d.getDay(); // 0=Sun..6=Sat
+    const day = d.getDay();
     const diffToMon = day === 0 ? -6 : 1 - day;
     const monday = new Date(d);
     monday.setDate(monday.getDate() + diffToMon);
-    // 다음 주 금요일 = 이번 주 월요일 + 11일
     const nextFri = new Date(monday);
     nextFri.setDate(nextFri.getDate() + 11);
     return nextFri;
