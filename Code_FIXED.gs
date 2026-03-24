@@ -509,7 +509,7 @@ function getMaster(sheetName) {
     }
 
     // 전화번호 컬럼 인덱스 사전 탐색 (앞 0 복원용)
-    const PHONE_FIELDS = ['phone','mobile','mobile_1','mobile_2','moblie_2'];
+    const PHONE_FIELDS = ['phone','mobile','mobile_1','mobile_2','moblie_2','next_of_kin'];
     const phoneColIdxSet = new Set();
     headers.forEach((h, i) => {
       if (PHONE_FIELDS.includes(normalizeKey(h))) phoneColIdxSet.add(i);
