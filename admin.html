@@ -4774,9 +4774,7 @@ function previewInvoiceDoc() {
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
   const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:true});
-  const win = window.open('', '_blank', 'width=900,height=700');
-  win.document.write(html);
-  win.document.close();
+  _showDocModal(html);
 }
 
 // ─── 인보이스 생성 (발행) ───
@@ -4808,9 +4806,7 @@ async function generateInvoice() {
   localStorage.setItem(issuedKey, issuedAt);
 
   const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
-  const win = window.open('', '_blank', 'width=900,height=700');
-  win.document.write(html);
-  win.document.close();
+  _showDocModal(html);
 }
 
 // ═══════════════════════════════════════
@@ -7753,19 +7749,12 @@ function openShiftPdfAdmin(r, type) {
   제출일시 Submitted: ${h(r.Submitted||'—')} &nbsp;|&nbsp; DONG CHOI PTY LTD Fleet Management System
 </div>
 <div class="no-print" style="position:fixed;bottom:20px;left:0;right:0;display:flex;gap:10px;justify-content:center;padding:0 16px;">
-  <button onclick="window.close()" style="flex:1;max-width:140px;background:#f0f4ff;color:#1a56db;border:2px solid #bfdbfe;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;">✕ 닫기</button>
+  <button onclick="try{parent._closeDocModal();}catch(e){window.close();}" style="flex:1;max-width:140px;background:#f0f4ff;color:#1a56db;border:2px solid #bfdbfe;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;">✕ 닫기</button>
   <button onclick="window.print()" style="flex:2;max-width:220px;background:#1a56db;color:white;border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(26,86,219,0.35);">🖨️ PDF 저장 / 인쇄</button>
 </div>
 </body></html>`;
 
-  const w = window.open('','_blank');
-  if (w) { w.document.write(html); w.document.close(); }
-  else {
-    const blob = new Blob([html],{type:'text/html'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.target='_blank'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
-  }
+  _showDocModal(html);
 }
 
 // ── 수정 모달 ──
@@ -8260,6 +8249,65 @@ function startAdminAutoSync(){
   document.addEventListener('visibilitychange',()=>{
     if(document.visibilityState==='visible' && Date.now()-_adminLastSync>60000) runAdminSync(true);
   });
+}
+
+// ═══════════════════════════════════════
+// INLINE DOCUMENT PREVIEW MODAL (모바일 호환)
+// ═══════════════════════════════════════
+// window.open() 은 모바일 브라우저에서 팝업 차단됨
+// → 대신 풀스크린 iframe 오버레이를 사용
+
+function _showDocModal(htmlContent) {
+  let overlay = document.getElementById('doc-preview-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'doc-preview-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.6);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0;';
+    overlay.innerHTML = `
+      <div id="doc-preview-bar" style="width:100%;max-width:900px;display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#1e293b;border-radius:12px 12px 0 0;">
+        <span style="color:#fff;font-size:13px;font-weight:700;">📄 문서 미리보기</span>
+        <div style="display:flex;gap:8px;">
+          <button onclick="_printDocModal()" style="padding:6px 14px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">🖨 인쇄/PDF</button>
+          <button onclick="_closeDocModal()" style="padding:6px 14px;border-radius:8px;border:none;background:#ef4444;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">✕ 닫기</button>
+        </div>
+      </div>
+      <iframe id="doc-preview-iframe" style="width:100%;max-width:900px;flex:1;border:none;background:#fff;border-radius:0 0 12px 12px;" sandbox="allow-same-origin allow-scripts allow-modals"></iframe>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) _closeDocModal(); });
+  }
+  overlay.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  const iframe = document.getElementById('doc-preview-iframe');
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile) {
+    overlay.style.padding = '0';
+    const bar = document.getElementById('doc-preview-bar');
+    bar.style.maxWidth = '100%';
+    bar.style.borderRadius = '0';
+    iframe.style.maxWidth = '100%';
+    iframe.style.borderRadius = '0';
+  }
+  const blob = new Blob([htmlContent], {type:'text/html;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  iframe.onload = () => URL.revokeObjectURL(url);
+  iframe.src = url;
+}
+
+function _closeDocModal() {
+  const overlay = document.getElementById('doc-preview-overlay');
+  if (overlay) { overlay.style.display = 'none'; }
+  document.body.style.overflow = '';
+  const iframe = document.getElementById('doc-preview-iframe');
+  if (iframe) iframe.src = 'about:blank';
+}
+
+function _printDocModal() {
+  const iframe = document.getElementById('doc-preview-iframe');
+  if (iframe && iframe.contentWindow) {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+  }
 }
 
 </script>
