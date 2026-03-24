@@ -14,7 +14,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Barlow+Condensed:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
-  color-scheme: light;
+  color-scheme: light only !important;
   --bg:#f0f2f5;--surface:#ffffff;--surface2:#f8f9fb;--border:#e4e8ef;
   --accent:#1a56db;--accent-light:#eff4ff;--green:#0e9f6e;--green-light:#f0fdf4;
   --red:#e02424;--red-light:#fff5f5;--orange:#ff6b35;--orange-light:#fff7f0;
@@ -22,8 +22,13 @@
   --text:#111827;--muted:#6b7280;--dim:#9ca3af;
   --radius:14px;--sb:env(safe-area-inset-bottom,0px);
 }
+/* 모바일 다크모드 강제 차단 */
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: light only !important; }
+  html, body { background-color: #f0f2f5 !important; color: #111827 !important; }
+}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-html,body{height:100%;height:100dvh;background:var(--bg);color:var(--text);font-family:sans-serif;font-size:14px;overflow:hidden;}
+html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);color:#111827;color:var(--text);font-family:sans-serif;font-size:14px;overflow:hidden;color-scheme:light only;}
 #app{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden;}
 #screen{flex:1 1 0;min-height:0;position:relative;overflow:hidden;}
 .page{display:none;position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;padding:0;padding-bottom:calc(80px + var(--sb));}
@@ -1727,11 +1732,7 @@ function applyMasterData(data) {
   // ★ GAS 드라이버 목록을 localStorage에 캐시 (오프라인 폴백용)
   try {
     if(MASTER.drivers.length > 0) {
-      localStorage.setItem('dc_drivers', JSON.stringify(MASTER.drivers.map(d=>({
-        name: d.Name_KR||'', Name_KR: d.Name_KR||'', Name_EN: d.Name_EN||'',
-        initials: d.Initials||'', Initials: d.Initials||'',
-        phone: d.Phone||'', Phone: d.Phone||'', pin: d.PIN||'1234', PIN: d.PIN||'1234'
-      }))));
+      localStorage.setItem('dc_drivers', JSON.stringify(MASTER.drivers));
     }
   } catch(e) {}
   MASTER.guides      = (data.M_Guides    || []);
@@ -1965,7 +1966,7 @@ function useFallbackMaster() {
     try {
       const cached = JSON.parse(localStorage.getItem('dc_drivers') || '[]');
       if(cached.length > 0) {
-        MASTER.drivers = cached.map(c=>({Name_KR:c.name||c.Name_KR||'',Name_EN:c.Name_EN||'',Initials:c.initials||c.Initials||'',Phone:c.phone||c.Phone||'',PIN:c.pin||c.PIN||'1234',Active:'Y'}));
+        MASTER.drivers = cached;
       }
     } catch(e) {}
   }
@@ -1994,6 +1995,9 @@ function useFallbackMaster() {
     const cachedAttr = localStorage.getItem('dc_attractions');
     if(cachedAttr) { const arr = JSON.parse(cachedAttr); if(arr.length > 0) { ATTRACTIONS.length=0; ATTRACTIONS.push(...arr); } }
   } catch(e) {}
+  // 폴백 후 연락처 & 셀렉트 갱신
+  populateMasterSelects();
+  populateContacts();
 }
 
 function populateMasterSelects() {
