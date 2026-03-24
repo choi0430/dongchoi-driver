@@ -4208,7 +4208,10 @@ function renderInvPreview(rows, agency, from, to) {
     </table>
     </div>
     <!-- 저장 버튼 -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:6px;">
+      <button onclick="previewInvoiceDoc()" class="btn" style="font-size:12px;padding:10px;background:#7c3aed;color:white;font-weight:700;">
+        👁 미리보기
+      </button>
       <button onclick="saveInvoiceToSheet()" class="btn" style="font-size:12px;padding:10px;background:#6d28d9;color:white;font-weight:700;">
         💾 저장
       </button>
@@ -4541,94 +4544,23 @@ function _isoToSunday(iso) {
 }
 
 // ─── generateInvoice: 그룹 모드 반영 ───
-async function generateInvoice() {
-  const agency = document.getElementById('inv-agency')?.value;
-  const from   = document.getElementById('inv-from')?.value;
-  const to     = document.getElementById('inv-to')?.value;
-  if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
-
-  /* ── 개선: ABN 필수 검증 ── */
-  const _abnVal = (document.getElementById('inv-abn')?.value || '').replace(/\s/g,'');
-  if (!_abnVal || _abnVal.length !== 11 || !/^\d{11}$/.test(_abnVal)) {
-    toast('⚠️ ABN을 정확히 입력하세요 (11자리 숫자)', 'er');
-    /* 설정 패널 열기 */
-    const settingsBtn = document.getElementById('inv-settings-toggle');
-    if(settingsBtn && !document.getElementById('inv-settings-panel')?.style.display?.includes('block')){
-      settingsBtn.click();
-    }
-    document.getElementById('inv-abn')?.focus();
-    return;
-  }
-
-  let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
-  // 제외된 항목 필터
-  rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
-  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
-
+// ─── 공용 인보이스 HTML 빌더 ───
+function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
-
   const client  = DB.C.find(c => c.Name === agency) || {};
   const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
   let grandTotal = _calcInvGrandTotal(_buildInvRows(agency, from, to));
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
-
   const invNum = getInvNum(agency, from);
-  const issuedKey = `dc_inv_issued_${invNum}`;
-  const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  localStorage.setItem(issuedKey, issuedAt);
-
   const _todayD = new Date();
   const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
   const _dueD   = new Date(); _dueD.setDate(_dueD.getDate()+14);
   const dueDateStr = String(_dueD.getDate()).padStart(2,'0')+'/'+String(_dueD.getMonth()+1).padStart(2,'0')+'/'+_dueD.getFullYear();
+  const groupLabel = {date:'날짜순',week:'주별',tour:'투어코드별'}[_invGroupMode];
 
-  // ─── 그룹 테이블 HTML 생성 ───
-  function buildTableRows() {
-    if (_invGroupMode === 'week') {
-      // 주별 그룹
-      const weeks = {};
-      rows.forEach(r => {
-        const mon = _isoToMonday(r._iso);
-        if (!weeks[mon]) weeks[mon] = [];
-        weeks[mon].push(r);
-      });
-      return Object.keys(weeks).sort().map(mon => {
-        const sun = _isoToSunday(mon);
-        const wrows = weeks[mon];
-        const wTotal = wrows.reduce((s,r)=>s+calcInvRow(r).total,0);
-        const headerRow = `<tr style="background:#f1f5f9;"><td colspan="6" style="font-weight:800;color:#1e40af;font-size:11px;padding:8px 12px;letter-spacing:.5px;">
-          📆 WEEK: ${fd(mon)} — ${fd(sun)} &nbsp;·&nbsp; ${wrows.length}건 &nbsp;·&nbsp; $${wTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-        </td></tr>`;
-        const dataRows = wrows.map(r => _makeTableRow(r, fd)).join('');
-        return headerRow + dataRows;
-      }).join('');
-    } else if (_invGroupMode === 'tour') {
-      // 투어코드 그룹
-      const tours = {};
-      rows.forEach(r => {
-        const key = r.Tour_Code || r.Attraction || 'Other';
-        if (!tours[key]) tours[key] = [];
-        tours[key].push(r);
-      });
-      return Object.keys(tours).sort().map(tc => {
-        const trows = tours[tc];
-        const tTotal = trows.reduce((s,r)=>s+calcInvRow(r).total,0);
-        const headerRow = `<tr style="background:#f0fdf4;"><td colspan="6" style="font-weight:800;color:#166534;font-size:11px;padding:8px 12px;letter-spacing:.5px;">
-          🗺 TOUR CODE: ${escH(tc)} &nbsp;·&nbsp; ${trows.length}건 &nbsp;·&nbsp; $${tTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-        </td></tr>`;
-        const dataRows = trows.map(r => _makeTableRow(r, fd)).join('');
-        return headerRow + dataRows;
-      }).join('');
-    } else {
-      // 날짜순 (기본)
-      return rows.map(r => _makeTableRow(r, fd)).join('');
-    }
-  }
-
-  function _makeTableRow(r, fd) {
+  function _makeTableRow(r) {
     const c   = calcInvRow(r);
-    // 오버라이드 반영 — generateInvoice에서도 수정된 금액 적용
     const ri  = rows.indexOf(r);
     const rk  = _invRowKey(r, ri >= 0 ? ri : 0);
     const ov  = _invOverrides[rk] || {};
@@ -4663,14 +4595,34 @@ async function generateInvoice() {
       '</tr>' + routeRow + extrasRow;
   }
 
-  // 그룹 모드 라벨
-  const groupLabel = {date:'날짜순',week:'주별',tour:'투어코드별'}[_invGroupMode];
+  function buildTableRows() {
+    if (_invGroupMode === 'week') {
+      const weeks = {};
+      rows.forEach(r => { const mon = _isoToMonday(r._iso); if (!weeks[mon]) weeks[mon] = []; weeks[mon].push(r); });
+      return Object.keys(weeks).sort().map(mon => {
+        const sun = _isoToSunday(mon); const wrows = weeks[mon];
+        const wTotal = wrows.reduce((s,r)=>s+calcInvRow(r).total,0);
+        return `<tr style="background:#f1f5f9;"><td colspan="6" style="font-weight:800;color:#1e40af;font-size:11px;padding:8px 12px;letter-spacing:.5px;">📆 WEEK: ${fd(mon)} — ${fd(sun)} &nbsp;·&nbsp; ${wrows.length}건 &nbsp;·&nbsp; $${wTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>` + wrows.map(r => _makeTableRow(r)).join('');
+      }).join('');
+    } else if (_invGroupMode === 'tour') {
+      const tours = {};
+      rows.forEach(r => { const key = r.Tour_Code||r.Attraction||'Other'; if(!tours[key]) tours[key]=[]; tours[key].push(r); });
+      return Object.keys(tours).sort().map(tc => {
+        const trows = tours[tc]; const tTotal = trows.reduce((s,r)=>s+calcInvRow(r).total,0);
+        return `<tr style="background:#f0fdf4;"><td colspan="6" style="font-weight:800;color:#166534;font-size:11px;padding:8px 12px;letter-spacing:.5px;">🗺 TOUR CODE: ${escH(tc)} &nbsp;·&nbsp; ${trows.length}건 &nbsp;·&nbsp; $${tTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>` + trows.map(r => _makeTableRow(r)).join('');
+      }).join('');
+    } else {
+      return rows.map(r => _makeTableRow(r)).join('');
+    }
+  }
 
-  const invoiceHTML = `<!DOCTYPE html>
+  const draftBanner = isDraft ? `<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:10px 16px;margin-bottom:20px;text-align:center;font-size:14px;font-weight:800;color:#92400e;">⚠️ DRAFT PREVIEW — 발행 전 미리보기 (저장되지 않음)</div>` : '';
+
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Tax Invoice — ${escH(agency)} — ${invNum}</title>
+<title>${isDraft?'[DRAFT] ':''}Tax Invoice — ${escH(agency)} — ${invNum}</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color: #1e293b; background: #fff; padding: 40px; max-width: 800px; margin: 0 auto; }
@@ -4684,11 +4636,11 @@ async function generateInvoice() {
   .inv-company-name { font-size: 22px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; }
   .inv-company-sub  { font-size: 11px; color: #64748b; margin-top: 4px; line-height: 1.6; }
   .inv-title-box { text-align: right; }
-  .inv-title { font-size: 28px; font-weight: 900; color: #1d4ed8; letter-spacing: 1px; }
+  .inv-title { font-size: 28px; font-weight: 900; color: ${isDraft?'#f59e0b':'#1d4ed8'}; letter-spacing: 1px; }
   .inv-num   { font-size: 13px; color: #64748b; margin-top: 4px; }
   .inv-date  { font-size: 12px; color: #94a3b8; margin-top: 2px; }
   .inv-line { border: none; border-top: 2px solid #e2e8f0; margin: 20px 0; }
-  .inv-line-bold { border-top: 3px solid #1d4ed8; }
+  .inv-line-bold { border-top: 3px solid ${isDraft?'#f59e0b':'#1d4ed8'}; }
   .inv-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 28px; }
   .inv-party-label { font-size: 10px; font-weight: 800; color: #94a3b8; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
   .inv-party-name  { font-size: 14px; font-weight: 800; color: #0f172a; }
@@ -4702,17 +4654,18 @@ async function generateInvoice() {
   .inv-table .sub-row td { font-size: 11px; color: #64748b; padding: 3px 12px 8px; border-bottom: none; }
   .inv-totals { margin-left: auto; width: 260px; }
   .inv-total-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
-  .inv-total-row.grand { font-weight: 900; font-size: 18px; color: #1d4ed8; border-top: 3px solid #1d4ed8; margin-top: 8px; padding-top: 10px; }
+  .inv-total-row.grand { font-weight: 900; font-size: 18px; color: ${isDraft?'#f59e0b':'#1d4ed8'}; border-top: 3px solid ${isDraft?'#f59e0b':'#1d4ed8'}; margin-top: 8px; padding-top: 10px; }
   .inv-payment { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; margin-top: 28px; }
   .inv-payment-title { font-size: 11px; font-weight: 800; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; }
   .inv-payment-row { display: flex; gap: 8px; font-size: 12px; margin-bottom: 4px; }
   .inv-payment-label { color: #94a3b8; width: 90px; flex-shrink: 0; }
   .inv-payment-val { color: #0f172a; font-weight: 600; }
   .inv-footer { margin-top: 32px; text-align: center; font-size: 11px; color: #94a3b8; }
-  .print-btn { display: block; margin: 0 auto 24px; padding: 12px 32px; background: #1d4ed8; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  .print-btn { display: block; margin: 0 auto 24px; padding: 12px 32px; background: ${isDraft?'#f59e0b':'#1d4ed8'}; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; }
 </style>
 </head>
 <body>
+${draftBanner}
 <button class="print-btn no-print" onclick="window.print()">🖨 Print / Save as PDF</button>
 <div class="inv-header">
   <div class="inv-company">
@@ -4724,7 +4677,7 @@ async function generateInvoice() {
     </div>
   </div>
   <div class="inv-title-box">
-    <div class="inv-title">TAX INVOICE</div>
+    <div class="inv-title">${isDraft?'DRAFT':'TAX INVOICE'}</div>
     <div class="inv-num">${invNum}</div>
     <div class="inv-date">Date: ${today}</div>
     <div class="inv-date" style="color:#ef4444;font-weight:700;">Due: ${dueDateStr}</div>
@@ -4797,9 +4750,56 @@ ${(DC_COMPANY.bank || localStorage.getItem('dc_bank')) ? `
   Thank you for your business. &nbsp;·&nbsp; ${escH(DC_COMPANY.name||'Dong Choi Pty Ltd')} &nbsp;·&nbsp; ${today}
 </div>
 </body></html>`;
+}
 
+// ─── 인보이스 미리보기 (발행 없이) ───
+function previewInvoiceDoc() {
+  const agency = document.getElementById('inv-agency')?.value;
+  const from   = document.getElementById('inv-from')?.value;
+  const to     = document.getElementById('inv-to')?.value;
+  if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
+
+  let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
+  rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
+  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
+
+  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:true});
   const win = window.open('', '_blank', 'width=900,height=700');
-  win.document.write(invoiceHTML);
+  win.document.write(html);
+  win.document.close();
+}
+
+// ─── 인보이스 생성 (발행) ───
+async function generateInvoice() {
+  const agency = document.getElementById('inv-agency')?.value;
+  const from   = document.getElementById('inv-from')?.value;
+  const to     = document.getElementById('inv-to')?.value;
+  if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
+
+  /* ── ABN 필수 검증 ── */
+  const _abnVal = (document.getElementById('inv-abn')?.value || '').replace(/\s/g,'');
+  if (!_abnVal || _abnVal.length !== 11 || !/^\d{11}$/.test(_abnVal)) {
+    toast('⚠️ ABN을 정확히 입력하세요 (11자리 숫자)', 'er');
+    const settingsBtn = document.getElementById('inv-settings-toggle');
+    if(settingsBtn && !document.getElementById('inv-settings-panel')?.style.display?.includes('block')){
+      settingsBtn.click();
+    }
+    document.getElementById('inv-abn')?.focus();
+    return;
+  }
+
+  let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
+  rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
+  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
+
+  const invNum = getInvNum(agency, from);
+  const issuedKey = `dc_inv_issued_${invNum}`;
+  const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  localStorage.setItem(issuedKey, issuedAt);
+
+  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
+  const win = window.open('', '_blank', 'width=900,height=700');
+  win.document.write(html);
   win.document.close();
 }
 
