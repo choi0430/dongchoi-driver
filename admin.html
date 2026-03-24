@@ -1928,7 +1928,7 @@ async function rD(q=''){
     return`<div class="mrow">
       <div class="mav" style="color:var(--or)">${ini(d.Name_EN)}</div>
       <div class="min"><div class="mnm">${d.Name_KR||''} <span style="color:var(--t3);font-size:12px">${d.Name_EN}</span></div>
-        <div class="msb">${(d.Phone||d.Mobile_1||'연락처없음')} · ${d.License_Class||'—'}</div>
+        <div class="msb">${fixPhone(d.Phone||d.Mobile_1)||'연락처없음'} · ${d.License_Class||'—'}</div>
         <div class="mtg">${etag(d.License_Expiry,'면허')}${etag(d.Authority_Expiry,'인가')}</div>
       </div>
       <div class="mac"><button class="btn bac xs" onclick="openView('D',${i})">보기</button><button class="btn bgh xs" onclick="openM('D',${i})">수정</button><button class="btn brd xs" onclick="cDel('D',${i},'${esc(d.Name_EN)}')">삭제</button></div>
@@ -1975,7 +1975,7 @@ async function rG(q=''){
     return`<div class="mrow">
       <div class="mav" style="color:var(--pu);font-size:10px">${(g.Name||g.Guide_Name||'')?.slice(0,2).toUpperCase()||'??'}</div>
       <div class="min"><div class="mnm">${g.Name||g.Guide_Name||''}</div>
-        <div class="msb">${g.GuideID} · ${(g.Phone||g.Mobile||'연락처없음')}${g.Agency?' · '+g.Agency:''}</div>
+        <div class="msb">${g.GuideID} · ${fixPhone(g.Phone||g.Mobile)||'연락처없음'}${g.Agency?' · '+g.Agency:''}</div>
       </div>
       <div class="mac"><button class="btn bac xs" onclick="openView('G',${i})">보기</button><button class="btn bgh xs" onclick="openM('G',${i})">수정</button><button class="btn brd xs" onclick="cDel('G',${i},'${esc(g.Name||g.Guide_Name||'')}')">삭제</button></div>
     </div>`}).join('')||nores();
@@ -2087,7 +2087,7 @@ async function rH(q=''){
     return`<div class="mrow">
       <div class="mav" style="color:var(--yl)">🏨</div>
       <div class="min"><div class="mnm">${h.Hotel_Name}</div>
-        <div class="msb">${h.Phone||'전화없음'}${h.Address?' · '+h.Address.slice(0,42):''}</div>
+        <div class="msb">${fixPhone(h.Phone)||'전화없음'}${h.Address?' · '+h.Address.slice(0,42):''}</div>
         ${h.Surcharge_Area?'<span class="tag ty" style="margin-top:4px;display:inline-flex">Surcharge Area</span>':''}
       </div>
       <div class="mac"><button class="btn bgh xs" onclick="openM('H',${i})">수정</button><button class="btn brd xs" onclick="cDel('H',${i},'${esc(h.Hotel_Name)}')">삭제</button></div>
@@ -2570,6 +2570,15 @@ function lrow(label, val, color){
   '</div>';
 }
 function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── 전화번호 앞 0 복원 (Google Sheets 숫자→텍스트 보정) ──
+function fixPhone(p){
+  if(p===null||p===undefined||p==='') return '';
+  let s=String(p).replace(/\.0+$/,'').replace(/[^0-9]/g,'');
+  if(!s) return '';
+  if(s.length===9) return '0'+s;
+  return s;
+}
 
 // ─── 건 추가/수정 모달 ─────────────────────
 function openLedgerEntry(idx){
@@ -6371,7 +6380,7 @@ function openView(type, idx) {
     const authNo    = d.Authority_No || d['Authority_#'] || '';
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">👤 기본 정보</div>`;
     html += row2A([['영문 이름', d.Name_EN], ['한글 이름', d.Name_KR]]);
-    html += row2A([['이메일 (DriverID)', d.DriverID], ['연락처', d.Phone||d.Mobile_1]]);
+    html += row2A([['이메일 (DriverID)', d.DriverID], ['연락처', fixPhone(d.Phone||d.Mobile_1)]]);
     html += rowA('비상연락처 (Next of Kin)', nextOfKin);
     // PIN: 보안상 마스킹 표시
     html += rowA('PIN', d.PIN ? '••••' : '');
@@ -6416,7 +6425,7 @@ function openView(type, idx) {
   } else if(type === 'C') {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🏢 여행사 정보</div>`;
     html += row2([['여행사명', d.Name], ['Client ID', d.ClientID]]);
-    html += row2([['연락처', d.Phone||d.Mobile], ['이메일', d.Email]]);
+    html += row2([['연락처', fixPhone(d.Phone||d.Mobile)], ['이메일', d.Email]]);
     html += row('주소', d.Address);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🏦 계좌 정보</div>`;
     html += row2([['은행', d.Bank_Name], ['BSB', d.BSB]]);
@@ -6427,7 +6436,7 @@ function openView(type, idx) {
   } else if(type === 'G') {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🎤 가이드 정보</div>`;
     html += row2([['Guide ID', d.GuideID], ['가이드명', d.Guide_Name]]);
-    html += row2([['연락처', d.Phone||d.Mobile], ['이메일', d.Email]]);
+    html += row2([['연락처', fixPhone(d.Phone||d.Mobile)], ['이메일', d.Email]]);
     html += row('소속 여행사', d.Agency);
     html += row('비고', d.Remarks);
   }
@@ -6502,7 +6511,7 @@ function openM(type,idx){
       <div class="fr"><label class="fl">🔑 PIN 번호 (4자리)</label><input class="fi" id="f15" value="${d.PIN||''}" placeholder="예) 1234" maxlength="4" inputmode="numeric" style="font-size:18px;letter-spacing:4px;font-weight:700;"></div>
       <div class="fr"><label class="fl">이메일 (DriverID)*</label><input class="fi" id="f2" value="${d.DriverID||''}"></div>
       <div class="fr2">
-        <div><label class="fl">연락처</label><input class="fi" id="f3" value="${d.Phone||d.Mobile_1||''}"></div>
+        <div><label class="fl">연락처</label><input class="fi" id="f3" value="${fixPhone(d.Phone||d.Mobile_1)}"></div>
         <div><label class="fl">비상연락처</label><input class="fi" id="f4" value="${nextOfKin}"></div></div>
       <div class="fr2">
         <div><label class="fl">면허 등급</label><div class="fsw"><select class="fs" id="f5">
@@ -6527,7 +6536,7 @@ function openM(type,idx){
     h=`<div class="fr"><label class="fl">여행사명*</label><input class="fi" id="f0" value="${d.Name||''}" placeholder="Hana Tour Pty Ltd"></div>
       <div class="fr"><label class="fl">Client ID</label><input class="fi" id="f1" value="${d.ClientID||''}" placeholder="자동생성"></div>
       <div class="fr2">
-        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${d.Phone||d.Mobile||''}"></div>
+        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${fixPhone(d.Phone||d.Mobile)}"></div>
         <div><label class="fl">이메일 (Invoice용)</label><input class="fi" id="f2b" value="${d.Email||''}" placeholder="billing@agencyname.com.au"></div>
       </div>
       <div class="fr"><label class="fl">주소</label><input class="fi" id="f3" value="${d.Address||''}"></div>
@@ -6541,7 +6550,7 @@ function openM(type,idx){
         <div><label class="fl">Guide ID</label><input class="fi" id="f0" value="${d.GuideID||''}"></div>
         <div><label class="fl">가이드명*</label><input class="fi" id="f1" value="${d.Guide_Name||''}"></div></div>
       <div class="fr2">
-        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${d.Phone||d.Mobile||''}"></div>
+        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${fixPhone(d.Phone||d.Mobile)}"></div>
         <div><label class="fl">소속 여행사</label><input class="fi" id="f3" value="${d.Agency||''}"></div></div>
       <div class="fr"><label class="fl">이메일</label><input class="fi" id="f4" value="${d.Email||''}"></div>
       <div class="fr"><label class="fl">비고</label><textarea class="fta" id="f5">${d.Remarks||''}</textarea></div>`;
@@ -6637,7 +6646,7 @@ function openM(type,idx){
   }
   else if(type==='H'){
     h=`<div class="fr"><label class="fl">호텔명*</label><input class="fi" id="f0" value="${d.Hotel_Name||''}"></div>
-      <div class="fr"><label class="fl">전화번호</label><input class="fi" id="f1" value="${d.Phone||''}"></div>
+      <div class="fr"><label class="fl">전화번호</label><input class="fi" id="f1" value="${fixPhone(d.Phone)}"></div>
       <div class="fr"><label class="fl">주소</label><textarea class="fta" id="f2" style="min-height:55px">${d.Address||''}</textarea></div>
       <div class="fr"><label class="fl">Surcharge Area</label><div class="fsw"><select class="fs" id="f3">
         <option value="">해당없음</option>
@@ -7057,7 +7066,8 @@ async function syncDrivers(){
   DB.D = rows.map(r=>({
     _rowIndex: r._rowIndex||null,
     Name_EN:r.Name_EN||'', Name_KR:r.Name_KR||'', DriverID:r.DriverID||'',
-    Phone:r.Phone||r.Mobile_1||r.Mobile||'',
+    Phone:fixPhone(r.Phone||r.Mobile_1||r.Mobile),
+    Mobile_1:fixPhone(r.Phone||r.Mobile_1||r.Mobile),
     NEXT_OF_KIN: rf(r,'NEXT_OF_KIN','NEXT OF KIN'),
     License_Class:r.License_Class||'',
     License_No: rf(r,'License_No','License_#'),
@@ -7074,7 +7084,7 @@ async function syncClients(){
   const rows = await loadTab('M_Clients');
   if(!rows) return;
   DB.C = rows.map(r=>({
-    Name:r.Name||'', ClientID:r.ClientID||'', Mobile:r.Phone||r.Mobile||'',Phone:r.Phone||r.Mobile||'', Email:r.Email||'',
+    Name:r.Name||'', ClientID:r.ClientID||'', Mobile:fixPhone(r.Phone||r.Mobile),Phone:fixPhone(r.Phone||r.Mobile), Email:r.Email||'',
     Address:r.Address||'', Bank_Name:r.Bank_Name||'', BSB:r.BSB||'', Account_Number:r.Account_Number||''
   }));
   // PC 동기화
@@ -7087,7 +7097,7 @@ async function syncGuides(){
   if(!rows) return;
   DB.G = rows.map(r=>({
     GuideID:r.GuideID||'', Guide_Name:r.Guide_Name||r.Name||'',
-    Mobile:r.Mobile||r.Phone||r.phone||'', Agency:r.Agency||'', Email:r.Email||'', Remarks:r.Remarks||''
+    Mobile:fixPhone(r.Mobile||r.Phone||r.phone), Phone:fixPhone(r.Mobile||r.Phone||r.phone), Agency:r.Agency||'', Email:r.Email||'', Remarks:r.Remarks||''
   }));
 }
 
@@ -7095,7 +7105,7 @@ async function syncHotels(){
   const rows = await loadTab('M_Hotels');
   if(!rows) return;
   DB.H = rows.map(r=>({
-    Hotel_Name:r.Hotel_Name,Phone:r.Phone,Address:r.Address,Surcharge_Area:r.Surcharge_Area
+    Hotel_Name:r.Hotel_Name,Phone:fixPhone(r.Phone),Address:r.Address,Surcharge_Area:r.Surcharge_Area
   }));
 }
 
@@ -7190,19 +7200,19 @@ async function loadAllFromSheets(){
 
     // M_Clients → DB.C
     if(d.M_Clients?.length) DB.C = d.M_Clients.map(r=>({
-      Name:r.Name||'', ClientID:r.ClientID||'', Mobile:r.Phone||r.Mobile||'',Phone:r.Phone||r.Mobile||'', Email:r.Email||'',
+      Name:r.Name||'', ClientID:r.ClientID||'', Mobile:fixPhone(r.Phone||r.Mobile),Phone:fixPhone(r.Phone||r.Mobile), Email:r.Email||'',
       Address:r.Address||'', Bank_Name:r.Bank_Name||'', BSB:r.BSB||'', Account_Number:r.Account_Number||''
     }));
 
     // M_Guides → DB.G (Mobile/Phone 두 컬럼명 모두 지원)
     if(d.M_Guides?.length) DB.G = d.M_Guides.map(r=>({
       GuideID:r.GuideID||'', Guide_Name:r.Guide_Name||r.Name||'',
-      Mobile:r.Mobile||r.Phone||r.phone||'', Agency:r.Agency||'', Email:r.Email||'', Remarks:r.Remarks||''
+      Mobile:fixPhone(r.Mobile||r.Phone||r.phone), Phone:fixPhone(r.Mobile||r.Phone||r.phone), Agency:r.Agency||'', Email:r.Email||'', Remarks:r.Remarks||''
     }));
 
     // M_Hotels → DB.H
     if(d.M_Hotels?.length) DB.H = d.M_Hotels.map(r=>({
-      Hotel_Name:r.Hotel_Name,Phone:r.Phone,Address:r.Address,Surcharge_Area:r.Surcharge_Area
+      Hotel_Name:r.Hotel_Name,Phone:fixPhone(r.Phone),Address:r.Address,Surcharge_Area:r.Surcharge_Area
     }));
 
     // M_PriceClient → DB.PC

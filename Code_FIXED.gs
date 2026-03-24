@@ -508,6 +508,13 @@ function getMaster(sheetName) {
       });
     }
 
+    // 전화번호 컬럼 인덱스 사전 탐색 (앞 0 복원용)
+    const PHONE_FIELDS = ['phone','mobile','mobile_1','mobile_2','moblie_2'];
+    const phoneColIdxSet = new Set();
+    headers.forEach((h, i) => {
+      if (PHONE_FIELDS.includes(normalizeKey(h))) phoneColIdxSet.add(i);
+    });
+
     const rows = data.slice(1).map((row, rowIdx) => {
       const obj = {};
       headers.forEach((h, i) => {
@@ -520,7 +527,14 @@ function getMaster(sheetName) {
             if (normToCanonical[alias]) { canonKey = normToCanonical[alias]; break; }
           }
         }
-        obj[canonKey] = row[i];
+        let val = row[i];
+        // ★ 전화번호 필드: 앞 0 자동 복원 (Google Sheets 숫자→텍스트 보정)
+        if (phoneColIdxSet.has(i) && val !== '' && val !== null && val !== undefined) {
+          let s = String(val).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
+          if (s.length === 9) s = '0' + s;   // 04xxxxxxxx → 0 복원
+          val = s;
+        }
+        obj[canonKey] = val;
       });
       // 행 번호 저장 (1-based 시트 행): 헤더(1) + rowIdx(0-based) + 1
       obj._rowIndex = rowIdx + 2;
@@ -898,12 +912,29 @@ function updateMasterRow(sheetName, rowIndex, data) {
 
     // 정확한 키 먼저, 없으면 정규화 키로 fallback (공백↔언더스코어 불일치 허용)
     const normMap = buildNormMap(data);
-    const row = headers.map(h => {
-      if (data[h] !== undefined) return data[h];
-      const nk = normalizeKey(h);
-      return normMap[nk] !== undefined ? normMap[nk] : '';
+    var PHONE_COL_NAMES = ['phone','mobile','mobile_1','mobile_2','moblie_2'];
+    const row = headers.map((h, i) => {
+      let val;
+      if (data[h] !== undefined) val = data[h];
+      else {
+        const nk = normalizeKey(h);
+        val = normMap[nk] !== undefined ? normMap[nk] : '';
+      }
+      // ★ 전화번호 필드: 앞 0 복원 + 텍스트 서식
+      if (PHONE_COL_NAMES.includes(normalizeKey(h)) && val !== '' && val !== null && val !== undefined) {
+        let s = String(val).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
+        if (s.length === 9) s = '0' + s;
+        val = s;
+      }
+      return val;
     });
     sheet.getRange(ri, 1, 1, row.length).setValues([row]);
+    // ★ 전화번호 셀에 텍스트 서식 적용 (앞 0 보존)
+    headers.forEach((h, i) => {
+      if (PHONE_COL_NAMES.includes(normalizeKey(h))) {
+        sheet.getRange(ri, i + 1).setNumberFormat('@');
+      }
+    });
 
     return {ok: true};
   } catch (err) {
@@ -1132,11 +1163,22 @@ function updateDriverInfo(driverName, data) {
 
     for (let r = 1; r < sheetData.length; r++) {
       if (sheetData[r][nameENIdx] === driverName || sheetData[r][nameKRIdx] === driverName) {
+        const PHONE_SAVE_FIELDS = ['Mobile_1', 'Moblie_2', 'Phone', 'Mobile'];
         Object.entries(data).forEach(([key, val]) => {
           const col = fieldMap[key];
           if (col) {
             const colIdx = headers.indexOf(col);
-            if (colIdx !== -1) sheet.getRange(r + 1, colIdx + 1).setValue(val);
+            if (colIdx !== -1) {
+              const cell = sheet.getRange(r + 1, colIdx + 1);
+              // ★ 전화번호 필드: 텍스트 서식 강제 적용 (앞 0 보존)
+              if (PHONE_SAVE_FIELDS.includes(col)) {
+                let s = String(val||'').replace(/[^0-9]/g, '');
+                if (s.length === 9) s = '0' + s;
+                cell.setNumberFormat('@').setValue(s);
+              } else {
+                cell.setValue(val);
+              }
+            }
           }
         });
         return {ok: true};
