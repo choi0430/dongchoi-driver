@@ -2831,6 +2831,9 @@ function doLogin() {
   loadMyPastShifts();
   // ── 서버에서 미완료 shift 동기화 (비동기) ──
   syncShiftsFromServer(name);
+  // ── GAS 전체 동기화 + 자동 폴링 시작 (오늘 리포트, 마스터 최신화) ──
+  runSync(false);
+  startAutoSync();
 }
 
 async function syncShiftsFromServer(driverName) {
@@ -6416,6 +6419,38 @@ function renderHomeBanner(notices){
 function getDefectReports(){ try{return JSON.parse(localStorage.getItem('defect_reports')||'[]');}catch(e){return[];} }
 function saveDefectReports(d){ localStorage.setItem('defect_reports',JSON.stringify(d)); }
 
+// GAS에서 결함 리포트 동기화
+async function syncDefectReportsFromGAS() {
+  try {
+    const driver = currentDriver?.name || '';
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_defect_reports&driver=' + encodeURIComponent(driver));
+    const json = await res.json();
+    if (json.ok && json.reports) {
+      // GAS 데이터를 로컬 형식으로 변환
+      const gasReports = json.reports.map(r => ({
+        id: String(r.ID || ''),
+        rego: r.Rego || '',
+        category: r.Category || '',
+        location: r.Location || '',
+        description: r.Description || '',
+        severity: r.Severity || 'low',
+        km: r.KM || null,
+        driver: r.Driver || '',
+        status: r.Status || 'open',
+        submittedAt: r.SubmittedAt || '',
+        adminNote: r.AdminNote || ''
+      }));
+      // GAS 기준으로 병합 (GAS에 없는 로컬 항목은 유지 — 아직 동기화 전일 수 있음)
+      const gasIds = new Set(gasReports.map(r => r.id));
+      const localOnly = getDefectReports().filter(r => !gasIds.has(r.id));
+      const merged = [...gasReports, ...localOnly];
+      merged.sort((a,b) => (b.submittedAt||'').localeCompare(a.submittedAt||''));
+      saveDefectReports(merged);
+      renderMyDefects();
+    }
+  } catch(e) { console.warn('결함 리포트 GAS 동기화 실패:', e); }
+}
+
 function submitDefectReport(){
   const rego     = document.getElementById('def-rego')?.value||'';
   const cat      = document.getElementById('def-cat')?.value||'';
@@ -6445,6 +6480,16 @@ function submitDefectReport(){
   const reports = getDefectReports();
   reports.unshift(entry);
   saveDefectReports(reports);
+
+  // GAS에도 저장
+  fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+    body: JSON.stringify({action:'save_defect_report', data:{
+      ID: entry.id, Rego: rego, Category: cat, Location: location,
+      Description: desc, Severity: severity, KM: km||'',
+      Driver: currentDriver?.name||driver, Status:'open',
+      SubmittedAt: entry.submittedAt, AdminNote:''
+    }})
+  }).catch(()=>{});
 
   // 필드 초기화
   ['def-rego','def-cat','def-location','def-desc','def-km'].forEach(id=>{
@@ -7304,7 +7349,8 @@ async function runSync(silent=true){
       syncMaster(),
       syncNotices(),
       syncDRReports(),
-      loadDriverWagesFromGAS(currentDriver.name)
+      loadDriverWagesFromGAS(currentDriver.name),
+      syncDefectReportsFromGAS()
     ]);
     // 현재 열린 탭에 따라 재렌더링
     const activePage = document.querySelector('.page.active')?.id;
@@ -7535,11 +7581,29 @@ function busLoadPerma(rego) {
   } catch(e) { return []; }
 }
 
+// GAS에서 데미지 마커 동기화 (비동기 — 로드 후 콜백으로 UI 갱신)
+async function busSyncFromGAS(rego, callback) {
+  if (!rego) return;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_bus_damage&rego=' + encodeURIComponent(rego));
+    const json = await res.json();
+    if (json.ok && json.markers && json.markers.length > 0) {
+      // GAS에 데이터가 있으면 로컬 업데이트
+      localStorage.setItem(busDmgKey(rego), JSON.stringify(json.markers));
+      if (callback) callback(json.markers);
+    }
+  } catch(e) { console.warn('데미지 GAS 동기화 실패:', e); }
+}
+
 function busSavePerma(rego, markers) {
   if (!rego) return;
   try {
     // permanent 플래그가 있는 것만 저장 (신규 추가된 것도 포함)
     localStorage.setItem(busDmgKey(rego), JSON.stringify(markers));
+    // GAS에도 동기화
+    fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'save_bus_damage', rego: rego, markers: markers, driver: currentDriver?.name||''})
+    }).catch(()=>{});
   } catch(e) { console.warn('데미지 저장 실패:', e); }
 }
 

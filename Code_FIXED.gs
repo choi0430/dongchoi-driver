@@ -72,7 +72,11 @@ const MASTER_HEADERS = {
   // ── 야간투어 요금 ──
   'M_NightRates': ['NightType','VehicleCategory','TA','DR','Owner'],
   // ── 관광지 POI 정보 ──
-  'M_Attractions': ['Attraction','Emoji','POI_Icon','POI_Name','POI_Detail','POI_MapURL','Info']
+  'M_Attractions': ['Attraction','Emoji','POI_Icon','POI_Name','POI_Detail','POI_MapURL','Info'],
+  // ── 결함 리포트 ──
+  'Defect_Reports': ['ID','Rego','Category','Location','Description','Severity','KM','Driver','Status','SubmittedAt','AdminNote'],
+  // ── 차량 데미지 마커 ──
+  'Bus_Damage': ['Rego','Markers','UpdatedAt','UpdatedBy']
 };
 
 // ── Tab Colors ──
@@ -84,7 +88,8 @@ const TAB_COLORS = {
   'Agency_Txn':'#0891b2','SUB_Txn':'#a21caf',
   'Invoices':'#6d28d9',
   'M_SvcOptions':'#6366f1','M_HotelOptions':'#ec4899','M_DistOptions':'#f59e0b',
-  'M_NightRates':'#8b5cf6','M_Attractions':'#14b8a6'
+  'M_NightRates':'#8b5cf6','M_Attractions':'#14b8a6',
+  'Defect_Reports':'#dc2626','Bus_Damage':'#ea580c'
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -198,6 +203,16 @@ function doGet(e) {
 
       case 'get_sub_txn':
         return cors(getSheetRows('SUB_Txn'));
+
+      case 'get_defect_reports': {
+        const defDriver = params.driver ? params.driver[0] : '';
+        return cors(getDefectReports(defDriver));
+      }
+
+      case 'get_bus_damage': {
+        const dmgRego = params.rego ? params.rego[0] : '';
+        return cors(getBusDamage(dmgRego));
+      }
 
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
@@ -414,6 +429,18 @@ function doPost(e) {
 
       case 'update_driver_info':
         return cors(updateDriverInfo(payload.driverName, payload.data));
+
+      // ── Defect Reports ──
+      case 'save_defect_report':
+        return cors(saveDefectReport(payload.data));
+
+      case 'update_defect_status': {
+        return cors(updateDefectStatus(payload.id, payload.status, payload.adminNote));
+      }
+
+      // ── Bus Damage Markers ──
+      case 'save_bus_damage':
+        return cors(saveBusDamage(payload.rego, payload.markers, payload.driver));
 
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
@@ -1570,6 +1597,153 @@ function bulkUpdateGuidePhones(guides) {
     }
 
     return { ok: true, updated, total: guides.length };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Defect Reports — Google Sheets 동기화
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getDefectReports(driverName) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Defect_Reports');
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { ok: true, reports: [] };
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const rows = data.map((row, idx) => {
+      const obj = { _rowIndex: idx + 2 };
+      headers.forEach((h, ci) => { obj[h] = row[ci]; });
+      return obj;
+    });
+    // 드라이버 필터 (빈 문자열이면 전체)
+    const filtered = driverName
+      ? rows.filter(r => String(r.Driver || '') === driverName)
+      : rows;
+    return { ok: true, reports: filtered };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function saveDefectReport(data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Defect_Reports');
+    const headers = MASTER_HEADERS['Defect_Reports'];
+    const row = headers.map(h => {
+      const nk = normalizeKey(h);
+      // data의 키를 lowercase로 매칭
+      for (const k of Object.keys(data)) {
+        if (normalizeKey(k) === nk) return data[k] || '';
+      }
+      return '';
+    });
+    sheet.appendRow(row);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function updateDefectStatus(id, status, adminNote) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Defect_Reports');
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { ok: false, error: 'No data' };
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    const idCol = headers.indexOf('ID');
+    const statusCol = headers.indexOf('Status');
+    const noteCol = headers.indexOf('AdminNote');
+    if (idCol < 0) return { ok: false, error: 'ID column not found' };
+    const data = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        if (statusCol >= 0) sheet.getRange(i + 2, statusCol + 1).setValue(status || '');
+        if (noteCol >= 0 && adminNote !== undefined) sheet.getRange(i + 2, noteCol + 1).setValue(adminNote || '');
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'ID not found: ' + id };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bus Damage Markers — Google Sheets 동기화
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getBusDamage(rego) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Bus_Damage');
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { ok: true, markers: [], rego: rego };
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const regoCol = headers.indexOf('Rego');
+    const markersCol = headers.indexOf('Markers');
+    if (regoCol < 0) return { ok: true, markers: [], rego: rego };
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][regoCol]).trim() === String(rego).trim()) {
+        let markers = [];
+        try { markers = JSON.parse(data[i][markersCol] || '[]'); } catch(e) {}
+        return { ok: true, markers: markers, rego: rego };
+      }
+    }
+    return { ok: true, markers: [], rego: rego };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function saveBusDamage(rego, markers, driver) {
+  try {
+    if (!rego) return { ok: false, error: 'Rego required' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Bus_Damage');
+    const lastRow = sheet.getLastRow();
+    const lastCol = Math.max(sheet.getLastColumn(), 1);
+    const headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : [];
+    const regoCol = headers.indexOf('Rego');
+    const markersCol = headers.indexOf('Markers');
+    const updatedAtCol = headers.indexOf('UpdatedAt');
+    const updatedByCol = headers.indexOf('UpdatedBy');
+    const now = Utilities.formatDate(new Date(), 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
+    const markersJson = JSON.stringify(markers || []);
+
+    // 기존 행 찾기
+    if (lastRow > 1 && regoCol >= 0) {
+      const data = sheet.getRange(2, regoCol + 1, lastRow - 1, 1).getValues();
+      for (let i = 0; i < data.length; i++) {
+        if (String(data[i][0]).trim() === String(rego).trim()) {
+          // 기존 행 업데이트
+          if (markersCol >= 0) sheet.getRange(i + 2, markersCol + 1).setValue(markersJson);
+          if (updatedAtCol >= 0) sheet.getRange(i + 2, updatedAtCol + 1).setValue(now);
+          if (updatedByCol >= 0) sheet.getRange(i + 2, updatedByCol + 1).setValue(driver || '');
+          return { ok: true, updated: true };
+        }
+      }
+    }
+    // 새 행 추가
+    const expected = MASTER_HEADERS['Bus_Damage'];
+    const row = expected.map(h => {
+      if (h === 'Rego') return rego;
+      if (h === 'Markers') return markersJson;
+      if (h === 'UpdatedAt') return now;
+      if (h === 'UpdatedBy') return driver || '';
+      return '';
+    });
+    sheet.appendRow(row);
+    return { ok: true, created: true };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
