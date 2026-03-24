@@ -37,10 +37,10 @@ const REPORT_HEADERS = {
 const MASTER_HEADERS = {
   'M_Vehicles': ['Rego','Make','Model','Manufacture_Date','Capacity','Owner','Rego_Date','HVIS_Date',
                  'Current_KM','Last_Service_KM','Service_Interval','VIN','Engine_Number',
-                 'Accreditation','Current_Status','Transmission'],
-  'M_Drivers':  ['Name_EN','Name_KR','DriverID','Mobile_1','NEXT_OF_KIN','License_Class',
+                 'Accreditation','Current_Status','Transmission','Active'],
+  'M_Drivers':  ['Name_EN','Name_KR','Initials','DriverID','Mobile_1','NEXT_OF_KIN','License_Class',
                  'License_No','License_Expiry','Authority_No','Authority_Expiry',
-                 'Address','Suburb','Bank_Name','BSB','Account_Number','PIN'],
+                 'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','Active'],
   'M_Clients':  ['Name','ClientID','Mobile','Email','Address','Bank_Name','BSB','Account_Number'],
   'M_Guides':   ['GuideID','Guide_Name','Mobile','Agency','Email','Remarks'],
   'M_Hotels':   ['Hotel_Name','Phone','Address','Surcharge_Area'],
@@ -461,8 +461,7 @@ function getReports(sheetName, driver) {
 function getMaster(sheetName) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
-    const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
+    const sheet = ensureSheet(ss, sheetName); // 누락 컬럼 자동 보정
 
     const data = sheet.getDataRange().getValues();
     if (data.length < 2) return {ok: true, sheet: sheetName, rows: []};
@@ -483,7 +482,14 @@ function getMaster(sheetName) {
       const obj = {};
       headers.forEach((h, i) => {
         // 시트 헤더를 정규 키로 변환 (공백↔언더스코어 자동 처리)
-        const canonKey = (h && normToCanonical[normalizeKey(h)]) || h;
+        const nk = normalizeKey(h);
+        let canonKey = (h && normToCanonical[nk]) || h;
+        // 별칭 매핑 (예: Phone → Mobile_1)
+        if (!normToCanonical[nk] && FIELD_ALIASES[nk]) {
+          for (const alias of FIELD_ALIASES[nk]) {
+            if (normToCanonical[alias]) { canonKey = normToCanonical[alias]; break; }
+          }
+        }
         obj[canonKey] = row[i];
       });
       // 행 번호 저장 (1-based 시트 행): 헤더(1) + rowIdx(0-based) + 1
