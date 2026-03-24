@@ -38,7 +38,7 @@ const MASTER_HEADERS = {
   'M_Vehicles': ['Rego','Make','Model','Manufacture_Date','Capacity','Owner','Rego_Date','HVIS_Date',
                  'Current_KM','Last_Service_KM','Service_Interval','VIN','Engine_Number',
                  'Accreditation','Current_Status','Transmission','Active'],
-  'M_Drivers':  ['Name_EN','Name_KR','Initials','DriverID','Mobile_1','NEXT_OF_KIN','License_Class',
+  'M_Drivers':  ['Name_EN','Name_KR','Initials','DriverID','Mobile_1','NEXT_OF_KIN','Moblie_2','License_Class',
                  'License_No','License_Expiry','Authority_No','Authority_Expiry',
                  'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','Active'],
   'M_Clients':  ['Name','ClientID','Mobile','Email','Address','Bank_Name','BSB','Account_Number'],
@@ -509,7 +509,7 @@ function getMaster(sheetName) {
     }
 
     // 전화번호 컬럼 인덱스 사전 탐색 (앞 0 복원용)
-    const PHONE_FIELDS = ['phone','mobile','mobile_1','mobile_2','moblie_2','next_of_kin'];
+    const PHONE_FIELDS = ['phone','mobile','mobile_1','mobile_2','moblie_2'];
     const phoneColIdxSet = new Set();
     headers.forEach((h, i) => {
       if (PHONE_FIELDS.includes(normalizeKey(h))) phoneColIdxSet.add(i);

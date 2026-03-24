@@ -6389,13 +6389,14 @@ function openView(type, idx) {
         <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">${escH(label)}</div>
         <div style="font-size:14px;font-weight:600;color:${val?'var(--t1)':'var(--t3)'};">${val?escH(String(val)):'—'}</div>
       </div>`).join('') + `</div>`;
-    const nextOfKin = fixPhone(d.NEXT_OF_KIN || d['NEXT OF KIN'] || '');
+    const nokName = d.NEXT_OF_KIN || d['NEXT OF KIN'] || '';
+    const nokPhone = fixPhone(d.Moblie_2||d['Moblie 2']||d.Mobile_2||d['Mobile 2']||'');
     const licNo     = d.License_No || d['License_#'] || '';
     const authNo    = d.Authority_No || d['Authority_#'] || '';
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">👤 기본 정보</div>`;
     html += row2A([['영문 이름', d.Name_EN], ['한글 이름', d.Name_KR]]);
     html += row2A([['이메일 (DriverID)', d.DriverID], ['연락처', fixPhone(d.Phone||d.Mobile_1)]]);
-    html += rowA('비상연락처 (Next of Kin)', nextOfKin);
+    html += row2A([['비상연락처 이름', nokName], ['비상연락처 번호', nokPhone]]);
     // PIN: 보안상 마스킹 표시
     html += rowA('PIN', d.PIN ? '••••' : '');
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🪪 면허 / Authority</div>`;
@@ -6516,7 +6517,8 @@ function openM(type,idx){
         </select></div></div></div>`;
   }
   else if(type==='D'){
-    const nextOfKin = fixPhone(d.NEXT_OF_KIN||d['NEXT OF KIN']||'');
+    const nokName = d.NEXT_OF_KIN||d['NEXT OF KIN']||'';
+    const nokPhone = fixPhone(d.Moblie_2||d['Moblie 2']||d.Mobile_2||d['Mobile 2']||'');
     const licNo     = d.License_No||d['License_#']||'';
     const authNo    = d.Authority_No||d['Authority_#']||'';
     h=`<div class="fr2">
@@ -6524,9 +6526,10 @@ function openM(type,idx){
         <div><label class="fl">한글 이름</label><input class="fi" id="f1" value="${d.Name_KR||''}"></div></div>
       <div class="fr"><label class="fl">🔑 PIN 번호 (4자리)</label><input class="fi" id="f15" value="${d.PIN||''}" placeholder="예) 1234" maxlength="4" inputmode="numeric" style="font-size:18px;letter-spacing:4px;font-weight:700;"></div>
       <div class="fr"><label class="fl">이메일 (DriverID)*</label><input class="fi" id="f2" value="${d.DriverID||''}"></div>
+      <div class="fr"><label class="fl">연락처</label><input class="fi" id="f3" value="${fixPhone(d.Phone||d.Mobile_1)}"></div>
       <div class="fr2">
-        <div><label class="fl">연락처</label><input class="fi" id="f3" value="${fixPhone(d.Phone||d.Mobile_1)}"></div>
-        <div><label class="fl">비상연락처</label><input class="fi" id="f4" value="${nextOfKin}"></div></div>
+        <div><label class="fl">비상연락처 이름</label><input class="fi" id="f4" value="${nokName}" placeholder="홍길동"></div>
+        <div><label class="fl">비상연락처 번호</label><input class="fi" id="f16" value="${nokPhone}" placeholder="0400 000 000" inputmode="tel"></div></div>
       <div class="fr2">
         <div><label class="fl">면허 등급</label><div class="fsw"><select class="fs" id="f5">
           <option value="HR"${d.License_Class==='HR'?' selected':''}>HR</option>
@@ -6694,7 +6697,7 @@ function saveM(){
     if(!gv('f0')){toast('이름 필수','er');return}
     sheetName='M_Drivers';
     obj={_rowIndex:ie?(DB.D[idx]?._rowIndex||null):null,
-         Name_EN:gv('f0'),Name_KR:gv('f1'),DriverID:gv('f2'),Mobile_1:gv('f3'),Phone:gv('f3'),NEXT_OF_KIN:gv('f4'),
+         Name_EN:gv('f0'),Name_KR:gv('f1'),DriverID:gv('f2'),Mobile_1:gv('f3'),Phone:gv('f3'),NEXT_OF_KIN:gv('f4'),Moblie_2:gv('f16'),
          License_Class:gv('f5'),License_No:gv('f6'),License_Expiry:fmtDate(gv('f7')),
          Authority_No:gv('f8'),Authority_Expiry:fmtDate(gv('f9')),
          Address:gv('f10'),Suburb:gv('f11'),Bank_Name:gv('f12'),BSB:gv('f13'),
@@ -7083,7 +7086,8 @@ async function syncDrivers(){
     Name_EN:rf(r,'Name_EN','Name EN')||'', Name_KR:rf(r,'Name_KR','Name KR')||'', DriverID:rf(r,'DriverID','Driver ID')||'',
     Phone:ph,
     Mobile_1:ph,
-    NEXT_OF_KIN: fixPhone(rf(r,'NEXT_OF_KIN','NEXT OF KIN','Next_of_Kin')),
+    NEXT_OF_KIN: rf(r,'NEXT_OF_KIN','NEXT OF KIN','Next_of_Kin'),
+    Moblie_2: fixPhone(rf(r,'Moblie_2','Moblie 2','Mobile_2','Mobile 2')),
     License_Class:rf(r,'License_Class','License Class')||'',
     License_No: rf(r,'License_No','License_#','License #'),
     License_Expiry:fmtDate(rf(r,'License_Expiry','License Expiry')||''),
@@ -7210,6 +7214,7 @@ async function loadAllFromSheets(){
         Name_EN:_rf2(r,'Name_EN','Name EN')||'', Name_KR:_rf2(r,'Name_KR','Name KR')||'', DriverID:_rf2(r,'DriverID','Driver ID')||'',
         Phone:ph, Mobile_1:ph,
         NEXT_OF_KIN: _rf2(r,'NEXT_OF_KIN','NEXT OF KIN','Next_of_Kin'),
+        Moblie_2: fixPhone(_rf2(r,'Moblie_2','Moblie 2','Mobile_2','Mobile 2')),
         License_Class:_rf2(r,'License_Class','License Class')||'',
         License_No: _rf2(r,'License_No','License_#','License #'),
         License_Expiry:fmtDate(_rf2(r,'License_Expiry','License Expiry')||''),
