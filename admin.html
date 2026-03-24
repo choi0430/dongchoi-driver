@@ -2930,6 +2930,8 @@ async function initBalance(){
 
 async function syncBalanceData(force){
   try {
+    // DR 리포트 캐시 확보 (드라이버 잔액 계산에 필요)
+    if(!_reportsCache) await ensureReportsCache();
     const [agRes, subRes] = await Promise.all([
       fetch(APPS_SCRIPT_URL+'?action=get_agency_txn'),
       fetch(APPS_SCRIPT_URL+'?action=get_sub_txn')
@@ -2938,7 +2940,7 @@ async function syncBalanceData(force){
     const subJson = await subRes.json();
     if(agJson.ok && agJson.rows) _balAgencyTxns = agJson.rows;
     if(subJson.ok && subJson.rows) _balSubTxns = subJson.rows;
-    // Driver wage: derive from ledger MyDr + wages
+    // Driver wage: derive from Daily_Report DR_Cost + wages
     _buildWageTxns();
     _balLoaded = true;
     if(force) toast('잔액 데이터 동기화 완료','ok');
@@ -2949,27 +2951,48 @@ async function syncBalanceData(force){
 }
 
 function _buildWageTxns(){
-  // Combine: Ledger entries (MyDr > 0) = DR (earned), Wages entries = CR (paid)
+  // Combine: Daily_Report DR_Cost = DR (earned), Wages entries = CR (paid)
   const txns = [];
-  // From ledger: driver earnings
+
+  // ① Daily_Report 기반 드라이버 발생 수당 (급여 페이지와 동일한 데이터 소스)
+  const drRows = _reportsCache || [];
+  drRows.forEach(r=>{
+    const driver = String(r.Driver||'').trim();
+    if(!driver) return;
+    const drCost = parseFloat(r.DR_Cost)||0;
+    const nightOwner = parseFloat(r.Night_Owner)||0;
+    const earned = drCost - nightOwner;
+    if(earned <= 0) return;
+    const isoDate = r._isoDate || parseToISO(r.Date||'');
+    txns.push({type:'DR', driver, date:isoDate, desc:(r.Attraction||r.Tour_Code||r.Agency||'운행'), amount:earned, source:'dr_report'});
+  });
+
+  // ② Ledger 기반 (MyDr) — 추가 정산이 있을 경우 (중복 방지: DR_Report에 없는 건만)
   const ledger = getLedger();
   ledger.forEach(wk=>{
     (wk.entries||[]).forEach(e=>{
       if(!e.rego || !e.myDr) return;
-      // Find driver for this rego from vehicles
       const veh = (ST.vehicles||[]).find(v=>v.Rego===e.rego);
-      const driver = e.driver || veh?._lastDriver || e.rego;
-      txns.push({type:'DR', driver:driver||e.rego, date:e.date, desc:e.tour||e.rego, amount:e.myDr, source:'ledger'});
+      const driver = e.driver || veh?._lastDriver || '';
+      if(!driver) return; // 드라이버 식별 불가능한 Ledger 건은 스킵
+      txns.push({type:'DR', driver, date:e.date, desc:e.tour||e.rego, amount:e.myDr, source:'ledger'});
     });
   });
-  // From wages: actual payments
-  const wages = safeGetLocal('admin_wages',[]);
-  wages.forEach(wk=>{
-    (wk.entries||[]).forEach(e=>{
-      if(!e.driver || !e.amount) return;
-      txns.push({type:'CR', driver:e.driver, date:e.date, desc:e.note||e.payMethod||'급여 지급', amount:e.amount, source:'wage'});
+
+  // ③ Wages (실 지급) = CR
+  // admin_wages 구조: { driverName: { weekStart: { entries: [{date, amount, method, note}] } } }
+  const wages = safeGetLocal('admin_wages', {});
+  if(wages && typeof wages === 'object' && !Array.isArray(wages)){
+    Object.entries(wages).forEach(([drv, weeks])=>{
+      if(!weeks || typeof weeks !== 'object') return;
+      Object.entries(weeks).forEach(([ws, wk])=>{
+        (wk.entries||[]).forEach(e=>{
+          if(!e.amount) return;
+          txns.push({type:'CR', driver:drv, date:e.date||ws, desc:e.note||e.method||'급여 지급', amount:Number(e.amount)||0, source:'wage'});
+        });
+      });
     });
-  });
+  }
   _balWageTxns = txns;
 }
 
