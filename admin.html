@@ -1477,6 +1477,23 @@ function fmtDate(ds){
   if(/^\d{4}-\d{2}-\d{2}/.test(s)){const[y,m,d]=s.slice(0,10).split('-');return d+'/'+m+'/'+y;}
   return s;
 }
+// 날짜+시간 포맷: "24/03/2026 21:33" (Sydney 시간)
+function fmtDateTime(ds){
+  if(!ds) return '—';
+  const s = String(ds).trim();
+  if(s.includes('T')){
+    const d = new Date(s);
+    if(!isNaN(d)){
+      const local = new Date(d.getTime()+getSydneyOffsetMs(d));
+      const dd=String(local.getUTCDate()).padStart(2,'0');
+      const mm=String(local.getUTCMonth()+1).padStart(2,'0');
+      const hh=String(local.getUTCHours()).padStart(2,'0');
+      const mi=String(local.getUTCMinutes()).padStart(2,'0');
+      return dd+'/'+mm+'/'+local.getUTCFullYear()+' '+hh+':'+mi;
+    }
+  }
+  return fmtDate(s);
+}
 function du(ds){if(!ds)return 9999;const iso=parseToISO(ds);if(!iso)return 9999;const d=new Date(iso),n=new Date();n.setHours(0,0,0,0);return Math.ceil((d-n)/86400000)}
 function etag(ds,lbl){
   if(!ds)return`<span class="tag ty">${lbl}: —</span>`;
@@ -4382,11 +4399,12 @@ function renderInvHistory() {
           </div>
           <div style="font-size:11px;color:var(--t2);">${escH(inv.Agency||'—')}</div>
           <div style="font-size:10px;color:var(--t3);">${fmtDate(inv.PeriodFrom)||inv.PeriodFrom||''} ~ ${fmtDate(inv.PeriodTo)||inv.PeriodTo||''}</div>
-          <div style="font-size:10px;color:var(--t3);margin-top:2px;">발행: ${inv.IssuedDate||'—'}${inv.EmailSentDate?' · 발송:'+inv.EmailSentDate:''}${inv.PaidDate?' · 결제:'+inv.PaidDate:''}</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:2px;">발행: ${fmtDateTime(inv.IssuedDate)}${inv.EmailSentDate?' · 발송: '+fmtDateTime(inv.EmailSentDate):''}${inv.PaidDate?' · 결제: '+fmtDateTime(inv.PaidDate):''}</div>
         </div>
         <div style="text-align:right;flex-shrink:0;margin-left:8px;">
           <div style="font-size:15px;font-weight:800;color:var(--gn);">$${amt.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
           <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap;">
+            <button onclick="previewIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:5px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">👁미리보기</button>
             ${inv.Status!=='paid'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','paid','PaidDate')" style="font-size:10px;padding:3px 7px;border-radius:5px;border:1px solid #86efac;background:#f0fdf4;color:#166534;cursor:pointer;font-weight:600;">✅결제</button>`:''}
             ${inv.Status==='issued'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','emailed','EmailSentDate')" style="font-size:10px;padding:3px 7px;border-radius:5px;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;cursor:pointer;font-weight:600;">✉️발송</button>`:''}
             ${inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','cancelled','')" style="font-size:10px;padding:3px 7px;border-radius:5px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:600;">❌취소</button>`:''}
@@ -4396,6 +4414,61 @@ function renderInvHistory() {
       </div>
     </div>`;
   }).join('');
+}
+
+async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
+  if (!agency || !periodFrom || !periodTo) {
+    toast('⚠️ 인보이스 정보가 부족합니다','warn');
+    return;
+  }
+  // ① 인보이스 셀렉터에 값 세팅
+  const selAgency = document.getElementById('inv-agency');
+  const inpFrom   = document.getElementById('inv-from');
+  const inpTo     = document.getElementById('inv-to');
+  if (inpFrom) inpFrom.value = periodFrom;
+  if (inpTo)   inpTo.value   = periodTo;
+
+  // ② 리포트 데이터 로드 (캐시 없으면 GAS에서 fetch)
+  if (!_invReports) {
+    try {
+      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      if (json.ok) {
+        _invReports = json.rows.map(r => ({
+          ...r,
+          _iso: parseToISO(r.Date || ''),
+          _agency: String(r.Agency||'').trim(),
+          _timeStart: parseSheetTime(r.Time_Start),
+          _timeEnd:   parseSheetTime(r.Time_End),
+        }));
+        await populateInvAgency();
+      }
+    } catch(e) {
+      toast('리포트 로드 실패: ' + e.message, 'err');
+      return;
+    }
+  }
+
+  // ③ 드롭다운에 agency 옵션이 없으면 추가
+  if (selAgency) {
+    let found = false;
+    for (const opt of selAgency.options) { if (opt.value === agency) { found = true; break; } }
+    if (!found) {
+      const opt = document.createElement('option');
+      opt.value = agency; opt.textContent = agency;
+      selAgency.appendChild(opt);
+    }
+    selAgency.value = agency;
+  }
+
+  // ④ 미리보기 빌드 & 렌더
+  const rows = _buildInvRows(agency, periodFrom, periodTo);
+  renderInvPreview(rows, agency, periodFrom, periodTo);
+
+  // ⑤ 미리보기 영역으로 스크롤
+  const prev = document.getElementById('inv-preview');
+  if (prev) prev.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function updateInvStatus(invNumber, status, field) {
