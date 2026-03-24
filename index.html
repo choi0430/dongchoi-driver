@@ -1701,7 +1701,11 @@ function loadMasterCache() {
     const raw = localStorage.getItem(MASTER_CACHE_KEY);
     if (!raw) return null;
     const { ts, data } = JSON.parse(raw);
-    if (Date.now() - ts > MASTER_CACHE_TTL) return null; // 만료
+    if (Date.now() - ts > MASTER_CACHE_TTL) return null; // 시간 만료
+    // ── 날짜 경계 체크: 캐시 저장일과 오늘이 다르면 무효화 ──
+    const cachedDate = new Date(ts).toLocaleDateString('en-AU', {timeZone:'Australia/Sydney'});
+    const todayDate  = new Date().toLocaleDateString('en-AU', {timeZone:'Australia/Sydney'});
+    if (cachedDate !== todayDate) return null; // 날짜 변경 시 캐시 무효화
     return data;
   } catch(e) { return null; }
 }

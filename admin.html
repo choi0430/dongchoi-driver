@@ -6529,7 +6529,7 @@ function saveM(){
     if(!gv('f0')){toast('이름 필수','er');return}
     sheetName='M_Drivers';
     obj={_rowIndex:ie?(DB.D[idx]?._rowIndex||null):null,
-         Name_EN:gv('f0'),Name_KR:gv('f1'),DriverID:gv('f2'),Phone:gv('f3'),NEXT_OF_KIN:gv('f4'),
+         Name_EN:gv('f0'),Name_KR:gv('f1'),DriverID:gv('f2'),Mobile_1:gv('f3'),Phone:gv('f3'),NEXT_OF_KIN:gv('f4'),
          License_Class:gv('f5'),License_No:gv('f6'),License_Expiry:fmtDate(gv('f7')),
          Authority_No:gv('f8'),Authority_Expiry:fmtDate(gv('f9')),
          Address:gv('f10'),Suburb:gv('f11'),Bank_Name:gv('f12'),BSB:gv('f13'),
@@ -6940,7 +6940,10 @@ async function syncSub(){
 async function loadAllFromSheets(){
   try {
     toast('📡 Google Sheets 로딩 중...','ok');
-    const res = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000); // 15초 타임아웃
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters', { signal: controller.signal });
+    clearTimeout(timeout);
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(!json.ok){ toast('데이터 로드 실패','er'); rDash(); return; }
@@ -7075,12 +7078,16 @@ async function loadAllFromSheets(){
     await loadNoticesFromGAS();
     await initNoticesIfEmpty();
   } catch(e){
-    console.error(e);
+    console.error('loadAllFromSheets error:', e);
     document.getElementById('sl').classList.remove('on');
     document.getElementById('sm').classList.add('on');
     document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
+    // 동기화 상태 업데이트 — 로딩 중에서 에러로 변경
+    const _syncEl = document.getElementById('sync-status');
+    if(_syncEl) _syncEl.textContent = '❌ 연결 실패 — 새로고침 또는 재시도하세요';
     rDash();
-    toast('⚠️ 오프라인 모드 (Sheets 연결 실패)','er');
+    const errMsg = e.name === 'AbortError' ? '⚠️ 서버 응답 시간 초과 (15초) — 새로고침하세요' : '⚠️ 오프라인 모드 (Sheets 연결 실패)';
+    toast(errMsg,'er');
   }
 }
 

@@ -119,6 +119,20 @@ function ensureSheet(ss, sheetName) {
         sheet.setFrozenRows(1);
         sheet.setTabColor(color);
       }
+    } else {
+      // ── 기존 시트에 누락된 컬럼 자동 추가 ──
+      const expected = MASTER_HEADERS[sheetName];
+      if (expected) {
+        const lastCol = sheet.getLastColumn();
+        const existing = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : [];
+        const missing = expected.filter(h => !existing.includes(h));
+        if (missing.length > 0) {
+          const startCol = lastCol + 1;
+          const color = TAB_COLORS[sheetName] || '#1a56db';
+          sheet.getRange(1, startCol, 1, missing.length).setValues([missing])
+            .setBackground(color).setFontColor('white').setFontWeight('bold');
+        }
+      }
     }
     return sheet;
   } catch (err) {
@@ -750,10 +764,32 @@ function normalizeKey(k) {
   return String(k).toLowerCase().replace(/[\s\-]+/g, '_');
 }
 
-// data 객체를 정규화 키로 조회하는 맵 생성
+// ── 필드 별칭 맵: 시트 헤더 ↔ 코드 키 불일치 자동 해소 ──
+const FIELD_ALIASES = {
+  'phone': ['mobile_1', 'mobile'],
+  'mobile_1': ['phone', 'mobile'],
+  'mobile': ['phone', 'mobile_1'],
+  'license_#': ['license_no'],
+  'license_no': ['license_#'],
+  'authority_#': ['authority_no'],
+  'authority_no': ['authority_#'],
+  'next_of_kin': ['next of kin'],
+  'engine_number': ['engine number'],
+  'manufacture_date': ['manufacture date']
+};
+
+// data 객체를 정규화 키로 조회하는 맵 생성 (별칭 포함)
 function buildNormMap(data) {
   const m = {};
-  Object.keys(data).forEach(k => { m[normalizeKey(k)] = data[k]; });
+  Object.keys(data).forEach(k => {
+    const nk = normalizeKey(k);
+    m[nk] = data[k];
+    // 별칭도 등록 (이미 있는 키는 덮어쓰지 않음)
+    const aliases = FIELD_ALIASES[nk];
+    if (aliases) {
+      aliases.forEach(a => { if (m[a] === undefined) m[a] = data[k]; });
+    }
+  });
   return m;
 }
 
