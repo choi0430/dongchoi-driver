@@ -9,10 +9,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#f0f2f5">
+<meta name="color-scheme" content="light only">
 <title>DC Fleet — Driver</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Barlow+Condensed:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
+  color-scheme: light;
   --bg:#f0f2f5;--surface:#ffffff;--surface2:#f8f9fb;--border:#e4e8ef;
   --accent:#1a56db;--accent-light:#eff4ff;--green:#0e9f6e;--green-light:#f0fdf4;
   --red:#e02424;--red-light:#fff5f5;--orange:#ff6b35;--orange-light:#fff7f0;
@@ -2786,6 +2788,19 @@ function doLogin() {
   // ── 드라이버별 localStorage 데이터 로드 ──
   try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
   try { todayReports = JSON.parse(localStorage.getItem('reports_'+name)||'[]'); } catch(e){ todayReports=[]; }
+  // ── 장기 미완료 shift 자동 정리 (48시간 초과) ──
+  const _shiftCutoff = 48 * 60 * 60 * 1000; // 48시간
+  const _now = Date.now();
+  const _expiredShifts = activeShifts.filter(s => {
+    const startStr = `${s.date}T${s.startTime || '00:00'}`;
+    const startMs = new Date(startStr.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')).getTime() || 0;
+    return startMs > 0 && (_now - startMs) > _shiftCutoff;
+  });
+  if(_expiredShifts.length > 0) {
+    activeShifts = activeShifts.filter(s => !_expiredShifts.includes(s));
+    localStorage.setItem('shifts_'+name, JSON.stringify(activeShifts));
+    console.warn('⚠️ 48시간 초과 shift 자동 정리:', _expiredShifts.length, '건');
+  }
   // 진행 중인 shift가 있으면 editingShiftId 복원
   if(activeShifts.length > 0) {
     editingShiftId = activeShifts[activeShifts.length - 1].id;
@@ -3187,6 +3202,18 @@ function autoRestoreSession() {
     currentDriver = { name, initials: initials||'??', englishName: englishName||name };
     try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
     try { todayReports = JSON.parse(localStorage.getItem('reports_'+name)||'[]'); } catch(e){ todayReports=[]; }
+    // ── 장기 미완료 shift 자동 정리 (48시간 초과) ──
+    const _cutoff = 48 * 60 * 60 * 1000;
+    const _nowMs = Date.now();
+    const _stale = activeShifts.filter(s => {
+      const startStr = `${s.date}T${s.startTime || '00:00'}`;
+      const startMs = new Date(startStr.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')).getTime() || 0;
+      return startMs > 0 && (_nowMs - startMs) > _cutoff;
+    });
+    if(_stale.length > 0) {
+      activeShifts = activeShifts.filter(s => !_stale.includes(s));
+      localStorage.setItem('shifts_'+name, JSON.stringify(activeShifts));
+    }
     if(activeShifts.length > 0) editingShiftId = activeShifts[activeShifts.length-1].id;
 
     document.getElementById('driver-name-pill').textContent = name + ' ▾';
