@@ -7587,7 +7587,8 @@ function renderShiftTab() {
   }
 
   const isPre = _shiftCurrentTab === 'pre';
-  container.innerHTML = filtered.map(r=>{
+  container.innerHTML = filtered.map(orig=>{
+    const r = isPre ? orig : _normalizeEOS({...orig});
     const ri = r._rowIndex;
     const tab = _shiftCurrentTab;
     const dateStr = fmtDate(r.Date)||r.Date||'—';
@@ -7650,7 +7651,35 @@ function viewShiftPdfAdmin(rowIndex, type) {
   openShiftPdfAdmin(r, type);
 }
 
+// ── EOS 데이터 정규화 (시트 컬럼 버전 차이 처리) ──
+function _normalizeEOS(r) {
+  // Check_Results에 서명(base64 이미지)이 들어간 경우
+  if (r.Check_Results && String(r.Check_Results).startsWith('data:image')) {
+    if (!r.Signature) r.Signature = r.Check_Results;
+    r.Check_Results = '';
+  }
+  // Remarks에 체크리스트 JSON이 들어간 경우
+  if (!r.Check_Results && r.Remarks && String(r.Remarks).trim().startsWith('[{')) {
+    r.Check_Results = r.Remarks;
+    r.Remarks = '';
+  }
+  // 무명 컬럼 ':'에 서명이 들어간 경우
+  if (!r.Signature && r[''] && String(r['']).startsWith('data:image')) {
+    r.Signature = r[''];
+  }
+  // End_Time에 KM 값이 들어간 경우 (숫자 > 10000)
+  const et = String(r.End_Time||'').trim();
+  if (et && !et.includes('T') && !et.includes(':') && Number(et) > 10000) {
+    // End_Time은 실제 End_KM, Fuel_End는 실제 End_Time
+    if (!r.End_KM || Number(r.End_KM) === 0) r.End_KM = et;
+    r.End_Time = r.Fuel_End || '';
+    r.Fuel_End = '';
+  }
+  return r;
+}
+
 function openShiftPdfAdmin(r, type) {
+  r = _normalizeEOS({...r});
   const isPre = type === 'pre';
   const typeLabel = isPre ? 'PRE DEPARTURE REPORT' : 'END OF SHIFT REPORT';
   const h = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
