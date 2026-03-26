@@ -8359,7 +8359,8 @@ function renderMyPastShifts() {
     return;
   }
 
-  listEl.innerHTML = all.map(r=>{
+  listEl.innerHTML = all.map(orig=>{
+    const r = orig._type === 'eos' ? _normalizeEOS({...orig}) : orig;
     const isPre = r._type === 'pre';
     const ri = r._rowIndex;
     const tp = r._type;
@@ -8368,14 +8369,14 @@ function renderMyPastShifts() {
       : `<span style="background:#f0fdf4;color:#15803d;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;">🏁 End of Shift</span>`;
     const sub = isPre
       ? `출발 ${parseSheetTime(r.Start_Time)||'—'} · KM ${r.Start_KM||'—'}`
-      : `종료 ${parseSheetTime(r.End_Time)||(String(r.Fuel_End||'').includes('T')?parseSheetTime(r.Fuel_End):'')||'—'} · KM ${r.End_KM||'—'}`;
+      : `종료 ${parseSheetTime(r.End_Time)||'—'} · KM ${r.End_KM||'—'}`;
     return `<div style="background:white;border-radius:12px;padding:12px;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">${badge}</div>
           <div style="font-size:13px;font-weight:700;color:#1a1a1a;">${fmtDate(r.Date)||r.Date||'—'} · ${r.Rego||'—'}</div>
           <div style="font-size:11px;color:#9ca3af;margin-top:2px;">${sub}</div>
-          ${r.Remarks&&!String(r.Remarks).trim().startsWith('[{')?`<div style="font-size:11px;color:#9ca3af;font-style:italic;margin-top:2px;">${r.Remarks}</div>`:''}
+          ${r.Remarks?`<div style="font-size:11px;color:#9ca3af;font-style:italic;margin-top:2px;">${r.Remarks}</div>`:''}
         </div>
         <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;">
           <button onclick="openPastShiftPdf(${ri},'${tp}')" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:none;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer;white-space:nowrap;">📄 PDF</button>
@@ -8386,10 +8387,33 @@ function renderMyPastShifts() {
   }).join('');
 }
 
+// ── EOS 데이터 정규화 (시트 컬럼 버전 차이 처리) ──
+function _normalizeEOS(r) {
+  if (r.Check_Results && String(r.Check_Results).startsWith('data:image')) {
+    if (!r.Signature) r.Signature = r.Check_Results;
+    r.Check_Results = '';
+  }
+  if (!r.Check_Results && r.Remarks && String(r.Remarks).trim().startsWith('[{')) {
+    r.Check_Results = r.Remarks;
+    r.Remarks = '';
+  }
+  if (!r.Signature && r[''] && String(r['']).startsWith('data:image')) {
+    r.Signature = r[''];
+  }
+  const et = String(r.End_Time||'').trim();
+  if (et && !et.includes('T') && !et.includes(':') && Number(et) > 10000) {
+    if (!r.End_KM || Number(r.End_KM) === 0) r.End_KM = et;
+    r.End_Time = r.Fuel_End || '';
+    r.Fuel_End = '';
+  }
+  return r;
+}
+
 function openPastShiftPdf(rowIndex, type) {
   const cache = type==='pre' ? _myPastShifts.pre : _myPastShifts.eos;
-  const r = cache.find(x=>x._rowIndex===rowIndex);
+  let r = cache.find(x=>x._rowIndex===rowIndex);
   if (!r) { showToast('리포트를 찾을 수 없습니다','error'); return; }
+  if (type !== 'pre') r = _normalizeEOS({...r});
 
   const isPre = type==='pre';
 
@@ -8408,9 +8432,8 @@ function openPastShiftPdf(rowIndex, type) {
     const matchPre = _myPastShifts.pre.find(p =>
       p.Driver === r.Driver && p.Rego === r.Rego && p.Date === r.Date
     );
-    // Parse EOS-stored fields (new columns)
-    const _eosCheckSrc = r.Check_Results || (r.Remarks && String(r.Remarks).trim().startsWith('[{') ? r.Remarks : '');
-    const eosChecks = (() => { try { return _eosCheckSrc ? JSON.parse(_eosCheckSrc) : []; } catch(e){return[];} })();
+    // Parse EOS-stored fields
+    const eosChecks = (() => { try { return r.Check_Results ? JSON.parse(r.Check_Results) : []; } catch(e){return[];} })();
     const eosDRs = (() => { try { return r.Daily_Reports ? JSON.parse(r.Daily_Reports) : []; } catch(e){return[];} })();
 
     const shift = {
@@ -8418,7 +8441,7 @@ function openPastShiftPdf(rowIndex, type) {
       startKm: r.Start_KM ? Number(r.Start_KM) : null,
       endKm: r.End_KM ? Number(r.End_KM) : null,
       endTime: parseSheetTime(r.End_Time)||r.End_Time||'',
-      fuel: r.Fuel_End||r.Fuel||'', remarks: (r.Remarks && String(r.Remarks).trim().startsWith('[{')) ? '' : (r.Remarks||''),
+      fuel: r.Fuel_End||r.Fuel||'', remarks: r.Remarks||'',
       eosSignature: r.Signature || '',
       damage: r.Damage || '',
       endChecks: eosChecks,
