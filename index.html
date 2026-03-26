@@ -8409,7 +8409,8 @@ function openPastShiftPdf(rowIndex, type) {
       p.Driver === r.Driver && p.Rego === r.Rego && p.Date === r.Date
     );
     // Parse EOS-stored fields (new columns)
-    const eosChecks = (() => { try { return r.Check_Results ? JSON.parse(r.Check_Results) : []; } catch(e){return[];} })();
+    const _eosCheckSrc = r.Check_Results || (r.Remarks && String(r.Remarks).trim().startsWith('[{') ? r.Remarks : '');
+    const eosChecks = (() => { try { return _eosCheckSrc ? JSON.parse(_eosCheckSrc) : []; } catch(e){return[];} })();
     const eosDRs = (() => { try { return r.Daily_Reports ? JSON.parse(r.Daily_Reports) : []; } catch(e){return[];} })();
 
     const shift = {
@@ -8417,7 +8418,7 @@ function openPastShiftPdf(rowIndex, type) {
       startKm: r.Start_KM ? Number(r.Start_KM) : null,
       endKm: r.End_KM ? Number(r.End_KM) : null,
       endTime: parseSheetTime(r.End_Time)||r.End_Time||'',
-      fuel: r.Fuel_End||r.Fuel||'', remarks: r.Remarks,
+      fuel: r.Fuel_End||r.Fuel||'', remarks: (r.Remarks && String(r.Remarks).trim().startsWith('[{')) ? '' : (r.Remarks||''),
       eosSignature: r.Signature || '',
       damage: r.Damage || '',
       endChecks: eosChecks,
