@@ -8270,7 +8270,7 @@ function openShiftReport(shift, type) {
 
   <!-- PRINT BUTTON (hidden when printing) -->
   <div class="no-print" style="position:fixed;bottom:20px;left:0;right:0;display:flex;gap:10px;justify-content:center;padding:0 16px;">
-    <button onclick="window.close()" style="flex:1;max-width:140px;background:#f0f4ff;color:#1a56db;border:2px solid #bfdbfe;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;">✕ 닫기</button>
+    <button onclick="try{parent._closeShiftReportModal();}catch(e){window.close();}" style="flex:1;max-width:140px;background:#f0f4ff;color:#1a56db;border:2px solid #bfdbfe;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;">✕ 닫기</button>
     <button onclick="window.print()" style="flex:2;max-width:220px;background:#1a56db;color:white;border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(26,86,219,0.35);">🖨️ PDF 저장 / 인쇄</button>
   </div>
 
@@ -8278,20 +8278,27 @@ function openShiftReport(shift, type) {
 </body>
 </html>`;
 
-  const w = window.open('', '_blank');
-  if (w) {
-    w.document.write(html);
-    w.document.close();
-  } else {
-    // Fallback: create blob and navigate
-    const blob = new Blob([html], {type:'text/html'});
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 5000);
-  }
+  // Mobile-friendly: open in full-screen iframe modal instead of popup
+  const blob = new Blob([html], {type:'text/html'});
+  const url  = URL.createObjectURL(blob);
+
+  // Remove existing modal if any
+  let modal = document.getElementById('shift-report-modal');
+  if (modal) modal.remove();
+
+  modal = document.createElement('div');
+  modal.id = 'shift-report-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;flex-direction:column;';
+  modal.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;background:#1a56db;padding:10px 16px;flex-shrink:0;">
+      <span style="color:white;font-size:14px;font-weight:700;">${typeLabel}</span>
+      <button onclick="document.getElementById('shift-report-modal').remove()" style="background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;">✕ 닫기</button>
+    </div>
+    <iframe src="${url}" style="flex:1;border:none;background:white;" onload="setTimeout(()=>URL.revokeObjectURL('${url}'),3000)"></iframe>
+  `;
+  document.body.appendChild(modal);
+  // Expose close function for iframe's close button
+  window._closeShiftReportModal = () => { modal.remove(); };
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -8361,7 +8368,7 @@ function renderMyPastShifts() {
       : `<span style="background:#f0fdf4;color:#15803d;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;">🏁 End of Shift</span>`;
     const sub = isPre
       ? `출발 ${parseSheetTime(r.Start_Time)||'—'} · KM ${r.Start_KM||'—'}`
-      : `종료 ${parseSheetTime(r.End_Time)||'—'} · KM ${r.End_KM||'—'}`;
+      : `종료 ${parseSheetTime(r.End_Time)||(String(r.Fuel_End||'').includes('T')?parseSheetTime(r.Fuel_End):'')||'—'} · KM ${r.End_KM||'—'}`;
     return `<div style="background:white;border-radius:12px;padding:12px;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
