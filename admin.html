@@ -7603,11 +7603,12 @@ function renderShiftTab() {
                           : (r.End_KM   ? Number(r.End_KM).toLocaleString()+' km'   : '—');
     const seatsStr = isPre && r.Seats ? `${r.Seats}석 · ` : '';
 
-    // Check results badge for Pre Departure
+    // Check results badge
     let checkBadge = '';
-    if (r.Check_Results) {
+    const _checkSrc = r.Check_Results || (r.Remarks && String(r.Remarks).trim().startsWith('[{') ? r.Remarks : '');
+    if (_checkSrc) {
       try {
-        const checks = typeof r.Check_Results==='string' ? JSON.parse(r.Check_Results) : r.Check_Results;
+        const checks = typeof _checkSrc==='string' ? JSON.parse(_checkSrc) : _checkSrc;
         if (Array.isArray(checks)) {
           const failCount = checks.filter(c=>c.pass===false).length;
           checkBadge = failCount > 0
@@ -7666,9 +7667,14 @@ function openShiftPdfAdmin(r, type) {
   // ── EOS 전용: 차량 점검 / Daily Reports / Damage / KM ──
   let eosChecksHtml = '', eosDRHtml = '', eosDamageHtml = '', eosStartKM = '', eosTotalKM = '';
   if (!isPre) {
-    if (r.Check_Results) {
+    // Check_Results가 없으면 Remarks에서 JSON 체크리스트 추출 시도
+    let checkSource = r.Check_Results;
+    if (!checkSource && r.Remarks && String(r.Remarks).trim().startsWith('[{')) {
+      checkSource = r.Remarks;
+    }
+    if (checkSource) {
       try {
-        const ch = typeof r.Check_Results==='string' ? JSON.parse(r.Check_Results) : r.Check_Results;
+        const ch = typeof checkSource==='string' ? JSON.parse(checkSource) : checkSource;
         if (Array.isArray(ch) && ch.length) {
           const fc = ch.filter(c=>c.pass===false).length;
           const rws = ch.map(c=>{const ok=c.pass!==false;return `<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:8px;background:${ok?'#f0fdf4':'#fef2f2'};border:1.5px solid ${ok?'#86efac':'#fca5a5'};margin-bottom:4px;">
@@ -7677,7 +7683,7 @@ function openShiftPdfAdmin(r, type) {
           </div>`;}).join('');
           eosChecksHtml = sec('🔍 차량 점검 Post-Shift Vehicle Check') + `<div>${rws}${fc>0?`<div style="margin-top:6px;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:8px 10px;font-size:11px;color:#b91c1c;font-weight:700;">⚠️ ${fc}개 FAIL</div>`:''}</div>`;
         }
-      } catch(e) { eosChecksHtml = sec('🔍 차량 점검') + `<div style="font-size:12px;color:#666;">${h(String(r.Check_Results))}</div>`; }
+      } catch(e) { eosChecksHtml = sec('🔍 차량 점검') + `<div style="font-size:12px;color:#666;">${h(String(checkSource))}</div>`; }
     }
     if (r.Daily_Reports) {
       try {
@@ -7784,7 +7790,7 @@ function openShiftPdfAdmin(r, type) {
       row2f(field('종료 시간 End Time', parseSheetTime(r.End_Time)||(String(r.Fuel_End||'').includes('T')?parseSheetTime(r.Fuel_End):'')||r.End_Time||'—'), field('연료 Fuel End', String(r.Fuel_End||'').includes('T')?'—':r.Fuel_End||'—')) +
       (eosStartKM ? row2f(eosStartKM, eosTotalKM) : '') +
       eosDamageHtml +
-      field('비고 Remarks', r.Remarks) +
+      (r.Remarks&&!String(r.Remarks).trim().startsWith('[{') ? field('비고 Remarks', r.Remarks) : '') +
       eosDRHtml +
       eosChecksHtml +
       eosDeclHtml +
