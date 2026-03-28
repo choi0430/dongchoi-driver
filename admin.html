@@ -4232,7 +4232,35 @@ function renderInvPreview(rows, agency, from, to) {
         </tr>
       </thead>
       <tbody>
-    ${rows.map((r, ri) => {
+    ${(()=>{
+      // 그룹 모드에 따라 행 정렬 및 그룹 헤더 삽입
+      let orderedRows = rows.map((r,ri)=>({r,ri}));
+      const groupHeaders = {}; // ri → header HTML
+      if (_invGroupMode === 'week') {
+        const weeks = {};
+        orderedRows.forEach(({r,ri}) => { const mon = _isoToMonday(r._iso); if(!weeks[mon]) weeks[mon]=[]; weeks[mon].push({r,ri}); });
+        const sorted = [];
+        Object.keys(weeks).sort().forEach(mon => {
+          const sun = _isoToSunday(mon); const wrows = weeks[mon];
+          const wTotal = wrows.reduce((s,{r})=>s+calcInvRow(r).total,0);
+          if(wrows.length>0) groupHeaders[wrows[0].ri] = `<tr style="background:var(--sf3);"><td colspan="6" style="padding:8px 6px;font-weight:800;color:#1e40af;font-size:11px;letter-spacing:.5px;">📆 ${fmtDate(mon)} — ${fmtDate(sun)} · ${wrows.length}건 · $${wTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>`;
+          sorted.push(...wrows);
+        });
+        orderedRows = sorted;
+      } else if (_invGroupMode === 'tour') {
+        const tours = {};
+        orderedRows.forEach(({r,ri}) => { const key = r.Tour_Code||r.Attraction||'Other'; if(!tours[key]) tours[key]=[]; tours[key].push({r,ri}); });
+        const sorted = [];
+        Object.keys(tours).sort().forEach(tc => {
+          const trows = tours[tc];
+          const tTotal = trows.reduce((s,{r})=>s+calcInvRow(r).total,0);
+          if(trows.length>0) groupHeaders[trows[0].ri] = `<tr style="background:#f0fdf4;"><td colspan="6" style="padding:8px 6px;font-weight:800;color:#166534;font-size:11px;letter-spacing:.5px;">🗺 ${escH(tc)} · ${trows.length}건 · $${tTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>`;
+          sorted.push(...trows);
+        });
+        orderedRows = sorted;
+      }
+      return orderedRows.map(({r,ri}) => {
+      const header = groupHeaders[ri] || '';
       const c   = calcInvRow(r);
       const rowKey = _invRowKey(r, ri);
       const ov  = _invOverrides[rowKey] || {};
@@ -4248,7 +4276,7 @@ function renderInvPreview(rows, agency, from, to) {
         : `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;">SVC</span>`;
       const manualBadge = r._manual ? `<span style="font-size:9px;background:#e0e7ff;color:#3730a3;border-radius:4px;padding:1px 5px;">수동</span>` : '';
       const ovBadge = isOverridden ? `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;">수정됨</span>` : '';
-      return `<tr style="border-bottom:1px solid var(--bd);${exclStyle}" data-inv-row="${ri}">
+      return header + `<tr style="border-bottom:1px solid var(--bd);${exclStyle}" data-inv-row="${ri}">
         <td style="padding:6px;white-space:nowrap;vertical-align:top;">
           ${fmtDate(r._iso)}
           ${_invEditMode ? `<div style="margin-top:3px;"><button onclick="_toggleInvExclude('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid ${excl?'#86efac':'#fecaca'};background:${excl?'#f0fdf4':'#fef2f2'};color:${excl?'#166534':'#ef4444'};cursor:pointer;">${excl?'포함':'제외'}</button></div>` : ''}
@@ -4292,7 +4320,8 @@ function renderInvPreview(rows, agency, from, to) {
         `}
         <td style="padding:6px;text-align:right;font-weight:800;color:var(--gn);white-space:nowrap;">$${oTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       </tr>`;
-    }).join('')}
+    }).join('');
+    })()}
       </tbody>
       <tfoot>
         <tr style="background:var(--sf3);font-weight:800;">
