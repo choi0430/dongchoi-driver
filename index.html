@@ -2947,12 +2947,11 @@ async function syncShiftsFromServer(driverName) {
       updated = true;
     }
 
-    if (updated) {
-      if (activeShifts.length > 0) editingShiftId = activeShifts[activeShifts.length - 1].id;
-      else editingShiftId = null;
-      localStorage.setItem('shifts_' + driverName, JSON.stringify(activeShifts));
-      renderShiftSection();
-    }
+    // sync 완료 후 항상 저장 & 렌더링 (비동기 완료 시점에 UI 갱신 보장)
+    if (activeShifts.length > 0) editingShiftId = activeShifts[activeShifts.length - 1].id;
+    else editingShiftId = null;
+    localStorage.setItem('shifts_' + driverName, JSON.stringify(activeShifts));
+    renderShiftSection();
   } catch (e) {
     console.warn('shift 서버 동기화 실패 (오프라인?):', e.message);
     // 오프라인 시에도 48시간 정리 (로컬 전용 shift만)
