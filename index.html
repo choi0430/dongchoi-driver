@@ -2837,19 +2837,7 @@ function doLogin() {
   // ── 드라이버별 localStorage 데이터 로드 ──
   try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
   try { todayReports = JSON.parse(localStorage.getItem('reports_'+name)||'[]'); } catch(e){ todayReports=[]; }
-  // ── 장기 미완료 shift 자동 정리 (48시간 초과) ──
-  const _shiftCutoff = 48 * 60 * 60 * 1000; // 48시간
-  const _now = Date.now();
-  const _expiredShifts = activeShifts.filter(s => {
-    const startStr = `${s.date}T${s.startTime || '00:00'}`;
-    const startMs = new Date(startStr.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')).getTime() || 0;
-    return startMs > 0 && (_now - startMs) > _shiftCutoff;
-  });
-  if(_expiredShifts.length > 0) {
-    activeShifts = activeShifts.filter(s => !_expiredShifts.includes(s));
-    localStorage.setItem('shifts_'+name, JSON.stringify(activeShifts));
-    console.warn('⚠️ 48시간 초과 shift 자동 정리:', _expiredShifts.length, '건');
-  }
+  // 48시간 자동 정리는 syncShiftsFromServer 완료 후 실행 (서버 shift 보호)
   // 진행 중인 shift가 있으면 editingShiftId 복원
   if(activeShifts.length > 0) {
     editingShiftId = activeShifts[activeShifts.length - 1].id;
@@ -2944,6 +2932,21 @@ async function syncShiftsFromServer(driverName) {
     );
     if (activeShifts.length !== before) updated = true;
 
+    // ── 48시간 초과 shift 자동 정리 (서버에서 온 shift는 제외) ──
+    const _shiftCutoff = 48 * 60 * 60 * 1000;
+    const _now = Date.now();
+    const _expiredShifts = activeShifts.filter(s => {
+      if (s._fromServer) return false; // 서버 shift는 정리하지 않음
+      const startStr = `${s.date}T${s.startTime || '00:00'}`;
+      const startMs = new Date(startStr.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')).getTime() || 0;
+      return startMs > 0 && (_now - startMs) > _shiftCutoff;
+    });
+    if (_expiredShifts.length > 0) {
+      activeShifts = activeShifts.filter(s => !_expiredShifts.includes(s));
+      console.warn('⚠️ 48시간 초과 shift 자동 정리:', _expiredShifts.length, '건 (서버 shift 제외)');
+      updated = true;
+    }
+
     if (updated) {
       if (activeShifts.length > 0) editingShiftId = activeShifts[activeShifts.length - 1].id;
       else editingShiftId = null;
@@ -2952,6 +2955,20 @@ async function syncShiftsFromServer(driverName) {
     }
   } catch (e) {
     console.warn('shift 서버 동기화 실패 (오프라인?):', e.message);
+    // 오프라인 시에도 48시간 정리 (로컬 전용 shift만)
+    const _shiftCutoff = 48 * 60 * 60 * 1000;
+    const _now = Date.now();
+    const _expiredLocal = activeShifts.filter(s => {
+      if (s._fromServer) return false;
+      const startStr = `${s.date}T${s.startTime || '00:00'}`;
+      const startMs = new Date(startStr.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')).getTime() || 0;
+      return startMs > 0 && (_now - startMs) > _shiftCutoff;
+    });
+    if (_expiredLocal.length > 0) {
+      activeShifts = activeShifts.filter(s => !_expiredLocal.includes(s));
+      localStorage.setItem('shifts_' + driverName, JSON.stringify(activeShifts));
+      renderShiftSection();
+    }
   }
 }
 
@@ -3327,18 +3344,7 @@ function autoRestoreSession() {
     currentDriver = { name, initials: initials||'??', englishName: englishName||name, ..._masterDrvAuto };
     try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
     try { todayReports = JSON.parse(localStorage.getItem('reports_'+name)||'[]'); } catch(e){ todayReports=[]; }
-    // ── 장기 미완료 shift 자동 정리 (48시간 초과) ──
-    const _cutoff = 48 * 60 * 60 * 1000;
-    const _nowMs = Date.now();
-    const _stale = activeShifts.filter(s => {
-      const startStr = `${s.date}T${s.startTime || '00:00'}`;
-      const startMs = new Date(startStr.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')).getTime() || 0;
-      return startMs > 0 && (_nowMs - startMs) > _cutoff;
-    });
-    if(_stale.length > 0) {
-      activeShifts = activeShifts.filter(s => !_stale.includes(s));
-      localStorage.setItem('shifts_'+name, JSON.stringify(activeShifts));
-    }
+    // 48시간 자동 정리는 syncShiftsFromServer 내에서 실행 (서버 shift 보호)
     if(activeShifts.length > 0) editingShiftId = activeShifts[activeShifts.length-1].id;
 
     document.getElementById('driver-name-pill').textContent = name + ' ▾';
@@ -3359,6 +3365,8 @@ function autoRestoreSession() {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
 
+    // 서버에서 미완료 shift 동기화 (비동기)
+    syncShiftsFromServer(name);
     // 세션 복원 후 GAS 동기화 시작 (오늘 리포트 & 마스터 최신화)
     runSync(false);
     startAutoSync();
