@@ -3857,6 +3857,7 @@ function submitDailyReport(){
     wash: parseFloat(document.getElementById('f-wash')?.value||0),
     meal: parseFloat(document.getElementById('f-meal')?.value||0),
     etc: parseFloat(document.getElementById('f-etc')?.value||0),
+    manualBonus: (()=>{ const rg=document.getElementById('pre-rego')?.value||''; const vh=MASTER.vehicles?.find(v=>v.Rego===rg); const isM=vh?.Transmission==='Manual'; const sv=getSvcValue(); return (isM&&sv>=250)?20:0; })(),
     remarks: document.getElementById('dr-remarks').value,
   };
   if(report.seats) shift.seats = report.seats; // 마지막 인승 저장 (다음 리포트 초기값)
@@ -6884,6 +6885,7 @@ async function renderPay(){
     meal:        parseFloat(r.Meal||0),
     trailer:     parseFloat(r.Trailer||0),
     tip:         parseFloat(r.Tip||0),
+    etc:         parseFloat(r.Etc||0),
     toll:        parseFloat(r.Toll||0),
     tollPersonal: r.Toll_Personal==='Y',
     fuel:        parseFloat(r.Fuel||0),
@@ -6951,6 +6953,11 @@ async function renderPay(){
     const washTotal     = wk.reports.reduce((s,r)=>s+(r.wash||0),0);
     const mealTotal     = wk.reports.reduce((s,r)=>s+(r.meal||0),0);
     const nightDRTotal  = wk.reports.reduce((s,r)=>s+(r.night||0),0);
+    const trailerTotal  = wk.reports.reduce((s,r)=>s+(r.trailer||0),0);
+    const tipTotal      = wk.reports.reduce((s,r)=>s+(r.tip||0),0);
+    const tollTotal     = wk.reports.reduce((s,r)=>s+(r.tollPersonal&&r.toll>0?r.toll:0),0);
+    const fuelTotal     = wk.reports.reduce((s,r)=>s+(r.fuelPersonal&&r.fuel>0?r.fuel:0),0);
+    const etcTotal      = wk.reports.reduce((s,r)=>s+(r.etc||0),0);
 
     const weekWageData = getWageEntriesForWeek(driverWages, wk.key);
     const paidAmt = weekWageData.reduce((s,e)=>s+(Number(e.amount)||0),0);
@@ -6965,6 +6972,11 @@ async function renderPay(){
       {label:'세차',    val:washTotal,  color:'#10b981'},
       {label:'식비',    val:mealTotal,  color:'#10b981'},
       {label:'야간',    val:nightDRTotal,color:'#6366f1'},
+      {label:'트레일러',val:trailerTotal,color:'#64748b'},
+      {label:'팁',      val:tipTotal,    color:'#eab308'},
+      {label:'톨비',    val:tollTotal,   color:'#78716c'},
+      {label:'연료비',  val:fuelTotal,   color:'#78716c'},
+      {label:'기타',    val:etcTotal,    color:'#78716c'},
     ].filter(i=>i.val>0);
 
     const itemBadges = items.map(i=>
@@ -7067,6 +7079,9 @@ function showPayDetail(wk){
   const nightDRGrand = sorted.reduce((s,r)=>s+(r.night||0),0);
   const trailerGrand = sorted.reduce((s,r)=>s+(r.trailer||0),0);
   const tipGrand     = sorted.reduce((s,r)=>s+(r.tip||0),0);
+  const tollGrand    = sorted.reduce((s,r)=>s+(r.tollPersonal&&r.toll>0?r.toll:0),0);
+  const fuelGrand    = sorted.reduce((s,r)=>s+(r.fuelPersonal&&r.fuel>0?r.fuel:0),0);
+  const etcGrand     = sorted.reduce((s,r)=>s+(r.etc||0),0);
 
   // 지급 내역 (admin_wages)
   const detailDriverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
@@ -7078,7 +7093,7 @@ function showPayDetail(wk){
 
   // 상단 합계 카드
   const breakItems = [
-    {label:'기본 수당', val: drGrand - otGrand - hotelGrand - distGrand - earlyGrand - washGrand - mealGrand - nightDRGrand - trailerGrand - tipGrand, color:'rgba(255,255,255,.9)'},
+    {label:'기본 수당', val: drGrand - otGrand - hotelGrand - distGrand - earlyGrand - washGrand - mealGrand - nightDRGrand - trailerGrand - tipGrand - tollGrand - fuelGrand - etcGrand, color:'rgba(255,255,255,.9)'},
     otGrand>0    && {label:'OT', val:otGrand, color:'#93c5fd'},
     hotelGrand>0 && {label:'호텔 서차지', val:hotelGrand, color:'#c4b5fd'},
     distGrand>0  && {label:'거리 서차지', val:distGrand, color:'#7dd3fc'},
@@ -7088,6 +7103,9 @@ function showPayDetail(wk){
     mealGrand>0  && {label:'식비', val:mealGrand, color:'#6ee7b7'},
     tipGrand>0   && {label:'팁', val:tipGrand, color:'#fbbf24'},
     nightDRGrand>0 && {label:'야간투어', val:nightDRGrand, color:'#a5b4fc'},
+    tollGrand>0  && {label:'톨비 (개인)', val:tollGrand, color:'#d6d3d1'},
+    fuelGrand>0  && {label:'연료비 (개인)', val:fuelGrand, color:'#d6d3d1'},
+    etcGrand>0   && {label:'기타', val:etcGrand, color:'#d6d3d1'},
     ownerGrand>0 && {label:'회사 납입 차감', val:-ownerGrand, color:'rgba(255,150,150,.9)'},
   ].filter(Boolean).filter(i=>i.val!==0);
 
@@ -7149,7 +7167,9 @@ function showPayDetail(wk){
         - (r.wash||0)
         - (r.meal||0)
         - (r.tollPersonal&&r.toll>0 ? r.toll : 0)
-        - (r.fuelPersonal&&r.fuel>0 ? r.fuel : 0);
+        - (r.fuelPersonal&&r.fuel>0 ? r.fuel : 0)
+        - (r.etc||0)
+        - (r.manualBonus||0);
       if(baseRate>0) breakdown.push({label:'기본 수당', val:baseRate, color:'var(--text)'});
       if(r.ot>0)      breakdown.push({label:'초과근무 (OT)', val:r.ot, color:'var(--blue)'});
       if(r.hotelSurcharge>0) breakdown.push({label:'호텔 서차지', val:r.hotelSurcharge, color:'#8b5cf6'});
@@ -7162,6 +7182,8 @@ function showPayDetail(wk){
       if(r.tollPersonal&&r.toll>0) breakdown.push({label:'톨비 (개인결제)', val:r.toll, color:'var(--text2)'});
       if(r.fuelPersonal&&r.fuel>0) breakdown.push({label:'연료비 (개인결제)', val:r.fuel, color:'var(--text2)'});
       if(r.tip>0)     breakdown.push({label:'팁', val:r.tip, color:'var(--yellow)'});
+      if(r.etc>0)     breakdown.push({label:'기타', val:r.etc, color:'var(--text2)'});
+      if(r.manualBonus>0) breakdown.push({label:'수동변속 보너스', val:r.manualBonus, color:'#f59e0b'});
 
       const nightOwnerNote = (r.nightOwner||0)>0
         ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-top:1px dashed rgba(239,68,68,0.3);margin-top:4px;">
