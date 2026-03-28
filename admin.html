@@ -3973,8 +3973,15 @@ function calcInvRow(r) {
                    : _pkOv === '0' ? 0
                    : autoParking;
 
-  // ── Trailer Surcharge ──
-  const trailerVal = parseFloat(r.Trailer) || 0;
+  // ── Trailer Surcharge (DR→TA 역산) ──
+  // 트레일러는 21/25S 전용: DR $30 → TA $80
+  const trailerDR = parseFloat(r.Trailer) || 0;
+  function trailerDRtoTA(dr, sn) {
+    if(dr===0) return 0;
+    if(sn>=40) return 0;  // 40/50S 트레일러 없음
+    return dr===30?80:Math.round(dr*2.67);  // 21/25S: DR $30→TA $80
+  }
+  const trailerVal = trailerDRtoTA(trailerDR, seatNum);
 
   // ── Night Tour TA ──
   const nightType = String(r.Night_Type || '').trim();

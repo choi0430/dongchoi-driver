@@ -1654,6 +1654,15 @@ function fmtDate(val) {
     const [y, m, d] = s.slice(0,10).split('-');
     return d + '/' + m + '/' + y;
   }
+  // JS Date.toString() 형식: "Sun Mar 15 2026 00:00:00 GMT+1100 ..."
+  const jsd = new Date(s);
+  if (!isNaN(jsd)) {
+    const local = new Date(jsd.getTime() + getSydneyOffsetMs(jsd));
+    const dd2 = String(local.getUTCDate()).padStart(2,'0');
+    const mm2 = String(local.getUTCMonth()+1).padStart(2,'0');
+    const yy2 = local.getUTCFullYear();
+    return dd2 + '/' + mm2 + '/' + yy2;
+  }
   return s;
 }
 
@@ -2886,6 +2895,7 @@ async function syncShiftsFromServer(driverName) {
     if (!json.ok || !json.shifts) return;
 
     const serverShifts = json.shifts;
+    console.log('[syncShifts] server returned', serverShifts.length, 'shifts:', JSON.stringify(serverShifts));
     // 날짜 비교 시 형식 정규화 (서버·로컬 포맷 차이 대비)
     const _normDate = d => fmtDate(String(d||''));
 
