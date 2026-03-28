@@ -3966,8 +3966,11 @@ function calcInvRow(r) {
                    : _pkOv === '0' ? 0
                    : autoParking;
 
-  const total = baseRate + ot + hotel + dist + earlyTA + parkingFee;
-  return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking, _pkKey, total, rateSource };
+  // ── Trailer Surcharge ──
+  const trailerVal = parseFloat(r.Trailer) || 0;
+
+  const total = baseRate + ot + hotel + dist + earlyTA + parkingFee + trailerVal;
+  return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking, _pkKey, trailerVal, total, rateSource };
 }
 async function initInvoice() {
   _invReports = null; // 항상 최신 리포트 재로드
@@ -4107,7 +4110,7 @@ function renderInvPreview(rows, agency, from, to) {
   rows.sort((a, b) => a._iso.localeCompare(b._iso));
 
   // calcInvRow로 각 행 청구액 계산 (M_PriceClient 요금표 기준)
-  let grandTotal = 0, totalBase = 0, totalOT = 0, totalHotel = 0, totalDist = 0, totalEarly = 0, totalParking = 0;
+  let grandTotal = 0, totalBase = 0, totalOT = 0, totalHotel = 0, totalDist = 0, totalEarly = 0, totalParking = 0, totalTrailer = 0;
   let hasPriceTable = false, hasFallback = false;
   rows.forEach(r => {
     const c = calcInvRow(r);
@@ -4118,6 +4121,7 @@ function renderInvPreview(rows, agency, from, to) {
     totalDist    += c.dist;
     totalEarly   += c.earlyTA;
     totalParking += (c.parkingFee || 0);
+    totalTrailer += (c.trailerVal || 0);
     if (c.rateSource === 'price_table') hasPriceTable = true;
     else hasFallback = true;
   });
@@ -4154,6 +4158,7 @@ function renderInvPreview(rows, agency, from, to) {
         ${totalHotel>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">호텔</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalHotel.toLocaleString()}</div></div>` : ''}
         ${totalDist>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">거리</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
         ${totalParking>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">공항주차</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalParking.toLocaleString()}</div></div>` : ''}
+        ${totalTrailer>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">트레일러</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalTrailer.toLocaleString()}</div></div>` : ''}
       </div>` : ''}
       <!-- 그룹 방식 선택 -->
       <div style="margin-bottom:8px;">
@@ -4230,6 +4235,7 @@ function renderInvPreview(rows, agency, from, to) {
             if(c.dist>0) parts.push('거리 $'+c.dist);
             if(c.earlyTA>0) parts.push('Early $'+c.earlyTA);
             if((c.parkingFee||0)>0) parts.push('주차 $'+c.parkingFee);
+            if((c.trailerVal||0)>0) parts.push('트레일러 $'+c.trailerVal);
             return parts.length ? '<div style="font-size:9px;color:var(--t3);margin-top:1px;">'+parts.join(' · ')+'</div>' : '';
           })()}
         </td>
@@ -4318,7 +4324,7 @@ function _calcInvGrandTotal(rows) {
     const ov = _invOverrides[rowKey] || {};
     const oBase  = ov.base  !== undefined ? ov.base  : c.baseRate;
     const oOT    = ov.ot    !== undefined ? ov.ot    : c.ot;
-    const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0));
+    const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0) + (c.trailerVal||0));
     total += oBase + oOT + oExtra;
   });
   return roundMoney(total);
@@ -4622,13 +4628,14 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
     const ov  = _invOverrides[rk] || {};
     const oBase  = ov.base  !== undefined ? ov.base  : c.baseRate;
     const oOT    = ov.ot    !== undefined ? ov.ot    : c.ot;
-    const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0));
+    const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0) + (c.trailerVal||0));
     const oTotal = oBase + oOT + oExtra;
     const surParts = [];
     if(c.hotel>0) surParts.push('Hotel $'+c.hotel);
     if(c.dist>0) surParts.push('Distance $'+c.dist);
     if(c.earlyTA>0) surParts.push('Early/Late $'+c.earlyTA);
     if((c.parkingFee||0)>0) surParts.push('Parking $'+c.parkingFee);
+    if((c.trailerVal||0)>0) surParts.push('Trailer $'+c.trailerVal);
     const extras = [
       oOT ? `OT $${oOT.toLocaleString()}` : '',
       ...surParts,
