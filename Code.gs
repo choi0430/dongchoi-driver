@@ -25,7 +25,7 @@ const REPORT_HEADERS = {
                      'SVC_Label','SVC_Charge','Hotel_Surcharge','Dist_Surcharge',
                      'OT','Trailer','Total_TA','DR_Cost','Toll','Toll_Personal',
                      'Fuel','Fuel_Personal','Early','Night_Type','Night_DR','Night_Owner',
-                     'Wash','Meal','Tip','Etc','Manual_Bonus','Remarks'],
+                     'Wash','Meal','Tip','Etc','Manual_Bonus','Toll_Detail','Remarks'],
   'Pre_Departure':  ['Submitted','Driver','Date','Rego','Seats','Start_KM','Fuel','Start_Time',
                      'Check_Results','Remarks','Signature'],
   'End_of_Shift':   ['Submitted','Driver','Date','Rego','Start_KM','End_KM','End_Time','Fuel_End','Damage','Check_Results','Daily_Reports','Remarks','Signature'],
