@@ -28,8 +28,7 @@ const REPORT_HEADERS = {
                      'Wash','Meal','Tip','Etc','Remarks'],
   'Pre_Departure':  ['Submitted','Driver','Date','Rego','Seats','Start_KM','Fuel','Start_Time',
                      'Check_Results','Remarks','Signature'],
-  'End_of_Shift':   ['Submitted','Driver','Date','Rego','Start_KM','End_KM','End_Time','Fuel_End',
-                     'Damage','Check_Results','Daily_Reports','Remarks','Signature'],
+  'End_of_Shift':   ['Submitted','Driver','Date','Rego','Start_KM','End_KM','End_Time','Fuel_End','Damage','Check_Results','Daily_Reports','Remarks','Signature'],
   'MOT_Report':     ['Submitted','Driver','Date','Time','Rego','Location','Officer','Type',
                      'Result','NoticeNum','Fine','Notes','FailedItems','Checks']
 };
@@ -38,10 +37,10 @@ const REPORT_HEADERS = {
 const MASTER_HEADERS = {
   'M_Vehicles': ['Rego','Make','Model','Manufacture_Date','Capacity','Owner','Rego_Date','HVIS_Date',
                  'Current_KM','Last_Service_KM','Service_Interval','VIN','Engine_Number',
-                 'Accreditation','Current_Status','Transmission'],
-  'M_Drivers':  ['Name_KR','Name_EN','DriverID','Phone','NEXT_OF_KIN','License_Class',
+                 'Accreditation','Current_Status','Transmission','Active'],
+  'M_Drivers':  ['Name_EN','Name_KR','Initials','DriverID','Mobile_1','NEXT_OF_KIN','Moblie_2','License_Class',
                  'License_No','License_Expiry','Authority_No','Authority_Expiry',
-                 'Address','Suburb','Bank_Name','BSB','Account_Number','PIN'],
+                 'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','Active'],
   'M_Clients':  ['Name','ClientID','Mobile','Email','Address','Bank_Name','BSB','Account_Number'],
   'M_Guides':   ['GuideID','Guide_Name','Mobile','Agency','Email','Remarks'],
   'M_Hotels':   ['Hotel_Name','Phone','Address','Surcharge_Area'],
@@ -54,16 +53,30 @@ const MASTER_HEADERS = {
   'M_PriceSub': ['SubCo','Course','max_hours','seats_21_rate','seats_21_ot',
                  'seats_25_rate','seats_25_ot','seats_40_rate','seats_40_ot',
                  'seats_50_rate','seats_50_ot'],
-  'Sub_Rates':  ['Rego','Tour','seats_21','seats_25','seats_40','seats_50'],
+  'Sub_Rates':  ['SubCo','Tour','seats_21','seats_25','seats_40','seats_50'],
   'Ledger':     ['RowID','Date','Rego','Tour','TA','SubTotal','MyDr','Extra','OT','Trailer','Hotel','Note'],
   'Wages':      ['RowID','Driver','WeekStart','Date','Amount','PayMethod','Notes'],
   'Notices':    ['ID','Title','Content','Type','Date','Active'],
   'Audit_Log':  ['Timestamp','User','Action','Sheet','RowIndex','Summary'],
-  'M_SvcOptions':   ['VehicleSize','Amount','Label'],
-  'M_HotelOptions': ['VehicleSize','Amount','Label'],
-  'M_DistOptions':  ['VehicleSize','Amount','Label'],
-  'M_NightRates':   ['NightType','VehicleCategory','TA','DR','Owner'],
-  'M_Attractions':  ['Attraction','Emoji','POI_Icon','POI_Name','POI_Detail','POI_MapURL','Info']
+  'Invoices':   ['InvNumber','Agency','PeriodFrom','PeriodTo','GrandTotal','GST','ExGST',
+                 'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Notes','CreatedBy'],
+  // ── 거래처 잔액 관리 ──
+  'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','DR','CR','Remark','StartDate','FinishDate','DueDate'],
+  'SUB_Txn':    ['RowID','SubCompany','Category','Date','InvoiceNo','Description','DR','CR','Remark'],
+  // ── 서비스 요금 옵션 (차량 좌석별) ──
+  'M_SvcOptions': ['VehicleSize','Label','Amount'],
+  // ── 호텔 서차지 옵션 ──
+  'M_HotelOptions': ['VehicleSize','Label','Amount'],
+  // ── 거리 서차지 옵션 ──
+  'M_DistOptions': ['VehicleSize','Label','Amount'],
+  // ── 야간투어 요금 ──
+  'M_NightRates': ['NightType','VehicleCategory','TA','DR','Owner'],
+  // ── 관광지 POI 정보 ──
+  'M_Attractions': ['Attraction','Emoji','POI_Icon','POI_Name','POI_Detail','POI_MapURL','Info'],
+  // ── 결함 리포트 ──
+  'Defect_Reports': ['ID','Rego','Category','Location','Description','Severity','KM','Driver','Status','SubmittedAt','AdminNote'],
+  // ── 차량 데미지 마커 ──
+  'Bus_Damage': ['Rego','Markers','UpdatedAt','UpdatedBy']
 };
 
 // ── Tab Colors ──
@@ -71,7 +84,12 @@ const TAB_COLORS = {
   'M_Vehicles':'#d97706','M_Drivers':'#1a56db','M_Clients':'#7e3af2',
   'M_Guides':'#0e9f6e','M_Hotels':'#e02424','M_PriceClient':'#0694a2',
   'M_PriceDriver':'#057a55','M_PriceSub':'#7c3aed','Sub_Rates':'#b45309',
-  'Ledger':'#1e40af','Wages':'#065f46','MOT_Report':'#be185d','Notices':'#0369a1'
+  'Ledger':'#1e40af','Wages':'#065f46','MOT_Report':'#be185d','Notices':'#0369a1',
+  'Agency_Txn':'#0891b2','SUB_Txn':'#a21caf',
+  'Invoices':'#6d28d9',
+  'M_SvcOptions':'#6366f1','M_HotelOptions':'#ec4899','M_DistOptions':'#f59e0b',
+  'M_NightRates':'#8b5cf6','M_Attractions':'#14b8a6',
+  'Defect_Reports':'#dc2626','Bus_Damage':'#ea580c'
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -105,6 +123,20 @@ function ensureSheet(ss, sheetName) {
           .setBackground(color).setFontColor('white').setFontWeight('bold');
         sheet.setFrozenRows(1);
         sheet.setTabColor(color);
+      }
+    } else {
+      // ── 기존 시트에 누락된 컬럼 자동 추가 ──
+      const expected = MASTER_HEADERS[sheetName];
+      if (expected) {
+        const lastCol = sheet.getLastColumn();
+        const existing = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : [];
+        const missing = expected.filter(h => !existing.includes(h));
+        if (missing.length > 0) {
+          const startCol = lastCol + 1;
+          const color = TAB_COLORS[sheetName] || '#1a56db';
+          sheet.getRange(1, startCol, 1, missing.length).setValues([missing])
+            .setBackground(color).setFontColor('white').setFontWeight('bold');
+        }
       }
     }
     return sheet;
@@ -154,11 +186,33 @@ function doGet(e) {
       case 'get_notices':
         return cors(getNoticesSheet());
 
+      case 'get_invoices':
+        return cors(getInvoices());
+
       case 'get_active_regos':
         return cors(getActiveRegos());
 
+      case 'get_my_shifts':
+        return cors(getMyShifts(driver));
+
       case 'get_max_km':
         return cors(getMaxKMPerRego());
+
+      case 'get_agency_txn':
+        return cors(getSheetRows('Agency_Txn'));
+
+      case 'get_sub_txn':
+        return cors(getSheetRows('SUB_Txn'));
+
+      case 'get_defect_reports': {
+        const defDriver = params.driver ? params.driver[0] : '';
+        return cors(getDefectReports(defDriver));
+      }
+
+      case 'get_bus_damage': {
+        const dmgRego = params.rego ? params.rego[0] : '';
+        return cors(getBusDamage(dmgRego));
+      }
 
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
@@ -236,12 +290,41 @@ function doPost(e) {
       case 'replace_master':
         return cors(replaceMasterSheet(payload.sheet, payload.rows));
 
+      // ── 가이드 전화번호 일괄 업데이트 ──
+      case 'bulk_update_guide_phones': {
+        const r = bulkUpdateGuidePhones(payload.guides || []);
+        if (r.ok) appendAuditLog(_user, 'bulk_update_guide_phones', 'M_Guides', '',
+          `${r.updated}명 전화번호 업데이트`);
+        return cors(r);
+      }
+
       case 'init_masters':
         return cors(initAllMasters());
 
       // ── Invoice Email ──
       case 'send_invoice_email':
         return cors(sendInvoiceEmail({...payload, _user}));
+
+      // ── Invoices CRUD ──
+      case 'save_invoice': {
+        const r = saveInvoice(payload.data);
+        if (r.ok) appendAuditLog(_user, 'save_invoice', 'Invoices', r.invNumber||'',
+          `Agency:${payload.data.Agency||''} Total:${payload.data.GrandTotal||''}`);
+        return cors(r);
+      }
+      case 'get_invoices':
+        return cors(getInvoices());
+      case 'update_invoice_status': {
+        const r = updateInvoiceStatus(payload.invNumber, payload.status, payload.field);
+        if (r.ok) appendAuditLog(_user, 'update_invoice_status', 'Invoices', payload.invNumber||'',
+          `Status→${payload.status} Field:${payload.field||''}`);
+        return cors(r);
+      }
+      case 'delete_invoice': {
+        const r = deleteInvoice(payload.invNumber);
+        if (r.ok) appendAuditLog(_user, 'delete_invoice', 'Invoices', payload.invNumber||'', '');
+        return cors(r);
+      }
 
       // ── Sub_Rates & M_PriceSub ──
       case 'replace_sub_rates':
@@ -300,6 +383,42 @@ function doPost(e) {
       case 'replace_wages':
         return cors(replaceWages(payload.rows));
 
+      // ── Agency_Txn CRUD ──
+      case 'add_agency_txn': {
+        const r = addMasterRow('Agency_Txn', payload.data);
+        if (r.ok) appendAuditLog(_user, 'add_agency_txn', 'Agency_Txn', r.row || '',
+          'Agency:' + (payload.data.Agency||'') + ' DR:' + (payload.data.DR||0));
+        return cors(r);
+      }
+      case 'update_agency_txn': {
+        const r = updateMasterRow('Agency_Txn', payload.rowIndex, payload.data);
+        if (r.ok) appendAuditLog(_user, 'update_agency_txn', 'Agency_Txn', payload.rowIndex, '');
+        return cors(r);
+      }
+      case 'delete_agency_txn': {
+        const r = deleteMasterRow('Agency_Txn', payload.rowIndex);
+        if (r.ok) appendAuditLog(_user, 'delete_agency_txn', 'Agency_Txn', payload.rowIndex, '');
+        return cors(r);
+      }
+
+      // ── SUB_Txn CRUD ──
+      case 'add_sub_txn': {
+        const r = addMasterRow('SUB_Txn', payload.data);
+        if (r.ok) appendAuditLog(_user, 'add_sub_txn', 'SUB_Txn', r.row || '',
+          'Sub:' + (payload.data.SubCompany||'') + ' DR:' + (payload.data.DR||0));
+        return cors(r);
+      }
+      case 'update_sub_txn': {
+        const r = updateMasterRow('SUB_Txn', payload.rowIndex, payload.data);
+        if (r.ok) appendAuditLog(_user, 'update_sub_txn', 'SUB_Txn', payload.rowIndex, '');
+        return cors(r);
+      }
+      case 'delete_sub_txn': {
+        const r = deleteMasterRow('SUB_Txn', payload.rowIndex);
+        if (r.ok) appendAuditLog(_user, 'delete_sub_txn', 'SUB_Txn', payload.rowIndex, '');
+        return cors(r);
+      }
+
       // ── Notices ──
       case 'save_notices':
         return cors(replaceNotices(payload.rows));
@@ -310,6 +429,18 @@ function doPost(e) {
 
       case 'update_driver_info':
         return cors(updateDriverInfo(payload.driverName, payload.data));
+
+      // ── Defect Reports ──
+      case 'save_defect_report':
+        return cors(saveDefectReport(payload.data));
+
+      case 'update_defect_status': {
+        return cors(updateDefectStatus(payload.id, payload.status, payload.adminNote));
+      }
+
+      // ── Bus Damage Markers ──
+      case 'save_bus_damage':
+        return cors(saveBusDamage(payload.rego, payload.markers, payload.driver));
 
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
@@ -360,8 +491,7 @@ function getReports(sheetName, driver) {
 function getMaster(sheetName) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
-    const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
+    const sheet = ensureSheet(ss, sheetName); // 누락 컬럼 자동 보정
 
     const data = sheet.getDataRange().getValues();
     if (data.length < 2) return {ok: true, sheet: sheetName, rows: []};
@@ -378,12 +508,33 @@ function getMaster(sheetName) {
       });
     }
 
+    // 전화번호 컬럼 인덱스 사전 탐색 (앞 0 복원용)
+    const PHONE_FIELDS = ['phone','mobile','mobile_1','mobile_2','moblie_2'];
+    const phoneColIdxSet = new Set();
+    headers.forEach((h, i) => {
+      if (PHONE_FIELDS.includes(normalizeKey(h))) phoneColIdxSet.add(i);
+    });
+
     const rows = data.slice(1).map((row, rowIdx) => {
       const obj = {};
       headers.forEach((h, i) => {
         // 시트 헤더를 정규 키로 변환 (공백↔언더스코어 자동 처리)
-        const canonKey = (h && normToCanonical[normalizeKey(h)]) || h;
-        obj[canonKey] = row[i];
+        const nk = normalizeKey(h);
+        let canonKey = (h && normToCanonical[nk]) || h;
+        // 별칭 매핑 (예: Phone → Mobile_1)
+        if (!normToCanonical[nk] && FIELD_ALIASES[nk]) {
+          for (const alias of FIELD_ALIASES[nk]) {
+            if (normToCanonical[alias]) { canonKey = normToCanonical[alias]; break; }
+          }
+        }
+        let val = row[i];
+        // ★ 전화번호 필드: 앞 0 자동 복원 (Google Sheets 숫자→텍스트 보정)
+        if (phoneColIdxSet.has(i) && val !== '' && val !== null && val !== undefined) {
+          let s = String(val).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
+          if (s.length === 9) s = '0' + s;   // 04xxxxxxxx → 0 복원
+          val = s;
+        }
+        obj[canonKey] = val;
       });
       // 행 번호 저장 (1-based 시트 행): 헤더(1) + rowIdx(0-based) + 1
       obj._rowIndex = rowIdx + 2;
@@ -400,7 +551,8 @@ function getAllMasters() {
   try {
     const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
                     'M_PriceClient', 'M_PriceDriver', 'M_PriceSub',
-                    'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions'];
+                    'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions',
+                    'Sub_Rates', 'Ledger', 'MOT_Report'];
     const result = {};
 
     sheets.forEach(name => {
@@ -455,6 +607,16 @@ function getWagesSheet(driver) {
 function getNoticesSheet() {
   try {
     const r = getMaster('Notices');
+    return {ok: r.ok, rows: r.rows || []};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// Generic sheet rows getter (for Agency_Txn, SUB_Txn, etc.)
+function getSheetRows(sheetName) {
+  try {
+    const r = getMaster(sheetName);
     return {ok: r.ok, rows: r.rows || []};
   } catch (err) {
     return {ok: false, error: err.toString()};
@@ -531,6 +693,64 @@ function getActiveRegos() {
   }
 }
 
+// ── 특정 드라이버의 미완료 shift 조회 (날짜 무관) ──
+function getMyShifts(driverName) {
+  try {
+    if (!driverName) return {ok: false, msg: 'driver param required'};
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const preSheet = ss.getSheetByName('Pre_Departure');
+    const eosSheet = ss.getSheetByName('End_of_Shift');
+    if (!preSheet) return {ok: true, shifts: []};
+
+    const preData = preSheet.getDataRange().getValues();
+    if (preData.length < 2) return {ok: true, shifts: []};
+    const preH = preData[0];
+
+    // 해당 드라이버의 Pre_Departure 기록 추출
+    const myPres = preData.slice(1).map(row => {
+      const obj = {};
+      preH.forEach((h, i) => obj[h] = row[i]);
+      return obj;
+    }).filter(r => String(r.Driver||'').trim() === driverName.trim());
+
+    // End_of_Shift 완료된 (Driver + Date + Rego) 조합 수집
+    const eosSet = new Set();
+    if (eosSheet && eosSheet.getLastRow() > 1) {
+      const eosData = eosSheet.getDataRange().getValues();
+      const eosH = eosData[0];
+      eosData.slice(1).forEach(row => {
+        const obj = {};
+        eosH.forEach((h, i) => obj[h] = row[i]);
+        if (String(obj.Driver||'').trim() === driverName.trim()) {
+          eosSet.add(String(obj.Rego).trim() + '|' + String(obj.Date).trim());
+        }
+      });
+    }
+
+    // 미완료 shift 필터링
+    const shifts = [];
+    const seen = new Set();
+    myPres.forEach(r => {
+      const key = String(r.Rego).trim() + '|' + String(r.Date).trim();
+      if (!eosSet.has(key) && !seen.has(key)) {
+        seen.add(key);
+        shifts.push({
+          rego: String(r.Rego).trim(),
+          date: String(r.Date).trim(),
+          seats: String(r.Seats || '').trim(),
+          startKm: Number(r.Start_KM) || 0,
+          startTime: String(r.Start_Time || '').trim(),
+          fuel: String(r.Fuel || '').trim()
+        });
+      }
+    });
+
+    return {ok: true, shifts};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Report Write Operations
 // ═══════════════════════════════════════════════════════════════════════════
@@ -602,23 +822,7 @@ function addMasterRow(sheetName, data) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, sheetName);
-    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-
-    // data에 있는데 시트 헤더에 없는 키 → 자동 추가 (_rowIndex, _user 제외)
-    var skipKeys = ['_rowIndex', '_user'];
-    var newCols = Object.keys(data).filter(function(k) {
-      return skipKeys.indexOf(k) === -1 && headers.indexOf(k) === -1 && normalizeKey(k) !== normalizeKey('_rowIndex');
-    });
-    // 정규화 키로도 이미 존재하는지 확인
-    var existingNorm = headers.map(function(h){ return normalizeKey(h); });
-    newCols = newCols.filter(function(k) {
-      return existingNorm.indexOf(normalizeKey(k)) === -1;
-    });
-    if (newCols.length > 0) {
-      var startCol = headers.length + 1;
-      sheet.getRange(1, startCol, 1, newCols.length).setValues([newCols]);
-      headers = headers.concat(newCols);
-    }
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
     // 정확한 키 먼저, 없으면 정규화 키로 fallback
     const normMap = buildNormMap(data);
@@ -668,10 +872,32 @@ function normalizeKey(k) {
   return String(k).toLowerCase().replace(/[\s\-]+/g, '_');
 }
 
-// data 객체를 정규화 키로 조회하는 맵 생성
+// ── 필드 별칭 맵: 시트 헤더 ↔ 코드 키 불일치 자동 해소 ──
+const FIELD_ALIASES = {
+  'phone': ['mobile_1', 'mobile'],
+  'mobile_1': ['phone', 'mobile'],
+  'mobile': ['phone', 'mobile_1'],
+  'license_#': ['license_no'],
+  'license_no': ['license_#'],
+  'authority_#': ['authority_no'],
+  'authority_no': ['authority_#'],
+  'next_of_kin': ['next of kin'],
+  'engine_number': ['engine number'],
+  'manufacture_date': ['manufacture date']
+};
+
+// data 객체를 정규화 키로 조회하는 맵 생성 (별칭 포함)
 function buildNormMap(data) {
   const m = {};
-  Object.keys(data).forEach(k => { m[normalizeKey(k)] = data[k]; });
+  Object.keys(data).forEach(k => {
+    const nk = normalizeKey(k);
+    m[nk] = data[k];
+    // 별칭도 등록 (이미 있는 키는 덮어쓰지 않음)
+    const aliases = FIELD_ALIASES[nk];
+    if (aliases) {
+      aliases.forEach(a => { if (m[a] === undefined) m[a] = data[k]; });
+    }
+  });
   return m;
 }
 
@@ -679,35 +905,36 @@ function updateMasterRow(sheetName, rowIndex, data) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, sheetName);
-    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
     const ri = parseInt(rowIndex);
     if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
 
-    // data에 있는데 시트 헤더에 없는 키 → 자동 추가 (_rowIndex, _user 제외)
-    var skipKeys = ['_rowIndex', '_user'];
-    var newCols = Object.keys(data).filter(function(k) {
-      return skipKeys.indexOf(k) === -1 && headers.indexOf(k) === -1;
-    });
-    // 정규화 키로도 이미 존재하는지 확인
-    var existingNorm = headers.map(function(h){ return normalizeKey(h); });
-    newCols = newCols.filter(function(k) {
-      return existingNorm.indexOf(normalizeKey(k)) === -1;
-    });
-    if (newCols.length > 0) {
-      var startCol = headers.length + 1;
-      sheet.getRange(1, startCol, 1, newCols.length).setValues([newCols]);
-      headers = headers.concat(newCols);
-    }
-
     // 정확한 키 먼저, 없으면 정규화 키로 fallback (공백↔언더스코어 불일치 허용)
     const normMap = buildNormMap(data);
-    const row = headers.map(h => {
-      if (data[h] !== undefined) return data[h];
-      const nk = normalizeKey(h);
-      return normMap[nk] !== undefined ? normMap[nk] : '';
+    var PHONE_COL_NAMES = ['phone','mobile','mobile_1','mobile_2','moblie_2'];
+    const row = headers.map((h, i) => {
+      let val;
+      if (data[h] !== undefined) val = data[h];
+      else {
+        const nk = normalizeKey(h);
+        val = normMap[nk] !== undefined ? normMap[nk] : '';
+      }
+      // ★ 전화번호 필드: 앞 0 복원 + 텍스트 서식
+      if (PHONE_COL_NAMES.includes(normalizeKey(h)) && val !== '' && val !== null && val !== undefined) {
+        let s = String(val).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
+        if (s.length === 9) s = '0' + s;
+        val = s;
+      }
+      return val;
     });
     sheet.getRange(ri, 1, 1, row.length).setValues([row]);
+    // ★ 전화번호 셀에 텍스트 서식 적용 (앞 0 보존)
+    headers.forEach((h, i) => {
+      if (PHONE_COL_NAMES.includes(normalizeKey(h))) {
+        sheet.getRange(ri, i + 1).setNumberFormat('@');
+      }
+    });
 
     return {ok: true};
   } catch (err) {
@@ -925,19 +1152,33 @@ function updateDriverInfo(driverName, data) {
     const nameKRIdx = headers.indexOf('Name_KR');
 
     const fieldMap = {
-      nameEN: 'Name_EN', nameKR: 'Name_KR', mobile: 'Phone',
+      nameEN: 'Name_EN', nameKR: 'Name_KR', mobile: 'Mobile_1',
       licClass: 'License_Class', licNo: 'License_No', licExp: 'License_Expiry',
       authNo: 'Authority_No', authExp: 'Authority_Expiry',
-      nokName: 'NEXT_OF_KIN', address: 'Address', suburb: 'Suburb'
+      wwcNo: 'WWC_No', wwcExp: 'WWC_Expiry',
+      nokName: 'NEXT_OF_KIN', nokPhone: 'Moblie_2',
+      address: 'Address', suburb: 'Suburb',
+      bank: 'Bank', bsb: 'BSB', account: 'Account'
     };
 
     for (let r = 1; r < sheetData.length; r++) {
       if (sheetData[r][nameENIdx] === driverName || sheetData[r][nameKRIdx] === driverName) {
+        const PHONE_SAVE_FIELDS = ['Mobile_1', 'Moblie_2', 'Phone', 'Mobile'];
         Object.entries(data).forEach(([key, val]) => {
           const col = fieldMap[key];
           if (col) {
             const colIdx = headers.indexOf(col);
-            if (colIdx !== -1) sheet.getRange(r + 1, colIdx + 1).setValue(val);
+            if (colIdx !== -1) {
+              const cell = sheet.getRange(r + 1, colIdx + 1);
+              // ★ 전화번호 필드: 텍스트 서식 강제 적용 (앞 0 보존)
+              if (PHONE_SAVE_FIELDS.includes(col)) {
+                let s = String(val||'').replace(/[^0-9]/g, '');
+                if (s.length === 9) s = '0' + s;
+                cell.setNumberFormat('@').setValue(s);
+              } else {
+                cell.setValue(val);
+              }
+            }
           }
         });
         return {ok: true};
@@ -1060,7 +1301,7 @@ function fixPhoneNumbers() {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const targets = [
       {sheet: 'M_Guides', col: 'Mobile'},
-      {sheet: 'M_Drivers', col: 'Phone'},
+      {sheet: 'M_Drivers', col: 'Mobile_1'},
       {sheet: 'M_Hotels', col: 'Phone'}
     ];
 
@@ -1195,6 +1436,137 @@ function appendAuditLog(user, action, sheet, rowIndex, summary) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// INVOICES — CRUD (Invoices 시트)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 인보이스 저장 (신규 또는 기존 덮어쓰기)
+ * data: { InvNumber, Agency, PeriodFrom, PeriodTo, GrandTotal, GST, ExGST,
+ *         Status, IssuedDate, Items (JSON), ManualItems (JSON), Notes, CreatedBy }
+ */
+function saveInvoice(data) {
+  try {
+    const ss    = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Invoices');
+    const headers = MASTER_HEADERS['Invoices'];
+    const invNum  = data.InvNumber || data.invNumber || '';
+    if (!invNum) return { ok: false, error: 'InvNumber required' };
+
+    // 기존 행 찾기 (InvNumber 기준)
+    const allData = sheet.getDataRange().getValues();
+    let existingRow = -1;
+    for (let i = 1; i < allData.length; i++) {
+      if (String(allData[i][0]).trim() === invNum) { existingRow = i + 1; break; }
+    }
+
+    const now = new Date();
+    const sydNow = Utilities.formatDate(now, 'Australia/Sydney', 'dd/MM/yyyy HH:mm:ss');
+    if (!data.IssuedDate) data.IssuedDate = sydNow;
+
+    const rowArr = headers.map(h => {
+      if (h === 'InvNumber') return invNum;
+      return data[h] !== undefined ? data[h] : '';
+    });
+
+    if (existingRow > 0) {
+      sheet.getRange(existingRow, 1, 1, headers.length).setValues([rowArr]);
+    } else {
+      sheet.appendRow(rowArr);
+    }
+
+    return { ok: true, invNumber: invNum, updated: existingRow > 0 };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * 모든 인보이스 조회
+ */
+function getInvoices() {
+  try {
+    const ss    = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Invoices');
+    if (!sheet) return { ok: true, rows: [] };
+
+    const data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return { ok: true, rows: [] };
+
+    const headers = data[0];
+    const rows = [];
+    for (let i = 1; i < data.length; i++) {
+      const obj = {};
+      headers.forEach((h, ci) => { obj[h] = data[i][ci]; });
+      obj._rowIndex = i + 1;
+      rows.push(obj);
+    }
+    return { ok: true, rows };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * 인보이스 상태 변경
+ * invNumber: 인보이스 번호
+ * status: 'issued' | 'emailed' | 'paid' | 'cancelled'
+ * field: 상태 변경 시 날짜 기록 필드 ('EmailSentDate' | 'PaidDate')
+ */
+function updateInvoiceStatus(invNumber, status, field) {
+  try {
+    const ss    = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Invoices');
+    if (!sheet) return { ok: false, error: 'Invoices sheet not found' };
+
+    const headers = MASTER_HEADERS['Invoices'];
+    const data = sheet.getDataRange().getValues();
+    let targetRow = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === invNumber) { targetRow = i + 1; break; }
+    }
+    if (targetRow < 0) return { ok: false, error: 'Invoice not found: ' + invNumber };
+
+    const now = Utilities.formatDate(new Date(), 'Australia/Sydney', 'dd/MM/yyyy HH:mm:ss');
+
+    // Status 열 업데이트
+    const statusCol = headers.indexOf('Status') + 1;
+    if (statusCol > 0) sheet.getRange(targetRow, statusCol).setValue(status);
+
+    // 날짜 필드 업데이트
+    if (field) {
+      const fieldCol = headers.indexOf(field) + 1;
+      if (fieldCol > 0) sheet.getRange(targetRow, fieldCol).setValue(now);
+    }
+
+    return { ok: true, invNumber, status, updatedAt: now };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * 인보이스 삭제
+ */
+function deleteInvoice(invNumber) {
+  try {
+    const ss    = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Invoices');
+    if (!sheet) return { ok: false, error: 'Invoices sheet not found' };
+
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === invNumber) {
+        sheet.deleteRow(i + 1);
+        return { ok: true, invNumber };
+      }
+    }
+    return { ok: false, error: 'Invoice not found: ' + invNumber };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // INVOICE EMAIL (GAS MailApp)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1228,6 +1600,195 @@ function sendInvoiceEmail(payload) {
       `인보이스 이메일 발송 → ${to} | ${subject}`);
 
     return { ok: true, to: to };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 가이드 전화번호 일괄 업데이트
+// guides: [{ Guide_Name: '...', Mobile: '...' }, ...]
+// 기존 M_Guides의 Guide_Name과 매칭하여 Mobile 컬럼을 업데이트
+// ═══════════════════════════════════════════════════════════════════════════
+function bulkUpdateGuidePhones(guides) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'M_Guides');
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { ok: false, msg: 'M_Guides 시트에 데이터 없음' };
+
+    const headers = data[0];
+    const nameCol = headers.indexOf('Guide_Name') !== -1 ? headers.indexOf('Guide_Name')
+                  : headers.indexOf('Guide Name') !== -1 ? headers.indexOf('Guide Name')
+                  : headers.indexOf('Name') !== -1 ? headers.indexOf('Name') : -1;
+    const mobileCol = headers.indexOf('Mobile') !== -1 ? headers.indexOf('Mobile')
+                    : headers.indexOf('Phone') !== -1 ? headers.indexOf('Phone') : -1;
+
+    if (nameCol === -1 || mobileCol === -1) return { ok: false, msg: 'Guide_Name 또는 Mobile 컬럼 없음' };
+
+    const guideMap = {};
+    guides.forEach(g => { if (g.Guide_Name && g.Mobile) guideMap[g.Guide_Name.trim()] = g.Mobile; });
+
+    let updated = 0;
+    for (let i = 1; i < data.length; i++) {
+      const name = String(data[i][nameCol] || '').trim();
+      if (name && guideMap[name]) {
+        const currentMobile = String(data[i][mobileCol] || '').trim();
+        if (!currentMobile) {  // 빈 셀만 업데이트
+          sheet.getRange(i + 1, mobileCol + 1).setValue(guideMap[name]);
+          updated++;
+        }
+      }
+    }
+
+    return { ok: true, updated, total: guides.length };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Defect Reports — Google Sheets 동기화
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getDefectReports(driverName) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Defect_Reports');
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { ok: true, reports: [] };
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const rows = data.map((row, idx) => {
+      const obj = { _rowIndex: idx + 2 };
+      headers.forEach((h, ci) => { obj[h] = row[ci]; });
+      return obj;
+    });
+    // 드라이버 필터 (빈 문자열이면 전체)
+    const filtered = driverName
+      ? rows.filter(r => String(r.Driver || '') === driverName)
+      : rows;
+    return { ok: true, reports: filtered };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function saveDefectReport(data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Defect_Reports');
+    const headers = MASTER_HEADERS['Defect_Reports'];
+    const row = headers.map(h => {
+      const nk = normalizeKey(h);
+      // data의 키를 lowercase로 매칭
+      for (const k of Object.keys(data)) {
+        if (normalizeKey(k) === nk) return data[k] || '';
+      }
+      return '';
+    });
+    sheet.appendRow(row);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function updateDefectStatus(id, status, adminNote) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Defect_Reports');
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { ok: false, error: 'No data' };
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    const idCol = headers.indexOf('ID');
+    const statusCol = headers.indexOf('Status');
+    const noteCol = headers.indexOf('AdminNote');
+    if (idCol < 0) return { ok: false, error: 'ID column not found' };
+    const data = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        if (statusCol >= 0) sheet.getRange(i + 2, statusCol + 1).setValue(status || '');
+        if (noteCol >= 0 && adminNote !== undefined) sheet.getRange(i + 2, noteCol + 1).setValue(adminNote || '');
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'ID not found: ' + id };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bus Damage Markers — Google Sheets 동기화
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getBusDamage(rego) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Bus_Damage');
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { ok: true, markers: [], rego: rego };
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const regoCol = headers.indexOf('Rego');
+    const markersCol = headers.indexOf('Markers');
+    if (regoCol < 0) return { ok: true, markers: [], rego: rego };
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][regoCol]).trim() === String(rego).trim()) {
+        let markers = [];
+        try { markers = JSON.parse(data[i][markersCol] || '[]'); } catch(e) {}
+        return { ok: true, markers: markers, rego: rego };
+      }
+    }
+    return { ok: true, markers: [], rego: rego };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function saveBusDamage(rego, markers, driver) {
+  try {
+    if (!rego) return { ok: false, error: 'Rego required' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Bus_Damage');
+    const lastRow = sheet.getLastRow();
+    const lastCol = Math.max(sheet.getLastColumn(), 1);
+    const headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : [];
+    const regoCol = headers.indexOf('Rego');
+    const markersCol = headers.indexOf('Markers');
+    const updatedAtCol = headers.indexOf('UpdatedAt');
+    const updatedByCol = headers.indexOf('UpdatedBy');
+    const now = Utilities.formatDate(new Date(), 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
+    const markersJson = JSON.stringify(markers || []);
+
+    // 기존 행 찾기
+    if (lastRow > 1 && regoCol >= 0) {
+      const data = sheet.getRange(2, regoCol + 1, lastRow - 1, 1).getValues();
+      for (let i = 0; i < data.length; i++) {
+        if (String(data[i][0]).trim() === String(rego).trim()) {
+          // 기존 행 업데이트
+          if (markersCol >= 0) sheet.getRange(i + 2, markersCol + 1).setValue(markersJson);
+          if (updatedAtCol >= 0) sheet.getRange(i + 2, updatedAtCol + 1).setValue(now);
+          if (updatedByCol >= 0) sheet.getRange(i + 2, updatedByCol + 1).setValue(driver || '');
+          return { ok: true, updated: true };
+        }
+      }
+    }
+    // 새 행 추가
+    const expected = MASTER_HEADERS['Bus_Damage'];
+    const row = expected.map(h => {
+      if (h === 'Rego') return rego;
+      if (h === 'Markers') return markersJson;
+      if (h === 'UpdatedAt') return now;
+      if (h === 'UpdatedBy') return driver || '';
+      return '';
+    });
+    sheet.appendRow(row);
+    return { ok: true, created: true };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
