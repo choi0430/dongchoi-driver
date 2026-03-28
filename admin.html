@@ -1258,6 +1258,13 @@ const DB = {
   regoMaxKM: {},  // { rego: maxKM } — highest KM from Pre_Departure/Daily_Report/End_of_Shift
 };
 
+// ★ NIGHT_RATES: 드라이버 앱과 동일 (M_NightRates 시트에서 오버라이드)
+const NIGHT_RATES = {
+  guide_opt:   { small:{ ta:0,   dr:0,   owner:50  }, large:{ ta:0,   dr:0,   owner:100 } },
+  agency_incl: { small:{ ta:250, dr:200, owner:50  }, large:{ ta:350, dr:300, owner:50  } },
+  prepaid_opt: { small:{ ta:330, dr:250, owner:50  }, large:{ ta:450, dr:350, owner:100 } },
+};
+
 // Load max KM per rego from report sheets (for accurate service schedule)
 async function loadRegoMaxKM() {
   try {
@@ -3969,8 +3976,30 @@ function calcInvRow(r) {
   // ── Trailer Surcharge ──
   const trailerVal = parseFloat(r.Trailer) || 0;
 
-  const total = baseRate + ot + hotel + dist + earlyTA + parkingFee + trailerVal;
-  return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking, _pkKey, trailerVal, total, rateSource };
+  // ── Night Tour TA ──
+  const nightType = String(r.Night_Type || '').trim();
+  const isLarge   = seatNum >= 40;
+  const nightCat  = isLarge ? 'large' : 'small';
+  const nightTA   = (nightType && nightType !== 'none' && NIGHT_RATES[nightType]?.[nightCat])
+                   ? (NIGHT_RATES[nightType][nightCat].ta || 0) : 0;
+
+  // ── Tip (보고 시 동일 금액 청구) ──
+  const tipVal = parseFloat(r.Tip) || 0;
+
+  // ── Meal (보고 시 동일 금액 청구) ──
+  const mealVal = parseFloat(r.Meal) || 0;
+
+  // ── Toll (40/50인승만 TA에 포함) ──
+  const tollVal = isLarge ? (parseFloat(r.Toll) || 0) : 0;
+
+  // ── Etc (관리자가 인보이스에서 포함/제외 선택) ──
+  const etcVal = parseFloat(r.Etc) || 0;
+  const _etcKey = 'dcetc_' + (r._iso||String(r.Date||'')).slice(0,10) + '_' + (r.Rego||'') + '_' + (r.Attraction||'').replace(/\s+/g,'').slice(0,8);
+  const _etcOv  = localStorage.getItem(_etcKey);
+  const etcTA   = _etcOv === '1' ? etcVal : _etcOv === '0' ? 0 : 0;  // 기본=미포함, 관리자가 '1'로 설정 시 포함
+
+  const total = baseRate + ot + hotel + dist + earlyTA + parkingFee + trailerVal + nightTA + tipVal + mealVal + tollVal + etcTA;
+  return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking, _pkKey, trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal, etcTA, _etcKey, total, rateSource };
 }
 async function initInvoice() {
   _invReports = null; // 항상 최신 리포트 재로드
@@ -4111,6 +4140,7 @@ function renderInvPreview(rows, agency, from, to) {
 
   // calcInvRow로 각 행 청구액 계산 (M_PriceClient 요금표 기준)
   let grandTotal = 0, totalBase = 0, totalOT = 0, totalHotel = 0, totalDist = 0, totalEarly = 0, totalParking = 0, totalTrailer = 0;
+  let totalNight = 0, totalTip = 0, totalMeal = 0, totalToll = 0, totalEtc = 0;
   let hasPriceTable = false, hasFallback = false;
   rows.forEach(r => {
     const c = calcInvRow(r);
@@ -4122,6 +4152,11 @@ function renderInvPreview(rows, agency, from, to) {
     totalEarly   += c.earlyTA;
     totalParking += (c.parkingFee || 0);
     totalTrailer += (c.trailerVal || 0);
+    totalNight   += (c.nightTA || 0);
+    totalTip     += (c.tipVal || 0);
+    totalMeal    += (c.mealVal || 0);
+    totalToll    += (c.tollVal || 0);
+    totalEtc     += (c.etcTA || 0);
     if (c.rateSource === 'price_table') hasPriceTable = true;
     else hasFallback = true;
   });
@@ -4159,6 +4194,11 @@ function renderInvPreview(rows, agency, from, to) {
         ${totalDist>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">거리</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
         ${totalParking>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">공항주차</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalParking.toLocaleString()}</div></div>` : ''}
         ${totalTrailer>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">트레일러</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalTrailer.toLocaleString()}</div></div>` : ''}
+        ${totalNight>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">야간투어</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalNight.toLocaleString()}</div></div>` : ''}
+        ${totalTip>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">팁</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalTip.toLocaleString()}</div></div>` : ''}
+        ${totalMeal>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">식비</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalMeal.toLocaleString()}</div></div>` : ''}
+        ${totalToll>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">톨비</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalToll.toLocaleString()}</div></div>` : ''}
+        ${totalEtc>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">기타</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalEtc.toLocaleString()}</div></div>` : ''}
       </div>` : ''}
       <!-- 그룹 방식 선택 -->
       <div style="margin-bottom:8px;">
@@ -4198,7 +4238,7 @@ function renderInvPreview(rows, agency, from, to) {
       const ov  = _invOverrides[rowKey] || {};
       const oBase = ov.base !== undefined ? ov.base : c.baseRate;
       const oOT   = ov.ot   !== undefined ? ov.ot   : c.ot;
-      const oExtra = ov.extra!== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0));
+      const oExtra = ov.extra!== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0) + (c.trailerVal||0) + (c.nightTA||0) + (c.tipVal||0) + (c.mealVal||0) + (c.tollVal||0) + (c.etcTA||0));
       const oTotal = oBase + oOT + oExtra;
       const isOverridden = ov.base !== undefined || ov.ot !== undefined || ov.extra !== undefined;
       const excl = _invExcludes[rowKey];
@@ -4236,6 +4276,11 @@ function renderInvPreview(rows, agency, from, to) {
             if(c.earlyTA>0) parts.push('Early $'+c.earlyTA);
             if((c.parkingFee||0)>0) parts.push('주차 $'+c.parkingFee);
             if((c.trailerVal||0)>0) parts.push('트레일러 $'+c.trailerVal);
+            if((c.nightTA||0)>0) parts.push('야간 $'+c.nightTA);
+            if((c.tipVal||0)>0) parts.push('팁 $'+c.tipVal);
+            if((c.mealVal||0)>0) parts.push('식비 $'+c.mealVal);
+            if((c.tollVal||0)>0) parts.push('톨비 $'+c.tollVal);
+            if((c.etcTA||0)>0) parts.push('기타 $'+c.etcTA);
             return parts.length ? '<div style="font-size:9px;color:var(--t3);margin-top:1px;">'+parts.join(' · ')+'</div>' : '';
           })()}
         </td>
@@ -4324,7 +4369,7 @@ function _calcInvGrandTotal(rows) {
     const ov = _invOverrides[rowKey] || {};
     const oBase  = ov.base  !== undefined ? ov.base  : c.baseRate;
     const oOT    = ov.ot    !== undefined ? ov.ot    : c.ot;
-    const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0) + (c.trailerVal||0));
+    const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0) + (c.trailerVal||0) + (c.nightTA||0) + (c.tipVal||0) + (c.mealVal||0) + (c.tollVal||0) + (c.etcTA||0));
     total += oBase + oOT + oExtra;
   });
   return roundMoney(total);
@@ -4628,7 +4673,7 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
     const ov  = _invOverrides[rk] || {};
     const oBase  = ov.base  !== undefined ? ov.base  : c.baseRate;
     const oOT    = ov.ot    !== undefined ? ov.ot    : c.ot;
-    const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0) + (c.trailerVal||0));
+    const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0) + (c.trailerVal||0) + (c.nightTA||0) + (c.tipVal||0) + (c.mealVal||0) + (c.tollVal||0) + (c.etcTA||0));
     const oTotal = oBase + oOT + oExtra;
     const surParts = [];
     if(c.hotel>0) surParts.push('Hotel $'+c.hotel);
@@ -4636,6 +4681,11 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
     if(c.earlyTA>0) surParts.push('Early/Late $'+c.earlyTA);
     if((c.parkingFee||0)>0) surParts.push('Parking $'+c.parkingFee);
     if((c.trailerVal||0)>0) surParts.push('Trailer $'+c.trailerVal);
+    if((c.nightTA||0)>0) surParts.push('Night Tour $'+c.nightTA);
+    if((c.tipVal||0)>0) surParts.push('Tip $'+c.tipVal);
+    if((c.mealVal||0)>0) surParts.push('Meal $'+c.mealVal);
+    if((c.tollVal||0)>0) surParts.push('Toll $'+c.tollVal);
+    if((c.etcTA||0)>0) surParts.push('Etc $'+c.etcTA);
     const extras = [
       oOT ? `OT $${oOT.toLocaleString()}` : '',
       ...surParts,
@@ -7273,6 +7323,15 @@ async function loadAllFromSheets(){
           '40':{rate:r.seats_40_rate,ot:r.seats_40_ot},
           '50':{rate:r.seats_50_rate,ot:r.seats_50_ot}
         };
+      });
+    }
+
+    // M_NightRates → NIGHT_RATES 오버라이드
+    if(d.M_NightRates?.length){
+      d.M_NightRates.forEach(r => {
+        const type = r.NightType, cat = r.VehicleCategory;
+        if(!NIGHT_RATES[type]) NIGHT_RATES[type] = {};
+        NIGHT_RATES[type][cat] = { ta: Number(r.TA)||0, dr: Number(r.DR)||0, owner: Number(r.Owner)||0 };
       });
     }
 
