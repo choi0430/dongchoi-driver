@@ -4281,7 +4281,12 @@ function renderInvPreview(rows, agency, from, to) {
             if((c.mealVal||0)>0) parts.push('식비 $'+c.mealVal);
             if((c.tollVal||0)>0) parts.push('톨비 $'+c.tollVal);
             if((c.etcTA||0)>0) parts.push('기타 $'+c.etcTA);
-            return parts.length ? '<div style="font-size:9px;color:var(--t3);margin-top:1px;">'+parts.join(' · ')+'</div>' : '';
+            let etcToggle = '';
+            if((c.etcVal||0)>0) {
+              const isIncl = (c.etcTA||0) > 0;
+              etcToggle = '<div style="margin-top:2px;"><button onclick="toggleEtcOverride(\''+c._etcKey+'\',\''+escH(agency)+'\',\''+from+'\',\''+to+'\')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid '+(isIncl?'#86efac':'#fecaca')+';background:'+(isIncl?'#f0fdf4':'#fef2f2')+';color:'+(isIncl?'#166534':'#b91c1c')+';cursor:pointer;">'+(isIncl?'✓ 기타 $'+c.etcVal+' 포함':'✗ 기타 $'+c.etcVal+' 미포함')+'</button></div>';
+            }
+            return (parts.length ? '<div style="font-size:9px;color:var(--t3);margin-top:1px;">'+parts.join(' · ')+'</div>' : '') + etcToggle;
           })()}
         </td>
         `}
@@ -4325,6 +4330,19 @@ function toggleParkingOverride(pkKey, autoParking, agency, from, to) {
   else if (autoParking > 0) localStorage.setItem(pkKey, '0'); // 자동 있음 → 강제 제외
   else                  localStorage.setItem(pkKey, '1');  // 자동 없음 → 강제 추가
   // 미리보기 갱신
+  if (agency && from && to) {
+    const rows = _buildInvRows(agency, from, to);
+    renderInvPreview(rows, agency, from, to);
+  }
+}
+
+// ─────────────────────────────────────────
+// 행별 기타(Etc) override 토글
+// ─────────────────────────────────────────
+function toggleEtcOverride(etcKey, agency, from, to) {
+  const cur = localStorage.getItem(etcKey);
+  if (cur === '1') localStorage.setItem(etcKey, '0');  // 포함 → 미포함
+  else             localStorage.setItem(etcKey, '1');  // 미포함/null → 포함
   if (agency && from && to) {
     const rows = _buildInvRows(agency, from, to);
     renderInvPreview(rows, agency, from, to);

@@ -785,8 +785,8 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
             <div style="display:flex;gap:6px;margin-bottom:4px;">
               <button type="button" id="wash-btn-0" onclick="selectWash(0)"
                 style="flex:1;padding:8px 0;border-radius:8px;border:1.5px solid var(--accent);background:var(--accent);color:white;font-size:13px;font-weight:700;cursor:pointer;font-family:sans-serif;">$0</button>
-              <button type="button" id="wash-btn-30" onclick="selectWash(30)"
-                style="flex:1;padding:8px 0;border-radius:8px;border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-weight:700;cursor:pointer;font-family:sans-serif;">$30</button>
+              <button type="button" id="wash-btn-20" onclick="selectWash(20)"
+                style="flex:1;padding:8px 0;border-radius:8px;border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-weight:700;cursor:pointer;font-family:sans-serif;">$20</button>
             </div>
             <input type="hidden" id="f-wash" value="0">
           </div>
@@ -5871,7 +5871,7 @@ function onNightChange(){
 }
 function selectWash(amt){
   document.getElementById('f-wash').value = amt;
-  [0, 30].forEach(v=>{
+  [0, 20].forEach(v=>{
     const b = document.getElementById('wash-btn-'+v);
     if(!b) return;
     const sel = v === amt;
@@ -6853,8 +6853,12 @@ async function renderPay(){
     nightType:   r.Night_Type||'',
     wash:        parseFloat(r.Wash||0),
     meal:        parseFloat(r.Meal||0),
+    trailer:     parseFloat(r.Trailer||0),
+    tip:         parseFloat(r.Tip||0),
     toll:        parseFloat(r.Toll||0),
+    tollPersonal: r.Toll_Personal==='Y',
     fuel:        parseFloat(r.Fuel||0),
+    fuelPersonal: r.Fuel_Personal==='Y',
     guide:       r.Guide||'',
     tourcode:    r.Tourcode||r.Tour_Code||'',
     remarks:     r.Remarks||'',
@@ -7032,6 +7036,8 @@ function showPayDetail(wk){
   const washGrand  = sorted.reduce((s,r)=>s+(r.wash||0),0);
   const mealGrand  = sorted.reduce((s,r)=>s+(r.meal||0),0);
   const nightDRGrand = sorted.reduce((s,r)=>s+(r.night||0),0);
+  const trailerGrand = sorted.reduce((s,r)=>s+(r.trailer||0),0);
+  const tipGrand     = sorted.reduce((s,r)=>s+(r.tip||0),0);
 
   // 지급 내역 (admin_wages)
   const detailDriverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
@@ -7043,13 +7049,15 @@ function showPayDetail(wk){
 
   // 상단 합계 카드
   const breakItems = [
-    {label:'기본 수당', val: drGrand - otGrand - hotelGrand - distGrand - earlyGrand - washGrand - mealGrand - nightDRGrand, color:'rgba(255,255,255,.9)'},
+    {label:'기본 수당', val: drGrand - otGrand - hotelGrand - distGrand - earlyGrand - washGrand - mealGrand - nightDRGrand - trailerGrand - tipGrand, color:'rgba(255,255,255,.9)'},
     otGrand>0    && {label:'OT', val:otGrand, color:'#93c5fd'},
     hotelGrand>0 && {label:'호텔 서차지', val:hotelGrand, color:'#c4b5fd'},
     distGrand>0  && {label:'거리 서차지', val:distGrand, color:'#7dd3fc'},
+    trailerGrand>0 && {label:'트레일러', val:trailerGrand, color:'#93c5fd'},
     earlyGrand>0 && {label:'조기 출발', val:earlyGrand, color:'#fcd34d'},
     washGrand>0  && {label:'세차', val:washGrand, color:'#6ee7b7'},
     mealGrand>0  && {label:'식비', val:mealGrand, color:'#6ee7b7'},
+    tipGrand>0   && {label:'팁', val:tipGrand, color:'#fbbf24'},
     nightDRGrand>0 && {label:'야간투어', val:nightDRGrand, color:'#a5b4fc'},
     ownerGrand>0 && {label:'회사 납입 차감', val:-ownerGrand, color:'rgba(255,150,150,.9)'},
   ].filter(Boolean).filter(i=>i.val!==0);
