@@ -885,6 +885,10 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           <label class="form-label">Vehicle Damage / Incident Report <span style="font-size:11px;color:var(--muted);">손상 / 사고 신고</span></label>
           <textarea class="form-textarea" id="end-damage" placeholder="Describe any damage or incidents... 손상 부위 상세 기록..."></textarea>
         </div>
+        <div class="form-group">
+          <label class="form-label">비고 / Remarks</label>
+          <textarea class="form-textarea" id="eos-remarks" placeholder="기타 사항..."></textarea>
+        </div>
 
         <div class="divider"></div>
 
@@ -4220,6 +4224,7 @@ function submitEndShift(){
   shift.endFuel = '';
   shift.endChecks = getCheckResults('end-checks');
   shift.damage = document.getElementById('end-damage').value;
+  shift.eosRemarks = document.getElementById('eos-remarks')?.value || '';
   shift.passengerCheck = document.getElementById('eos-pax-check').checked;
   shift.lostPropertyCheck = document.getElementById('eos-lost-check').checked;
   shift.vehicleSecuredCheck = document.getElementById('eos-fuel-chk').checked;
@@ -4267,7 +4272,7 @@ function submitEndShift(){
     Damage: shift.damage || '',
     Check_Results: checksJson,
     Daily_Reports: drJson.length < 45000 ? drJson : JSON.stringify(drSummary.map(r=>({a:r.agency,t:r.total,d:r.dr}))),
-    Remarks: shift.remarks || '',
+    Remarks: shift.eosRemarks || '',
     Signature: shift.eosSignature || ''
   });
 
@@ -4427,6 +4432,7 @@ function saveEosDraft(){
       endTime: document.getElementById('end-time')?.value || '',
       endDate: document.getElementById('end-date')?.value || '',
       damage:  document.getElementById('end-damage')?.value || '',
+      eosRemarks: document.getElementById('eos-remarks')?.value || '',
       paxCheck:  document.getElementById('eos-pax-check')?.checked || false,
       lostCheck: document.getElementById('eos-lost-check')?.checked || false,
       fuelChk:   document.getElementById('eos-fuel-chk')?.checked || false,
@@ -4449,6 +4455,7 @@ function restoreEosDraft(){
     if(d.endTime){ const el=document.getElementById('end-time'); if(el) el.value=d.endTime; }
     if(d.endDate){ const el=document.getElementById('end-date'); if(el) el.value=d.endDate; }
     if(d.damage) { const el=document.getElementById('end-damage'); if(el) el.value=d.damage; }
+    if(d.eosRemarks) { const el=document.getElementById('eos-remarks'); if(el) el.value=d.eosRemarks; }
     if(d.paxCheck)  { const el=document.getElementById('eos-pax-check');  if(el){ el.checked=true;  onEosCheckChange('eos-pax-item','eos-pax-check');   } }
     if(d.lostCheck) { const el=document.getElementById('eos-lost-check'); if(el){ el.checked=true;  onEosCheckChange('eos-lost-item','eos-lost-check');  } }
     if(d.fuelChk)   { const el=document.getElementById('eos-fuel-chk');   if(el){ el.checked=true;  onEosCheckChange('eos-fuel-item','eos-fuel-chk');    } }
