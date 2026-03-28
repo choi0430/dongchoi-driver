@@ -713,6 +713,13 @@ function getMyShifts(driverName) {
       return obj;
     }).filter(r => String(r.Driver||'').trim() === driverName.trim());
 
+    // 날짜를 dd/MM/yyyy 형식으로 통일하는 헬퍼
+    const fmtD = v => (v instanceof Date) ? formatDateForSheet(v) : String(v||'').trim();
+    const fmtT = v => {
+      if (v instanceof Date) return Utilities.formatDate(v, 'Australia/Sydney', 'HH:mm');
+      return String(v||'').trim();
+    };
+
     // End_of_Shift 완료된 (Driver + Date + Rego) 조합 수집
     const eosSet = new Set();
     if (eosSheet && eosSheet.getLastRow() > 1) {
@@ -722,7 +729,7 @@ function getMyShifts(driverName) {
         const obj = {};
         eosH.forEach((h, i) => obj[h] = row[i]);
         if (String(obj.Driver||'').trim() === driverName.trim()) {
-          eosSet.add(String(obj.Rego).trim() + '|' + String(obj.Date).trim());
+          eosSet.add(String(obj.Rego).trim() + '|' + fmtD(obj.Date));
         }
       });
     }
@@ -731,15 +738,16 @@ function getMyShifts(driverName) {
     const shifts = [];
     const seen = new Set();
     myPres.forEach(r => {
-      const key = String(r.Rego).trim() + '|' + String(r.Date).trim();
+      const dateStr = fmtD(r.Date);
+      const key = String(r.Rego).trim() + '|' + dateStr;
       if (!eosSet.has(key) && !seen.has(key)) {
         seen.add(key);
         shifts.push({
           rego: String(r.Rego).trim(),
-          date: String(r.Date).trim(),
+          date: dateStr,
           seats: String(r.Seats || '').trim(),
           startKm: Number(r.Start_KM) || 0,
-          startTime: String(r.Start_Time || '').trim(),
+          startTime: fmtT(r.Start_Time),
           fuel: String(r.Fuel || '').trim()
         });
       }
