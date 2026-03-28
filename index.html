@@ -2886,31 +2886,38 @@ async function syncShiftsFromServer(driverName) {
     if (!json.ok || !json.shifts) return;
 
     const serverShifts = json.shifts;
+    // 날짜 비교 시 형식 정규화 (서버·로컬 포맷 차이 대비)
+    const _normDate = d => fmtDate(String(d||''));
+
     if (serverShifts.length === 0 && activeShifts.length > 0) {
-      // 서버에 미완료 shift가 없으면 로컬도 정리
-      activeShifts = [];
-      editingShiftId = null;
-      localStorage.setItem('shifts_' + driverName, '[]');
-      renderShiftSection();
+      // 서버에 미완료 shift가 없어도 로컬에 dailyReport가 있으면 유지 (데이터 보호)
+      const hasWork = activeShifts.some(s => s.dailyReports && s.dailyReports.length > 0);
+      if (!hasWork) {
+        activeShifts = [];
+        editingShiftId = null;
+        localStorage.setItem('shifts_' + driverName, '[]');
+        renderShiftSection();
+      }
       return;
     }
 
     // 서버 shift를 로컬 형식으로 변환하고 병합
     let updated = false;
     serverShifts.forEach(sv => {
+      const svDate = _normDate(sv.date);
       const exists = activeShifts.some(ls =>
-        ls.rego === sv.rego && ls.date === sv.date
+        ls.rego === sv.rego && _normDate(ls.date) === svDate
       );
       if (!exists) {
         // 서버에는 있지만 로컬에 없는 shift → 추가
         activeShifts.push({
-          id: sv.rego + '_' + sv.date.replace(/\//g, ''),
+          id: sv.rego + '_' + svDate.replace(/\//g, ''),
           rego: sv.rego,
           seats: sv.seats,
           startKm: sv.startKm,
           startTime: sv.startTime,
           fuel: sv.fuel,
-          date: sv.date,
+          date: svDate,
           dailyReports: [],
           _fromServer: true
         });
@@ -2918,10 +2925,13 @@ async function syncShiftsFromServer(driverName) {
       }
     });
 
-    // 로컬에만 있고 서버에 없는 shift 제거 (서버가 진실의 원천)
-    const serverKeys = new Set(serverShifts.map(s => s.rego + '|' + s.date));
+    // 로컬에만 있고 서버에 없는 shift 제거 — 단, dailyReport가 있으면 유지 (데이터 보호)
+    const serverKeys = new Set(serverShifts.map(s => s.rego + '|' + _normDate(s.date)));
     const before = activeShifts.length;
-    activeShifts = activeShifts.filter(ls => serverKeys.has(ls.rego + '|' + ls.date));
+    activeShifts = activeShifts.filter(ls =>
+      serverKeys.has(ls.rego + '|' + _normDate(ls.date)) ||
+      (ls.dailyReports && ls.dailyReports.length > 0)
+    );
     if (activeShifts.length !== before) updated = true;
 
     if (updated) {
@@ -3381,8 +3391,10 @@ function startReport(){
   if(activeShifts.length===0){
     goStep(1);
   } else {
-    goStep(2);
-    updateStep2UI();
+    // 활성 shift가 있으면 바로 Daily Report 화면으로
+    const shift = activeShifts.find(s=>s.id===editingShiftId) || activeShifts[activeShifts.length-1];
+    if(shift) addDailyReport(shift.id);
+    else { goStep(2); updateStep2UI(); }
   }
 }
 
@@ -3907,7 +3919,7 @@ function submitDailyReport(){
     showToast('❌ 저장 오류: ' + err.message, 'error');
   } finally {
     const _drBtnF = document.querySelector('button[onclick="submitDailyReport()"]');
-    if(_drBtnF){ _drBtnF.disabled=false; _drBtnF.textContent='✅ Daily Report 저장'; }
+    if(_drBtnF){ _drBtnF.disabled=false; _drBtnF.textContent='✓ Daily Report 저장'; }
   }
 }
 
