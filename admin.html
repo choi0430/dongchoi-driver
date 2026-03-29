@@ -328,6 +328,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pbal','nbal');initBalance()"><div style="font-size:20px;margin-bottom:4px">📊</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">잔액</div><div style="font-size:11px;color:var(--t3)">Agency/Sub</div></div>
     <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pwage','nwage');rWage()"><div style="font-size:20px;margin-bottom:4px">💵</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">급여</div><div style="font-size:11px;color:var(--t3)">Driver Wage</div></div>
     <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pinv','ninv');initInvoice()"><div style="font-size:20px;margin-bottom:4px">🧾</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">인보이스</div><div style="font-size:11px;color:var(--t3)">Invoice</div></div>
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pquo','nquo');initQuotation()"><div style="font-size:20px;margin-bottom:4px">📑</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">견적서</div><div style="font-size:11px;color:var(--t3)">Quotation</div></div>
   </div>
 
 </div>
@@ -487,6 +488,107 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 </div>
 
 
+<!-- QUOTATION PAGE -->
+<div class="pg" id="pquo">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">📑 Quotation</div><div class="ssb">견적서 작성 · 여행사 / 직접 고객</div></div>
+  </div>
+  <div style="padding:10px 14px 0;">
+    <div style="margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px">여행사 / 고객</div>
+      <select id="quo-agency" class="profit-sel" style="width:100%;margin-bottom:4px;" onchange="onQuoAgencyChange()">
+        <option value="">-- 선택 --</option>
+      </select>
+      <input type="text" id="quo-agency-custom" class="profit-finp" style="width:100%;display:none;" placeholder="고객명 직접 입력...">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px">견적 날짜</div>
+        <input type="date" id="quo-date" class="profit-finp" style="width:100%;box-sizing:border-box">
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px">유효기한</div>
+        <input type="date" id="quo-valid" class="profit-finp" style="width:100%;box-sizing:border-box">
+      </div>
+    </div>
+    <div style="margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px">비고 / 메모</div>
+      <input type="text" id="quo-memo" class="profit-finp" style="width:100%;" placeholder="특이사항, 요청사항 등">
+    </div>
+  </div>
+  <div style="padding:0 14px 10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <div style="font-size:11px;font-weight:700;color:var(--t3);letter-spacing:.5px;">📝 견적 항목</div>
+      <button class="btn bac sm" onclick="openQuoItemModal(null)" style="font-size:11px;padding:4px 10px;">+ 항목 추가</button>
+    </div>
+    <div id="quo-item-list"></div>
+  </div>
+  <div id="quo-preview" style="padding:0 14px 14px"></div>
+</div>
+
+<!-- 견적 항목 모달 -->
+<div id="quo-item-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:var(--sf);border-radius:16px;padding:18px;width:100%;max-width:400px;max-height:90vh;overflow-y:auto;">
+    <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:14px;" id="quo-modal-title">📝 항목 추가</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">날짜</div>
+        <input type="date" id="qim-date" class="profit-finp" style="width:100%;">
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">차량 (Rego)</div>
+        <select id="qim-rego" class="profit-sel" style="width:100%;" onchange="onQimRegoChange()">
+          <option value="">선택</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:8px;">
+      <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">서비스 / 관광지 <span style="color:#ef4444;">*</span></div>
+      <select id="qim-tour" class="profit-sel" style="width:100%;margin-bottom:4px;" onchange="onQimTourChange()">
+        <option value="">-- 관광지 선택 --</option>
+      </select>
+      <input type="text" id="qim-tour-custom" class="profit-finp" style="width:100%;display:none;" placeholder="직접 입력...">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">인승 (Seats)</div>
+        <select id="qim-seats" class="profit-sel" style="width:100%;" onchange="onQimAutoFill()">
+          <option value="">선택</option>
+          <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
+        </select>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">수량</div>
+        <input type="number" id="qim-qty" class="profit-finp" style="width:100%;" placeholder="1" min="1" value="1">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">단가 ($) <span style="color:#ef4444;">*</span></div>
+        <input type="number" id="qim-price" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">OT ($)</div>
+        <input type="number" id="qim-ot" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">기타 ($)</div>
+        <input type="number" id="qim-extra" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+      </div>
+    </div>
+    <div style="margin-bottom:10px;">
+      <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">비고</div>
+      <input type="text" id="qim-note" class="profit-finp" style="width:100%;" placeholder="설명, 메모 등">
+    </div>
+    <div id="qim-auto-info" style="display:none;background:#eff6ff;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:#1d4ed8;font-weight:600;"></div>
+    <div id="qim-err" style="display:none;background:#fef2f2;color:#ef4444;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:11px;font-weight:700;"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <button onclick="closeQuoItemModal()" class="btn bgh" style="padding:10px;font-weight:700;">취소</button>
+      <button onclick="saveQuoItem()" class="btn bac" style="padding:10px;font-weight:700;">저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- INVOICE PAGE -->
 <div class="pg" id="pinv">
   <div class="shd" style="padding-top:8px">
@@ -607,12 +709,17 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
         </div>
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">차량 (Rego)</div>
-          <input type="text" id="iim-rego" class="profit-finp" style="width:100%;" placeholder="예: TV1072">
+          <select id="iim-rego" class="profit-sel" style="width:100%;" onchange="onIimRegoChange()">
+            <option value="">선택</option>
+          </select>
         </div>
       </div>
       <div style="margin-bottom:8px;">
         <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">서비스 / 투어명 <span style="color:#ef4444;">*</span></div>
-        <input type="text" id="iim-tour" class="profit-finp" style="width:100%;" placeholder="예: Blue Mountains Day Tour">
+        <select id="iim-tour" class="profit-sel" style="width:100%;margin-bottom:4px;" onchange="onIimTourChange()">
+          <option value="">-- 관광지 선택 --</option>
+        </select>
+        <input type="text" id="iim-tour-custom" class="profit-finp" style="width:100%;display:none;" placeholder="직접 입력...">
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
         <div>
@@ -627,7 +734,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">인승 (Seats)</div>
-          <select id="iim-seats" class="profit-sel" style="width:100%;">
+          <select id="iim-seats" class="profit-sel" style="width:100%;" onchange="onIimAutoFill()">
             <option value="">선택</option>
             <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
           </select>
@@ -1181,6 +1288,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="ni" id="nbal" onclick="nv('pbal','nbal');initBalance()"><div class="nie">📊</div><div class="nil">잔액</div></div>
     <div class="ni" id="nwage" onclick="nv('pwage','nwage');rWage()"><div class="nie">💵</div><div class="nil">급여</div></div>
     <div class="ni" id="ninv" onclick="nv('pinv','ninv');initInvoice()"><div class="nie">🧾</div><div class="nil">인보이스</div></div>
+    <div class="ni" id="nquo" onclick="nv('pquo','nquo');initQuotation()"><div class="nie">📑</div><div class="nil">견적서</div></div>
   </div>
   <div class="bnav-group">
     <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div></div>
@@ -1425,6 +1533,7 @@ function nv(pg,ni){
     pwage: ()=>rWage(ST.curWageDriver),
     pbal:  ()=>renderBalance(),
     pinv:  ()=>initInvoice(),
+    pquo:  ()=>initQuotation(),
     pnotice: ()=>loadNoticesFromGAS(),
   };
 
@@ -1442,6 +1551,7 @@ function nv(pg,ni){
     pwage: ()=>{ _wagesLastSync=0; return loadWagesFromSheet(true).then(()=>rWage(ST.curWageDriver)); },
     pbal:  ()=>syncBalanceData(true).then(renderBalance),
     pinv:  ()=>initInvoice(),
+    pquo:  ()=>initQuotation(),
     pnotice: ()=>loadNoticesFromGAS(),
   };
 
@@ -3595,15 +3705,25 @@ function openInvItemModal(id) {
   const errEl = document.getElementById('iim-err');
   if (errEl) { errEl.style.display='none'; errEl.textContent=''; }
 
+  // ── 드롭다운 채우기 ──
+  _populateIimDropdowns();
+
   if (id) {
-    // 기존 데이터 불러오기
     const key   = _invManualKey();
     const items = JSON.parse(localStorage.getItem(key)||'[]');
     const item  = items.find(x => x.id === id);
     if (item) {
       document.getElementById('iim-date').value     = parseToISO(item.date || '');
       document.getElementById('iim-rego').value     = item.rego     || '';
-      document.getElementById('iim-tour').value     = item.tour     || '';
+      // 투어: select에 있으면 선택, 없으면 커스텀
+      const tourSel = document.getElementById('iim-tour');
+      const tourCustom = document.getElementById('iim-tour-custom');
+      const tourVal = item.tour || '';
+      if ([...tourSel.options].some(o => o.value === tourVal)) {
+        tourSel.value = tourVal; tourCustom.style.display = 'none';
+      } else {
+        tourSel.value = '__custom__'; tourCustom.style.display = ''; tourCustom.value = tourVal;
+      }
       document.getElementById('iim-start').value    = item.start    || '';
       document.getElementById('iim-end').value      = item.end      || '';
       document.getElementById('iim-seats').value    = item.seats    || '';
@@ -3614,15 +3734,72 @@ function openInvItemModal(id) {
       document.getElementById('iim-note').value     = item.note     || '';
     }
   } else {
-    // 폼 초기화
-    ['iim-date','iim-rego','iim-tour','iim-start','iim-end','iim-tourcode','iim-amount','iim-ot','iim-hotel','iim-note'].forEach(id=>{
+    ['iim-date','iim-start','iim-end','iim-tourcode','iim-amount','iim-ot','iim-hotel','iim-note'].forEach(id=>{
       const el=document.getElementById(id); if(el) el.value='';
     });
+    document.getElementById('iim-rego').value = '';
+    document.getElementById('iim-tour').value = '';
+    document.getElementById('iim-tour-custom').style.display = 'none';
+    document.getElementById('iim-tour-custom').value = '';
     document.getElementById('iim-seats').value = '';
-    // 현재 선택된 기간 첫 날짜 기본값
     const from = document.getElementById('inv-from')?.value;
     if (from) document.getElementById('iim-date').value = from;
   }
+}
+
+// ── 인보이스 모달 드롭다운 채우기 ──
+function _populateIimDropdowns() {
+  // Rego
+  const regoSel = document.getElementById('iim-rego');
+  if (regoSel) {
+    regoSel.innerHTML = '<option value="">선택</option>' +
+      (DB.V||[]).map(v => `<option value="${v.Rego}">${v.Rego}${v.Capacity?' ('+v.Capacity+'인승)':''}</option>`).join('');
+  }
+  // Tour (현재 여행사 코스 + 전체 코스)
+  const tourSel = document.getElementById('iim-tour');
+  if (tourSel) {
+    const agency = document.getElementById('inv-agency')?.value || '';
+    const courses = new Set();
+    if (agency && DB.PC[agency]) Object.keys(DB.PC[agency]).forEach(c => courses.add(c));
+    Object.values(DB.PC||{}).forEach(cm => Object.keys(cm).forEach(c => courses.add(c)));
+    tourSel.innerHTML = '<option value="">-- 관광지 선택 --</option>' +
+      [...courses].sort().map(c => `<option value="${c}">${c}</option>`).join('') +
+      '<option value="__custom__">✏️ 직접 입력...</option>';
+  }
+}
+function onIimRegoChange() {
+  const rego = document.getElementById('iim-rego')?.value;
+  if (!rego) return;
+  const veh = (DB.V||[]).find(v => v.Rego === rego);
+  if (veh && veh.Capacity) {
+    const cap = String(veh.Capacity).replace(/[^0-9]/g,'');
+    const seatsSel = document.getElementById('iim-seats');
+    const match = [...seatsSel.options].find(o => o.value.replace(/[^0-9]/g,'') === cap);
+    if (match) seatsSel.value = match.value;
+  }
+  onIimAutoFill();
+}
+function onIimTourChange() {
+  const sel = document.getElementById('iim-tour');
+  const custom = document.getElementById('iim-tour-custom');
+  if (sel.value === '__custom__') { custom.style.display = ''; custom.focus(); }
+  else { custom.style.display = 'none'; custom.value = ''; onIimAutoFill(); }
+}
+function onIimAutoFill() {
+  const agency = document.getElementById('inv-agency')?.value || '';
+  const tourSel = document.getElementById('iim-tour');
+  const tour = tourSel?.value === '__custom__' ? '' : (tourSel?.value || '');
+  const seats = document.getElementById('iim-seats')?.value || '';
+  if (!agency || !tour || !seats) return;
+  const agPC = DB.PC[agency]; if (!agPC) return;
+  let ce = agPC[tour];
+  if (!ce) { const lc = tour.trim().toLowerCase(); const k = Object.keys(agPC).find(x=>x.trim().toLowerCase()===lc); if(k) ce=agPC[k]; }
+  if (!ce) return;
+  const sk = seats.replace(/[^0-9]/g,'')||'21';
+  const sd = ce[sk]||ce['21']; if (!sd) return;
+  const rate = parseFloat(sd.rate)||0;
+  const amtEl = document.getElementById('iim-amount');
+  if (rate > 0 && (!amtEl.value || parseFloat(amtEl.value)===0)) amtEl.value = rate;
 }
 
 function closeInvItemModal() {
@@ -3633,7 +3810,10 @@ function closeInvItemModal() {
 function saveInvItem() {
   const errEl = document.getElementById('iim-err');
   const date   = document.getElementById('iim-date')?.value;
-  const tour   = document.getElementById('iim-tour')?.value?.trim();
+  const tourSel = document.getElementById('iim-tour')?.value;
+  const tour   = tourSel === '__custom__'
+    ? (document.getElementById('iim-tour-custom')?.value?.trim() || '')
+    : (tourSel || '').trim();
   const amount = parseFloat(document.getElementById('iim-amount')?.value) || 0;
 
   if (!date)  { errEl.textContent='날짜를 입력하세요.'; errEl.style.display='block'; return; }
@@ -8499,6 +8679,477 @@ function startAdminAutoSync(){
 // INLINE DOCUMENT PREVIEW MODAL (모바일 호환)
 // ═══════════════════════════════════════
 // window.open() 은 모바일 브라우저에서 팝업 차단됨
+// ═══════════════════════════════════════════════════════
+// QUOTATION (견적서)
+// ═══════════════════════════════════════════════════════
+let _quoItems = [];
+let _quoItemEditId = null;
+
+function initQuotation() {
+  const sel = document.getElementById('quo-agency');
+  if (sel) {
+    const agencies = [...new Set([...Object.keys(DB.PC||{}), ...(DB.C||[]).map(c=>c.Name)])].filter(Boolean).sort();
+    sel.innerHTML = '<option value="">-- 선택 --</option>' +
+      agencies.map(a => `<option value="${a}">${a}</option>`).join('') +
+      '<option value="__custom__">✏️ 직접 입력...</option>';
+  }
+  if (!document.getElementById('quo-date')?.value) {
+    document.getElementById('quo-date').value = new Date().toISOString().slice(0,10);
+  }
+  if (!document.getElementById('quo-valid')?.value) {
+    const d = new Date(); d.setDate(d.getDate()+30);
+    document.getElementById('quo-valid').value = d.toISOString().slice(0,10);
+  }
+  _quoLoadItems();
+  renderQuoItemList();
+  renderQuoPreview();
+}
+
+function onQuoAgencyChange() {
+  const sel = document.getElementById('quo-agency');
+  const custom = document.getElementById('quo-agency-custom');
+  if (sel.value === '__custom__') { custom.style.display = ''; custom.focus(); }
+  else { custom.style.display = 'none'; custom.value = ''; }
+  renderQuoPreview();
+}
+
+function _quoGetAgency() {
+  const v = document.getElementById('quo-agency')?.value || '';
+  return v === '__custom__' ? (document.getElementById('quo-agency-custom')?.value?.trim()||'') : v;
+}
+function _quoStorageKey() { return 'dc_quo_items'; }
+function _quoLoadItems() { _quoItems = JSON.parse(localStorage.getItem(_quoStorageKey())||'[]'); }
+function _quoSaveItems() { localStorage.setItem(_quoStorageKey(), JSON.stringify(_quoItems)); }
+
+// ── 모달 ──
+function openQuoItemModal(id) {
+  _quoItemEditId = id;
+  document.getElementById('quo-item-modal').style.display = 'flex';
+  document.getElementById('quo-modal-title').textContent = id ? '✏️ 항목 편집' : '📝 항목 추가';
+  const errEl = document.getElementById('qim-err');
+  if (errEl) { errEl.style.display='none'; errEl.textContent=''; }
+  document.getElementById('qim-auto-info').style.display='none';
+
+  // Rego 드롭다운
+  const regoSel = document.getElementById('qim-rego');
+  regoSel.innerHTML = '<option value="">선택</option>' +
+    (DB.V||[]).map(v => `<option value="${v.Rego}">${v.Rego}${v.Capacity?' ('+v.Capacity+'인승)':''}</option>`).join('');
+
+  // Tour 드롭다운
+  _populateQimTour();
+
+  if (id) {
+    const item = _quoItems.find(x => x.id === id);
+    if (item) {
+      document.getElementById('qim-date').value = item.date || '';
+      regoSel.value = item.rego || '';
+      const tourSel = document.getElementById('qim-tour');
+      const tourCustom = document.getElementById('qim-tour-custom');
+      if ([...tourSel.options].some(o => o.value === item.tour)) {
+        tourSel.value = item.tour; tourCustom.style.display = 'none';
+      } else {
+        tourSel.value = '__custom__'; tourCustom.style.display = ''; tourCustom.value = item.tour||'';
+      }
+      document.getElementById('qim-seats').value = item.seats || '';
+      document.getElementById('qim-qty').value   = item.qty  || 1;
+      document.getElementById('qim-price').value = item.price || '';
+      document.getElementById('qim-ot').value    = item.ot   || '';
+      document.getElementById('qim-extra').value = item.extra || '';
+      document.getElementById('qim-note').value  = item.note || '';
+    }
+  } else {
+    ['qim-date','qim-price','qim-ot','qim-extra','qim-note'].forEach(x => {
+      const el = document.getElementById(x); if(el) el.value='';
+    });
+    regoSel.value = '';
+    document.getElementById('qim-tour').value = '';
+    document.getElementById('qim-tour-custom').style.display = 'none';
+    document.getElementById('qim-tour-custom').value = '';
+    document.getElementById('qim-seats').value = '';
+    document.getElementById('qim-qty').value = 1;
+  }
+}
+function closeQuoItemModal() {
+  document.getElementById('quo-item-modal').style.display = 'none';
+  _quoItemEditId = null;
+}
+
+function _populateQimTour() {
+  const sel = document.getElementById('qim-tour'); if (!sel) return;
+  const agency = _quoGetAgency();
+  const courses = new Set();
+  if (agency && DB.PC[agency]) Object.keys(DB.PC[agency]).forEach(c => courses.add(c));
+  Object.values(DB.PC||{}).forEach(cm => Object.keys(cm).forEach(c => courses.add(c)));
+  sel.innerHTML = '<option value="">-- 관광지 선택 --</option>' +
+    [...courses].sort().map(c => `<option value="${c}">${c}</option>`).join('') +
+    '<option value="__custom__">✏️ 직접 입력...</option>';
+}
+
+function onQimRegoChange() {
+  const rego = document.getElementById('qim-rego')?.value;
+  if (!rego) return;
+  const veh = (DB.V||[]).find(v => v.Rego === rego);
+  if (veh && veh.Capacity) {
+    const cap = String(veh.Capacity).replace(/[^0-9]/g,'');
+    const seatsSel = document.getElementById('qim-seats');
+    const match = [...seatsSel.options].find(o => o.value.replace(/[^0-9]/g,'') === cap);
+    if (match) seatsSel.value = match.value;
+  }
+  onQimAutoFill();
+}
+
+function onQimTourChange() {
+  const sel = document.getElementById('qim-tour');
+  const custom = document.getElementById('qim-tour-custom');
+  if (sel.value === '__custom__') { custom.style.display = ''; custom.focus(); }
+  else { custom.style.display = 'none'; custom.value = ''; onQimAutoFill(); }
+}
+
+function onQimAutoFill() {
+  const agency = _quoGetAgency();
+  const tourSel = document.getElementById('qim-tour');
+  const tour = tourSel?.value === '__custom__' ? '' : (tourSel?.value||'');
+  const seats = document.getElementById('qim-seats')?.value || '';
+  const infoEl = document.getElementById('qim-auto-info');
+  if (!tour || !seats) { if(infoEl) infoEl.style.display='none'; return; }
+
+  // 여행사 요금표에서 조회
+  let courseEntry = null, foundAgency = agency;
+  const agPC = agency ? DB.PC[agency] : null;
+  if (agPC) {
+    courseEntry = agPC[tour];
+    if (!courseEntry) { const lc=tour.trim().toLowerCase(); const k=Object.keys(agPC).find(x=>x.trim().toLowerCase()===lc); if(k) courseEntry=agPC[k]; }
+  }
+  // 없으면 다른 여행사에서 참조
+  if (!courseEntry) {
+    for (const ag of Object.keys(DB.PC||{})) {
+      let ce = DB.PC[ag][tour];
+      if (!ce) { const lc=tour.trim().toLowerCase(); const k=Object.keys(DB.PC[ag]).find(x=>x.trim().toLowerCase()===lc); if(k) ce=DB.PC[ag][k]; }
+      if (ce) { courseEntry = ce; foundAgency = ag; break; }
+    }
+  }
+  if (!courseEntry) { if(infoEl) infoEl.style.display='none'; return; }
+
+  const sk = seats.replace(/[^0-9]/g,'')||'21';
+  const sd = courseEntry[sk]||courseEntry['21'];
+  if (!sd) { if(infoEl) infoEl.style.display='none'; return; }
+
+  const rate = parseFloat(sd.rate)||0;
+  const ot   = parseFloat(sd.ot)||0;
+  const priceEl = document.getElementById('qim-price');
+  if (rate > 0 && (!priceEl.value || parseFloat(priceEl.value)===0)) priceEl.value = rate;
+
+  // 정보 표시
+  if (infoEl && rate > 0) {
+    infoEl.style.display = 'block';
+    infoEl.textContent = `💡 ${foundAgency} 요금표: ${tour} ${seats} = $${rate}${ot?' / OT $'+ot+'(시간당)':''}`;
+  }
+}
+
+function saveQuoItem() {
+  const errEl = document.getElementById('qim-err');
+  const tourSel = document.getElementById('qim-tour')?.value;
+  const tour = tourSel === '__custom__'
+    ? (document.getElementById('qim-tour-custom')?.value?.trim()||'') : (tourSel||'').trim();
+  const price = parseFloat(document.getElementById('qim-price')?.value)||0;
+  if (!tour) { errEl.textContent='관광지를 선택하세요.'; errEl.style.display='block'; return; }
+  if (price<=0) { errEl.textContent='단가를 입력하세요.'; errEl.style.display='block'; return; }
+
+  const item = {
+    id: _quoItemEditId||Date.now().toString(),
+    date: document.getElementById('qim-date')?.value||'',
+    rego: document.getElementById('qim-rego')?.value||'',
+    tour, seats: document.getElementById('qim-seats')?.value||'',
+    qty: parseInt(document.getElementById('qim-qty')?.value)||1,
+    price, ot: parseFloat(document.getElementById('qim-ot')?.value)||0,
+    extra: parseFloat(document.getElementById('qim-extra')?.value)||0,
+    note: document.getElementById('qim-note')?.value?.trim()||'',
+  };
+  if (_quoItemEditId) {
+    const idx = _quoItems.findIndex(x=>x.id===_quoItemEditId);
+    if (idx!==-1) _quoItems[idx]=item; else _quoItems.push(item);
+  } else _quoItems.push(item);
+  _quoItems.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  _quoSaveItems();
+  closeQuoItemModal();
+  renderQuoItemList();
+  renderQuoPreview();
+  toast('항목 저장됨','ok');
+}
+
+function deleteQuoItem(id) {
+  if(!confirm('이 항목을 삭제하시겠습니까?')) return;
+  _quoItems = _quoItems.filter(x=>x.id!==id);
+  _quoSaveItems(); renderQuoItemList(); renderQuoPreview();
+  toast('항목 삭제됨','ok');
+}
+
+function clearQuoItems() {
+  if(!confirm('모든 견적 항목을 초기화하시겠습니까?')) return;
+  _quoItems = []; _quoSaveItems(); renderQuoItemList(); renderQuoPreview();
+  toast('초기화 완료','ok');
+}
+
+function renderQuoItemList() {
+  const el = document.getElementById('quo-item-list'); if(!el) return;
+  if (_quoItems.length===0) {
+    el.innerHTML = '<div style="background:var(--sf2);border-radius:12px;padding:20px;text-align:center;color:var(--t3);font-size:12px;">항목이 없습니다. + 항목 추가를 눌러주세요</div>';
+    return;
+  }
+  const total = _quoItems.reduce((s,i)=>s+((i.price||0)+(i.ot||0)+(i.extra||0))*(i.qty||1),0);
+  el.innerHTML = `
+    <div style="background:var(--sf2);border-radius:12px;overflow:hidden;margin-bottom:6px;">
+      <div style="padding:8px 12px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:11px;font-weight:700;color:var(--t2);">견적 항목 ${_quoItems.length}건</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:12px;font-weight:800;color:var(--gn);">합계 $${total.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+          <button onclick="clearQuoItems()" style="font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:700;">초기화</button>
+        </div>
+      </div>
+      ${_quoItems.map(item => {
+        const lineTotal = ((item.price||0)+(item.ot||0)+(item.extra||0))*(item.qty||1);
+        return `<div style="padding:9px 12px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:700;color:var(--t1);">${escH(item.tour)}</div>
+            <div style="font-size:11px;color:var(--t2);margin-top:1px;">${item.date?fmtDate(item.date)+' · ':''}${escH(item.rego||'—')}${item.seats?' ('+item.seats+')':''} × ${item.qty||1}</div>
+            ${item.note?`<div style="font-size:10px;color:var(--t3);">${escH(item.note)}</div>`:''}
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="font-size:13px;font-weight:800;color:var(--gn);">$${lineTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            <div style="font-size:10px;color:var(--t3);">@$${(item.price||0).toLocaleString()}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+            <button onclick="openQuoItemModal('${item.id}')" style="padding:4px 8px;border-radius:6px;border:1px solid var(--bd);background:var(--sf);font-size:11px;font-weight:700;cursor:pointer;color:var(--ac);">✏️</button>
+            <button onclick="deleteQuoItem('${item.id}')" style="padding:4px 8px;border-radius:6px;border:1px solid #fecaca;background:#fef2f2;font-size:11px;font-weight:700;cursor:pointer;color:#ef4444;">🗑</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function renderQuoPreview() {
+  const prev = document.getElementById('quo-preview'); if(!prev) return;
+  if (_quoItems.length===0) { prev.innerHTML=''; return; }
+  const total = _quoItems.reduce((s,i)=>s+((i.price||0)+(i.ot||0)+(i.extra||0))*(i.qty||1),0);
+  const gst = roundMoney(total/11);
+  const exGST = roundMoney(total-gst);
+  prev.innerHTML = `
+    <div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:10px;">
+      <div style="font-size:13px;font-weight:700;color:var(--t1);margin-bottom:6px;">💰 견적 요약</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
+        ${wstat('총액 (GST포함)',total,'var(--gn)')}
+        ${wstat('GST (1/11)',gst,'var(--ac)')}
+        ${wstat('GST 제외',exGST,'var(--t2)')}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+        <button onclick="previewQuotationDoc()" class="btn" style="font-size:12px;padding:10px;background:#7c3aed;color:white;font-weight:700;">👁 미리보기</button>
+        <button onclick="generateQuotationDoc()" class="btn bac" style="font-size:12px;padding:10px;font-weight:700;">📄 생성</button>
+        <button onclick="emailQuotation()" class="btn" style="font-size:12px;padding:10px;background:#0ea5e9;color:white;font-weight:700;">✉️ 발송</button>
+      </div>
+    </div>`;
+}
+
+function _quoNum() {
+  const ag = _quoGetAgency()||'CUSTOM';
+  const dt = document.getElementById('quo-date')?.value||new Date().toISOString().slice(0,10);
+  return 'QUO-' + ag.replace(/[^A-Za-z0-9]/g,'').slice(0,6).toUpperCase() + '-' + dt.replace(/-/g,'').slice(2);
+}
+
+function _buildQuotationHTML({isDraft=false}={}) {
+  const agency = _quoGetAgency();
+  const quoDate = document.getElementById('quo-date')?.value||new Date().toISOString().slice(0,10);
+  const validDate = document.getElementById('quo-valid')?.value||'';
+  const memo = document.getElementById('quo-memo')?.value?.trim()||'';
+  const client = (DB.C||[]).find(c=>c.Name===agency)||{};
+  const abn = DC_COMPANY.abn||localStorage.getItem('dc_abn')||'';
+  const fd = ds => ds ? fmtDate(ds)||ds : '—';
+  const quoNum = _quoNum();
+
+  let grandTotal = _quoItems.reduce((s,i)=>s+((i.price||0)+(i.ot||0)+(i.extra||0))*(i.qty||1),0);
+  const gst = roundMoney(grandTotal/11);
+  const exGST = roundMoney(grandTotal-gst);
+  const draftBanner = isDraft ? `<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:10px 16px;margin-bottom:20px;text-align:center;font-size:14px;font-weight:800;color:#92400e;">⚠️ DRAFT PREVIEW</div>` : '';
+
+  const tableRows = _quoItems.map(item => {
+    const lineTotal = ((item.price||0)+(item.ot||0)+(item.extra||0))*(item.qty||1);
+    const extras = [item.ot?'OT $'+item.ot:'', item.extra?'Extra $'+item.extra:''].filter(Boolean).join(' · ');
+    return `<tr>
+      <td style="white-space:nowrap">${item.date?fd(item.date):'—'}</td>
+      <td>${escH(item.tour)}${item.seats?' ('+escH(item.seats)+')':''}${item.note?'<div style="font-size:10px;color:#64748b;margin-top:2px;">'+escH(item.note)+'</div>':''}</td>
+      <td>${escH(item.rego||'—')}</td>
+      <td style="text-align:center">${item.qty||1}</td>
+      <td style="text-align:right">$${(item.price||0).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td style="text-align:right;font-weight:700">$${lineTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+    </tr>${extras?'<tr><td></td><td colspan="5" style="color:#64748b;font-size:11px;padding:2px 12px 6px;">'+extras+'</td></tr>':''}`;
+  }).join('');
+
+  const accentColor = isDraft ? '#f59e0b' : '#059669';
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>${isDraft?'[DRAFT] ':''}Quotation — ${escH(agency||'Customer')} — ${quoNum}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:13px;color:#1e293b;background:#fff;padding:40px;max-width:800px;margin:0 auto}
+@media print{body{padding:20px}.no-print{display:none!important}@page{margin:15mm}}
+.q-header{display:flex;justify-content:space-between;align-items:flex-start}
+.q-company{flex:1}
+.q-company-name{font-size:22px;font-weight:900;color:#0f172a;letter-spacing:-.5px}
+.q-company-sub{font-size:11px;color:#64748b;margin-top:4px;line-height:1.6}
+.q-title-box{text-align:right}
+.q-title{font-size:28px;font-weight:900;color:${accentColor};letter-spacing:1px}
+.q-num{font-size:13px;color:#64748b;margin-top:4px}
+.q-date{font-size:12px;color:#94a3b8;margin-top:2px}
+.q-line{border:none;border-top:2px solid #e2e8f0;margin:20px 0}
+.q-line-bold{border-top:3px solid ${accentColor}}
+.q-label{font-size:10px;font-weight:800;color:#94a3b8;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px}
+.q-name{font-size:14px;font-weight:800;color:#0f172a}
+.q-sub{font-size:11px;color:#64748b;margin-top:3px;line-height:1.6}
+.q-table{width:100%;border-collapse:collapse;margin-bottom:20px}
+.q-table th{background:#1e293b;color:#fff;font-size:11px;font-weight:700;padding:10px 12px;text-align:left;letter-spacing:.3px}
+.q-table th:last-child,.q-table th:nth-child(5){text-align:right}
+.q-table th:nth-child(4){text-align:center}
+.q-table td{padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;vertical-align:top}
+.q-table td:last-child{text-align:right;font-weight:700}
+.q-table td:nth-child(4){text-align:center}
+.q-table td:nth-child(5){text-align:right}
+.q-table tr:hover td{background:#f8fafc}
+.q-totals{margin-left:auto;width:260px}
+.q-total-row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}
+.q-total-row.grand{font-weight:900;font-size:18px;color:${accentColor};border-top:3px solid ${accentColor};margin-top:8px;padding-top:10px}
+.q-footer{margin-top:32px;text-align:center;font-size:11px;color:#94a3b8}
+.print-btn{display:block;margin:0 auto 24px;padding:12px 32px;background:${accentColor};color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer}
+</style></head><body>
+${draftBanner}
+<button class="print-btn no-print" onclick="window.print()">🖨 Print / Save as PDF</button>
+<div class="q-header">
+  <div class="q-company">
+    <div class="q-company-name">${escH(DC_COMPANY.name||'DONG CHOI PTY LTD')}</div>
+    <div class="q-company-sub">
+      ${abn?'ABN: '+abn+'<br>':''}
+      ${DC_COMPANY.address||''}<br>
+      ${DC_COMPANY.phone||''} &nbsp;·&nbsp; ${DC_COMPANY.email||''}
+    </div>
+  </div>
+  <div class="q-title-box">
+    <div class="q-title">${isDraft?'DRAFT':'QUOTATION'}</div>
+    <div class="q-num">${quoNum}</div>
+    <div class="q-date">Date: ${fd(quoDate)}</div>
+    ${validDate?'<div class="q-date" style="color:#059669;font-weight:700;">Valid Until: '+fd(validDate)+'</div>':''}
+  </div>
+</div>
+<hr class="q-line q-line-bold">
+<div style="margin-bottom:28px;">
+  <div class="q-label">Prepared For</div>
+  <div class="q-name">${escH(agency||'Customer')}</div>
+  <div class="q-sub">
+    ${client.ClientID?'ID: '+escH(client.ClientID)+'<br>':''}
+    ${client.Mobile?'Tel: '+escH(client.Mobile)+'<br>':''}
+    ${client.Email?'Email: '+escH(client.Email)+'<br>':''}
+    ${client.Address?escH(client.Address):''}
+  </div>
+</div>
+${memo?'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 16px;margin-bottom:24px;font-size:12px;color:#166534;"><strong>Note:</strong> '+escH(memo)+'</div>':''}
+<table class="q-table">
+  <thead><tr>
+    <th>Date</th><th>Service / Tour</th><th>Vehicle</th><th>Qty</th><th>Unit Price</th><th style="text-align:right">Amount (incl. GST)</th>
+  </tr></thead>
+  <tbody>${tableRows}</tbody>
+</table>
+<div class="q-totals">
+  <div class="q-total-row"><span>Subtotal (excl. GST)</span><span>$${exGST.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+  <div class="q-total-row"><span>GST (10%)</span><span>$${gst.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+  <div class="q-total-row grand"><span>Total</span><span>$${grandTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+</div>
+<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;margin-top:28px;">
+  <div style="font-size:11px;font-weight:800;color:#64748b;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;">Terms & Conditions</div>
+  <div style="font-size:11px;color:#64748b;line-height:1.8;">
+    1. This quotation is valid until ${validDate?fd(validDate):'30 days from the date of issue'}.<br>
+    2. All prices are in Australian Dollars (AUD) and include GST.<br>
+    3. A booking confirmation is required to secure the service.<br>
+    4. Cancellation policy applies as per our standard terms.
+  </div>
+</div>
+<div class="q-footer">
+  Thank you for your enquiry. &nbsp;·&nbsp; ${escH(DC_COMPANY.name||'Dong Choi Pty Ltd')} &nbsp;·&nbsp; ${fd(quoDate)}
+</div>
+</body></html>`;
+}
+
+function previewQuotationDoc() {
+  if (_quoItems.length===0) { toast('견적 항목을 추가하세요','er'); return; }
+  _showDocModal(_buildQuotationHTML({isDraft:true}));
+}
+
+function generateQuotationDoc() {
+  if (_quoItems.length===0) { toast('견적 항목을 추가하세요','er'); return; }
+  const html = _buildQuotationHTML({isDraft:false});
+  const blob = new Blob([html], {type:'text/html'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = _quoNum() + '.html'; a.click();
+  URL.revokeObjectURL(url);
+  toast('견적서 다운로드 완료','ok');
+}
+
+async function emailQuotation() {
+  const agency = _quoGetAgency();
+  if (_quoItems.length===0) { toast('견적 항목을 추가하세요','er'); return; }
+
+  const client = (DB.C||[]).find(c=>c.Name===agency)||{};
+  let toEmail = (client.Email||'').trim();
+  const quoNum = _quoNum();
+  const grandTotal = _quoItems.reduce((s,i)=>s+((i.price||0)+(i.ot||0)+(i.extra||0))*(i.qty||1),0);
+  const validDate = document.getElementById('quo-valid')?.value||'';
+  const fd = ds => ds ? fmtDate(ds)||ds : '—';
+
+  if (!toEmail) {
+    toEmail = (prompt(`${agency||'고객'}의 이메일 주소를 입력하세요:\n(여행사 정보에 이메일을 등록하면 자동으로 불러옵니다)`,'') || '').trim();
+    if (!toEmail) return;
+  }
+
+  const subject = `Quotation ${quoNum} — ${agency||'Customer'}`;
+
+  // 항목 목록 텍스트
+  const itemLines = _quoItems.map(item => {
+    const lineTotal = ((item.price||0)+(item.ot||0)+(item.extra||0))*(item.qty||1);
+    return `  - ${item.tour}${item.seats?' ('+item.seats+')':''}${item.rego?' / '+item.rego:''} × ${item.qty||1} = $${lineTotal.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  }).join('\n');
+
+  const body =
+    `Dear ${agency||'Customer'},\n\n` +
+    `Thank you for your enquiry. Please find our quotation below:\n\n` +
+    `Quotation No: ${quoNum}\n` +
+    `Total: $${grandTotal.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})} (incl. GST)\n` +
+    (validDate ? `Valid Until: ${fd(validDate)}\n` : '') +
+    `\nServices:\n${itemLines}\n\n` +
+    `Please feel free to contact us if you have any questions or would like to proceed with a booking.\n\n` +
+    `Kind regards,\n${DC_COMPANY.name||'Dong Choi Pty Ltd'}\n${DC_COMPANY.phone||''}\n${DC_COMPANY.email||''}`;
+
+  const emailBtn = document.querySelector('button[onclick="emailQuotation()"]');
+  if (emailBtn) { emailBtn.disabled=true; emailBtn.textContent='⏳ 발송 중...'; }
+
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action:'send_invoice_email', to:toEmail, subject, body,
+        senderName: DC_COMPANY.name||'Dong Choi Pty Ltd',
+        _user: getAdminUser()
+      })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json.ok) { toast(`✉️ ${toEmail} 으로 견적서 발송 완료`,'ok'); }
+    else throw new Error(json.error||'발송 실패');
+  } catch (e) {
+    toast(`⚠️ GAS 발송 실패 — 이메일 클라이언트로 열기: ${e.message}`,'er');
+    const s = encodeURIComponent(subject);
+    const b = encodeURIComponent(body);
+    window.open(`mailto:${encodeURIComponent(toEmail)}?subject=${s}&body=${b}`,'_blank');
+  } finally {
+    if (emailBtn) { emailBtn.disabled=false; emailBtn.textContent='✉️ 발송'; }
+  }
+}
+
 // → 대신 풀스크린 iframe 오버레이를 사용
 
 function _showDocModal(htmlContent) {
