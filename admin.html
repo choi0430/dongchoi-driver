@@ -3976,14 +3976,59 @@ function renderInvManualList() {
     </div>`;
 }
 
+// ★ 선수금/크레딧 값을 변수로 유지 (재렌더링 시 보존)
+let _invPrepaid = 0;
+let _invCredit = 0;
+let _invCreditNote = '';
+
+function _onInvPrepaidChange(val) { _invPrepaid = parseFloat(val)||0; _updateInvDeductionDisplay(); }
+function _onInvCreditChange(val)  { _invCredit = parseFloat(val)||0; _updateInvDeductionDisplay(); }
+function _onInvCreditNoteChange(val) { _invCreditNote = (val||'').trim(); }
+
+function _updateInvDeductionDisplay() {
+  const el = document.getElementById('inv-deduction-summary');
+  if (!el) return;
+  const gt = parseFloat(el.dataset.grandtotal)||0;
+  const pp = _invPrepaid, cr = _invCredit;
+  if (pp + cr > 0) {
+    const net = roundMoney(gt - pp - cr);
+    el.innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">' +
+      (pp>0 ? wstat('선수금', -pp, '#dc2626') : '') +
+      (cr>0 ? wstat('크레딧', -cr, '#dc2626') : '') +
+      wstat('최종 청구액', net, '#059669') +
+      '</div>';
+    el.style.display = '';
+  } else {
+    el.innerHTML = '';
+    el.style.display = 'none';
+  }
+}
+
 function _refreshInvPreview() {
+  // 재렌더 전 값 보존 (DOM에서 읽어 변수 동기화)
+  const ppEl = document.getElementById('inv-prepaid');
+  const crEl = document.getElementById('inv-credit');
+  const cnEl = document.getElementById('inv-credit-note');
+  if (ppEl) _invPrepaid = parseFloat(ppEl.value)||0;
+  if (crEl) _invCredit = parseFloat(crEl.value)||0;
+  if (cnEl) _invCreditNote = cnEl.value||'';
+
   const agency = document.getElementById('inv-agency')?.value;
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) return;
-  // generateInvRows 재호출
   const rows = _buildInvRows(agency, from, to);
   renderInvPreview(rows, agency, from, to);
+
+  // 재렌더 후 값 복원
+  const ppEl2 = document.getElementById('inv-prepaid');
+  const crEl2 = document.getElementById('inv-credit');
+  const cnEl2 = document.getElementById('inv-credit-note');
+  if (ppEl2) ppEl2.value = _invPrepaid || '';
+  if (crEl2) crEl2.value = _invCredit || '';
+  if (cnEl2) cnEl2.value = _invCreditNote || '';
+  _updateInvDeductionDisplay();
 }
 
 // 수동 항목을 report rows 형식으로 변환
@@ -4474,19 +4519,20 @@ function renderInvPreview(rows, agency, from, to) {
         ${wstat('GST (1/11)', gst, 'var(--ac)')}
         ${wstat('GST 제외', exGST, 'var(--t2)')}
       </div>
-      ${(function(){
-        const _pp = parseFloat(document.getElementById('inv-prepaid')?.value)||0;
-        const _cr = parseFloat(document.getElementById('inv-credit')?.value)||0;
-        if(_pp+_cr>0){
-          const _net = roundMoney(grandTotal - _pp - _cr);
-          return '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">' +
-            (_pp>0 ? wstat('선수금', -_pp, '#dc2626') : '') +
-            (_cr>0 ? wstat('크레딧', -_cr, '#dc2626') : '') +
-            wstat('최종 청구액', _net, '#059669') +
-          '</div>';
-        }
-        return '';
-      })()}
+      <div id="inv-deduction-summary" data-grandtotal="${grandTotal}" style="${_invPrepaid+_invCredit>0?'':'display:none;'}">
+        ${(function(){
+          const pp=_invPrepaid, cr=_invCredit;
+          if(pp+cr>0){
+            const net=roundMoney(grandTotal-pp-cr);
+            return '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">'+
+              (pp>0?wstat('선수금',-pp,'#dc2626'):'')+
+              (cr>0?wstat('크레딧',-cr,'#dc2626'):'')+
+              wstat('최종 청구액',net,'#059669')+
+            '</div>';
+          }
+          return '';
+        })()}
+      </div>
       ${totalOT>0||totalHotel>0||totalDist>0 ? `
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;">
         ${totalBase>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">기본요금</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalBase.toLocaleString()}</div></div>` : ''}
@@ -4517,15 +4563,15 @@ function renderInvPreview(rows, agency, from, to) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div>
             <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">선수금 (Prepaid)</div>
-            <input type="number" id="inv-prepaid" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01" onchange="_refreshInvPreview()">
+            <input type="number" id="inv-prepaid" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01" value="${_invPrepaid||''}" oninput="_onInvPrepaidChange(this.value)">
           </div>
           <div>
             <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">크레딧 (Credit)</div>
-            <input type="number" id="inv-credit" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01" onchange="_refreshInvPreview()">
+            <input type="number" id="inv-credit" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01" value="${_invCredit||''}" oninput="_onInvCreditChange(this.value)">
           </div>
         </div>
         <div style="font-size:10px;color:var(--t3);margin-top:3px;">
-          <input type="text" id="inv-credit-note" class="profit-finp" style="width:100%;font-size:10px;" placeholder="크레딧/선수금 메모 (선택)" onchange="_refreshInvPreview()">
+          <input type="text" id="inv-credit-note" class="profit-finp" style="width:100%;font-size:10px;" placeholder="크레딧/선수금 메모 (선택)" value="${escH(_invCreditNote)}" oninput="_onInvCreditNoteChange(this.value)">
         </div>
       </div>
     </div>
@@ -5011,10 +5057,10 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
   let grandTotal = _calcInvGrandTotal(_buildInvRows(agency, from, to));
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
-  // ★ 선수금 / 크레딧
-  const prepaid    = parseFloat(document.getElementById('inv-prepaid')?.value) || 0;
-  const credit     = parseFloat(document.getElementById('inv-credit')?.value) || 0;
-  const creditNote = document.getElementById('inv-credit-note')?.value?.trim() || '';
+  // ★ 선수금 / 크레딧 (변수에서 읽기)
+  const prepaid    = _invPrepaid || 0;
+  const credit     = _invCredit || 0;
+  const creditNote = _invCreditNote || '';
   const totalDeductions = prepaid + credit;
   const amountDue  = roundMoney(grandTotal - totalDeductions);
   const invNum = getInvNum(agency, from);
@@ -5422,8 +5468,8 @@ async function emailInvoice() {
 
   let grandTotal = 0;
   rows.forEach(r => { grandTotal += calcInvRow(r).total; });
-  const _emailPrepaid = parseFloat(document.getElementById('inv-prepaid')?.value)||0;
-  const _emailCredit  = parseFloat(document.getElementById('inv-credit')?.value)||0;
+  const _emailPrepaid = _invPrepaid || 0;
+  const _emailCredit  = _invCredit || 0;
   const _emailAmountDue = roundMoney(grandTotal - _emailPrepaid - _emailCredit);
 
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
