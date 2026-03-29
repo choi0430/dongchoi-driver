@@ -9020,21 +9020,21 @@ ${memo?'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8p
 </body></html>`;
 }
 
-function convertQuoToInvoice() {
+async function convertQuoToInvoice() {
   if (_quoItems.length === 0) { toast('견적 항목이 없습니다','er'); return; }
   const agency = _quoGetAgency();
   if (!agency) { toast('여행사/고객을 선택하세요','er'); return; }
+  if (!confirm(`견적서 ${_quoItems.length}건을 "${agency}" 인보이스 수동 항목으로 전환하시겠습니까?`)) return;
 
-  // 날짜 범위 계산
+  // 날짜 범위: 견적 항목의 최소~최대 날짜
   const dates = _quoItems.map(i => i.date).filter(Boolean).sort();
   const firstDate = dates[0] || new Date().toISOString().slice(0,10);
+  const lastDate  = dates[dates.length-1] || firstDate;
   const monthKey = firstDate.slice(0,7);
   const invKey = 'dc_inv_manual_' + agency + '_' + monthKey;
 
-  // 기존 수동 항목 로드
+  // 기존 수동 항목에 병합
   const existing = JSON.parse(localStorage.getItem(invKey) || '[]');
-
-  // 견적 항목 → 인보이스 수동 항목으로 변환
   const newItems = _quoItems.map(item => {
     const unitTotal = (item.price||0) + (item.ot||0) + (item.extra||0);
     return {
@@ -9052,37 +9052,32 @@ function convertQuoToInvoice() {
       _manual:  true,
     };
   });
-
-  // 병합 & 저장
   const merged = [...existing, ...newItems].sort((a,b) => (a.date||'').localeCompare(b.date||''));
   localStorage.setItem(invKey, JSON.stringify(merged));
 
-  // 인보이스 페이지로 이동
+  // 인보이스 페이지로 이동 & 초기화 대기
   nv('pinv','ninv');
-  initInvoice();
+  await initInvoice();
 
-  // 여행사 & 기간 자동 설정
-  setTimeout(() => {
-    const agSel = document.getElementById('inv-agency');
-    if (agSel) {
-      // 해당 여행사가 옵션에 있으면 선택
-      if ([...agSel.options].some(o => o.value === agency)) {
-        agSel.value = agency;
-      }
-    }
-    // 기간: 해당 월의 1일 ~ 말일
-    const from = monthKey + '-01';
-    const lastDay = new Date(parseInt(monthKey.slice(0,4)), parseInt(monthKey.slice(5,7)), 0).getDate();
-    const to = monthKey + '-' + String(lastDay).padStart(2,'0');
-    const fromEl = document.getElementById('inv-from');
-    const toEl = document.getElementById('inv-to');
-    if (fromEl) fromEl.value = from;
-    if (toEl) toEl.value = to;
+  // 여행사 선택
+  const agSel = document.getElementById('inv-agency');
+  if (agSel && [...agSel.options].some(o => o.value === agency)) {
+    agSel.value = agency;
+  }
 
-    // 리포트 로드
-    loadInvReports();
-    toast(`🧾 견적서 ${_quoItems.length}건이 인보이스 수동 항목으로 전환되었습니다`, 'ok');
-  }, 300);
+  // 기간: 항목 날짜 범위 기준 (ISO)
+  const fromISO = parseToISO(firstDate) || firstDate;
+  const toISO   = parseToISO(lastDate)  || lastDate;
+  const fromEl = document.getElementById('inv-from');
+  const toEl   = document.getElementById('inv-to');
+  if (fromEl) fromEl.value = fromISO;
+  if (toEl)   toEl.value   = toISO;
+
+  // 리포트 로드 → 미리보기 렌더
+  await loadInvReports();
+  renderInvManualList();
+
+  toast(`🧾 견적서 ${_quoItems.length}건이 인보이스로 전환되었습니다`, 'ok');
 }
 
 function previewQuotationDoc() {
