@@ -5554,7 +5554,7 @@ async function renderWageAll() {
       const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
       const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
       const weekRows = rows.filter(r => matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
-      earned = weekRows.reduce((s,r) => s+(parseFloat(r.DR_Cost)||0)-(parseFloat(r.Night_Owner)||0), 0); // 야경 납입금 차감
+      earned = weekRows.reduce((s,r) => s+(parseFloat(r.DR_Cost)||0), 0);
       const week = drvWages[mon] || {entries:[]};
       paid = (week.entries||[]).reduce((s,e) => s+(e.amount||0), 0);
     } else {
@@ -5566,7 +5566,7 @@ async function renderWageAll() {
         const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
         const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
         return matchNames.has(String(r.Driver||'').trim());
-      }).reduce((s,r) => s+(parseFloat(r.DR_Cost)||0)-(parseFloat(r.Night_Owner)||0), 0); // 야경 납입금 차감
+      }).reduce((s,r) => s+(parseFloat(r.DR_Cost)||0), 0);
     }
 
     if (earned > 0 || paid > 0) {
@@ -5785,7 +5785,7 @@ function renderDR(){
     return sum+diff;
   },0);
   const totalHoursStr = totalMinutes>0 ? `· ⏱ ${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m` : '';
-  const sumDR = filtered.reduce((s,r)=>s+(parseFloat(r.DR_Cost||0))-(parseFloat(r.Night_Owner||0)),0);
+  const sumDR = filtered.reduce((s,r)=>s+(parseFloat(r.DR_Cost||0)),0);
   document.getElementById('dr-summary').textContent =
     `${filtered.length}건 · DR 합계 $${sumDR.toFixed(2)} ${totalHoursStr}`;
 
@@ -5813,7 +5813,7 @@ function renderDR(){
     const etc  = parseFloat(r.Etc||0);
     const nightType = String(r.Night_Type||'').trim();
     const nightOwner = parseFloat(r.Night_Owner||0);
-    const total = dr - nightOwner;
+    const total = dr;
     const rowIdx = r._rowIndex;
 
     // 시간 계산
@@ -6130,7 +6130,7 @@ async function getEarnedFromSheets(driverName, weekStart) {
     if (!matchNames.has(String(r.Driver||'').trim())) return;
     if (r._isoDate >= mon && r._isoDate <= sun) {
       total += (parseFloat(r.DR_Cost) || 0);
-      total -= (parseFloat(r.Night_Owner) || 0); // 야경 회사 납입금 차감
+      // Night_Owner는 DR에서 차감하지 않음 (회사 비용)
     }
   });
   return total;
