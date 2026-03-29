@@ -7105,8 +7105,12 @@ function showPayDetail(wk){
   const isAllPaid = finalBalance <= 0;
 
   // 상단 합계 카드
+  const manualGrand = sorted.reduce((s,r)=>s+(r.manualBonus||0),0);
+  // 기본 수당 역산: DR_Cost는 야경납입 차감 후이므로 nightOwner를 더해 복원 후 부가항목 차감
+  const grossDRGrand = drGrand + ownerGrand;
+  const baseGrand = grossDRGrand - otGrand - hotelGrand - distGrand - earlyGrand - washGrand - mealGrand - nightDRGrand - trailerGrand - tipGrand - tollGrand - fuelGrand - etcGrand - manualGrand;
   const breakItems = [
-    {label:'기본 수당', val: drGrand - otGrand - hotelGrand - distGrand - earlyGrand - washGrand - mealGrand - nightDRGrand - trailerGrand - tipGrand - tollGrand - fuelGrand - etcGrand, color:'rgba(255,255,255,.9)'},
+    {label:'기본 수당', val: baseGrand, color:'rgba(255,255,255,.9)'},
     otGrand>0    && {label:'OT', val:otGrand, color:'#93c5fd'},
     hotelGrand>0 && {label:'호텔 서차지', val:hotelGrand, color:'#c4b5fd'},
     distGrand>0  && {label:'거리 서차지', val:distGrand, color:'#7dd3fc'},
@@ -7119,6 +7123,7 @@ function showPayDetail(wk){
     tollGrand>0  && {label:'톨비 (개인)', val:tollGrand, color:'#d6d3d1'},
     fuelGrand>0  && {label:'연료비 (개인)', val:fuelGrand, color:'#d6d3d1'},
     etcGrand>0   && {label:'기타', val:etcGrand, color:'#d6d3d1'},
+    manualGrand>0 && {label:'수동변속 보너스', val:manualGrand, color:'#fbbf24'},
     ownerGrand>0 && {label:'회사 납입 차감', val:-ownerGrand, color:'rgba(255,150,150,.9)'},
   ].filter(Boolean).filter(i=>i.val!==0);
 
