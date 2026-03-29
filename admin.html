@@ -4030,15 +4030,24 @@ function calcInvRow(r) {
   const agency     = (r._agency || String(r.Agency||'')).trim();
   const attraction = String(r.Attraction||'').trim();
   const seats      = String(r.Seats||'').trim();          // e.g. "21S","25S","40S","50S"
-  const ot         = parseFloat(r.OT)              || 0;
+  const otDR       = parseFloat(r.OT)              || 0;  // DR 기준값 (드라이버 지급액)
   const hotelDR    = parseFloat(r.Hotel_Surcharge) || 0;  // DR 기준값 (드라이버 지급액)
   const distDR     = parseFloat(r.Dist_Surcharge)  || 0;  // DR 기준값 (드라이버 지급액)
   const earlyDR    = parseFloat(r.Early)           || 0;  // DR 기준값
 
+  // seats 숫자 추출: "21S" → 21
+  const seatNum = parseInt(seats.replace(/[^0-9]/g,''))||21;
+
+  // ── OT DR → TA 역산 ──
+  // 21/25S: DR $30/h → TA $80/h, 40S: DR $40/h → TA $150/h, 50S: DR $40/h → TA $160/h
+  const _otRateDR = seatNum>=40 ? 40 : 30;
+  const _otRateTA = seatNum>=50 ? 160 : seatNum>=40 ? 150 : 80;
+  const _otHrs = _otRateDR>0 ? otDR/_otRateDR : 0;
+  const ot = Math.round(_otHrs * _otRateTA);
+
   // ── Hotel/Dist DR → TA 역산 ──
   // Hotel: 21/25S DR $10→TA $40, DR $20→TA $80 / 40S DR $15→TA $75, DR $30→TA $150 / 50S DR $15→TA $80, DR $30→TA $160
   // Dist:  21/25S DR $30→TA $80 / 40S DR $40→TA $150 / 50S DR $40→TA $160
-  const seatNum = parseInt(seats.replace(/[^0-9]/g,''))||21;
   function hotelDRtoTA(dr, sn) {
     if(dr===0) return 0;
     if(sn>=50) return dr===15?80:dr===30?160:dr*4;   // 50S
