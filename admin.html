@@ -828,6 +828,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <select id="dr-filter-rego" class="profit-sel" style="flex:1;min-width:90px;" onchange="renderDR()">
       <option value="">전체 차량</option>
     </select>
+    <button id="dr-sort-btn" class="btn bgh sm" style="white-space:nowrap;font-size:11px;padding:6px 10px;" onclick="toggleDRSort()">↑ 오름차순</button>
   </div>
   <!-- 요약 배지 -->
   <div id="dr-summary" style="padding:6px 14px 0;font-size:11px;color:var(--t3);"></div>
@@ -5913,6 +5914,15 @@ async function loadDR(force=false){
   renderDR();
 }
 
+// ── 정렬 토글 (기본 오름차순) ──
+window._drSortAsc = true;
+function toggleDRSort(){
+  window._drSortAsc = !window._drSortAsc;
+  const btn = document.getElementById('dr-sort-btn');
+  if(btn) btn.textContent = window._drSortAsc ? '↑ 오름차순' : '↓ 내림차순';
+  renderDR();
+}
+
 function renderDR(){
   const rows = _drCache || [];
   const driverSel = document.getElementById('dr-filter-driver');
@@ -5957,8 +5967,9 @@ function renderDR(){
   }
   if(regoSel.value) filtered = filtered.filter(r=>r.Rego===regoSel.value);
 
-  // 날짜 내림차순 정렬
-  filtered = [...filtered].sort((a,b)=>{ const ai=parseToISO(a.Date||''), bi=parseToISO(b.Date||''); return bi.localeCompare(ai); });
+  // 날짜 정렬 (기본: 오름차순)
+  const sortAsc = window._drSortAsc !== false;  // 기본값 true (오름차순)
+  filtered = [...filtered].sort((a,b)=>{ const ai=parseToISO(a.Date||''), bi=parseToISO(b.Date||''); return sortAsc ? ai.localeCompare(bi) : bi.localeCompare(ai); });
 
   // 총 근무시간 합산 (분 단위로 계산)
   const toMin = t => { const s=parseSheetTime(t); if(!s) return NaN; const [h,m]=s.split(':').map(Number); return h*60+(m||0); };
