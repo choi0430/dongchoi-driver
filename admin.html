@@ -4010,6 +4010,8 @@ function calcInvRow(r) {
 }
 async function initInvoice() {
   _invReports = null; // 항상 최신 리포트 재로드
+  // M_Clients 로드 확보
+  if (!DB.C || !DB.C.length) await syncClients();
   // 저장된 회사 설정 로드
   DC_COMPANY.name    = localStorage.getItem('dc_company_name') || DC_COMPANY.name;
   DC_COMPANY.abn     = localStorage.getItem('dc_abn')          || DC_COMPANY.abn;
@@ -4032,9 +4034,10 @@ async function initInvoice() {
 async function populateInvAgency() {
   const sel = document.getElementById('inv-agency');
   if (!sel) return;
-  // 리포트가 로드된 후 여행사 목록 채우기
+  // M_Clients 마스터 + 리포트 여행사 병합
+  const masterAgencies = (DB.C||[]).map(c=>String(c.Name||'').trim()).filter(Boolean);
   const reportAgencies = (_invReports||[]).map(r=>(r._agency||String(r.Agency||'').trim())).filter(Boolean);
-  const allAgencies = [...new Set(reportAgencies)].sort();
+  const allAgencies = [...new Set([...masterAgencies, ...reportAgencies])].sort();
   const cur = sel.value;
   sel.innerHTML = '<option value="">-- 여행사 선택 --</option>' +
     allAgencies.map(a => `<option value="${escH(a)}"${a===cur?' selected':''}>${escH(a)}</option>`).join('');
