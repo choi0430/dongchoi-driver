@@ -2751,6 +2751,7 @@ function lrow(label, val, color){
   '</div>';
 }
 function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmtABN(v){ const d=String(v||'').replace(/\D/g,''); if(d.length!==11) return v||''; return d.slice(0,2)+' '+d.slice(2,5)+' '+d.slice(5,8)+' '+d.slice(8,11); }
 
 // ── 전화번호 앞 0 복원 (Google Sheets 숫자→텍스트 보정) ──
 function fixPhone(p){
@@ -5178,11 +5179,11 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
     .no-print { display: none !important; }
     @page { margin: 15mm; }
   }
-  .inv-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0; }
-  .inv-company { flex: 1; }
+  .inv-header { display: table; width: 100%; margin-bottom: 0; }
+  .inv-company { display: table-cell; vertical-align: top; width: 60%; }
   .inv-company-name { font-size: 22px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; }
   .inv-company-sub  { font-size: 11px; color: #64748b; margin-top: 4px; line-height: 1.6; }
-  .inv-title-box { text-align: right; }
+  .inv-title-box { display: table-cell; vertical-align: top; text-align: right; width: 40%; }
   .inv-title { font-size: 28px; font-weight: 900; color: ${isDraft?'#f59e0b':'#1d4ed8'}; letter-spacing: 1px; }
   .inv-num   { font-size: 13px; color: #64748b; margin-top: 4px; }
   .inv-date  { font-size: 12px; color: #94a3b8; margin-top: 2px; }
@@ -5200,13 +5201,15 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
   .inv-table tr:hover td { background: #f8fafc; }
   .inv-table .sub-row td { font-size: 11px; color: #64748b; padding: 3px 12px 8px; border-bottom: none; }
   .inv-totals { margin-left: auto; width: 260px; }
-  .inv-total-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
+  .inv-total-row { display: table; width: 100%; padding: 5px 0; font-size: 13px; }
+  .inv-total-row span:first-child { display: table-cell; text-align: left; }
+  .inv-total-row span:last-child { display: table-cell; text-align: right; }
   .inv-total-row.grand { font-weight: 900; font-size: 18px; color: ${isDraft?'#f59e0b':'#1d4ed8'}; border-top: 3px solid ${isDraft?'#f59e0b':'#1d4ed8'}; margin-top: 8px; padding-top: 10px; }
   .inv-payment { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; margin-top: 28px; }
   .inv-payment-title { font-size: 11px; font-weight: 800; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; }
-  .inv-payment-row { display: flex; gap: 8px; font-size: 12px; margin-bottom: 4px; }
-  .inv-payment-label { color: #94a3b8; width: 90px; flex-shrink: 0; }
-  .inv-payment-val { color: #0f172a; font-weight: 600; }
+  .inv-payment-row { display: table; width: 100%; font-size: 12px; margin-bottom: 4px; }
+  .inv-payment-label { display: table-cell; color: #94a3b8; width: 90px; }
+  .inv-payment-val { display: table-cell; color: #0f172a; font-weight: 600; }
   .inv-footer { margin-top: 32px; text-align: center; font-size: 11px; color: #94a3b8; }
   .print-btn { display: block; margin: 0 auto 24px; padding: 12px 32px; background: ${isDraft?'#f59e0b':'#1d4ed8'}; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; }
 </style>
@@ -5218,7 +5221,7 @@ ${draftBanner}
   <div class="inv-company">
     <div class="inv-company-name">${escH(DC_COMPANY.name||'DONG CHOI PTY LTD')}</div>
     <div class="inv-company-sub">
-      ${abn ? `ABN: ${abn}<br>` : ''}
+      ${abn ? `ABN: ${fmtABN(abn)}<br>` : ''}
       ${DC_COMPANY.address||''}<br>
       ${DC_COMPANY.phone||''} &nbsp;·&nbsp; ${DC_COMPANY.email||''}
     </div>
@@ -5235,7 +5238,7 @@ ${draftBanner}
   <div class="inv-party-label">Bill To</div>
   <div class="inv-party-name">${escH(agency)}</div>
   <div class="inv-party-sub">
-    ${client.ABN      ? `ABN: ${escH(client.ABN)}<br>` : ''}
+    ${client.ABN      ? `ABN: ${fmtABN(client.ABN)}<br>` : ''}
     ${client.ClientID ? `ID: ${escH(client.ClientID)}<br>` : ''}
     ${client.Mobile   ? `Tel: ${escH(client.Mobile)}<br>` : ''}
     ${client.Email    ? `Email: ${escH(client.Email)}<br>` : ''}
@@ -9291,7 +9294,7 @@ ${draftBanner}
   <div class="q-company">
     <div class="q-company-name">${escH(DC_COMPANY.name||'DONG CHOI PTY LTD')}</div>
     <div class="q-company-sub">
-      ${abn?'ABN: '+abn+'<br>':''}
+      ${abn?'ABN: '+fmtABN(abn)+'<br>':''}
       ${DC_COMPANY.address||''}<br>
       ${DC_COMPANY.phone||''} &nbsp;·&nbsp; ${DC_COMPANY.email||''}
     </div>
