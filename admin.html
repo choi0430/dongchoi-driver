@@ -5330,21 +5330,11 @@ async function downloadInvoicePdf() {
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
-  const invNum = getInvNum(agency, from);
-  const pdfName = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
   const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
-
-  toast('📄 PDF 생성 중...', 'ok');
-  try {
-    const pdfBlob = await _generateInvPdfBlob(html);
-    const url = URL.createObjectURL(pdfBlob);
-    const a = document.createElement('a'); a.href = url; a.download = pdfName;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast('✅ PDF 다운로드 완료: ' + pdfName, 'ok');
-  } catch(e) {
-    toast('PDF 생성 실패: ' + e.message, 'er');
-  }
+  const win = window.open('', '_blank', 'width=900,height=700');
+  win.document.write(html);
+  win.document.close();
+  win.onload = () => { win.focus(); win.print(); };
 }
 
 // ─── 인보이스 생성 (발행) ───
@@ -9542,32 +9532,14 @@ function _printDocModal() {
   }
 }
 
-// ★ PDF 다운로드 (html2pdf.js)
+// ★ PDF 다운로드 (브라우저 인쇄 → PDF 저장)
 let _lastInvHtml = '';  // 마지막으로 생성된 인보이스 HTML 저장용
 function _downloadInvPdf() {
   const iframe = document.getElementById('doc-preview-iframe');
-  if (!iframe || !iframe.contentDocument) { toast('미리보기가 없습니다','er'); return; }
-  const body = iframe.contentDocument.body;
-  if (!body) { toast('문서 내용을 읽을 수 없습니다','er'); return; }
-
-  const agency = document.getElementById('inv-agency')?.value || 'Invoice';
-  const from   = document.getElementById('inv-from')?.value || '';
-  const invNum = getInvNum ? getInvNum(agency, from) : 'INV';
-  const filename = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
-
-  toast('📥 PDF 생성 중...','ok');
-  const opt = {
-    margin:       [10, 10, 10, 10],
-    filename:     filename,
-    image:        { type: 'jpeg', quality: 0.98 },
-    html2canvas:  { scale: 2, useCORS: true },
-    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-  };
-  html2pdf().set(opt).from(body).save().then(() => {
-    toast('✅ PDF 다운로드 완료', 'ok');
-  }).catch(e => {
-    toast('PDF 생성 실패: ' + e.message, 'er');
-  });
+  if (!iframe || !iframe.contentWindow) { toast('미리보기가 없습니다','er'); return; }
+  toast('🖨 인쇄 화면에서 "PDF로 저장"을 선택하세요','ok');
+  iframe.contentWindow.focus();
+  iframe.contentWindow.print();
 }
 
 // ★ PDF Blob 생성 (이메일 첨부용)
