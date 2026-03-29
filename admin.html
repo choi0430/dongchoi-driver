@@ -723,6 +723,36 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
         </select>
         <input type="text" id="iim-tour-custom" class="profit-finp" style="width:100%;display:none;" placeholder="직접 입력...">
       </div>
+      <!-- ★ 드라이버, 가이드, 차량 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">드라이버</div>
+          <select id="iim-driver" class="profit-sel" style="width:100%;">
+            <option value="">선택</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">가이드</div>
+          <input type="text" id="iim-guide" class="profit-finp" style="width:100%;" placeholder="가이드명">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">차량 (Rego)</div>
+          <select id="iim-rego" class="profit-sel" style="width:100%;">
+            <option value="">선택</option>
+          </select>
+        </div>
+      </div>
+      <!-- ★ 픽업 / 드롭오프 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">픽업 장소</div>
+          <input type="text" id="iim-pickup" class="profit-finp" style="width:100%;" placeholder="픽업">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">드롭오프 장소</div>
+          <input type="text" id="iim-dropoff" class="profit-finp" style="width:100%;" placeholder="드롭오프">
+        </div>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">시작 시간</div>
@@ -751,6 +781,21 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">호텔 서차지 ($)</div>
           <input type="number" id="iim-hotel" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+        </div>
+      </div>
+      <!-- ★ 트레일러, 톨, 거리할증 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">트레일러 ($)</div>
+          <input type="number" id="iim-trailer" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">톨 ($)</div>
+          <input type="number" id="iim-toll" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">거리할증 ($)</div>
+          <input type="number" id="iim-dist" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
         </div>
       </div>
       <div style="margin-bottom:12px;">
@@ -3739,13 +3784,21 @@ function openInvItemModal(id) {
       document.getElementById('iim-end').value      = item.end      || '';
       document.getElementById('iim-seats').value    = item.seats    || '';
       document.getElementById('iim-tourcode').value = item.tourcode || '';
+      document.getElementById('iim-driver').value   = item.driver   || '';
+      document.getElementById('iim-guide').value    = item.guide    || '';
+      document.getElementById('iim-rego').value     = item.rego     || '';
+      document.getElementById('iim-pickup').value   = item.pickup   || '';
+      document.getElementById('iim-dropoff').value  = item.dropoff  || '';
       document.getElementById('iim-amount').value   = item.amount   || '';
       document.getElementById('iim-ot').value       = item.ot       || '';
       document.getElementById('iim-hotel').value    = item.hotel    || '';
+      document.getElementById('iim-trailer').value  = item.trailer  || '';
+      document.getElementById('iim-toll').value     = item.toll     || '';
+      document.getElementById('iim-dist').value     = item.dist     || '';
       document.getElementById('iim-note').value     = item.note     || '';
     }
   } else {
-    ['iim-date','iim-start','iim-end','iim-tourcode','iim-amount','iim-ot','iim-hotel','iim-note'].forEach(id=>{
+    ['iim-date','iim-start','iim-end','iim-tourcode','iim-driver','iim-guide','iim-rego','iim-pickup','iim-dropoff','iim-amount','iim-ot','iim-hotel','iim-trailer','iim-toll','iim-dist','iim-note'].forEach(id=>{
       const el=document.getElementById(id); if(el) el.value='';
     });
     document.getElementById('iim-tour').value = '';
@@ -3769,6 +3822,18 @@ function _populateIimDropdowns() {
     tourSel.innerHTML = '<option value="">-- 관광지 선택 --</option>' +
       [...courses].sort().map(c => `<option value="${c}">${c}</option>`).join('') +
       '<option value="__custom__">✏️ 직접 입력...</option>';
+  }
+  // ★ 드라이버 드롭다운
+  const drvSel = document.getElementById('iim-driver');
+  if (drvSel) {
+    const drivers = (DB.DR||[]).filter(d=>d.Active!=='N').map(d=>d.Name_EN||d.Name_KR||'').filter(Boolean).sort();
+    drvSel.innerHTML = '<option value="">선택</option>' + drivers.map(n=>`<option value="${n}">${n}</option>`).join('');
+  }
+  // ★ 차량(Rego) 드롭다운
+  const regoSel = document.getElementById('iim-rego');
+  if (regoSel) {
+    const regos = (DB.VH||[]).filter(v=>v.Active!=='N').map(v=>v.Rego||'').filter(Boolean).sort();
+    regoSel.innerHTML = '<option value="">선택</option>' + regos.map(r=>`<option value="${r}">${r}</option>`).join('');
   }
 }
 function onIimTourChange() {
@@ -3820,9 +3885,17 @@ function saveInvItem() {
     end:      document.getElementById('iim-end')?.value              || '',
     seats:    document.getElementById('iim-seats')?.value            || '',
     tourcode: document.getElementById('iim-tourcode')?.value?.trim() || '',
+    driver:   document.getElementById('iim-driver')?.value           || '',
+    guide:    document.getElementById('iim-guide')?.value?.trim()    || '',
+    rego:     document.getElementById('iim-rego')?.value             || '',
+    pickup:   document.getElementById('iim-pickup')?.value?.trim()   || '',
+    dropoff:  document.getElementById('iim-dropoff')?.value?.trim()  || '',
     amount,
     ot:       parseFloat(document.getElementById('iim-ot')?.value)   || 0,
     hotel:    parseFloat(document.getElementById('iim-hotel')?.value)|| 0,
+    trailer:  parseFloat(document.getElementById('iim-trailer')?.value)|| 0,
+    toll:     parseFloat(document.getElementById('iim-toll')?.value) || 0,
+    dist:     parseFloat(document.getElementById('iim-dist')?.value) || 0,
     note:     document.getElementById('iim-note')?.value?.trim()     || '',
     _manual:  true,
   };
@@ -3919,19 +3992,24 @@ function _manualItemsToRows(agency, from) {
   return items.map(item => ({
     _iso:           parseToISO(item.date) || item.date,
     Date:           item.date,
-    Rego:           item.rego   || '',
-    Attraction:     item.tour   || '',
-    Seats:          item.seats  || '',
+    Rego:           item.rego     || '',
+    Attraction:     item.tour     || '',
+    Seats:          item.seats    || '',
     Tour_Code:      item.tourcode || '',
-    SVC_Label:      item.note   || '',
-    Total_TA:       (item.amount||0) + (item.ot||0) + (item.hotel||0),
-    OT:             item.ot     || 0,
-    Hotel_Surcharge:item.hotel  || 0,
-    Dist_Surcharge: 0,
-    SVC_Charge:     item.amount || 0,
-    _timeStart:     item.start  || '',
-    _timeEnd:       item.end    || '',
-    Driver:         '(수동 입력)',
+    SVC_Label:      item.note     || '',
+    Total_TA:       (item.amount||0) + (item.ot||0) + (item.hotel||0) + (item.trailer||0) + (item.toll||0) + (item.dist||0),
+    OT:             item.ot       || 0,
+    Hotel_Surcharge:item.hotel    || 0,
+    Dist_Surcharge: item.dist     || 0,
+    Trailer:        item.trailer  || 0,
+    Toll:           item.toll     || 0,
+    SVC_Charge:     item.amount   || 0,
+    _timeStart:     item.start    || '',
+    _timeEnd:       item.end      || '',
+    Driver:         item.driver   || '(수동 입력)',
+    Guide:          item.guide    || '',
+    Pickup:         item.pickup   || '',
+    Dropoff:        item.dropoff  || '',
     _manual:        true,
   }));
 }
@@ -4395,6 +4473,19 @@ function renderInvPreview(rows, agency, from, to) {
         ${wstat('GST (1/11)', gst, 'var(--ac)')}
         ${wstat('GST 제외', exGST, 'var(--t2)')}
       </div>
+      ${(function(){
+        const _pp = parseFloat(document.getElementById('inv-prepaid')?.value)||0;
+        const _cr = parseFloat(document.getElementById('inv-credit')?.value)||0;
+        if(_pp+_cr>0){
+          const _net = roundMoney(grandTotal - _pp - _cr);
+          return '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">' +
+            (_pp>0 ? wstat('선수금', -_pp, '#dc2626') : '') +
+            (_cr>0 ? wstat('크레딧', -_cr, '#dc2626') : '') +
+            wstat('최종 청구액', _net, '#059669') +
+          '</div>';
+        }
+        return '';
+      })()}
       ${totalOT>0||totalHotel>0||totalDist>0 ? `
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;">
         ${totalBase>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">기본요금</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalBase.toLocaleString()}</div></div>` : ''}
@@ -4417,6 +4508,23 @@ function renderInvPreview(rows, agency, from, to) {
           <button id="inv-grp-date" class="btn bac sm" style="flex:1;font-size:11px;" onclick="setInvGroupMode('date')">📅 날짜순</button>
           <button id="inv-grp-week" class="btn bgh sm" style="flex:1;font-size:11px;" onclick="setInvGroupMode('week')">📆 주별</button>
           <button id="inv-grp-tour" class="btn bgh sm" style="flex:1;font-size:11px;" onclick="setInvGroupMode('tour')">🗺 투어코드</button>
+        </div>
+      </div>
+      <!-- ★ 선수금 / 크레딧 입력 -->
+      <div style="margin-bottom:8px;padding-top:6px;border-top:1px dashed var(--bd);">
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:5px;letter-spacing:.5px;">💳 선수금 / 크레딧</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div>
+            <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">선수금 (Prepaid)</div>
+            <input type="number" id="inv-prepaid" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01" onchange="_refreshInvPreview()">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">크레딧 (Credit)</div>
+            <input type="number" id="inv-credit" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01" onchange="_refreshInvPreview()">
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--t3);margin-top:3px;">
+          <input type="text" id="inv-credit-note" class="profit-finp" style="width:100%;font-size:10px;" placeholder="크레딧/선수금 메모 (선택)" onchange="_refreshInvPreview()">
         </div>
       </div>
     </div>
@@ -4899,6 +5007,12 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
   let grandTotal = _calcInvGrandTotal(_buildInvRows(agency, from, to));
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
+  // ★ 선수금 / 크레딧
+  const prepaid    = parseFloat(document.getElementById('inv-prepaid')?.value) || 0;
+  const credit     = parseFloat(document.getElementById('inv-credit')?.value) || 0;
+  const creditNote = document.getElementById('inv-credit-note')?.value?.trim() || '';
+  const totalDeductions = prepaid + credit;
+  const amountDue  = roundMoney(grandTotal - totalDeductions);
   const invNum = getInvNum(agency, from);
   const _todayD = new Date();
   const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
@@ -5092,9 +5206,21 @@ ${draftBanner}
     <span>GST (10%)</span>
     <span>$${gst.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
   </div>
-  <div class="inv-total-row grand">
-    <span>Total Due</span>
+  <div class="inv-total-row" style="font-weight:700;">
+    <span>Total (incl. GST)</span>
     <span>$${grandTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+  </div>
+  ${prepaid > 0 ? `<div class="inv-total-row" style="color:#dc2626;">
+    <span>Prepaid${creditNote ? ' — '+escH(creditNote) : ''}</span>
+    <span>-$${prepaid.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+  </div>` : ''}
+  ${credit > 0 ? `<div class="inv-total-row" style="color:#dc2626;">
+    <span>Credit${creditNote && !prepaid ? ' — '+escH(creditNote) : ''}</span>
+    <span>-$${credit.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+  </div>` : ''}
+  <div class="inv-total-row grand">
+    <span>${totalDeductions > 0 ? 'Amount Due' : 'Total Due'}</span>
+    <span>$${amountDue.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
   </div>
 </div>
 ${(DC_COMPANY.bank || localStorage.getItem('dc_bank')) ? `
@@ -5264,6 +5390,9 @@ async function emailInvoice() {
 
   let grandTotal = 0;
   rows.forEach(r => { grandTotal += calcInvRow(r).total; });
+  const _emailPrepaid = parseFloat(document.getElementById('inv-prepaid')?.value)||0;
+  const _emailCredit  = parseFloat(document.getElementById('inv-credit')?.value)||0;
+  const _emailAmountDue = roundMoney(grandTotal - _emailPrepaid - _emailCredit);
 
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
 
@@ -5277,6 +5406,9 @@ async function emailInvoice() {
     `Dear ${agency},\n\n` +
     `Please find attached Tax Invoice ${invNum} for services provided during ${fd(from)} – ${fd(to)}.\n\n` +
     `Invoice Total: $${grandTotal.toLocaleString('en-AU', {minimumFractionDigits:2, maximumFractionDigits:2})} (incl. GST)\n` +
+    (_emailPrepaid>0 ? `Prepaid: -$${_emailPrepaid.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` : '') +
+    (_emailCredit>0 ? `Credit: -$${_emailCredit.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` : '') +
+    (_emailPrepaid+_emailCredit>0 ? `Amount Due: $${_emailAmountDue.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` : '') +
     `Due Date: 14 days from invoice date\n` +
     `Reference: ${invNum}\n\n` +
     `Bank: ${DC_COMPANY.bank||''}\n` +
