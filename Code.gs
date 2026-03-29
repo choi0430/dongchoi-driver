@@ -1589,6 +1589,8 @@ function sendInvoiceEmail(payload) {
     const body    = (payload.body || '').trim();
     const cc      = (payload.cc || '').trim();
     const name    = payload.senderName || 'Dong Choi Pty Ltd';
+    const docHtml = payload.docHtml || '';       // 첨부할 문서 HTML
+    const pdfName = payload.pdfName || 'document.pdf'; // PDF 파일명
 
     if (!to)      return { ok: false, error: '수신자 이메일이 없습니다 (to is empty)' };
     if (!subject) return { ok: false, error: '제목이 없습니다 (subject is empty)' };
@@ -1601,11 +1603,18 @@ function sendInvoiceEmail(payload) {
     };
     if (cc) mailOptions.cc = cc;
 
+    // HTML → PDF 변환 후 첨부
+    if (docHtml) {
+      const htmlBlob = HtmlService.createHtmlOutput(docHtml).getBlob();
+      const pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
+      mailOptions.attachments = [pdfBlob];
+    }
+
     MailApp.sendEmail(mailOptions);
 
     // 감사 로그
     appendAuditLog(payload._user, 'send_invoice_email', '—', '—',
-      `인보이스 이메일 발송 → ${to} | ${subject}`);
+      `이메일 발송 (PDF${docHtml?'첨부':'없음'}) → ${to} | ${subject}`);
 
     return { ok: true, to: to };
   } catch (err) {
@@ -1801,3 +1810,4 @@ function saveBusDamage(rego, markers, driver) {
     return { ok: false, error: err.toString() };
   }
 }
+
