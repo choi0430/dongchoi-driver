@@ -11,6 +11,7 @@
 <meta name="theme-color" content="#f0f1f5">
 <meta name="color-scheme" content="light only">
 <title>DC Fleet — Admin</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -4650,17 +4651,20 @@ function renderInvPreview(rows, agency, from, to) {
     </table>
     </div>
     <!-- 저장 버튼 -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:6px;">
-      <button onclick="previewInvoiceDoc()" class="btn" style="font-size:12px;padding:10px;background:#7c3aed;color:white;font-weight:700;">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:6px;margin-top:6px;">
+      <button onclick="previewInvoiceDoc()" class="btn" style="font-size:11px;padding:8px;background:#7c3aed;color:white;font-weight:700;">
         👁 미리보기
       </button>
-      <button onclick="saveInvoiceToSheet()" class="btn" style="font-size:12px;padding:10px;background:#6d28d9;color:white;font-weight:700;">
+      <button onclick="downloadInvoicePdf()" class="btn" style="font-size:11px;padding:8px;background:#059669;color:white;font-weight:700;">
+        📥 PDF
+      </button>
+      <button onclick="saveInvoiceToSheet()" class="btn" style="font-size:11px;padding:8px;background:#6d28d9;color:white;font-weight:700;">
         💾 저장
       </button>
-      <button onclick="generateInvoice()" class="btn bac" style="font-size:12px;padding:10px;font-weight:700;">
+      <button onclick="generateInvoice()" class="btn bac" style="font-size:11px;padding:8px;font-weight:700;">
         📄 생성
       </button>
-      <button onclick="emailInvoice()" class="btn" style="font-size:12px;padding:10px;background:#0ea5e9;color:white;font-weight:700;">
+      <button onclick="emailInvoice()" class="btn" style="font-size:11px;padding:8px;background:#0ea5e9;color:white;font-weight:700;">
         ✉️ 발송
       </button>
     </div>
@@ -5253,6 +5257,34 @@ function previewInvoiceDoc() {
   _showDocModal(html);
 }
 
+// ─── 인보이스 PDF 다운로드 ───
+async function downloadInvoicePdf() {
+  const agency = document.getElementById('inv-agency')?.value;
+  const from   = document.getElementById('inv-from')?.value;
+  const to     = document.getElementById('inv-to')?.value;
+  if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
+
+  let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
+  rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
+  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
+
+  const invNum = getInvNum(agency, from);
+  const pdfName = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
+  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
+
+  toast('📄 PDF 생성 중...', 'ok');
+  try {
+    const pdfBlob = await _generateInvPdfBlob(html);
+    const url = URL.createObjectURL(pdfBlob);
+    const a = document.createElement('a'); a.href = url; a.download = pdfName;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('✅ PDF 다운로드 완료: ' + pdfName, 'ok');
+  } catch(e) {
+    toast('PDF 생성 실패: ' + e.message, 'er');
+  }
+}
+
 // ─── 인보이스 생성 (발행) ───
 async function generateInvoice() {
   const agency = document.getElementById('inv-agency')?.value;
@@ -5423,9 +5455,16 @@ async function emailInvoice() {
   const pdfName = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   const emailBtn = document.querySelector('button[onclick="emailInvoice()"]');
-  if (emailBtn) { emailBtn.disabled = true; emailBtn.textContent = '⏳ 발송 중...'; }
+  if (emailBtn) { emailBtn.disabled = true; emailBtn.textContent = '⏳ PDF 생성 중...'; }
 
   try {
+    // ★ 클라이언트에서 PDF 생성 → Base64 변환
+    toast('📄 PDF 생성 중...', 'ok');
+    const pdfBlob = await _generateInvPdfBlob(docHtml);
+    const pdfBase64 = await _blobToBase64(pdfBlob);
+
+    if (emailBtn) emailBtn.textContent = '⏳ 발송 중...';
+
     const res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -5434,7 +5473,7 @@ async function emailInvoice() {
         to:         toEmail,
         subject,
         body,
-        docHtml,
+        pdfBase64,
         pdfName,
         senderName: DC_COMPANY.name || 'Dong Choi Pty Ltd',
         _user:      getAdminUser()
@@ -5448,10 +5487,19 @@ async function emailInvoice() {
       throw new Error(json.error || '발송 실패');
     }
   } catch (e) {
-    toast(`⚠️ GAS 발송 실패 — 이메일 클라이언트로 대신 열기: ${e.message}`, 'er');
+    toast(`⚠️ GAS 발송 실패: ${e.message}`, 'er');
+    // ★ 실패 시 PDF 다운로드 + mailto 링크
+    try {
+      toast('📥 대신 PDF를 다운로드합니다...', 'ok');
+      const fallbackBlob = await _generateInvPdfBlob(docHtml);
+      const url = URL.createObjectURL(fallbackBlob);
+      const a = document.createElement('a'); a.href = url; a.download = pdfName;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch(e2) {}
     const s = encodeURIComponent(subject);
     const b = encodeURIComponent(body);
-    location.href = `mailto:${encodeURIComponent(toEmail)}?subject=${s}&body=${b}`;
+    setTimeout(() => { location.href = `mailto:${encodeURIComponent(toEmail)}?subject=${s}&body=${b}`; }, 1000);
   } finally {
     if (emailBtn) { emailBtn.disabled = false; emailBtn.textContent = '✉️ 발송'; }
   }
@@ -9386,6 +9434,7 @@ function _showDocModal(htmlContent) {
       <div id="doc-preview-bar" style="width:100%;max-width:900px;display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#1e293b;border-radius:12px 12px 0 0;">
         <span style="color:#fff;font-size:13px;font-weight:700;">📄 문서 미리보기</span>
         <div style="display:flex;gap:8px;">
+          <button onclick="_downloadInvPdf()" style="padding:6px 14px;border-radius:8px;border:none;background:#059669;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">📥 PDF 다운로드</button>
           <button onclick="_printDocModal()" style="padding:6px 14px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">🖨 인쇄/PDF</button>
           <button onclick="_closeDocModal()" style="padding:6px 14px;border-radius:8px;border:none;background:#ef4444;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">✕ 닫기</button>
         </div>
@@ -9427,6 +9476,65 @@ function _printDocModal() {
     iframe.contentWindow.focus();
     iframe.contentWindow.print();
   }
+}
+
+// ★ PDF 다운로드 (html2pdf.js)
+let _lastInvHtml = '';  // 마지막으로 생성된 인보이스 HTML 저장용
+function _downloadInvPdf() {
+  const iframe = document.getElementById('doc-preview-iframe');
+  if (!iframe || !iframe.contentDocument) { toast('미리보기가 없습니다','er'); return; }
+  const body = iframe.contentDocument.body;
+  if (!body) { toast('문서 내용을 읽을 수 없습니다','er'); return; }
+
+  const agency = document.getElementById('inv-agency')?.value || 'Invoice';
+  const from   = document.getElementById('inv-from')?.value || '';
+  const invNum = getInvNum ? getInvNum(agency, from) : 'INV';
+  const filename = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
+
+  toast('📥 PDF 생성 중...','ok');
+  const opt = {
+    margin:       [10, 10, 10, 10],
+    filename:     filename,
+    image:        { type: 'jpeg', quality: 0.98 },
+    html2canvas:  { scale: 2, useCORS: true },
+    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+  };
+  html2pdf().set(opt).from(body).save().then(() => {
+    toast('✅ PDF 다운로드 완료', 'ok');
+  }).catch(e => {
+    toast('PDF 생성 실패: ' + e.message, 'er');
+  });
+}
+
+// ★ PDF Blob 생성 (이메일 첨부용)
+async function _generateInvPdfBlob(htmlContent) {
+  const container = document.createElement('div');
+  container.style.cssText = 'position:absolute;left:-9999px;top:0;width:800px;';
+  container.innerHTML = htmlContent;
+  document.body.appendChild(container);
+
+  const opt = {
+    margin:       [10, 10, 10, 10],
+    image:        { type: 'jpeg', quality: 0.98 },
+    html2canvas:  { scale: 2, useCORS: true },
+    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+  };
+  try {
+    const pdfBlob = await html2pdf().set(opt).from(container).outputPdf('blob');
+    return pdfBlob;
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
+// ★ Blob → Base64 변환
+function _blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 </script>

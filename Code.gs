@@ -1590,13 +1590,14 @@ function deleteInvoice(invNumber) {
  */
 function sendInvoiceEmail(payload) {
   try {
-    const to      = (payload.to || '').trim();
-    const subject = (payload.subject || '').trim();
-    const body    = (payload.body || '').trim();
-    const cc      = (payload.cc || '').trim();
-    const name    = payload.senderName || 'Dong Choi Pty Ltd';
-    const docHtml = payload.docHtml || '';       // 첨부할 문서 HTML
-    const pdfName = payload.pdfName || 'document.pdf'; // PDF 파일명
+    const to        = (payload.to || '').trim();
+    const subject   = (payload.subject || '').trim();
+    const body      = (payload.body || '').trim();
+    const cc        = (payload.cc || '').trim();
+    const name      = payload.senderName || 'Dong Choi Pty Ltd';
+    const pdfBase64 = payload.pdfBase64 || '';      // 클라이언트에서 생성한 PDF (Base64)
+    const docHtml   = payload.docHtml || '';         // 폴백: HTML → PDF 변환
+    const pdfName   = payload.pdfName || 'document.pdf';
 
     if (!to)      return { ok: false, error: '수신자 이메일이 없습니다 (to is empty)' };
     if (!subject) return { ok: false, error: '제목이 없습니다 (subject is empty)' };
@@ -1609,18 +1610,29 @@ function sendInvoiceEmail(payload) {
     };
     if (cc) mailOptions.cc = cc;
 
-    // HTML → PDF 변환 후 첨부
-    if (docHtml) {
+    // ★ 클라이언트에서 보낸 Base64 PDF 첨부 (우선)
+    if (pdfBase64) {
+      const decoded = Utilities.base64Decode(pdfBase64);
+      const pdfBlob = Utilities.newBlob(decoded, 'application/pdf', pdfName);
+      mailOptions.attachments = [pdfBlob];
+    }
+    // 폴백: HTML → PDF 변환 후 첨부
+    else if (docHtml) {
       const htmlBlob = HtmlService.createHtmlOutput(docHtml).getBlob();
       const pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
       mailOptions.attachments = [pdfBlob];
     }
 
-    MailApp.sendEmail(mailOptions);
+    // ★ GmailApp 사용 (MailApp보다 권한 승인이 안정적)
+    GmailApp.sendEmail(to, subject, body, {
+      name: name,
+      cc: cc || undefined,
+      attachments: mailOptions.attachments || []
+    });
 
     // 감사 로그
     appendAuditLog(payload._user, 'send_invoice_email', '—', '—',
-      `이메일 발송 (PDF${docHtml?'첨부':'없음'}) → ${to} | ${subject}`);
+      `이메일 발송 (PDF${pdfBase64||docHtml?'첨부':'없음'}) → ${to} | ${subject}`);
 
     return { ok: true, to: to };
   } catch (err) {
