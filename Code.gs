@@ -776,7 +776,10 @@ function saveReport(sheetName, data) {
       sheet.setFrozenRows(1);
     }
 
-    const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+    // ★ 실제 시트 헤더를 읽어서 매핑 (컬럼 순서 불일치 방지)
+    const lastCol = sheet.getLastColumn();
+    const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : headers;
+    const row = actualHeaders.map(h => data[h] !== undefined ? data[h] : '');
     sheet.appendRow(row);
 
     return {ok: true, sheet: sheetName, row: sheet.getLastRow()};
@@ -797,7 +800,10 @@ function updateReport(sheetName, rowIndex, data) {
     const ri = parseInt(rowIndex);
     if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
 
-    const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+    // ★ 실제 시트 헤더를 읽어서 매핑 (컬럼 순서 불일치 방지)
+    const lastCol = sheet.getLastColumn();
+    const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : headers;
+    const row = actualHeaders.map(h => data[h] !== undefined ? data[h] : '');
     sheet.getRange(ri, 1, 1, row.length).setValues([row]);
 
     return {ok: true};
