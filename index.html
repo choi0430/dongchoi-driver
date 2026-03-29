@@ -6934,7 +6934,7 @@ async function renderPay(){
   // ── 미지급 배지 계산
   let totalUnpaid=0;
   weeks.forEach(wk=>{
-    const net  = wk.reports.reduce((s,r)=>s+(r.dr||0)-(r.nightOwner||0),0);
+    const net  = wk.reports.reduce((s,r)=>s+(r.dr||0),0);  // DR_Cost는 이미 야경납입 차감 후
     const paid = getWageEntriesForWeek(driverWages,wk.key).reduce((s,e)=>s+(Number(e.amount)||0),0);
     totalUnpaid += Math.max(0, net-paid);
   });
@@ -7163,13 +7163,14 @@ function showPayDetail(wk){
     const dayOwner = reports.reduce((s,r)=>s+(r.nightOwner||0),0);
     html+=`<div style="padding:0 16px 6px;display:flex;justify-content:space-between;align-items:baseline;">
       <div style="font-size:12px;font-weight:700;color:var(--muted);">${date}</div>
-      <div style="font-size:13px;font-weight:700;color:var(--accent);">$${(dayDr-dayOwner).toLocaleString()}</div>
+      <div style="font-size:13px;font-weight:700;color:var(--accent);">$${dayDr.toLocaleString()}</div>
     </div>`;
     reports.forEach(r=>{
       // 계산 근거 항목 빌드
       const breakdown=[];
-      // 기본 수당 (attraction 기반 DR rate — early/trailer/tip/서차지 제외한 순수 기본 수당)
-      const baseRate = (r.dr||0)
+      // 기본 수당: DR이 야경납입 차감 후 저장되므로, grossDR = dr + nightOwner로 복원
+      const grossDR = (r.dr||0) + (r.nightOwner||0);
+      const baseRate = grossDR
         - (r.ot||0)
         - (r.hotelSurcharge||0)
         - (r.distSurcharge||0)
@@ -7210,7 +7211,7 @@ function showPayDetail(wk){
           <span style="font-size:11px;font-weight:600;color:${b.color};">+$${b.val}</span>
         </div>`).join('');
 
-      const netDr = (r.dr||0) - (r.nightOwner||0);
+      const netDr = (r.dr||0);  // DR_Cost는 이미 야경납입 차감 후 저장됨
 
       html+=`<div class="pay-report-row">
         <div class="pay-report-row-top">
@@ -7231,7 +7232,7 @@ function showPayDetail(wk){
           ${breakdownHTML}
           <div style="display:flex;justify-content:space-between;padding:5px 0 2px;border-top:1px solid var(--border);margin-top:4px;">
             <span style="font-size:11px;font-weight:700;color:var(--text);">DR 소계</span>
-            <span style="font-size:11px;font-weight:700;color:var(--green);">$${r.dr||0}</span>
+            <span style="font-size:11px;font-weight:700;color:var(--green);">$${grossDR}</span>
           </div>
           ${nightOwnerNote}
         </div>
@@ -7286,7 +7287,7 @@ async function renderSalary(){
     const wk = getWeekKey(r.date);
     if(!wk) return;
     if(!weekMap[wk.key]) weekMap[wk.key]={label:wk.label,key:wk.key,total:0,paid:0,wageEntries:[]};
-    weekMap[wk.key].total += (r.dr||0) - (r.nightOwner||0);
+    weekMap[wk.key].total += (r.dr||0);  // DR_Cost는 이미 야경납입 차감 후
   });
   // 지급 금액 합산 (admin_wages 키 YYYY-MM-DD → wk.key 변환 포함)
   Object.entries(driverWages).forEach(([monISO, wkWages])=>{
