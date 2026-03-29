@@ -4795,7 +4795,7 @@ const OVERNIGHT_PAIRS = [
   { day1:/1박\s*2일\s*첫째날/i, day2:'1박 2일 둘째날' },
   { day1:/Port\s*Stephens$/i,      day2:'Port Stephens (2nd Day)' },
   { day1:/Newcastle$/i,            day2:'Newcastle (2nd Day)' },
-  // Jervis Bay는 당일 일정 (12시간 기준) — 1박2일 아님
+  { day1:/Jervis\s*Bay$/i,         day2:'Jervis Bay (2nd Day)' },
   { day1:/Hunter\s*Valley$/i,      day2:null }, // 1박 있을 수 있음
   { day1:/Canberra$/i,             day2:null },
 ];
@@ -4808,9 +4808,15 @@ function getOvernightPair(att){
   return null;
 }
 
+// ★ max_hours로 당일(12h) vs 1박2일(10h) 판별
+// max_hours <= 10 → 1박2일, max_hours >= 12 → 당일
 function isOvernightFirst(att){
   const p = getOvernightPair(att);
-  return p ? (p.day2 ? p.day2 : null) : null;
+  if(!p) return null;
+  const maxH = getMaxHours(att);
+  // max_hours가 12 이상이면 당일 일정 → 1박2일 안내 안 함
+  if(maxH && maxH >= 12) return null;
+  return p.day2 ? p.day2 : null;
 }
 
 // 관광지 선택 시 호출: 1박2일 힌트 + OT 힌트 갱신
@@ -4824,15 +4830,23 @@ function onAttractionChange(){
   const maxH = getMaxHours(att);
   const day2 = isOvernightFirst(att);
   const isDay2 = att && (att.includes('2nd Day') || att.includes('둘째날'));
+  const overnightPair = getOvernightPair(att);  // 이름 매칭 여부 (당일/1박 무관)
   const seats  = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   let html = '';
 
-  // 1박2일 첫째날
+  // 1박2일 첫째날 (max_hours <= 10)
   if(day2){
     html += `<div style="background:#eff6ff;border:1.5px solid #93c5fd;border-radius:8px;padding:8px 10px;margin-bottom:6px;">
       <div style="font-weight:700;color:#1e40af;margin-bottom:3px;">🌙 1박 2일 일정 — 첫째날</div>
       <div style="color:#1d4ed8;">• 이 코스는 1박 2일 일정입니다. 다음 날 리포트 코스: <b>${day2}</b></div>
       <div style="color:#1d4ed8;">• 각 날 max ${maxH||10}시간, 초과 시 OT 적용 (15분 waive)</div>
+    </div>`;
+  }
+  // 당일 일정 (max_hours >= 12, 1박2일도 가능한 코스)
+  else if(!day2 && overnightPair && maxH && maxH >= 12){
+    html += `<div style="background:#fefce8;border:1.5px solid #fde047;border-radius:8px;padding:8px 10px;margin-bottom:6px;">
+      <div style="font-weight:700;color:#854d0e;margin-bottom:3px;">☀️ 당일 일정</div>
+      <div style="color:#a16207;">• max ${maxH}시간 기준, 초과 시 OT 적용 (15분 waive)</div>
     </div>`;
   }
   // 1박2일 둘째날
