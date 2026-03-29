@@ -6841,7 +6841,8 @@ function saveM(){
   } else if(t==='C'){
     if(!gv('f0')){toast('여행사명 필수','er');return}
     sheetName='M_Clients';
-    obj={Name:gv('f0'),ClientID:gv('f1')||Date.now().toString(16).slice(-8),
+    obj={_rowIndex:ie?(DB.C[idx]?._rowIndex||null):null,
+         Name:gv('f0'),ClientID:gv('f1')||Date.now().toString(16).slice(-8),
          Mobile:gv('f2'),Email:gv('f2b')||'',Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6')};
     ie?DB.C[idx]=obj:DB.C.push(obj);
     if(obj.Name && !DB.PC[obj.Name]) {
@@ -6850,13 +6851,15 @@ function saveM(){
   } else if(t==='G'){
     if(!gv('f1')){toast('가이드명 필수','er');return}
     sheetName='M_Guides';
-    obj={GuideID:gv('f0')||'SG'+(DB.G.length+1).toString().padStart(3,'0'),
+    obj={_rowIndex:ie?(DB.G[idx]?._rowIndex||null):null,
+         GuideID:gv('f0')||'SG'+(DB.G.length+1).toString().padStart(3,'0'),
          Guide_Name:gv('f1'),Mobile:gv('f2'),Agency:gv('f3'),Email:gv('f4'),Remarks:gv('f5')};
     ie?DB.G[idx]=obj:DB.G.push(obj);
   } else if(t==='H'){
     if(!gv('f0')){toast('호텔명 필수','er');return}
     sheetName='M_Hotels';
-    obj={Hotel_Name:gv('f0'),Phone:gv('f1'),Address:gv('f2'),Surcharge_Area:gv('f3')||''};
+    obj={_rowIndex:ie?(DB.H[idx]?._rowIndex||null):null,
+         Hotel_Name:gv('f0'),Phone:gv('f1'),Address:gv('f2'),Surcharge_Area:gv('f3')||''};
     ie?DB.H[idx]=obj:DB.H.push(obj);
   } else if(t==='AG'){
     let agName=gv('fagname');
@@ -7240,6 +7243,7 @@ async function syncClients(){
   DB.C = rows.map(r=>{
     const ph = getPhoneFromRow(r);
     return {
+    _rowIndex: r._rowIndex||null,
     Name:r.Name||'', ClientID:r.ClientID||'', Mobile:ph, Phone:ph, Email:r.Email||'',
     Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||''
   };});
@@ -7265,6 +7269,7 @@ async function syncHotels(){
   const rows = await loadTab('M_Hotels');
   if(!rows) return;
   DB.H = rows.map(r=>({
+    _rowIndex: r._rowIndex||null,
     Hotel_Name:r.Hotel_Name,Phone:fixPhone(r.Phone),Address:r.Address,Surcharge_Area:r.Surcharge_Area
   }));
 }
