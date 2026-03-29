@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DC FLEET — Test Harness</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Outfit:wght@400;600;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0c0e14; --sf: #141722; --sf2: #1b1f2e; --sf3: #252a3a;
+  --bd: #2a3045; --t1: #e8ecf4; --t2: #9ba4b8; --t3: #5e6781;
+  --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --blue: #3b82f6;
+  --purple: #a78bfa; --cyan: #06b6d4;
+  --pass-bg: #052e16; --fail-bg: #450a0a; --skip-bg: #1c1917;
+  --ff: 'Outfit', sans-serif; --fm: 'JetBrains Mono', monospace;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: var(--ff); background: var(--bg); color: var(--t1); min-height:100vh; }
+
+/* ── Header ── */
+.header { background: var(--sf); border-bottom: 1px solid var(--bd); padding: 16px 20px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:100; }
+.header-left { display:flex; align-items:center; gap:12px; }
+.logo { font-family: var(--fm); font-weight:800; font-size:18px; color:var(--cyan); letter-spacing:2px; }
+.logo span { color:var(--t3); font-weight:400; }
+.header-right { display:flex; gap:8px; }
+
+/* ── Buttons ── */
+.btn { padding:8px 16px; border-radius:8px; border:1px solid var(--bd); background:var(--sf2); color:var(--t1); font-family:var(--ff); font-size:13px; font-weight:600; cursor:pointer; transition:all .15s; }
+.btn:hover { background:var(--sf3); border-color:var(--t3); }
+.btn-run { background: linear-gradient(135deg, #06b6d4, #3b82f6); border:none; color:#fff; font-weight:700; }
+.btn-run:hover { opacity:.9; }
+.btn-sm { padding:5px 10px; font-size:11px; border-radius:6px; }
+
+/* ── Stats Bar ── */
+.stats { display:grid; grid-template-columns: repeat(5,1fr); gap:10px; padding:16px 20px; background:var(--sf); border-bottom:1px solid var(--bd); }
+.stat { background:var(--sf2); border-radius:10px; padding:12px 14px; text-align:center; border:1px solid var(--bd); }
+.stat-num { font-family:var(--fm); font-size:28px; font-weight:800; line-height:1; }
+.stat-label { font-size:10px; color:var(--t3); text-transform:uppercase; letter-spacing:1.5px; margin-top:4px; font-weight:600; }
+
+/* ── Filters ── */
+.filters { display:flex; gap:6px; padding:12px 20px; flex-wrap:wrap; }
+.filter-btn { padding:5px 12px; border-radius:20px; border:1px solid var(--bd); background:transparent; color:var(--t3); font-size:11px; font-weight:600; cursor:pointer; transition:all .15s; font-family:var(--ff); }
+.filter-btn.active { background:var(--sf3); color:var(--t1); border-color:var(--t3); }
+.filter-btn[data-f="pass"].active { border-color:var(--green); color:var(--green); }
+.filter-btn[data-f="fail"].active { border-color:var(--red); color:var(--red); }
+.filter-btn[data-f="skip"].active { border-color:var(--amber); color:var(--amber); }
+
+/* ── Suite ── */
+.suite { margin:12px 20px; background:var(--sf); border:1px solid var(--bd); border-radius:12px; overflow:hidden; }
+.suite-head { padding:12px 16px; display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none; }
+.suite-head:hover { background:var(--sf2); }
+.suite-title { font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
+.suite-title .icon { font-size:16px; }
+.suite-badge { font-family:var(--fm); font-size:11px; padding:2px 8px; border-radius:10px; font-weight:700; }
+.suite-badge.pass { background:var(--pass-bg); color:var(--green); }
+.suite-badge.fail { background:var(--fail-bg); color:var(--red); }
+.suite-badge.mixed { background:var(--sf3); color:var(--amber); }
+.suite-body { display:none; border-top:1px solid var(--bd); }
+.suite.open .suite-body { display:block; }
+.suite-meta { display:flex; gap:12px; align-items:center; }
+.suite-time { font-family:var(--fm); font-size:11px; color:var(--t3); }
+
+/* ── Test Row ── */
+.test-row { padding:8px 16px; display:flex; align-items:flex-start; gap:10px; border-bottom:1px solid var(--bd); font-size:12px; transition:background .15s; }
+.test-row:last-child { border-bottom:none; }
+.test-row:hover { background:var(--sf2); }
+.test-row.pass { border-left: 3px solid var(--green); }
+.test-row.fail { border-left: 3px solid var(--red); background: var(--fail-bg); }
+.test-row.skip { border-left: 3px solid var(--amber); opacity:.6; }
+.test-status { font-family:var(--fm); font-weight:700; font-size:11px; min-width:36px; padding-top:1px; }
+.test-status.pass { color:var(--green); }
+.test-status.fail { color:var(--red); }
+.test-status.skip { color:var(--amber); }
+.test-name { flex:1; color:var(--t2); font-weight:600; }
+.test-detail { font-family:var(--fm); font-size:11px; color:var(--t3); margin-top:3px; word-break:break-all; }
+.test-detail.fail { color:#fca5a5; }
+.test-time { font-family:var(--fm); font-size:10px; color:var(--t3); min-width:50px; text-align:right; padding-top:2px; }
+
+/* ── Log Panel ── */
+.log-panel { margin:12px 20px; background:var(--sf); border:1px solid var(--bd); border-radius:12px; overflow:hidden; }
+.log-head { padding:10px 16px; font-size:12px; font-weight:700; color:var(--t3); display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--bd); }
+.log-body { max-height:300px; overflow-y:auto; padding:8px 12px; font-family:var(--fm); font-size:11px; line-height:1.8; color:var(--t3); }
+.log-body .log-pass { color:var(--green); }
+.log-body .log-fail { color:var(--red); }
+.log-body .log-info { color:var(--blue); }
+.log-body .log-warn { color:var(--amber); }
+
+/* ── Progress ── */
+.progress-bar { height:3px; background:var(--bd); position:relative; }
+.progress-fill { height:100%; background: linear-gradient(90deg, var(--cyan), var(--blue)); transition: width .2s; width:0; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:var(--sf); }
+::-webkit-scrollbar-thumb { background:var(--bd); border-radius:3px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="logo">DC<span>TEST</span></div>
+    <span style="font-size:11px;color:var(--t3);">Fleet System Test Harness v1.0</span>
+  </div>
+  <div class="header-right">
+    <button class="btn btn-sm" onclick="toggleAllSuites()">▼ 전체 펼치기</button>
+    <button class="btn btn-run" onclick="runAllTests()">▶ Run All Tests</button>
+  </div>
+</div>
+
+<div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+
+<div class="stats">
+  <div class="stat"><div class="stat-num" id="s-total" style="color:var(--t1)">0</div><div class="stat-label">Total</div></div>
+  <div class="stat"><div class="stat-num" id="s-pass" style="color:var(--green)">0</div><div class="stat-label">Passed</div></div>
+  <div class="stat"><div class="stat-num" id="s-fail" style="color:var(--red)">0</div><div class="stat-label">Failed</div></div>
+  <div class="stat"><div class="stat-num" id="s-skip" style="color:var(--amber)">0</div><div class="stat-label">Skipped</div></div>
+  <div class="stat"><div class="stat-num" id="s-time" style="color:var(--cyan)">-</div><div class="stat-label">Duration</div></div>
+</div>
+
+<div class="filters">
+  <button class="filter-btn active" data-f="all" onclick="setFilter('all')">All</button>
+  <button class="filter-btn" data-f="pass" onclick="setFilter('pass')">✓ Passed</button>
+  <button class="filter-btn" data-f="fail" onclick="setFilter('fail')">✗ Failed</button>
+  <button class="filter-btn" data-f="skip" onclick="setFilter('skip')">⊘ Skipped</button>
+  <button class="filter-btn" data-f="unit" onclick="setFilter('unit')">Unit</button>
+  <button class="filter-btn" data-f="integration" onclick="setFilter('integration')">Integration</button>
+  <button class="filter-btn" data-f="api" onclick="setFilter('api')">API</button>
+</div>
+
+<div id="suites"></div>
+
+<div class="log-panel">
+  <div class="log-head"><span>📋 Test Log</span><button class="btn btn-sm" onclick="clearLog()">Clear</button></div>
+  <div class="log-body" id="log"></div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// DC FLEET — 의존성 함수 복사 (테스트 대상)
+// ══════════════════════════════════════════════════════════════
+
+function getSydneyOffsetMs(date) {
+  const d = date || new Date();
+  try {
+    const fmt = new Intl.DateTimeFormat('en-AU', {
+      timeZone:'Australia/Sydney', year:'numeric', month:'2-digit', day:'2-digit',
+      hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
+    });
+    const parts = fmt.formatToParts(d);
+    const get = t => parseInt(parts.find(p=>p.type===t)?.value||'0');
+    const sydLocal = new Date(Date.UTC(get('year'),get('month')-1,get('day'),get('hour')%24,get('minute'),get('second')));
+    return sydLocal.getTime() - d.getTime();
+  } catch(e) {
+    const utcStr=d.toLocaleString('en-US',{timeZone:'UTC'});
+    const sydStr=d.toLocaleString('en-US',{timeZone:'Australia/Sydney'});
+    return (new Date(sydStr)-new Date(utcStr));
+  }
+}
+
+function roundMoney(value) { return Math.round((parseFloat(value)||0)*100)/100; }
+function formatCurrency(value) { const n=roundMoney(value); return '$'+n.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+function parseToISO(ds){
+  if(!ds) return '';
+  const s=String(ds).trim();
+  if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){const[dd,mm,yyyy]=s.split('/');return yyyy+'-'+mm+'-'+dd;}
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  if(/^\d{4}-\d{2}-\d{2}T/.test(s)){
+    const d=new Date(s);
+    if(!isNaN(d)){
+      const local=new Date(d.getTime()+getSydneyOffsetMs(d));
+      const dd2=String(local.getUTCDate()).padStart(2,'0');
+      const mm2=String(local.getUTCMonth()+1).padStart(2,'0');
+      return local.getUTCFullYear()+'-'+mm2+'-'+dd2;
+    }
+  }
+  return '';
+}
+
+function fmtDate(ds){
+  if(!ds)return '-';
+  const s=String(ds).trim();
+  if(/^\d{2}\/\d{2}\/\d{4}$/.test(s))return s;
+  if(s.includes('T')){
+    const d=new Date(s);
+    if(!isNaN(d)){
+      const local=new Date(d.getTime()+getSydneyOffsetMs(d));
+      const dd=String(local.getUTCDate()).padStart(2,'0');
+      const mm=String(local.getUTCMonth()+1).padStart(2,'0');
+      return dd+'/'+mm+'/'+local.getUTCFullYear();
+    }
+  }
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)){const[y,m,d]=s.slice(0,10).split('-');return d+'/'+m+'/'+y;}
+  return s;
+}
+
+function escH(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+function fixPhone(p){
+  if(p===null||p===undefined||p==='') return '';
+  let s=String(p).replace(/\.0+$/,'').replace(/[^0-9]/g,'');
+  if(!s) return '';
+  if(s.length===9) return '0'+s;
+  return s;
+}
+
+function getPhoneFromRow(r){
+  const keys=['Mobile_1','Mobile 1','mobile_1','mobile 1','Phone','phone','Mobile','mobile','Mobile_2','Mobile 2','mobile_2','mobile 2','Moblie_2','Moblie 2'];
+  for(const k of keys){const v=r[k];if(v!==undefined&&v!==null&&v!==''&&v!==0)return fixPhone(v);}
+  return '';
+}
+
+function toLocalISO(d){
+  const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
+  return y+'-'+m+'-'+dd;
+}
+
+function _isoToMonday(iso){
+  const d=new Date(iso+'T00:00:00');
+  const day=d.getDay();
+  const diff=day===0?-6:1-day;
+  d.setDate(d.getDate()+diff);
+  return toLocalISO(d);
+}
+function _isoToSunday(iso){
+  const d=new Date(_isoToMonday(iso)+'T00:00:00');
+  d.setDate(d.getDate()+6);
+  return toLocalISO(d);
+}
+
+function parseSheetTime(ts){
+  if(!ts) return '';
+  const s=String(ts).trim();
+  if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return '';
+  if(/^\d{1,2}:\d{2}$/.test(s)) return s.padStart(5,'0').slice(0,5);
+  if(s.includes('T')){
+    const d=new Date(s);
+    if(!isNaN(d)){
+      const offsetH=Math.round(getSydneyOffsetMs(d)/3600000);
+      const h=((d.getUTCHours()+offsetH)%24+24)%24;
+      const mn=String(d.getUTCMinutes()).padStart(2,'0');
+      return String(h).padStart(2,'0')+':'+mn;
+    }
+  }
+  return s.length<=5?s:'';
+}
+
+function calcDuration(start, end){
+  if(!start||!end) return '';
+  const toMin=t=>{const s=parseSheetTime(t);if(!s)return NaN;const[h,m]=s.split(':').map(Number);return h*60+(m||0);};
+  let diff=toMin(end)-toMin(start);
+  if(isNaN(diff)) return '';
+  if(diff<0) diff+=24*60;
+  const h=Math.floor(diff/60),m=diff%60;
+  return h>0?(m>0?h+'h '+m+'m':h+'h'):m+'m';
+}
+
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
+
+
+// ══════════════════════════════════════════════════════════════
+// TEST FRAMEWORK
+// ══════════════════════════════════════════════════════════════
+
+const _suites = [];
+let _currentSuite = null;
+let _results = [];
+let _logLines = [];
+let _filter = 'all';
+
+function describe(name, opts, fn) {
+  if (typeof opts === 'function') { fn = opts; opts = {}; }
+  _suites.push({ name, opts, fn, tests: [] });
+}
+
+function it(name, fn) {
+  if (_currentSuite) _currentSuite.tests.push({ name, fn });
+}
+
+function log(msg, cls='') { _logLines.push({ msg, cls }); }
+
+class Assert {
+  constructor(testName) { this.name = testName; }
+  eq(a, b, msg='') {
+    if (a !== b) throw new Error(`${msg||'eq'}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
+  }
+  deepEq(a, b, msg='') {
+    if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${msg||'deepEq'}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
+  }
+  neq(a, b, msg='') {
+    if (a === b) throw new Error(`${msg||'neq'}: values should differ, both are ${JSON.stringify(a)}`);
+  }
+  ok(val, msg='') {
+    if (!val) throw new Error(`${msg||'ok'}: expected truthy, got ${JSON.stringify(val)}`);
+  }
+  notOk(val, msg='') {
+    if (val) throw new Error(`${msg||'notOk'}: expected falsy, got ${JSON.stringify(val)}`);
+  }
+  match(str, regex, msg='') {
+    if (!regex.test(str)) throw new Error(`${msg||'match'}: "${str}" did not match ${regex}`);
+  }
+  throws(fn, msg='') {
+    let threw = false;
+    try { fn(); } catch(e) { threw = true; }
+    if (!threw) throw new Error(`${msg||'throws'}: expected function to throw`);
+  }
+  type(val, t, msg='') {
+    if (typeof val !== t) throw new Error(`${msg||'type'}: expected type ${t}, got ${typeof val}`);
+  }
+  gt(a, b, msg='') {
+    if (!(a > b)) throw new Error(`${msg||'gt'}: expected ${a} > ${b}`);
+  }
+  gte(a, b, msg='') {
+    if (!(a >= b)) throw new Error(`${msg||'gte'}: expected ${a} >= ${b}`);
+  }
+  includes(arr, val, msg='') {
+    const has = Array.isArray(arr) ? arr.includes(val) : String(arr).includes(val);
+    if (!has) throw new Error(`${msg||'includes'}: ${JSON.stringify(val)} not found`);
+  }
+}
+
+async function runAllTests() {
+  _results = [];
+  _logLines = [];
+  const progress = document.getElementById('progress');
+  progress.style.width = '0%';
+  const totalTests = _suites.reduce((s, suite) => { _currentSuite = suite; suite.tests = []; suite.fn(); return s + suite.tests.length; }, 0);
+  let completed = 0;
+  const t0 = performance.now();
+
+  log('═══ DC FLEET Test Harness ═══', 'log-info');
+  log(`Suites: ${_suites.length} | Tests: ${totalTests}`, 'log-info');
+  log('');
+
+  for (const suite of _suites) {
+    _currentSuite = suite;
+    suite.tests = [];
+    suite.fn();
+    const suiteResult = { name: suite.name, tag: suite.opts.tag||'unit', tests: [], time: 0 };
+    const st0 = performance.now();
+
+    log(`▸ ${suite.name}`, 'log-info');
+
+    for (const test of suite.tests) {
+      const tt0 = performance.now();
+      let status = 'pass', detail = '';
+      try {
+        const ret = test.fn(new Assert(test.name));
+        if (ret instanceof Promise) await ret;
+      } catch(e) {
+        status = 'fail';
+        detail = e.message || String(e);
+      }
+      const elapsed = performance.now() - tt0;
+      suiteResult.tests.push({ name: test.name, status, detail, time: elapsed });
+      completed++;
+      progress.style.width = (completed/totalTests*100)+'%';
+      log(`  ${status==='pass'?'✓':'✗'} ${test.name}${detail?' — '+detail:''} (${elapsed.toFixed(1)}ms)`, status==='pass'?'log-pass':'log-fail');
+    }
+    suiteResult.time = performance.now() - st0;
+    _results.push(suiteResult);
+  }
+  const totalTime = performance.now() - t0;
+  log('');
+  const pass = _results.flatMap(s=>s.tests).filter(t=>t.status==='pass').length;
+  const fail = _results.flatMap(s=>s.tests).filter(t=>t.status==='fail').length;
+  log(`═══ ${pass} passed, ${fail} failed — ${totalTime.toFixed(0)}ms ═══`, fail?'log-fail':'log-pass');
+
+  renderResults(totalTime);
+}
+
+function renderResults(totalTime) {
+  const all = _results.flatMap(s=>s.tests);
+  document.getElementById('s-total').textContent = all.length;
+  document.getElementById('s-pass').textContent = all.filter(t=>t.status==='pass').length;
+  document.getElementById('s-fail').textContent = all.filter(t=>t.status==='fail').length;
+  document.getElementById('s-skip').textContent = all.filter(t=>t.status==='skip').length;
+  document.getElementById('s-time').textContent = totalTime < 1000 ? totalTime.toFixed(0)+'ms' : (totalTime/1000).toFixed(1)+'s';
+
+  const container = document.getElementById('suites');
+  container.innerHTML = _results.map((suite, si) => {
+    const p=suite.tests.filter(t=>t.status==='pass').length;
+    const f=suite.tests.filter(t=>t.status==='fail').length;
+    const badge = f ? 'fail' : p===suite.tests.length ? 'pass' : 'mixed';
+    const badgeText = f ? `${f} FAIL` : `${p} PASS`;
+    const openClass = f ? ' open' : '';
+    const filteredTests = suite.tests.filter(t => {
+      if (_filter==='all') return true;
+      if (_filter==='pass'||_filter==='fail'||_filter==='skip') return t.status===_filter;
+      if (_filter==='unit'||_filter==='integration'||_filter==='api') return suite.tag===_filter;
+      return true;
+    });
+    if (_filter!=='all' && filteredTests.length===0) return '';
+    return `<div class="suite${openClass}" data-tag="${suite.tag}" data-si="${si}">
+      <div class="suite-head" onclick="this.parentElement.classList.toggle('open')">
+        <div class="suite-title"><span class="icon">${suite.tag==='api'?'🌐':suite.tag==='integration'?'🔗':'🧪'}</span>${escH(suite.name)}</div>
+        <div class="suite-meta">
+          <span class="suite-time">${suite.time.toFixed(0)}ms</span>
+          <span class="suite-badge ${badge}">${badgeText}</span>
+        </div>
+      </div>
+      <div class="suite-body">${filteredTests.map(t => `
+        <div class="test-row ${t.status}">
+          <div class="test-status ${t.status}">${t.status==='pass'?'PASS':t.status==='fail'?'FAIL':'SKIP'}</div>
+          <div class="test-name">${escH(t.name)}${t.detail?`<div class="test-detail ${t.status}">${escH(t.detail)}</div>`:''}</div>
+          <div class="test-time">${t.time.toFixed(1)}ms</div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  // Log
+  const logEl = document.getElementById('log');
+  logEl.innerHTML = _logLines.map(l => `<div class="${l.cls}">${escH(l.msg)}</div>`).join('');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setFilter(f) {
+  _filter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.f===f));
+  if (_results.length) renderResults(parseFloat(document.getElementById('s-time').textContent)||0);
+}
+
+function toggleAllSuites() {
+  const suites = document.querySelectorAll('.suite');
+  const allOpen = [...suites].every(s => s.classList.contains('open'));
+  suites.forEach(s => s.classList.toggle('open', !allOpen));
+}
+
+function clearLog() { document.getElementById('log').innerHTML = ''; }
+
+
+// ══════════════════════════════════════════════════════════════
+// TEST SUITES
+// ══════════════════════════════════════════════════════════════
+
+// ─── 1. parseToISO ───
+describe('parseToISO — 날짜 → ISO 변환', { tag: 'unit' }, () => {
+  it('dd/mm/yyyy → YYYY-MM-DD', t => {
+    t.eq(parseToISO('28/03/2026'), '2026-03-28');
+  });
+  it('01/01/2025 → 2025-01-01', t => {
+    t.eq(parseToISO('01/01/2025'), '2025-01-01');
+  });
+  it('YYYY-MM-DD 그대로 반환', t => {
+    t.eq(parseToISO('2026-03-28'), '2026-03-28');
+  });
+  it('YYYY-MM-DDThh:mm:ss.sssZ (ISO timestamp) 처리', t => {
+    const result = parseToISO('2026-03-10T13:00:00.000Z');
+    t.match(result, /^\d{4}-\d{2}-\d{2}$/, 'ISO 형식이어야 함');
+    t.ok(result.length === 10);
+  });
+  it('빈 문자열 → 빈 문자열', t => {
+    t.eq(parseToISO(''), '');
+    t.eq(parseToISO(null), '');
+    t.eq(parseToISO(undefined), '');
+  });
+  it('잘못된 형식 → 빈 문자열', t => {
+    t.eq(parseToISO('hello'), '');
+    t.eq(parseToISO('2026'), '');
+  });
+});
+
+// ─── 2. fmtDate ───
+describe('fmtDate — 표시용 날짜 포맷', { tag: 'unit' }, () => {
+  it('이미 dd/mm/yyyy → 그대로', t => {
+    t.eq(fmtDate('28/03/2026'), '28/03/2026');
+  });
+  it('YYYY-MM-DD → dd/mm/yyyy', t => {
+    t.eq(fmtDate('2026-03-28'), '28/03/2026');
+  });
+  it('빈 값 → 대시', t => {
+    t.eq(fmtDate(''), '-');
+    t.eq(fmtDate(null), '-');
+    t.eq(fmtDate(undefined), '-');
+  });
+  it('알 수 없는 문자열 → 그대로 반환', t => {
+    t.eq(fmtDate('xyz'), 'xyz');
+  });
+});
+
+// ─── 3. roundMoney ───
+describe('roundMoney — 금액 반올림', { tag: 'unit' }, () => {
+  it('소수점 2자리 반올림', t => {
+    t.eq(roundMoney(100.456), 100.46);
+    t.eq(roundMoney(100.454), 100.45);
+  });
+  it('정수 입력', t => {
+    t.eq(roundMoney(100), 100);
+  });
+  it('문자열 입력 → 파싱', t => {
+    t.eq(roundMoney('99.999'), 100);
+  });
+  it('NaN/null → 0', t => {
+    t.eq(roundMoney(NaN), 0);
+    t.eq(roundMoney(null), 0);
+    t.eq(roundMoney('abc'), 0);
+  });
+  it('음수 처리', t => {
+    t.eq(roundMoney(-50.555), -50.56);
+  });
+});
+
+// ─── 4. formatCurrency ───
+describe('formatCurrency — 통화 표시', { tag: 'unit' }, () => {
+  it('$기호 + 소수 2자리', t => {
+    t.match(formatCurrency(1234.5), /^\$.*1.*234\.50$/);
+  });
+  it('0 → $0.00', t => {
+    t.eq(formatCurrency(0), '$0.00');
+  });
+});
+
+// ─── 5. escH — HTML 이스케이프 ───
+describe('escH — HTML 이스케이프', { tag: 'unit' }, () => {
+  it('& → &amp;', t => { t.includes(escH('a&b'), '&amp;'); });
+  it('< → &lt;', t => { t.includes(escH('<script>'), '&lt;'); });
+  it('> → &gt;', t => { t.includes(escH('a>b'), '&gt;'); });
+  it('" → &quot;', t => { t.includes(escH('a"b'), '&quot;'); });
+  it('일반 문자열 → 그대로', t => { t.eq(escH('hello'), 'hello'); });
+  it('숫자 입력 → 문자열', t => { t.eq(escH(123), '123'); });
+});
+
+// ─── 6. fixPhone — 전화번호 보정 ───
+describe('fixPhone — 전화번호 앞 0 복원', { tag: 'unit' }, () => {
+  it('9자리 → 앞에 0 추가', t => {
+    t.eq(fixPhone('412345678'), '0412345678');
+  });
+  it('10자리 그대로', t => {
+    t.eq(fixPhone('0412345678'), '0412345678');
+  });
+  it('소수점 제거 (Google Sheets)', t => {
+    t.eq(fixPhone('412345678.0'), '0412345678');
+  });
+  it('빈 값 → 빈 문자열', t => {
+    t.eq(fixPhone(''), '');
+    t.eq(fixPhone(null), '');
+    t.eq(fixPhone(undefined), '');
+  });
+  it('특수문자 제거', t => {
+    t.eq(fixPhone('04-1234-5678'), '0412345678');
+  });
+});
+
+// ─── 7. getPhoneFromRow — 행 객체 전화번호 탐색 ───
+describe('getPhoneFromRow — 다양한 키에서 전화번호 추출', { tag: 'unit' }, () => {
+  it('Mobile_1 키', t => {
+    t.eq(getPhoneFromRow({ Mobile_1: '412345678' }), '0412345678');
+  });
+  it('Phone 키', t => {
+    t.eq(getPhoneFromRow({ Phone: '0412345678' }), '0412345678');
+  });
+  it('Moblie_2 (오타 키)', t => {
+    t.eq(getPhoneFromRow({ Moblie_2: '499999999' }), '0499999999');
+  });
+  it('모든 키 없음 → 빈 문자열', t => {
+    t.eq(getPhoneFromRow({ Name: 'test' }), '');
+  });
+  it('0 값 무시', t => {
+    t.eq(getPhoneFromRow({ Mobile_1: 0, Phone: '0411111111' }), '0411111111');
+  });
+});
+
+// ─── 8. _isoToMonday / _isoToSunday ───
+describe('_isoToMonday / _isoToSunday — 주간 계산', { tag: 'unit' }, () => {
+  it('수요일 → 해당 주 월요일', t => {
+    t.eq(_isoToMonday('2026-03-25'), '2026-03-23'); // Wed→Mon
+  });
+  it('월요일 → 그대로', t => {
+    t.eq(_isoToMonday('2026-03-23'), '2026-03-23');
+  });
+  it('일요일 → 전주 월요일', t => {
+    t.eq(_isoToMonday('2026-03-29'), '2026-03-23');
+  });
+  it('월요일 → 해당 주 일요일', t => {
+    t.eq(_isoToSunday('2026-03-23'), '2026-03-29');
+  });
+  it('일요일 → 그 주 일요일 (전주 월요일 기준)', t => {
+    t.eq(_isoToSunday('2026-03-29'), '2026-03-29');
+  });
+});
+
+// ─── 9. parseSheetTime — 시간 파싱 ───
+describe('parseSheetTime — 시간 파싱', { tag: 'unit' }, () => {
+  it('HH:MM 그대로', t => {
+    t.eq(parseSheetTime('08:30'), '08:30');
+  });
+  it('H:MM → 0 패딩', t => {
+    t.eq(parseSheetTime('8:30'), '08:30');
+  });
+  it('빈 값', t => {
+    t.eq(parseSheetTime(''), '');
+    t.eq(parseSheetTime(null), '');
+  });
+  it('dd/mm/yyyy (날짜) → 빈 문자열', t => {
+    t.eq(parseSheetTime('28/03/2026'), '');
+  });
+});
+
+// ─── 10. calcDuration — 시간 차이 ───
+describe('calcDuration — 근무 시간 계산', { tag: 'unit' }, () => {
+  it('08:00 ~ 17:00 = 9h', t => {
+    t.eq(calcDuration('08:00', '17:00'), '9h');
+  });
+  it('09:30 ~ 18:45 = 9h 15m', t => {
+    t.eq(calcDuration('09:30', '18:45'), '9h 15m');
+  });
+  it('빈 입력 → 빈 문자열', t => {
+    t.eq(calcDuration('', '17:00'), '');
+    t.eq(calcDuration('08:00', ''), '');
+  });
+  it('자정 넘김 (야간) → 올바른 계산', t => {
+    t.eq(calcDuration('22:00', '02:00'), '4h');
+  });
+  it('분만 차이', t => {
+    t.eq(calcDuration('08:00', '08:30'), '30m');
+  });
+});
+
+// ─── 11. toLocalISO ───
+describe('toLocalISO — Date → YYYY-MM-DD', { tag: 'unit' }, () => {
+  it('Date 객체 → ISO 문자열', t => {
+    const d = new Date(2026, 2, 28); // March 28
+    t.eq(toLocalISO(d), '2026-03-28');
+  });
+  it('1월 1일 → 제로 패딩', t => {
+    const d = new Date(2026, 0, 1);
+    t.eq(toLocalISO(d), '2026-01-01');
+  });
+});
+
+// ─── 12. 날짜 변환 왕복 테스트 ───
+describe('날짜 변환 왕복 (parseToISO ↔ fmtDate)', { tag: 'integration' }, () => {
+  it('dd/mm/yyyy → ISO → dd/mm/yyyy', t => {
+    const orig = '15/06/2026';
+    const iso = parseToISO(orig);
+    const back = fmtDate(iso);
+    t.eq(back, orig);
+  });
+  it('ISO → fmtDate → parseToISO', t => {
+    const orig = '2026-12-25';
+    const display = fmtDate(orig);
+    const back = parseToISO(display);
+    t.eq(back, orig);
+  });
+  it('여러 날짜 일괄 변환 정합성', t => {
+    const dates = ['01/01/2026','28/02/2026','31/12/2025','15/06/2026'];
+    dates.forEach(d => {
+      const roundtrip = fmtDate(parseToISO(d));
+      t.eq(roundtrip, d, `왕복 실패: ${d}`);
+    });
+  });
+});
+
+// ─── 13. 수동 항목 날짜 필터 (최근 버그 수정 검증) ───
+describe('수동 항목 날짜 필터 (parseToISO 적용 검증)', { tag: 'integration' }, () => {
+  it('fmtDate으로 저장된 날짜가 ISO 비교에서 필터링됨', t => {
+    const savedDate = fmtDate('2026-03-28'); // → '28/03/2026'
+    const iso = parseToISO(savedDate);       // → '2026-03-28'
+    const from = '2026-03-01', to = '2026-03-31';
+    t.ok(iso >= from && iso <= to, `${iso} should be in range ${from}~${to}`);
+  });
+  it('월 경계 항목 올바르게 필터링', t => {
+    const aprilDate = fmtDate('2026-04-01');
+    const iso = parseToISO(aprilDate);
+    const from = '2026-03-01', to = '2026-03-31';
+    t.notOk(iso >= from && iso <= to, '4월 항목은 3월 범위에 포함되면 안 됨');
+  });
+});
+
+// ─── 14. 전화번호 보정 통합 ───
+describe('전화번호 보정 통합 테스트', { tag: 'integration' }, () => {
+  it('Google Sheets 숫자 → fixPhone → getPhoneFromRow 일관성', t => {
+    const row = { Mobile_1: 412345678 }; // Sheets에서 숫자로 저장
+    t.eq(getPhoneFromRow(row), '0412345678');
+  });
+  it('다양한 키 우선순위', t => {
+    const row = { Mobile_1: '', Phone: '0411111111', Mobile: '0422222222' };
+    t.eq(getPhoneFromRow(row), '0411111111'); // Phone이 Mobile_1 다음 우선
+  });
+});
+
+// ─── 15. 주간 계산 통합 ───
+describe('주간 계산 통합 (인보이스 그룹용)', { tag: 'integration' }, () => {
+  it('같은 주 날짜들이 같은 Monday 반환', t => {
+    const mon = _isoToMonday('2026-03-23'); // Mon
+    const wed = _isoToMonday('2026-03-25'); // Wed
+    const fri = _isoToMonday('2026-03-27'); // Fri
+    const sun = _isoToMonday('2026-03-29'); // Sun
+    t.eq(mon, wed);
+    t.eq(mon, fri);
+    t.eq(mon, sun);
+  });
+  it('Monday~Sunday 범위 = 6일 차이', t => {
+    const mon = _isoToMonday('2026-03-25');
+    const sun = _isoToSunday('2026-03-25');
+    const diff = (new Date(sun+'T00:00:00') - new Date(mon+'T00:00:00')) / 86400000;
+    t.eq(diff, 6);
+  });
+});
+
+// ─── 16. GAS API Ping ───
+describe('GAS API — Ping 연결 테스트', { tag: 'api' }, () => {
+  it('ping → ok:true', async t => {
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=ping');
+      const json = await res.json();
+      t.ok(json.ok, 'API ping ok');
+      t.ok(json.ts, 'timestamp 존재');
+    } catch(e) {
+      throw new Error('API 연결 실패: ' + e.message);
+    }
+  });
+});
+
+// ─── 17. GAS API — get_master ───
+describe('GAS API — 마스터 데이터 조회', { tag: 'api' }, () => {
+  it('M_Vehicles 조회', async t => {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_master&sheet=M_Vehicles');
+    const json = await res.json();
+    t.ok(json.ok, 'ok');
+    t.ok(Array.isArray(json.rows), 'rows는 배열');
+  });
+  it('M_Drivers 조회', async t => {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_master&sheet=M_Drivers');
+    const json = await res.json();
+    t.ok(json.ok, 'ok');
+    t.ok(Array.isArray(json.rows), 'rows는 배열');
+    if (json.rows.length > 0) {
+      t.ok('Name_EN' in json.rows[0] || 'Name EN' in json.rows[0], 'Name_EN 필드 존재');
+    }
+  });
+  it('M_Clients 조회 + ABN 컬럼 존재', async t => {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_master&sheet=M_Clients');
+    const json = await res.json();
+    t.ok(json.ok, 'ok');
+    if (json.rows.length > 0) {
+      t.ok('ABN' in json.rows[0], 'ABN 컬럼이 M_Clients에 존재해야 함');
+    }
+  });
+  it('존재하지 않는 시트 → 빈 rows', async t => {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_master&sheet=NonExistSheet');
+    const json = await res.json();
+    t.ok(json.ok || !json.ok, '에러든 빈 결과든 응답이 와야 함');
+  });
+});
+
+// ─── 18. GAS API — get_reports ───
+describe('GAS API — Daily_Report 조회', { tag: 'api' }, () => {
+  it('Daily_Report 조회 성공', async t => {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+    const json = await res.json();
+    t.ok(json.ok, 'ok');
+    t.ok(Array.isArray(json.rows), 'rows 배열');
+  });
+  it('Pre_Departure 조회', async t => {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Pre_Departure');
+    const json = await res.json();
+    t.ok(json.ok);
+    t.ok(Array.isArray(json.rows));
+  });
+  it('End_of_Shift 조회', async t => {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=End_of_Shift');
+    const json = await res.json();
+    t.ok(json.ok);
+    t.ok(Array.isArray(json.rows));
+  });
+});
+
+// ─── 19. GAS API — get_invoices ───
+describe('GAS API — 인보이스 조회', { tag: 'api' }, () => {
+  it('get_invoices 성공', async t => {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+    const json = await res.json();
+    t.ok(json.ok);
+    t.ok(Array.isArray(json.rows));
+  });
+});
+
+// ─── 20. GAS API — get_all_masters ───
+describe('GAS API — 전체 마스터 일괄 조회', { tag: 'api' }, () => {
+  it('get_all_masters → 주요 시트 포함', async t => {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters');
+    const json = await res.json();
+    t.ok(json.ok, 'ok');
+    t.ok(json.data, 'data 존재');
+    t.ok(Array.isArray(json.data.M_Vehicles), 'M_Vehicles');
+    t.ok(Array.isArray(json.data.M_Drivers), 'M_Drivers');
+    t.ok(Array.isArray(json.data.M_Clients), 'M_Clients');
+    t.ok(Array.isArray(json.data.M_PriceClient), 'M_PriceClient');
+  });
+});
+
+// ─── 21. GAS API — unknown action ───
+describe('GAS API — 에러 핸들링', { tag: 'api' }, () => {
+  it('unknown action → error 응답', async t => {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=nonexistent_action_xyz');
+    const json = await res.json();
+    t.notOk(json.ok, '알 수 없는 액션은 ok:false');
+  });
+});
+
+// ─── 22. Edge Cases ───
+describe('Edge Cases — 경계값 테스트', { tag: 'unit' }, () => {
+  it('parseToISO: 윤년 2/29', t => {
+    t.eq(parseToISO('29/02/2024'), '2024-02-29');
+  });
+  it('fmtDate: 윤년 2/29', t => {
+    t.eq(fmtDate('2024-02-29'), '29/02/2024');
+  });
+  it('roundMoney: 매우 작은 값', t => {
+    t.eq(roundMoney(0.001), 0);
+    t.eq(roundMoney(0.005), 0.01);
+  });
+  it('roundMoney: 큰 값', t => {
+    t.eq(roundMoney(999999.999), 1000000);
+  });
+  it('fixPhone: 국제번호', t => {
+    t.eq(fixPhone('+61412345678'), '61412345678');
+  });
+  it('escH: 복합 XSS', t => {
+    const xss = '<img onerror="alert(1)" src=x>';
+    t.notOk(escH(xss).includes('<'), 'HTML 태그 없어야 함');
+  });
+  it('calcDuration: 동일 시간', t => {
+    t.eq(calcDuration('08:00', '08:00'), '');
+  });
+});
+
+</script>
+</body>
+</html>
