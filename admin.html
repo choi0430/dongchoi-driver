@@ -5204,7 +5204,10 @@ async function emailInvoice() {
   let toEmail  = (client.Email || '').trim();
   const invNum = getInvNum(agency, from);
 
-  const rows = _buildInvRows(agency, from, to);
+  let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
+  rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
+  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
+
   let grandTotal = 0;
   rows.forEach(r => { grandTotal += calcInvRow(r).total; });
 
@@ -5218,7 +5221,7 @@ async function emailInvoice() {
   const subject = `Tax Invoice ${invNum} — ${agency} (${fd(from)} – ${fd(to)})`;
   const body =
     `Dear ${agency},\n\n` +
-    `Please find enclosed Tax Invoice ${invNum} for services provided during ${fd(from)} – ${fd(to)}.\n\n` +
+    `Please find attached Tax Invoice ${invNum} for services provided during ${fd(from)} – ${fd(to)}.\n\n` +
     `Invoice Total: $${grandTotal.toLocaleString('en-AU', {minimumFractionDigits:2, maximumFractionDigits:2})} (incl. GST)\n` +
     `Due Date: 14 days from invoice date\n` +
     `Reference: ${invNum}\n\n` +
@@ -5228,6 +5231,10 @@ async function emailInvoice() {
     `Account Name: ${DC_COMPANY.accname||DC_COMPANY.name||''}\n\n` +
     `Please don't hesitate to contact us if you have any queries.\n\n` +
     `Kind regards,\n${DC_COMPANY.name||'Dong Choi Pty Ltd'}\n${DC_COMPANY.phone||''}\n${DC_COMPANY.email||''}`;
+
+  // 인보이스 PDF용 HTML 생성
+  const docHtml = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
+  const pdfName = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   const emailBtn = document.querySelector('button[onclick="emailInvoice()"]');
   if (emailBtn) { emailBtn.disabled = true; emailBtn.textContent = '⏳ 발송 중...'; }
@@ -5241,6 +5248,8 @@ async function emailInvoice() {
         to:         toEmail,
         subject,
         body,
+        docHtml,
+        pdfName,
         senderName: DC_COMPANY.name || 'Dong Choi Pty Ltd',
         _user:      getAdminUser()
       })
@@ -5248,18 +5257,17 @@ async function emailInvoice() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json.ok) {
-      toast(`✉️ ${toEmail} 으로 인보이스 발송 완료`, 'ok');
+      toast(`✉️ ${toEmail} 으로 인보이스 발송 완료 (PDF 첨부)`, 'ok');
     } else {
       throw new Error(json.error || '발송 실패');
     }
   } catch (e) {
-    // GAS 실패 시 mailto 폴백
     toast(`⚠️ GAS 발송 실패 — 이메일 클라이언트로 대신 열기: ${e.message}`, 'er');
     const s = encodeURIComponent(subject);
     const b = encodeURIComponent(body);
     location.href = `mailto:${encodeURIComponent(toEmail)}?subject=${s}&body=${b}`;
   } finally {
-    if (emailBtn) { emailBtn.disabled = false; emailBtn.textContent = '✉️ 이메일 발송'; }
+    if (emailBtn) { emailBtn.disabled = false; emailBtn.textContent = '✉️ 발송'; }
   }
 }
 
@@ -9122,13 +9130,17 @@ async function emailQuotation() {
 
   const body =
     `Dear ${agency||'Customer'},\n\n` +
-    `Thank you for your enquiry. Please find our quotation below:\n\n` +
+    `Thank you for your enquiry. Please find attached our quotation.\n\n` +
     `Quotation No: ${quoNum}\n` +
     `Total: $${grandTotal.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})} (incl. GST)\n` +
     (validDate ? `Valid Until: ${fd(validDate)}\n` : '') +
     `\nServices:\n${itemLines}\n\n` +
     `Please feel free to contact us if you have any questions or would like to proceed with a booking.\n\n` +
     `Kind regards,\n${DC_COMPANY.name||'Dong Choi Pty Ltd'}\n${DC_COMPANY.phone||''}\n${DC_COMPANY.email||''}`;
+
+  // 견적서 PDF용 HTML 생성
+  const docHtml = _buildQuotationHTML({isDraft:false});
+  const pdfName = `${quoNum}_${(agency||'Customer').replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   const emailBtn = document.querySelector('button[onclick="emailQuotation()"]');
   if (emailBtn) { emailBtn.disabled=true; emailBtn.textContent='⏳ 발송 중...'; }
@@ -9138,13 +9150,15 @@ async function emailQuotation() {
       method:'POST', headers:{'Content-Type':'text/plain'},
       body: JSON.stringify({
         action:'send_invoice_email', to:toEmail, subject, body,
+        docHtml,
+        pdfName,
         senderName: DC_COMPANY.name||'Dong Choi Pty Ltd',
         _user: getAdminUser()
       })
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    if (json.ok) { toast(`✉️ ${toEmail} 으로 견적서 발송 완료`,'ok'); }
+    if (json.ok) { toast(`✉️ ${toEmail} 으로 견적서 발송 완료 (PDF 첨부)`,'ok'); }
     else throw new Error(json.error||'발송 실패');
   } catch (e) {
     toast(`⚠️ GAS 발송 실패 — 이메일 클라이언트로 열기: ${e.message}`,'er');
