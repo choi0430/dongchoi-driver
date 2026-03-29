@@ -536,9 +536,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
         <input type="date" id="qim-date" class="profit-finp" style="width:100%;">
       </div>
       <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">차량 (Rego)</div>
-        <select id="qim-rego" class="profit-sel" style="width:100%;" onchange="onQimRegoChange()">
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">요청 인승 (Seats)</div>
+        <select id="qim-seats" class="profit-sel" style="width:100%;" onchange="onQimAutoFill()">
           <option value="">선택</option>
+          <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
         </select>
       </div>
     </div>
@@ -549,14 +550,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       </select>
       <input type="text" id="qim-tour-custom" class="profit-finp" style="width:100%;display:none;" placeholder="직접 입력...">
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">인승 (Seats)</div>
-        <select id="qim-seats" class="profit-sel" style="width:100%;" onchange="onQimAutoFill()">
-          <option value="">선택</option>
-          <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
-        </select>
-      </div>
+    <div style="margin-bottom:8px;">
       <div>
         <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">수량</div>
         <input type="number" id="qim-qty" class="profit-finp" style="width:100%;" placeholder="1" min="1" value="1">
@@ -708,9 +702,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
           <input type="date" id="iim-date" class="profit-finp" style="width:100%;">
         </div>
         <div>
-          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">차량 (Rego)</div>
-          <select id="iim-rego" class="profit-sel" style="width:100%;" onchange="onIimRegoChange()">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">요청 인승 (Seats)</div>
+          <select id="iim-seats" class="profit-sel" style="width:100%;" onchange="onIimAutoFill()">
             <option value="">선택</option>
+            <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
           </select>
         </div>
       </div>
@@ -731,14 +726,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
           <input type="time" id="iim-end" class="profit-finp" style="width:100%;">
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">인승 (Seats)</div>
-          <select id="iim-seats" class="profit-sel" style="width:100%;" onchange="onIimAutoFill()">
-            <option value="">선택</option>
-            <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
-          </select>
-        </div>
+      <div style="margin-bottom:8px;">
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">Tour Code</div>
           <input type="text" id="iim-tourcode" class="profit-finp" style="width:100%;" placeholder="예: BM-2024-01">
@@ -3714,7 +3702,6 @@ function openInvItemModal(id) {
     const item  = items.find(x => x.id === id);
     if (item) {
       document.getElementById('iim-date').value     = parseToISO(item.date || '');
-      document.getElementById('iim-rego').value     = item.rego     || '';
       // 투어: select에 있으면 선택, 없으면 커스텀
       const tourSel = document.getElementById('iim-tour');
       const tourCustom = document.getElementById('iim-tour-custom');
@@ -3737,7 +3724,6 @@ function openInvItemModal(id) {
     ['iim-date','iim-start','iim-end','iim-tourcode','iim-amount','iim-ot','iim-hotel','iim-note'].forEach(id=>{
       const el=document.getElementById(id); if(el) el.value='';
     });
-    document.getElementById('iim-rego').value = '';
     document.getElementById('iim-tour').value = '';
     document.getElementById('iim-tour-custom').style.display = 'none';
     document.getElementById('iim-tour-custom').value = '';
@@ -3749,12 +3735,6 @@ function openInvItemModal(id) {
 
 // ── 인보이스 모달 드롭다운 채우기 ──
 function _populateIimDropdowns() {
-  // Rego
-  const regoSel = document.getElementById('iim-rego');
-  if (regoSel) {
-    regoSel.innerHTML = '<option value="">선택</option>' +
-      (DB.V||[]).map(v => `<option value="${v.Rego}">${v.Rego}${v.Capacity?' ('+v.Capacity+'인승)':''}</option>`).join('');
-  }
   // Tour (현재 여행사 코스 + 전체 코스)
   const tourSel = document.getElementById('iim-tour');
   if (tourSel) {
@@ -3766,18 +3746,6 @@ function _populateIimDropdowns() {
       [...courses].sort().map(c => `<option value="${c}">${c}</option>`).join('') +
       '<option value="__custom__">✏️ 직접 입력...</option>';
   }
-}
-function onIimRegoChange() {
-  const rego = document.getElementById('iim-rego')?.value;
-  if (!rego) return;
-  const veh = (DB.V||[]).find(v => v.Rego === rego);
-  if (veh && veh.Capacity) {
-    const cap = String(veh.Capacity).replace(/[^0-9]/g,'');
-    const seatsSel = document.getElementById('iim-seats');
-    const match = [...seatsSel.options].find(o => o.value.replace(/[^0-9]/g,'') === cap);
-    if (match) seatsSel.value = match.value;
-  }
-  onIimAutoFill();
 }
 function onIimTourChange() {
   const sel = document.getElementById('iim-tour');
@@ -3823,7 +3791,6 @@ function saveInvItem() {
   const item = {
     id:       _invItemEditId || Date.now().toString(),
     date:     fmtDate(date),
-    rego:     document.getElementById('iim-rego')?.value?.trim()     || '',
     tour,
     start:    document.getElementById('iim-start')?.value            || '',
     end:      document.getElementById('iim-end')?.value              || '',
@@ -3892,7 +3859,7 @@ function renderInvManualList() {
         const timeStr = item.start||item.end ? (item.start||'') + (item.end ? ' - '+item.end : '') : '';
         return `<div style="padding:9px 12px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(item.date)} · ${escH(item.rego||'—')}</div>
+            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(item.date)}${item.seats?' · '+item.seats:''}</div>
             <div style="font-size:11px;color:var(--t2);margin-top:1px;">${escH(item.tour)}</div>
             ${timeStr?`<div style="font-size:10px;color:var(--t3);">${escH(timeStr)}</div>`:''}
             ${item.note?`<div style="font-size:10px;color:var(--t3);">${escH(item.note)}</div>`:''}
@@ -8730,11 +8697,6 @@ function openQuoItemModal(id) {
   if (errEl) { errEl.style.display='none'; errEl.textContent=''; }
   document.getElementById('qim-auto-info').style.display='none';
 
-  // Rego 드롭다운
-  const regoSel = document.getElementById('qim-rego');
-  regoSel.innerHTML = '<option value="">선택</option>' +
-    (DB.V||[]).map(v => `<option value="${v.Rego}">${v.Rego}${v.Capacity?' ('+v.Capacity+'인승)':''}</option>`).join('');
-
   // Tour 드롭다운
   _populateQimTour();
 
@@ -8742,7 +8704,6 @@ function openQuoItemModal(id) {
     const item = _quoItems.find(x => x.id === id);
     if (item) {
       document.getElementById('qim-date').value = item.date || '';
-      regoSel.value = item.rego || '';
       const tourSel = document.getElementById('qim-tour');
       const tourCustom = document.getElementById('qim-tour-custom');
       if ([...tourSel.options].some(o => o.value === item.tour)) {
@@ -8761,7 +8722,6 @@ function openQuoItemModal(id) {
     ['qim-date','qim-price','qim-ot','qim-extra','qim-note'].forEach(x => {
       const el = document.getElementById(x); if(el) el.value='';
     });
-    regoSel.value = '';
     document.getElementById('qim-tour').value = '';
     document.getElementById('qim-tour-custom').style.display = 'none';
     document.getElementById('qim-tour-custom').value = '';
@@ -8783,19 +8743,6 @@ function _populateQimTour() {
   sel.innerHTML = '<option value="">-- 관광지 선택 --</option>' +
     [...courses].sort().map(c => `<option value="${c}">${c}</option>`).join('') +
     '<option value="__custom__">✏️ 직접 입력...</option>';
-}
-
-function onQimRegoChange() {
-  const rego = document.getElementById('qim-rego')?.value;
-  if (!rego) return;
-  const veh = (DB.V||[]).find(v => v.Rego === rego);
-  if (veh && veh.Capacity) {
-    const cap = String(veh.Capacity).replace(/[^0-9]/g,'');
-    const seatsSel = document.getElementById('qim-seats');
-    const match = [...seatsSel.options].find(o => o.value.replace(/[^0-9]/g,'') === cap);
-    if (match) seatsSel.value = match.value;
-  }
-  onQimAutoFill();
 }
 
 function onQimTourChange() {
@@ -8858,7 +8805,6 @@ function saveQuoItem() {
   const item = {
     id: _quoItemEditId||Date.now().toString(),
     date: document.getElementById('qim-date')?.value||'',
-    rego: document.getElementById('qim-rego')?.value||'',
     tour, seats: document.getElementById('qim-seats')?.value||'',
     qty: parseInt(document.getElementById('qim-qty')?.value)||1,
     price, ot: parseFloat(document.getElementById('qim-ot')?.value)||0,
@@ -8911,7 +8857,7 @@ function renderQuoItemList() {
         return `<div style="padding:9px 12px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;">
           <div style="flex:1;min-width:0;">
             <div style="font-size:12px;font-weight:700;color:var(--t1);">${escH(item.tour)}</div>
-            <div style="font-size:11px;color:var(--t2);margin-top:1px;">${item.date?fmtDate(item.date)+' · ':''}${escH(item.rego||'—')}${item.seats?' ('+item.seats+')':''} × ${item.qty||1}</div>
+            <div style="font-size:11px;color:var(--t2);margin-top:1px;">${item.date?fmtDate(item.date)+' · ':''}${item.seats?item.seats+' · ':''}× ${item.qty||1}</div>
             ${item.note?`<div style="font-size:10px;color:var(--t3);">${escH(item.note)}</div>`:''}
           </div>
           <div style="text-align:right;flex-shrink:0;">
@@ -8976,11 +8922,10 @@ function _buildQuotationHTML({isDraft=false}={}) {
     return `<tr>
       <td style="white-space:nowrap">${item.date?fd(item.date):'—'}</td>
       <td>${escH(item.tour)}${item.seats?' ('+escH(item.seats)+')':''}${item.note?'<div style="font-size:10px;color:#64748b;margin-top:2px;">'+escH(item.note)+'</div>':''}</td>
-      <td>${escH(item.rego||'—')}</td>
       <td style="text-align:center">${item.qty||1}</td>
       <td style="text-align:right">$${(item.price||0).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td style="text-align:right;font-weight:700">$${lineTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-    </tr>${extras?'<tr><td></td><td colspan="5" style="color:#64748b;font-size:11px;padding:2px 12px 6px;">'+extras+'</td></tr>':''}`;
+    </tr>${extras?'<tr><td></td><td colspan="4" style="color:#64748b;font-size:11px;padding:2px 12px 6px;">'+extras+'</td></tr>':''}`;
   }).join('');
 
   const accentColor = isDraft ? '#f59e0b' : '#059669';
@@ -9005,12 +8950,12 @@ body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:13px;color:#1e293b;
 .q-sub{font-size:11px;color:#64748b;margin-top:3px;line-height:1.6}
 .q-table{width:100%;border-collapse:collapse;margin-bottom:20px}
 .q-table th{background:#1e293b;color:#fff;font-size:11px;font-weight:700;padding:10px 12px;text-align:left;letter-spacing:.3px}
-.q-table th:last-child,.q-table th:nth-child(5){text-align:right}
-.q-table th:nth-child(4){text-align:center}
+.q-table th:last-child,.q-table th:nth-child(4){text-align:right}
+.q-table th:nth-child(3){text-align:center}
 .q-table td{padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;vertical-align:top}
 .q-table td:last-child{text-align:right;font-weight:700}
-.q-table td:nth-child(4){text-align:center}
-.q-table td:nth-child(5){text-align:right}
+.q-table td:nth-child(3){text-align:center}
+.q-table td:nth-child(4){text-align:right}
 .q-table tr:hover td{background:#f8fafc}
 .q-totals{margin-left:auto;width:260px}
 .q-total-row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}
@@ -9050,7 +8995,7 @@ ${draftBanner}
 ${memo?'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 16px;margin-bottom:24px;font-size:12px;color:#166534;"><strong>Note:</strong> '+escH(memo)+'</div>':''}
 <table class="q-table">
   <thead><tr>
-    <th>Date</th><th>Service / Tour</th><th>Vehicle</th><th>Qty</th><th>Unit Price</th><th style="text-align:right">Amount (incl. GST)</th>
+    <th>Date</th><th>Service / Tour</th><th>Qty</th><th>Unit Price</th><th style="text-align:right">Amount (incl. GST)</th>
   </tr></thead>
   <tbody>${tableRows}</tbody>
 </table>
@@ -9111,7 +9056,7 @@ async function emailQuotation() {
   // 항목 목록 텍스트
   const itemLines = _quoItems.map(item => {
     const lineTotal = ((item.price||0)+(item.ot||0)+(item.extra||0))*(item.qty||1);
-    return `  - ${item.tour}${item.seats?' ('+item.seats+')':''}${item.rego?' / '+item.rego:''} × ${item.qty||1} = $${lineTotal.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+    return `  - ${item.tour}${item.seats?' ('+item.seats+')':''} × ${item.qty||1} = $${lineTotal.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
   }).join('\n');
 
   const body =
