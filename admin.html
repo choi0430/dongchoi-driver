@@ -3976,27 +3976,71 @@ function renderInvManualList() {
     </div>`;
 }
 
-// ★ 선수금/크레딧 값을 변수로 유지 (재렌더링 시 보존)
-let _invPrepaid = 0;
-let _invCredit = 0;
-let _invCreditNote = '';
+// ★ 선수금/크레딧 다건 관리
+// 각 항목: { type:'prepaid'|'credit', amount:number, note:string }
+let _invDeductions = [];
 
-function _onInvPrepaidChange(val) { _invPrepaid = parseFloat(val)||0; _updateInvDeductionDisplay(); }
-function _onInvCreditChange(val)  { _invCredit = parseFloat(val)||0; _updateInvDeductionDisplay(); }
-function _onInvCreditNoteChange(val) { _invCreditNote = (val||'').trim(); }
+function _addInvDeduction() {
+  _invDeductions.push({ type:'prepaid', amount:0, note:'' });
+  _renderInvDeductionInputs();
+}
+function _removeInvDeduction(idx) {
+  _invDeductions.splice(idx, 1);
+  _renderInvDeductionInputs();
+  _updateInvDeductionDisplay();
+}
+function _onDeductionChange(idx, field, val) {
+  if (!_invDeductions[idx]) return;
+  if (field === 'amount') _invDeductions[idx].amount = parseFloat(val)||0;
+  else if (field === 'type') _invDeductions[idx].type = val;
+  else if (field === 'note') _invDeductions[idx].note = val||'';
+  _updateInvDeductionDisplay();
+}
+
+function _renderInvDeductionInputs() {
+  const container = document.getElementById('inv-deduction-inputs');
+  if (!container) return;
+  container.innerHTML = _invDeductions.map((d, i) => `
+    <div style="display:flex;gap:4px;align-items:center;margin-bottom:4px;">
+      <select style="width:80px;padding:4px;border:1px solid var(--bd);border-radius:6px;font-size:10px;background:var(--sf);" onchange="_onDeductionChange(${i},'type',this.value)">
+        <option value="prepaid" ${d.type==='prepaid'?'selected':''}>선수금</option>
+        <option value="credit" ${d.type==='credit'?'selected':''}>크레딧</option>
+      </select>
+      <input type="number" style="width:80px;padding:4px;border:1px solid var(--bd);border-radius:6px;font-size:11px;" placeholder="금액" value="${d.amount||''}" min="0" step="0.01" oninput="_onDeductionChange(${i},'amount',this.value)">
+      <input type="text" style="flex:1;padding:4px;border:1px solid var(--bd);border-radius:6px;font-size:10px;" placeholder="메모" value="${escH(d.note)}" oninput="_onDeductionChange(${i},'note',this.value)">
+      <button onclick="_removeInvDeduction(${i})" style="padding:2px 6px;border:none;background:#ef4444;color:#fff;border-radius:6px;font-size:11px;cursor:pointer;">✕</button>
+    </div>
+  `).join('');
+}
+
+// 하위 호환: _invPrepaid/_invCredit 계산
+function _getInvDeductionTotals() {
+  let prepaid = 0, credit = 0;
+  _invDeductions.forEach(d => {
+    if (d.type === 'prepaid') prepaid += (d.amount||0);
+    else credit += (d.amount||0);
+  });
+  return { prepaid, credit, total: prepaid + credit };
+}
 
 function _updateInvDeductionDisplay() {
   const el = document.getElementById('inv-deduction-summary');
   if (!el) return;
   const gt = parseFloat(el.dataset.grandtotal)||0;
-  const pp = _invPrepaid, cr = _invCredit;
-  if (pp + cr > 0) {
-    const net = roundMoney(gt - pp - cr);
+  const { prepaid, credit, total } = _getInvDeductionTotals();
+  if (total > 0) {
+    const net = roundMoney(gt - total);
+    let items = '';
+    _invDeductions.forEach(d => {
+      if (d.amount > 0) {
+        const label = d.type === 'prepaid' ? '선수금' : '크레딧';
+        const note = d.note ? ` (${d.note})` : '';
+        items += wstat(label + note, -d.amount, '#dc2626');
+      }
+    });
     el.innerHTML =
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">' +
-      (pp>0 ? wstat('선수금', -pp, '#dc2626') : '') +
-      (cr>0 ? wstat('크레딧', -cr, '#dc2626') : '') +
-      wstat('최종 청구액', net, '#059669') +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;margin-bottom:10px;">' +
+      items + wstat('최종 청구액', net, '#059669') +
       '</div>';
     el.style.display = '';
   } else {
@@ -4005,15 +4049,12 @@ function _updateInvDeductionDisplay() {
   }
 }
 
-function _refreshInvPreview() {
-  // 재렌더 전 값 보존 (DOM에서 읽어 변수 동기화)
-  const ppEl = document.getElementById('inv-prepaid');
-  const crEl = document.getElementById('inv-credit');
-  const cnEl = document.getElementById('inv-credit-note');
-  if (ppEl) _invPrepaid = parseFloat(ppEl.value)||0;
-  if (crEl) _invCredit = parseFloat(crEl.value)||0;
-  if (cnEl) _invCreditNote = cnEl.value||'';
+// 하위 호환 변수 (getter)
+Object.defineProperty(window, '_invPrepaid', { get() { return _getInvDeductionTotals().prepaid; } });
+Object.defineProperty(window, '_invCredit', { get() { return _getInvDeductionTotals().credit; } });
+Object.defineProperty(window, '_invCreditNote', { get() { return _invDeductions.map(d=>d.note).filter(Boolean).join(', '); } });
 
+function _refreshInvPreview() {
   const agency = document.getElementById('inv-agency')?.value;
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
@@ -4021,13 +4062,8 @@ function _refreshInvPreview() {
   const rows = _buildInvRows(agency, from, to);
   renderInvPreview(rows, agency, from, to);
 
-  // 재렌더 후 값 복원
-  const ppEl2 = document.getElementById('inv-prepaid');
-  const crEl2 = document.getElementById('inv-credit');
-  const cnEl2 = document.getElementById('inv-credit-note');
-  if (ppEl2) ppEl2.value = _invPrepaid || '';
-  if (crEl2) crEl2.value = _invCredit || '';
-  if (cnEl2) cnEl2.value = _invCreditNote || '';
+  // 재렌더 후 차감 입력 복원
+  _renderInvDeductionInputs();
   _updateInvDeductionDisplay();
 }
 
@@ -4519,20 +4555,7 @@ function renderInvPreview(rows, agency, from, to) {
         ${wstat('GST (1/11)', gst, 'var(--ac)')}
         ${wstat('GST 제외', exGST, 'var(--t2)')}
       </div>
-      <div id="inv-deduction-summary" data-grandtotal="${grandTotal}" style="${_invPrepaid+_invCredit>0?'':'display:none;'}">
-        ${(function(){
-          const pp=_invPrepaid, cr=_invCredit;
-          if(pp+cr>0){
-            const net=roundMoney(grandTotal-pp-cr);
-            return '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">'+
-              (pp>0?wstat('선수금',-pp,'#dc2626'):'')+
-              (cr>0?wstat('크레딧',-cr,'#dc2626'):'')+
-              wstat('최종 청구액',net,'#059669')+
-            '</div>';
-          }
-          return '';
-        })()}
-      </div>
+      <div id="inv-deduction-summary" data-grandtotal="${grandTotal}" style="display:none;"></div>
       ${totalOT>0||totalHotel>0||totalDist>0 ? `
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;">
         ${totalBase>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">기본요금</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalBase.toLocaleString()}</div></div>` : ''}
@@ -4557,22 +4580,13 @@ function renderInvPreview(rows, agency, from, to) {
           <button id="inv-grp-tour" class="btn bgh sm" style="flex:1;font-size:11px;" onclick="setInvGroupMode('tour')">🗺 투어코드</button>
         </div>
       </div>
-      <!-- ★ 선수금 / 크레딧 입력 -->
+      <!-- ★ 선수금 / 크레딧 입력 (다건) -->
       <div style="margin-bottom:8px;padding-top:6px;border-top:1px dashed var(--bd);">
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:5px;letter-spacing:.5px;">💳 선수금 / 크레딧</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div>
-            <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">선수금 (Prepaid)</div>
-            <input type="number" id="inv-prepaid" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01" value="${_invPrepaid||''}" oninput="_onInvPrepaidChange(this.value)">
-          </div>
-          <div>
-            <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">크레딧 (Credit)</div>
-            <input type="number" id="inv-credit" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01" value="${_invCredit||''}" oninput="_onInvCreditChange(this.value)">
-          </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.5px;">💳 선수금 / 크레딧</div>
+          <button onclick="_addInvDeduction()" style="padding:2px 8px;border:1px solid var(--ac);background:var(--sf);border-radius:6px;font-size:10px;font-weight:700;color:var(--ac);cursor:pointer;">+ 추가</button>
         </div>
-        <div style="font-size:10px;color:var(--t3);margin-top:3px;">
-          <input type="text" id="inv-credit-note" class="profit-finp" style="width:100%;font-size:10px;" placeholder="크레딧/선수금 메모 (선택)" value="${escH(_invCreditNote)}" oninput="_onInvCreditNoteChange(this.value)">
-        </div>
+        <div id="inv-deduction-inputs"></div>
       </div>
     </div>
 
@@ -5057,10 +5071,9 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
   let grandTotal = _calcInvGrandTotal(_buildInvRows(agency, from, to));
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
-  // ★ 선수금 / 크레딧 (변수에서 읽기)
-  const prepaid    = _invPrepaid || 0;
-  const credit     = _invCredit || 0;
-  const creditNote = _invCreditNote || '';
+  // ★ 선수금 / 크레딧 (다건)
+  const { prepaid, credit, total: totalDeductionsRaw } = _getInvDeductionTotals();
+  const creditNote = _invDeductions.map(d=>d.note).filter(Boolean).join(', ');
   const totalDeductions = prepaid + credit;
   const amountDue  = roundMoney(grandTotal - totalDeductions);
   const invNum = getInvNum(agency, from);
@@ -5260,14 +5273,14 @@ ${draftBanner}
     <span>Total (incl. GST)</span>
     <span>$${grandTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
   </div>
-  ${prepaid > 0 ? `<div class="inv-total-row" style="color:#dc2626;">
-    <span>Prepaid${creditNote ? ' — '+escH(creditNote) : ''}</span>
-    <span>-$${prepaid.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-  </div>` : ''}
-  ${credit > 0 ? `<div class="inv-total-row" style="color:#dc2626;">
-    <span>Credit${creditNote && !prepaid ? ' — '+escH(creditNote) : ''}</span>
-    <span>-$${credit.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-  </div>` : ''}
+  ${_invDeductions.filter(d=>d.amount>0).map(d => {
+    const label = d.type==='prepaid' ? 'Prepaid' : 'Credit';
+    const note = d.note ? ' — '+escH(d.note) : '';
+    return `<div class="inv-total-row" style="color:#dc2626;">
+      <span>${label}${note}</span>
+      <span>-$${d.amount.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+    </div>`;
+  }).join('')}
   <div class="inv-total-row grand">
     <span>${totalDeductions > 0 ? 'Amount Due' : 'Total Due'}</span>
     <span>$${amountDue.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
@@ -5468,9 +5481,8 @@ async function emailInvoice() {
 
   let grandTotal = 0;
   rows.forEach(r => { grandTotal += calcInvRow(r).total; });
-  const _emailPrepaid = _invPrepaid || 0;
-  const _emailCredit  = _invCredit || 0;
-  const _emailAmountDue = roundMoney(grandTotal - _emailPrepaid - _emailCredit);
+  const { prepaid: _emailPrepaid, credit: _emailCredit, total: _emailTotalDeduct } = _getInvDeductionTotals();
+  const _emailAmountDue = roundMoney(grandTotal - _emailTotalDeduct);
 
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
 
@@ -5484,9 +5496,12 @@ async function emailInvoice() {
     `Dear ${agency},\n\n` +
     `Please find attached Tax Invoice ${invNum} for services provided during ${fd(from)} – ${fd(to)}.\n\n` +
     `Invoice Total: $${grandTotal.toLocaleString('en-AU', {minimumFractionDigits:2, maximumFractionDigits:2})} (incl. GST)\n` +
-    (_emailPrepaid>0 ? `Prepaid: -$${_emailPrepaid.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` : '') +
-    (_emailCredit>0 ? `Credit: -$${_emailCredit.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` : '') +
-    (_emailPrepaid+_emailCredit>0 ? `Amount Due: $${_emailAmountDue.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` : '') +
+    (_invDeductions.filter(d=>d.amount>0).map(d => {
+      const lbl = d.type==='prepaid'?'Prepaid':'Credit';
+      const nt = d.note ? ` (${d.note})` : '';
+      return `${lbl}${nt}: -$${d.amount.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n`;
+    }).join('')) +
+    (_emailTotalDeduct>0 ? `Amount Due: $${_emailAmountDue.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` : '') +
     `Due Date: 14 days from invoice date\n` +
     `Reference: ${invNum}\n\n` +
     `Bank: ${DC_COMPANY.bank||''}\n` +
