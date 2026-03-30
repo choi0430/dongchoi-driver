@@ -6312,7 +6312,18 @@ function calcTotal(){
     const airportTA = atRow ? (Number(atRow[rateCol]) || 0) : 0;
     earlyTA = Math.round(airportTA * 0.3);
   }
-  let ta=svcVal+getHotelTA()+getDistTA()+earlyTA;
+  // ── TA 기본 요금: M_PriceClient 여행사별 코스 요금 우선, 없으면 SVC 값 사용 ──
+  const _agTA = document.getElementById('dr-agency')?.value || '';
+  const _attTA = document.getElementById('dr-attraction')?.value || '';
+  const _skTA = seatKey(seats);
+  const _rcTA = 'seats_'+_skTA+'_rate';
+  const _pcRows = MASTER.priceClient || [];
+  const _courseRowTA = _attTA ? (
+    _pcRows.find(r => r.Course && r.Course.trim().toLowerCase() === _attTA.trim().toLowerCase() && r.Agency === _agTA) ||
+    _pcRows.find(r => r.Course && r.Course.trim().toLowerCase() === _attTA.trim().toLowerCase())
+  ) : null;
+  const _taBaseRate = _courseRowTA ? (Number(_courseRowTA[_rcTA]) || svcVal) : svcVal;
+  let ta=_taBaseRate+getHotelTA()+getDistTA()+earlyTA;
   fixedTA.forEach(id=>{ta+=parseFloat(document.getElementById(id)?.value||0);});
   if(isLarge) ta += tollVal;
   ta += nightTA;
