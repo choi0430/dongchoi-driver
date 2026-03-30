@@ -5103,8 +5103,17 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
   // 그 외 (GENTRA LINK 등): 서비스 기간 종료일(to) 기준 다음 주 금요일
   const _agUpper = agency.toUpperCase().trim();
   const _dueD = (function(){
-    // to가 유효한 날짜인지 확인, 아니면 오늘 기준
-    let baseDate = new Date(to + 'T00:00:00');
+    // to 날짜 파싱 (YYYY-MM-DD 또는 DD/MM/YYYY)
+    let baseDate;
+    const toStr = String(to||'').trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(toStr)) {
+      baseDate = new Date(toStr + 'T00:00:00');
+    } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(toStr)) {
+      const [dd,mm,yy] = toStr.split('/');
+      baseDate = new Date(`${yy}-${mm}-${dd}T00:00:00`);
+    } else {
+      baseDate = new Date(toStr);
+    }
     if (isNaN(baseDate.getTime())) baseDate = new Date();
 
     if (_agUpper.includes('HOJURO') || _agUpper.includes('호주로')) {
