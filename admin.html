@@ -4984,37 +4984,94 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     return;
   }
 
-  // ① 리포트 데이터 로드 (캐시 없으면 GAS에서 fetch)
-  if (!_invReports) {
+  // ① 인보이스 이력 캐시 확보
+  if (!_invHistoryCache) {
     try {
-      toast('📄 리포트 로딩 중...','ok');
-      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const json = await res.json();
-      if (json.ok) {
-        _invReports = json.rows.map(r => ({
-          ...r,
-          _iso: parseToISO(r.Date || ''),
-          _agency: String(r.Agency||'').trim(),
-          _timeStart: parseSheetTime(r.Time_Start),
-          _timeEnd:   parseSheetTime(r.Time_End),
-        }));
-        await populateInvAgency();
-      }
-    } catch(e) {
-      toast('리포트 로드 실패: ' + e.message, 'err');
-      return;
+      toast('📄 인보이스 이력 로딩 중...','ok');
+      const hRes = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+      const hJson = await hRes.json();
+      if (hJson.ok) _invHistoryCache = (hJson.rows||[]).reverse();
+    } catch(e) { toast('이력 로드 실패','er'); return; }
+  }
+
+  const savedInv = (_invHistoryCache||[]).find(inv => String(inv.InvNumber) === invNumber);
+  if (!savedInv) { toast('⚠️ 발행된 인보이스를 찾을 수 없습니다','er'); return; }
+
+  // ② 저장된 크레딧/선수금 복원
+  if (savedInv.Deductions) {
+    try { _invDeductions = JSON.parse(savedInv.Deductions); } catch(e) { _invDeductions = []; }
+  } else {
+    _invDeductions = [];
+  }
+
+  // ③ 저장된 Items로 rows 재구성 (Daily_Report 재조회 불필요)
+  let savedItems = [];
+  try { savedItems = JSON.parse(savedInv.Items || '[]'); } catch(e) {}
+
+  // 리포트 데이터가 있으면 Items 키로 매칭 필터링, 없으면 Items에서 직접 렌더링
+  let rows = [];
+  let useStoredGrandTotal = false;
+
+  if (_invReports) {
+    // 리포트 캐시가 있으면 저장된 Items 키로 매칭
+    const allRows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
+    if (savedItems.length > 0) {
+      const savedKeys = new Set(savedItems.map(it => it.date + '|' + (it.tour||'')));
+      rows = allRows.filter(r => savedKeys.has((r._iso||'') + '|' + (r.Attraction||'')));
+    } else {
+      rows = allRows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
     }
   }
 
-  // ② 인보이스 셀렉터에 값 세팅
+  // 리포트가 없거나 매칭된 rows가 비어있으면 → 리포트 로드 후 재시도
+  if (rows.length === 0 && savedItems.length > 0) {
+    if (!_invReports) {
+      try {
+        toast('📄 리포트 로딩 중...','ok');
+        const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const json = await res.json();
+        if (json.ok) {
+          _invReports = json.rows.map(r => ({
+            ...r,
+            _iso: parseToISO(r.Date || ''),
+            _agency: String(r.Agency||'').trim(),
+            _timeStart: parseSheetTime(r.Time_Start),
+            _timeEnd:   parseSheetTime(r.Time_End),
+          }));
+          await populateInvAgency();
+        }
+      } catch(e) { /* ignore */ }
+    }
+    if (_invReports) {
+      const allRows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
+      const savedKeys = new Set(savedItems.map(it => it.date + '|' + (it.tour||'')));
+      rows = allRows.filter(r => savedKeys.has((r._iso||'') + '|' + (r.Attraction||'')));
+    }
+  }
+
+  // 그래도 rows가 비면 저장된 GrandTotal로 폴백
+  if (rows.length === 0) {
+    useStoredGrandTotal = true;
+  }
+
+  // ④ 저장된 ManualItems 복원
+  if (savedInv.ManualItems) {
+    try {
+      const savedManual = JSON.parse(savedInv.ManualItems);
+      if (savedManual.length > 0) {
+        const manualKey = 'dc_inv_manual_' + agency + '_' + periodFrom.slice(0,7);
+        localStorage.setItem(manualKey, JSON.stringify(savedManual));
+      }
+    } catch(e) {}
+  }
+
+  // ⑤ 셀렉터 값 세팅 (다른 함수에서 참조할 수 있으므로)
   const selAgency = document.getElementById('inv-agency');
   const inpFrom   = document.getElementById('inv-from');
   const inpTo     = document.getElementById('inv-to');
   if (inpFrom) inpFrom.value = periodFrom;
   if (inpTo)   inpTo.value   = periodTo;
-
-  // ③ 드롭다운에 agency 옵션이 없으면 추가
   if (selAgency) {
     let found = false;
     for (const opt of selAgency.options) { if (opt.value === agency) { found = true; break; } }
@@ -5026,53 +5083,16 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     selAgency.value = agency;
   }
 
-  // ④ 저장된 크레딧/선수금 복원
-  if (!_invHistoryCache) {
-    try {
-      const hRes = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
-      const hJson = await hRes.json();
-      if (hJson.ok) _invHistoryCache = (hJson.rows||[]).reverse();
-    } catch(e) { /* ignore */ }
-  }
-  if (_invHistoryCache) {
-    const savedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber);
-    if (savedInv && savedInv.Deductions) {
-      try { _invDeductions = JSON.parse(savedInv.Deductions); } catch(e) { _invDeductions = []; }
-    } else {
-      _invDeductions = [];
-    }
-    _renderInvDeductionInputs();
-    _updateInvDeductionDisplay();
-  }
+  _renderInvDeductionInputs();
+  _updateInvDeductionDisplay();
 
-  // ⑤ 바로 모달로 미리보기 — 저장된 Items 기준으로 필터링
-  let rows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
-  rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
-
-  // 발행 당시 저장된 Items가 있으면, 해당 항목만 필터링 (이후 추가된 리포트 제외)
-  const savedInv2 = (_invHistoryCache||[]).find(inv => String(inv.InvNumber) === invNumber);
-  if (savedInv2 && savedInv2.Items) {
-    try {
-      const savedItems = JSON.parse(savedInv2.Items);
-      const savedKeys = new Set(savedItems.map(it => it.date + '|' + (it.tour||'')));
-      rows = rows.filter(r => savedKeys.has((r._iso||'') + '|' + (r.Attraction||'')));
-    } catch(e) { console.warn('Items parse failed', e); }
-  }
-
-  // 발행 당시 저장된 ManualItems 복원
-  if (savedInv2 && savedInv2.ManualItems) {
-    try {
-      const savedManual = JSON.parse(savedInv2.ManualItems);
-      if (savedManual.length > 0) {
-        const manualKey = 'dc_inv_manual_' + agency + '_' + periodFrom.slice(0,7);
-        localStorage.setItem(manualKey, JSON.stringify(savedManual));
-      }
-    } catch(e) {}
-  }
-
-  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
-
-  const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false, invNumOverride:invNumber});
+  // ⑥ 모달 미리보기 — 저장된 GrandTotal 사용
+  const gt = useStoredGrandTotal ? parseFloat(savedInv.GrandTotal)||0 : null;
+  const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {
+    isDraft: false,
+    invNumOverride: invNumber,
+    grandTotalOverride: gt
+  });
   _showDocModal(html);
 }
 
@@ -5136,11 +5156,11 @@ function _isoToSunday(iso) {
 
 // ─── generateInvoice: 그룹 모드 반영 ───
 // ─── 공용 인보이스 HTML 빌더 ───
-function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverride=null}={}) {
+function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverride=null, grandTotalOverride=null}={}) {
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
   const client  = DB.C.find(c => c.Name === agency) || {};
   const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
-  let grandTotal = _calcInvGrandTotal(rows);
+  let grandTotal = grandTotalOverride !== null ? grandTotalOverride : _calcInvGrandTotal(rows);
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
   // ★ 선수금 / 크레딧 (다건)
