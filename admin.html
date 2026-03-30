@@ -7164,9 +7164,23 @@ function openView(type, idx) {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">📅 만료일</div>`;
     html += row2A([['Rego 만료일', fmtDate(d.Rego_Date||'')], ['HVIS 만료일', fmtDate(d.HVIS_Date||'')]]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔧 정비</div>`;
-    html += row2A([['현재 KM', d.Current_KM ? Number(d.Current_KM).toLocaleString()+' km' : ''],
-                   ['마지막 정비 KM', d.Last_Service_KM ? Number(d.Last_Service_KM).toLocaleString()+' km' : '']]);
-    html += rowA('정비 간격', d.Service_Interval ? Number(d.Service_Interval).toLocaleString()+' km' : '');
+    const _curKM = Math.max(Number(d.Current_KM)||0, DB.regoMaxKM?.[d.Rego]||0);
+    const _lastSvc = Number(d.Last_Service_KM)||0;
+    const _svcInt = Number(d.Service_Interval)||10000;
+    const _nextSvcKM = _lastSvc + _svcInt;
+    const _remainKM = _nextSvcKM - _curKM;
+    const _remColor = _remainKM<=0?'var(--rd)':_remainKM<=1000?'var(--or)':_remainKM<=3000?'var(--yl)':'var(--gn)';
+    const _remLabel = _remainKM<=0?'⚠️ 초과 '+Math.abs(_remainKM).toLocaleString()+'km':'✅ '+_remainKM.toLocaleString()+'km 남음';
+    html += row2A([['현재 KM', _curKM ? _curKM.toLocaleString()+' km' : '—'],
+                   ['마지막 정비 KM', _lastSvc ? _lastSvc.toLocaleString()+' km' : '—']]);
+    html += row2A([['다음 서비스 KM', _lastSvc ? _nextSvcKM.toLocaleString()+' km' : '—'],
+                   ['정비 간격', _svcInt.toLocaleString()+' km']]);
+    if (_curKM && _lastSvc) {
+      html += `<div style="background:${_remColor}15;border-left:3px solid ${_remColor};border-radius:8px;padding:10px 12px;margin:6px 0 2px;">
+        <div style="font-size:14px;font-weight:800;color:${_remColor};">${_remLabel}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:2px;">다음 정비: ${_nextSvcKM.toLocaleString()} km</div>
+      </div>`;
+    }
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔢 식별 번호</div>`;
     html += row2A([['VIN', d.VIN], ['Engine No.', engNum]]);
     html += rowA('Accreditation', d.Accreditation);
