@@ -4949,16 +4949,11 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     toast('⚠️ 인보이스 정보가 부족합니다','warn');
     return;
   }
-  // ① 인보이스 셀렉터에 값 세팅
-  const selAgency = document.getElementById('inv-agency');
-  const inpFrom   = document.getElementById('inv-from');
-  const inpTo     = document.getElementById('inv-to');
-  if (inpFrom) inpFrom.value = periodFrom;
-  if (inpTo)   inpTo.value   = periodTo;
 
-  // ② 리포트 데이터 로드 (캐시 없으면 GAS에서 fetch)
+  // ① 리포트 데이터 로드 (캐시 없으면 GAS에서 fetch)
   if (!_invReports) {
     try {
+      toast('📄 리포트 로딩 중...','ok');
       const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
@@ -4978,6 +4973,13 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     }
   }
 
+  // ② 인보이스 셀렉터에 값 세팅
+  const selAgency = document.getElementById('inv-agency');
+  const inpFrom   = document.getElementById('inv-from');
+  const inpTo     = document.getElementById('inv-to');
+  if (inpFrom) inpFrom.value = periodFrom;
+  if (inpTo)   inpTo.value   = periodTo;
+
   // ③ 드롭다운에 agency 옵션이 없으면 추가
   if (selAgency) {
     let found = false;
@@ -4990,13 +4992,13 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     selAgency.value = agency;
   }
 
-  // ④ 미리보기 빌드 & 렌더
-  const rows = _buildInvRows(agency, periodFrom, periodTo);
-  renderInvPreview(rows, agency, periodFrom, periodTo);
+  // ④ 바로 모달로 미리보기
+  let rows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
+  rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
+  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
-  // ⑤ 미리보기 영역으로 스크롤
-  const prev = document.getElementById('inv-preview');
-  if (prev) prev.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false});
+  _showDocModal(html);
 }
 
 async function updateInvStatus(invNumber, status, field) {
