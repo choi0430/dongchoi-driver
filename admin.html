@@ -4507,37 +4507,40 @@ function _buildInvRows(agency, from, to) {
 // ── 인보이스 번호 관리 ──
 function getInvNum(agency, from) {
   const ym = from.slice(0,7).replace('-','');  // YYYYMM
-  const key = `dc_inv_num_${agency}_${ym}`;
-  let num = localStorage.getItem(key);
-  if (!num) {
-    // 발행 이력에서 같은 YYYYMM의 최대 번호 찾기
-    const prefix = `INV-${ym}-`;
-    let maxSeq = 0;
-    // localStorage에 저장된 기존 번호 스캔
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('dc_inv_num_')) {
-        const v = localStorage.getItem(k) || '';
-        if (v.startsWith(prefix)) {
-          const seq = parseInt(v.replace(prefix, '')) || 0;
-          if (seq > maxSeq) maxSeq = seq;
-        }
+  const prefix = `INV-${ym}-`;
+  let maxSeq = 0;
+
+  // ① localStorage의 dc_inv_num_ 키 스캔
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('dc_inv_num_')) {
+      const v = localStorage.getItem(k) || '';
+      if (v.startsWith(prefix)) {
+        const seq = parseInt(v.replace(prefix, '')) || 0;
+        if (seq > maxSeq) maxSeq = seq;
       }
     }
-    // 발행 이력 캐시에서도 스캔
-    if (_invHistoryCache) {
-      _invHistoryCache.forEach(inv => {
-        const n = String(inv.InvNumber || '');
-        if (n.startsWith(prefix)) {
-          const seq = parseInt(n.replace(prefix, '')) || 0;
-          if (seq > maxSeq) maxSeq = seq;
-        }
-      });
+    // ② dc_inv_issued_ 키도 스캔 (발행 완료된 번호 중복 방지)
+    if (k && k.startsWith('dc_inv_issued_')) {
+      const invN = k.replace('dc_inv_issued_', '');
+      if (invN.startsWith(prefix)) {
+        const seq = parseInt(invN.replace(prefix, '')) || 0;
+        if (seq > maxSeq) maxSeq = seq;
+      }
     }
-    const nextSeq = maxSeq + 1;
-    num = `${prefix}${String(nextSeq).padStart(3,'0')}`;
-    localStorage.setItem(key, num);
   }
+  // ③ 발행 이력 캐시에서도 스캔
+  if (_invHistoryCache) {
+    _invHistoryCache.forEach(inv => {
+      const n = String(inv.InvNumber || '');
+      if (n.startsWith(prefix)) {
+        const seq = parseInt(n.replace(prefix, '')) || 0;
+        if (seq > maxSeq) maxSeq = seq;
+      }
+    });
+  }
+  const nextSeq = maxSeq + 1;
+  const num = `${prefix}${String(nextSeq).padStart(3,'0')}`;
   return num;
 }
 
@@ -4871,6 +4874,15 @@ async function saveInvoiceToSheet() {
   const gst   = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
   const invNum = getInvNum(agency, from);
+
+  // ★ 중복 번호 방지: 발행 이력에서 동일 번호가 이미 있는지 확인
+  if (_invHistoryCache) {
+    const dup = _invHistoryCache.find(inv => String(inv.InvNumber).trim() === invNum);
+    if (dup) {
+      toast(`⚠️ ${invNum}은 이미 발행된 인보이스입니다. 페이지를 새로고침하세요.`, 'er');
+      return;
+    }
+  }
 
   // 항목 요약 JSON (DR 항목)
   const itemsSummary = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)] && !r._manual).map((r,ri) => {
