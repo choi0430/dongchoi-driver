@@ -72,6 +72,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .fr{margin-bottom:12px}
 .fr2{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px}
 .fr3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:12px}
+.fr4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:7px;margin-bottom:12px}
 .fsw{position:relative}.fsw::after{content:"▼";position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:9px;color:var(--t3);pointer-events:none}
 .pfw{position:relative}.pfw .ps{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:13px;pointer-events:none}.pfw input{padding-left:22px}
 .btn{display:flex;align-items:center;justify-content:center;gap:5px;padding:11px 14px;border-radius:var(--rr);font-size:12px;font-weight:700;font-family:var(--fd);letter-spacing:1px;text-transform:uppercase;cursor:pointer;border:none;transition:all .2s;width:100%}
@@ -4065,14 +4066,15 @@ function _refreshInvPreview() {
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) return;
-  const rows = _buildInvRows(agency, from, to);
-  renderInvPreview(rows, agency, from, to);
 
-  // localStorage에서 크레딧/선수금 복원 (비어있을 때만)
+  // localStorage에서 크레딧/선수금 복원 (비어있을 때만) — 렌더 전에 먼저 복원
   if (_invDeductions.length === 0) {
     const savedDed = localStorage.getItem(`dc_inv_deductions_${agency}_${from.slice(0,7)}`);
     if (savedDed) { try { _invDeductions = JSON.parse(savedDed); } catch(e) {} }
   }
+
+  const rows = _buildInvRows(agency, from, to);
+  renderInvPreview(rows, agency, from, to);
 
   // 재렌더 후 차감 입력 복원
   _renderInvDeductionInputs();
@@ -7250,10 +7252,11 @@ function openM(type,idx){
       <div class="fr2">
         <div><label class="fl">Rego 만료일</label><input class="fi" id="f7" type="date" value="${parseToISO(d.Rego_Date||'')}"></div>
         <div><label class="fl">HVIS 만료일</label><input class="fi" id="f8" type="date" value="${parseToISO(d.HVIS_Date||'')}"></div></div>
-      <div class="fr3">
+      <div class="fr4">
         <div><label class="fl">현재 KM</label><input class="fi" id="f9" type="number" value="${d.Current_KM||''}"></div>
         <div><label class="fl">마지막 정비 KM</label><input class="fi" id="f10" type="number" value="${d.Last_Service_KM||''}"></div>
-        <div><label class="fl">정비 간격(km)</label><input class="fi" id="f11" type="number" value="${d.Service_Interval||10000}"></div></div>
+        <div><label class="fl">정비 간격(km)</label><input class="fi" id="f11" type="number" value="${d.Service_Interval||10000}"></div>
+        <div><label class="fl">다음 정비 KM</label><input class="fi" id="f11b" type="number" value="${d.Next_Service_KM||(((Number(d.Last_Service_KM)||0)+(Number(d.Service_Interval)||10000))||'')}"></div></div>
       <div class="fr2">
         <div><label class="fl">VIN</label><input class="fi" id="f12" value="${d.VIN||''}"></div>
         <div><label class="fl">Engine No.</label><input class="fi" id="f13" value="${engNum}"></div></div>
@@ -7424,6 +7427,15 @@ function openM(type,idx){
 
   document.getElementById('mb').innerHTML=h;
   document.getElementById('modal').classList.add('on');
+  // 차량: 다음 정비 KM 자동계산
+  if(type==='V'){
+    var _f10=document.getElementById('f10'),_f11=document.getElementById('f11'),_f11b=document.getElementById('f11b');
+    if(_f10&&_f11&&_f11b){
+      var _calcNext=function(){_f11b.value=(Number(_f10.value)||0)+(Number(_f11.value)||10000);};
+      _f10.addEventListener('input',_calcNext);
+      _f11.addEventListener('input',_calcNext);
+    }
+  }
 }
 
 // ═══════════════════════════════════════
@@ -7439,7 +7451,7 @@ function saveM(){
     obj={_rowIndex:ie?(DB.V[idx]?._rowIndex||null):null,
          Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),Manufacture_Date:gn('f4'),
          Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:fmtDate(gv('f7')),HVIS_Date:fmtDate(gv('f8')),
-         Current_KM:gn('f9'),Last_Service_KM:gn('f10'),Service_Interval:gn('f11')||10000,
+         Current_KM:gn('f9'),Last_Service_KM:gn('f10'),Service_Interval:gn('f11')||10000,Next_Service_KM:gn('f11b')||0,
          VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14'),Transmission:gv('f15')||'Auto'};
     ie?DB.V[idx]=obj:DB.V.push(obj);
     // 서브 차량이면 DB.PS에 슬롯 보장
@@ -7822,7 +7834,7 @@ async function syncVehicles(){
     Capacity:r.Capacity||0, Owner:r.Owner||'',
     Rego_Date:fmtDate(r.Rego_Date||''), HVIS_Date:fmtDate(r.HVIS_Date||''),
     Current_KM:r.Current_KM||0, Last_Service_KM:r.Last_Service_KM||0,
-    Service_Interval:r.Service_Interval||10000,
+    Service_Interval:r.Service_Interval||10000, Next_Service_KM:r.Next_Service_KM||0,
     VIN:r.VIN||'',
     Engine_Number: rf(r,'Engine_Number','Engine Number'),
     Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
@@ -7954,7 +7966,7 @@ async function loadAllFromSheets(){
         Capacity:r.Capacity||0, Owner:r.Owner||'',
         Rego_Date:fmtDate(r.Rego_Date||''), HVIS_Date:fmtDate(r.HVIS_Date||''),
         Current_KM:r.Current_KM||0, Last_Service_KM:r.Last_Service_KM||0,
-        Service_Interval:r.Service_Interval||10000,
+        Service_Interval:r.Service_Interval||10000, Next_Service_KM:r.Next_Service_KM||0,
         VIN:r.VIN||'',
         Engine_Number: _rf(r,'Engine_Number','Engine Number'),
         Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
