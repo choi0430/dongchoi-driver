@@ -198,6 +198,9 @@ function doGet(e) {
       case 'get_max_km':
         return cors(getMaxKMPerRego());
 
+      case 'sync_vehicle_km':
+        return cors(syncAllVehicleKM());
+
       case 'get_agency_txn':
         return cors(getSheetRows('Agency_Txn'));
 
@@ -781,6 +784,9 @@ function saveReport(sheetName, data) {
     const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : headers;
     const row = actualHeaders.map(h => data[h] !== undefined ? data[h] : '');
     sheet.appendRow(row);
+
+    // ★ 리포트 제출 시 M_Vehicles Current_KM 자동 업데이트
+    try { _autoUpdateVehicleKM(ss, sheetName, data); } catch(e) { Logger.log('KM auto-update error: ' + e); }
 
     return {ok: true, sheet: sheetName, row: sheet.getLastRow()};
   } catch (err) {
@@ -1400,6 +1406,87 @@ function getMaxKMPerRego() {
     scanSheet('End_of_Shift',  ['End_KM']);
 
     return { ok: true, kmMap };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Auto-update M_Vehicles Current_KM when reports are submitted
+// ═══════════════════════════════════════════════════════════════════════════
+function _autoUpdateVehicleKM(ss, sheetName, data) {
+  const rego = String(data.Rego || '').trim();
+  if (!rego) return;
+
+  // KM 필드 매핑
+  const kmFields = {
+    'Daily_Report':  ['KM_End', 'KM_Start'],
+    'Pre_Departure': ['Start_KM'],
+    'End_of_Shift':  ['End_KM']
+  };
+  const fields = kmFields[sheetName];
+  if (!fields) return;
+
+  // 리포트에서 최대 KM 추출
+  let reportKM = 0;
+  fields.forEach(f => {
+    const v = parseFloat(data[f]);
+    if (!isNaN(v) && v > reportKM) reportKM = v;
+  });
+  if (reportKM <= 0) return;
+
+  // M_Vehicles 시트에서 해당 Rego 찾기
+  const vSheet = ss.getSheetByName('M_Vehicles');
+  if (!vSheet || vSheet.getLastRow() < 2) return;
+
+  const vData = vSheet.getDataRange().getValues();
+  const headers = vData[0];
+  const regoIdx = headers.indexOf('Rego');
+  const kmIdx   = headers.indexOf('Current_KM');
+  if (regoIdx < 0 || kmIdx < 0) return;
+
+  for (let i = 1; i < vData.length; i++) {
+    if (String(vData[i][regoIdx]).trim() === rego) {
+      const currentKM = parseFloat(vData[i][kmIdx]) || 0;
+      if (reportKM > currentKM) {
+        vSheet.getRange(i + 1, kmIdx + 1).setValue(reportKM);
+        Logger.log('Updated ' + rego + ' Current_KM: ' + currentKM + ' → ' + reportKM);
+      }
+      break;
+    }
+  }
+}
+
+// Bulk sync: 모든 리포트 기반으로 M_Vehicles Current_KM 일괄 업데이트
+function syncAllVehicleKM() {
+  try {
+    const result = getMaxKMPerRego();
+    if (!result.ok) return result;
+
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const vSheet = ss.getSheetByName('M_Vehicles');
+    if (!vSheet || vSheet.getLastRow() < 2) return { ok: true, updated: 0 };
+
+    const vData = vSheet.getDataRange().getValues();
+    const headers = vData[0];
+    const regoIdx = headers.indexOf('Rego');
+    const kmIdx   = headers.indexOf('Current_KM');
+    if (regoIdx < 0 || kmIdx < 0) return { ok: false, error: 'Current_KM or Rego column not found' };
+
+    let updated = 0;
+    for (let i = 1; i < vData.length; i++) {
+      const rego = String(vData[i][regoIdx]).trim();
+      if (!rego) continue;
+      const maxKM = result.kmMap[rego] || 0;
+      const curKM = parseFloat(vData[i][kmIdx]) || 0;
+      if (maxKM > curKM) {
+        vSheet.getRange(i + 1, kmIdx + 1).setValue(maxKM);
+        updated++;
+        Logger.log('Synced ' + rego + ': ' + curKM + ' → ' + maxKM);
+      }
+    }
+
+    return { ok: true, updated };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
