@@ -1068,7 +1068,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div id="wage-view-single">
     <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;">
       <select id="wage-driver-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
-      <select id="wage-week-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
+      <select id="wage-week-sel" class="profit-sel" style="flex:1;" onchange="ST.wageWeek=this.value;renderWage()">
+      </select>
       <button class="btn brd sm" onclick="deleteWageWeek()" style="padding:0 10px;" title="주간 삭제">🗑</button>
     </div>
     <div id="wage-summary" style="padding:10px 14px 0;"></div>
@@ -6638,10 +6639,16 @@ async function ensureReportsCache() {
 }
 
 // 드라이버·주간별 DR 합계 (GAS 기준)
-async function getEarnedFromSheets(driverName, weekStart) {
+async function getEarnedFromSheets(driverName, weekStart, customFrom, customTo) {
   const rows = await ensureReportsCache();
-  const mon  = weekStart;
-  const sun  = (() => { const d = new Date(weekStart); d.setDate(d.getDate()+6); return toLocalISO(d); })();
+  let mon, sun;
+  if (customFrom && customTo) {
+    mon = customFrom;
+    sun = customTo;
+  } else {
+    mon = weekStart;
+    sun = (() => { const d = new Date(weekStart); d.setDate(d.getDate()+6); return toLocalISO(d); })();
+  }
 
   // 드라이버명 매칭: Name_KR 또는 Name_EN 또는 Driver 컬럼 직접
   const drRow = DB.D.find(d => (d.Name_KR||'')===driverName || (d.Name_EN||'')===driverName);
@@ -6649,14 +6656,15 @@ async function getEarnedFromSheets(driverName, weekStart) {
   if (drRow) { matchNames.add(drRow.Name_KR||''); matchNames.add(drRow.Name_EN||''); }
 
   let total = 0;
+  const matchedRows = [];
   rows.forEach(r => {
     if (!matchNames.has(String(r.Driver||'').trim())) return;
     if (r._isoDate >= mon && r._isoDate <= sun) {
       total += (parseFloat(r.DR_Cost) || 0);
-      // Night_Owner는 DR에서 차감하지 않음 (회사 비용)
+      matchedRows.push(r);
     }
   });
-  return total;
+  return { total, rows: matchedRows };
 }
 
 async function selectWageDriver(drv){setWageTab('single');ST.wageDriver=drv;rWage();}
@@ -6688,11 +6696,32 @@ function initWageWeeks(){
     wages[drv] = drvWages;
     saveWages(wages);
   }
-  const weeks = Object.keys(drvWages).sort((a,b)=>b.localeCompare(a));
+
+  // 지급 기록이 있는 주 + 리포트가 있는 모든 주 병합
+  const paidWeeks = new Set(Object.keys(drvWages));
+
+  // 리포트 캐시에서 이 드라이버의 모든 주 찾기
+  const drRow = DB.D.find(d=>(d.Name_KR||'')===drv||(d.Name_EN||'')===drv);
+  const matchNames = new Set([drv]);
+  if(drRow){ matchNames.add(drRow.Name_KR||''); matchNames.add(drRow.Name_EN||''); }
+  const allRows = _reportsCache || [];
+  allRows.forEach(r => {
+    if(!matchNames.has(String(r.Driver||'').trim())) return;
+    const iso = r._isoDate || parseToISO(r.Date||'');
+    if(!iso) return;
+    const d = new Date(iso + 'T00:00:00');
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    const mon = new Date(d);
+    mon.setDate(mon.getDate() + diff);
+    paidWeeks.add(toLocalISO(mon));
+  });
+
+  const weeks = [...paidWeeks].sort((a,b)=>b.localeCompare(a));
   const wSel = document.getElementById('wage-week-sel');
   if(!wSel) return;
   wSel.innerHTML = weeks.map(w=>'<option value="'+w+'">'+getWeekLabel(w)+'</option>').join('');
-  if(!ST.wageWeek || !drvWages[ST.wageWeek]) ST.wageWeek = weeks[0];
+  if(!ST.wageWeek || !weeks.includes(ST.wageWeek)) ST.wageWeek = weeks[0];
   wSel.value = ST.wageWeek;
   wSel.onchange = function(){ ST.wageWeek=this.value; renderWage(); };
   renderWage();
@@ -6713,18 +6742,14 @@ async function renderWage(){
     '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:4px;text-align:center;color:var(--t3);font-size:13px;">⏳ DR 금액 조회 중...</div>';
 
   // ── GAS Daily_Report 시트에서 드라이버 해당 주 DR_Cost 합산 ──
-  const earned = await getEarnedFromSheets(ST.wageDriver, ST.wageWeek);
+  const earnResult = await getEarnedFromSheets(ST.wageDriver, ST.wageWeek);
+  const earned = earnResult.total;
+  const weekReports = earnResult.rows;
 
   const totalPaid = entries.reduce((s,e)=>s+(e.amount||0),0);
   const balance   = earned - totalPaid;
 
   // 리포트 건수도 표시
-  const rows = _reportsCache || [];
-  const mon  = ST.wageWeek;
-  const sun  = (() => { const d=new Date(mon); d.setDate(d.getDate()+6); return toLocalISO(d); })();
-  const drRow = DB.D.find(d=>(d.Name_KR||'')===ST.wageDriver||(d.Name_EN||'')===ST.wageDriver);
-  const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
-  const weekReports = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
   const nightOwnerTotal = weekReports.reduce((s,r)=>s+(parseFloat(r.Night_Owner)||0),0);
   // DR_Cost가 0/빈 문자열이면 각 항목 합산으로 재계산
   function calcDRFromReport(r) {
