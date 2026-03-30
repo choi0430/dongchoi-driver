@@ -680,7 +680,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div style="padding:0 14px 10px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
       <div style="font-size:11px;font-weight:700;color:var(--t3);letter-spacing:.5px;">📝 수동 항목 추가 / 편집</div>
-      <button class="btn bac sm" onclick="openInvItemModal(null)" style="font-size:11px;padding:4px 10px;">+ 항목 추가</button>
+      <button onclick="openInvItemModal(null)" style="padding:2px 8px;border:1px solid var(--ac);background:var(--sf);border-radius:6px;font-size:10px;font-weight:700;color:var(--ac);cursor:pointer;">+ 추가</button>
     </div>
     <div id="inv-manual-list" style="display:none;"></div>
   </div>
@@ -747,11 +747,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">픽업 장소</div>
-          <input type="text" id="iim-pickup" class="profit-finp" style="width:100%;" placeholder="픽업">
+          <input type="text" id="iim-pickup" class="profit-finp" style="width:100%;" placeholder="픽업" list="iim-pickup-list"><datalist id="iim-pickup-list"></datalist>
         </div>
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">드롭오프 장소</div>
-          <input type="text" id="iim-dropoff" class="profit-finp" style="width:100%;" placeholder="드롭오프">
+          <input type="text" id="iim-dropoff" class="profit-finp" style="width:100%;" placeholder="드롭오프" list="iim-dropoff-list"><datalist id="iim-dropoff-list"></datalist>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
@@ -3825,16 +3825,28 @@ function _populateIimDropdowns() {
   // ★ 드라이버 드롭다운
   const drvSel = document.getElementById('iim-driver');
   if (drvSel) {
-    const drivers = (DB.DR||[]).filter(d=>d.Active!=='N').map(d=>d.Name_EN||d.Name_KR||'').filter(Boolean).sort();
+    const drivers = (DB.D||[]).filter(d=>d.Status!=='퇴사').map(d=>d.Name_EN||d.Name_KR||'').filter(Boolean).sort();
     drvSel.innerHTML = '<option value="">선택</option>' + drivers.map(n=>`<option value="${n}">${n}</option>`).join('');
   }
   // ★ 차량(Rego) 드롭다운
   const regoSel = document.getElementById('iim-rego');
   if (regoSel) {
-    const regos = (DB.VH||[]).filter(v=>v.Active!=='N').map(v=>v.Rego||'').filter(Boolean).sort();
+    const regos = (DB.V||[]).map(v=>v.Rego||'').filter(Boolean).sort();
     regoSel.innerHTML = '<option value="">선택</option>' + regos.map(r=>`<option value="${r}">${r}</option>`).join('');
   }
+
+  // ★ 픽업/드롭오프 자동완성 (리포트 데이터 기반)
+  const pickupSet = new Set(), dropoffSet = new Set();
+  (_invReports||[]).forEach(r => {
+    const p = String(r.Pickup||'').trim(), d = String(r.Dropoff||'').trim();
+    if(p) pickupSet.add(p); if(d) dropoffSet.add(d);
+  });
+  const puList = document.getElementById('iim-pickup-list');
+  const doList = document.getElementById('iim-dropoff-list');
+  if(puList) puList.innerHTML = [...pickupSet].sort().map(v=>'<option value="'+v+'">').join('');
+  if(doList) doList.innerHTML = [...dropoffSet].sort().map(v=>'<option value="'+v+'">').join('');
 }
+
 function onIimTourChange() {
   const sel = document.getElementById('iim-tour');
   const custom = document.getElementById('iim-tour-custom');
@@ -3932,46 +3944,35 @@ function deleteInvItem(id) {
 
 function renderInvManualList() {
   const el  = document.getElementById('inv-manual-list');
-  if (!el) return;
+  const inlineEl = document.getElementById('inv-manual-inline');
   const key   = _invManualKey();
   const items = JSON.parse(localStorage.getItem(key)||'[]');
 
-  if (items.length === 0) {
-    el.style.display = 'none';
-    return;
-  }
-  el.style.display = 'block';
+  // 기존 위치 (있으면 숨김 처리 — 인라인으로 이동)
+  if (el) el.style.display = 'none';
 
-  const total = items.reduce((s,i)=> s + (i.amount||0) + (i.ot||0) + (i.hotel||0), 0);
-
-  el.innerHTML = `
-    <div style="background:var(--sf2);border-radius:12px;overflow:hidden;margin-bottom:6px;">
-      <div style="padding:8px 12px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:11px;font-weight:700;color:var(--t2);">수동 항목 ${items.length}건</span>
-        <span style="font-size:12px;font-weight:800;color:var(--gn);">합계 $${total.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-      </div>
-      ${items.map(item => {
-        const sub = (item.amount||0)+(item.ot||0)+(item.hotel||0);
-        const timeStr = item.start||item.end ? (item.start||'') + (item.end ? ' - '+item.end : '') : '';
-        return `<div style="padding:9px 12px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;">
+  // 인라인 (요약 카드 내부)
+  if (inlineEl) {
+    if (items.length === 0) {
+      inlineEl.innerHTML = '<div style="font-size:10px;color:var(--t3);padding:4px 0;">수동 항목 없음</div>';
+    } else {
+      const total = items.reduce((s,i)=> s + (i.amount||0) + (i.ot||0) + (i.hotel||0) + (i.trailer||0) + (i.toll||0) + (i.dist||0), 0);
+      inlineEl.innerHTML = items.map(item => {
+        const sub = (item.amount||0)+(item.ot||0)+(item.hotel||0)+(item.trailer||0)+(item.toll||0)+(item.dist||0);
+        const extras = [item.ot?'OT $'+item.ot:'', item.hotel?'Hotel $'+item.hotel:'', item.trailer?'Trailer $'+item.trailer:'', item.toll?'Toll $'+item.toll:'', item.dist?'Dist $'+item.dist:''].filter(Boolean).join(' · ');
+        return `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--bd);">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(item.date)}${item.seats?' · '+item.seats:''}</div>
-            <div style="font-size:11px;color:var(--t2);margin-top:1px;">${escH(item.tour)}</div>
-            ${timeStr?`<div style="font-size:10px;color:var(--t3);">${escH(timeStr)}</div>`:''}
-            ${item.note?`<div style="font-size:10px;color:var(--t3);">${escH(item.note)}</div>`:''}
+            <div style="font-size:11px;font-weight:600;color:var(--t1);">${fmtDate(item.date)} · ${escH(item.tour)}${item.seats?' ('+item.seats+')':''}</div>
+            ${extras?'<div style="font-size:9px;color:var(--t3);">'+extras+'</div>':''}
           </div>
-          <div style="text-align:right;flex-shrink:0;">
-            <div style="font-size:13px;font-weight:800;color:var(--gn);">$${sub.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
-            ${item.ot?`<div style="font-size:10px;color:var(--t3);">OT $${item.ot}</div>`:''}
-            ${item.hotel?`<div style="font-size:10px;color:var(--t3);">Hotel $${item.hotel}</div>`:''}
-          </div>
-          <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
-            <button onclick="openInvItemModal('${item.id}')" style="padding:4px 8px;border-radius:6px;border:1px solid var(--bd);background:var(--sf);font-size:11px;font-weight:700;cursor:pointer;color:var(--ac);">✏️</button>
-            <button onclick="deleteInvItem('${item.id}')" style="padding:4px 8px;border-radius:6px;border:1px solid #fecaca;background:#fef2f2;font-size:11px;font-weight:700;cursor:pointer;color:#ef4444;">🗑</button>
-          </div>
+          <div style="font-size:11px;font-weight:700;color:var(--gn);flex-shrink:0;">$${sub.toLocaleString()}</div>
+          <button onclick="openInvItemModal('${item.id}')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--bd);background:var(--sf);font-size:10px;cursor:pointer;color:var(--ac);">✏️</button>
+          <button onclick="deleteInvItem('${item.id}')" style="padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fef2f2;font-size:10px;cursor:pointer;color:#ef4444;">🗑</button>
         </div>`;
-      }).join('')}
-    </div>`;
+      }).join('') +
+      `<div style="text-align:right;padding:4px 0;font-size:11px;font-weight:800;color:var(--gn);">수동 합계: $${total.toLocaleString()}</div>`;
+    }
+  }
 }
 
 // ★ 선수금/크레딧 다건 관리
@@ -4229,6 +4230,18 @@ function calcInvRow(r) {
 
   // seats 숫자 추출: "21S" → 21
   const seatNum = parseInt(seats.replace(/[^0-9]/g,''))||21;
+
+  // ── 수동 항목: 이미 TA 금액이므로 DR→TA 변환 건너뛰 ──
+  if (r._manual) {
+    const baseRate = parseFloat(r.SVC_Charge) || 0;
+    const ot = otDR;
+    const hotel = hotelDR;
+    const dist = distDR;
+    const trailerVal = parseFloat(r.Trailer) || 0;
+    const tollVal = parseFloat(r.Toll) || 0;
+    const total = baseRate + ot + hotel + dist + trailerVal + tollVal;
+    return { baseRate, ot, hotel, dist, earlyTA:0, parkingFee:0, autoParking:0, _pkKey:'', trailerVal, nightTA:0, tipVal:0, mealVal:0, tollVal, etcVal:0, etcTA:0, _etcKey:'', total, rateSource:'manual' };
+  }
 
   // ── OT DR → TA 역산 ──
   // 21/25S: DR $30/h → TA $80/h, 40S: DR $40/h → TA $150/h, 50S: DR $40/h → TA $160/h
@@ -4617,6 +4630,14 @@ function renderInvPreview(rows, agency, from, to) {
           <button onclick="_addInvDeduction()" style="padding:2px 8px;border:1px solid var(--ac);background:var(--sf);border-radius:6px;font-size:10px;font-weight:700;color:var(--ac);cursor:pointer;">+ 추가</button>
         </div>
         <div id="inv-deduction-inputs"></div>
+      </div>
+      <!-- ★ 수동 항목 (선수금/크레딧 바로 아래) -->
+      <div style="margin-bottom:8px;padding-top:6px;border-top:1px dashed var(--bd);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.5px;">📝 수동 항목</div>
+          <button onclick="openInvItemModal(null)" style="padding:2px 8px;border:1px solid var(--ac);background:var(--sf);border-radius:6px;font-size:10px;font-weight:700;color:var(--ac);cursor:pointer;">+ 추가</button>
+        </div>
+        <div id="inv-manual-inline"></div>
       </div>
     </div>
 
@@ -5023,18 +5044,33 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   }
 
   // ④ 저장된 크레딧/선수금 복원
+  let _previewSavedInv = null;
   if (_invHistoryCache) {
-    const savedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber);
-    if (savedInv && savedInv.Deductions) {
+    _previewSavedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber) || null;
+    if (_previewSavedInv && _previewSavedInv.Deductions) {
       try { _invDeductions = JSON.parse(savedInv.Deductions); } catch(e) { _invDeductions = []; }
       _renderInvDeductionInputs();
       _updateInvDeductionDisplay();
     }
   }
 
+
+  // ⑤-2 저장된 수동 항목을 localStorage에 임시 복원
+  const _manualKey = 'dc_inv_manual_' + agency + '_' + periodFrom.slice(0,7);
+  const _origManualJSON = localStorage.getItem(_manualKey);
+  if (_previewSavedInv && _previewSavedInv.ManualItems) {
+    try { localStorage.setItem(_manualKey, _previewSavedInv.ManualItems); } catch(e) {}
+  }
   // ⑤ 바로 모달로 미리보기
   let rows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
+
+  // ⑦ localStorage 원래 값 복원
+  try {
+    if (_origManualJSON !== null) localStorage.setItem(_manualKey, _origManualJSON);
+    else localStorage.removeItem(_manualKey);
+  } catch(e) {}
+
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
   const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false, invNumOverride:invNumber});
