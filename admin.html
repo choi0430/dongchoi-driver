@@ -4913,6 +4913,8 @@ async function saveInvoiceToSheet() {
     const ov = _invOverrides[_invRowKey(r,ri)] || {};
     return {
       date: r._iso, rego: r.Rego, tour: r.Attraction, seats: r.Seats, driver: r.Driver,
+      tourcode: r.Tour_Code||'', pickup: r.Pickup||'', dropoff: r.Dropoff||'',
+      timeStart: r._timeStart||'', timeEnd: r._timeEnd||'',
       base: ov.base !== undefined ? ov.base : c.baseRate,
       ot:   ov.ot   !== undefined ? ov.ot   : c.ot,
       extra:ov.extra!== undefined ? ov.extra : (c.earlyTA+c.hotel+c.dist+(c.parkingFee||0)+(c.trailerVal||0)+(c.nightTA||0)+(c.tipVal||0)+(c.mealVal||0)+(c.tollVal||0)+(c.etcTA||0)),
@@ -5115,16 +5117,32 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
 
 
   // ⑤-2 저장된 인보이스 데이터로 미리보기 (저장된 Items 우선)
-  if (_previewSavedInv && _previewSavedInv.Items) {
+  // Smart Items detection: 컬럼이 밀려 Items 필드가 다른 컬럼에 있을 수 있음
+  let _itemsJSON = '', _manualJSON = '', _savedGT = 0;
+  if (_previewSavedInv) {
+    _savedGT = parseFloat(_previewSavedInv.GrandTotal) || 0;
+    // Items 찾기: date+tour 키를 가진 JSON 배열 탐지
+    Object.keys(_previewSavedInv).forEach(function(k) {
+      var v = String(_previewSavedInv[k]||'').trim();
+      if (v.startsWith('[') && v.indexOf('"date"') >= 0 && v.indexOf('"tour"') >= 0) {
+        if (v.indexOf('"amount"') >= 0 || v.indexOf('"start"') >= 0) _manualJSON = v;
+        else _itemsJSON = v;
+      }
+    });
+    // 정확한 필드가 있으면 우선 사용
+    if (_previewSavedInv.Items && String(_previewSavedInv.Items).startsWith('[')) _itemsJSON = String(_previewSavedInv.Items);
+    if (_previewSavedInv.ManualItems && String(_previewSavedInv.ManualItems).startsWith('[')) _manualJSON = String(_previewSavedInv.ManualItems);
+  }
+  if (_itemsJSON) {
     try {
-      const _si = JSON.parse(_previewSavedInv.Items);
-      const _sm = _previewSavedInv.ManualItems ? JSON.parse(_previewSavedInv.ManualItems) : [];
-      const _sGT = parseFloat(_previewSavedInv.GrandTotal) || 0;
+      const _si = JSON.parse(_itemsJSON);
+      const _sm = _manualJSON ? JSON.parse(_manualJSON) : [];
       const _savedRows = _si.map(item => ({
         _iso: item.date||'', Date: item.date||'',
         Attraction: item.tour||'-', Rego: item.rego||'', Seats: item.seats||'',
-        Driver: item.driver||'', Tour_Code: '', Pickup: '', Dropoff: '',
-        _timeStart: '', _timeEnd: '',
+        Driver: item.driver||'', Tour_Code: item.tourcode||'',
+        Pickup: item.pickup||'', Dropoff: item.dropoff||'',
+        _timeStart: item.timeStart||'', _timeEnd: item.timeEnd||'',
         _manual: true,
         SVC_Charge: item.base||0, OT: item.ot||0,
         Hotel_Surcharge: item.extra||0,
@@ -5147,7 +5165,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
       const _origExcl = _invExcludes, _origOver = _invOverrides;
       _invExcludes = {}; _invOverrides = {};
       const html = _buildInvoiceHTML(agency, periodFrom, periodTo, _savedRows,
-        {isDraft:false, invNumOverride:invNumber, grandTotalOverride:_sGT});
+        {isDraft:false, invNumOverride:invNumber, grandTotalOverride:_savedGT});
       _invExcludes = _origExcl; _invOverrides = _origOver;
       _showDocModal(html);
       return;
