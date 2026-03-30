@@ -4486,14 +4486,36 @@ function _buildInvRows(agency, from, to) {
 
 // ── 인보이스 번호 관리 ──
 function getInvNum(agency, from) {
-  const key = `dc_inv_num_${agency}_${from.slice(0,7)}`;
+  const ym = from.slice(0,7).replace('-','');  // YYYYMM
+  const key = `dc_inv_num_${agency}_${ym}`;
   let num = localStorage.getItem(key);
   if (!num) {
-    // INV-YYYYMM-NNN (NNN은 저장된 카운터)
-    const cntKey = 'dc_inv_counter';
-    const cnt = (parseInt(localStorage.getItem(cntKey)||'0') + 1);
-    localStorage.setItem(cntKey, cnt);
-    num = `INV-${from.slice(0,7).replace('-','')}-${String(cnt).padStart(3,'0')}`;
+    // 발행 이력에서 같은 YYYYMM의 최대 번호 찾기
+    const prefix = `INV-${ym}-`;
+    let maxSeq = 0;
+    // localStorage에 저장된 기존 번호 스캔
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('dc_inv_num_')) {
+        const v = localStorage.getItem(k) || '';
+        if (v.startsWith(prefix)) {
+          const seq = parseInt(v.replace(prefix, '')) || 0;
+          if (seq > maxSeq) maxSeq = seq;
+        }
+      }
+    }
+    // 발행 이력 캐시에서도 스캔
+    if (_invHistoryCache) {
+      _invHistoryCache.forEach(inv => {
+        const n = String(inv.InvNumber || '');
+        if (n.startsWith(prefix)) {
+          const seq = parseInt(n.replace(prefix, '')) || 0;
+          if (seq > maxSeq) maxSeq = seq;
+        }
+      });
+    }
+    const nextSeq = maxSeq + 1;
+    num = `${prefix}${String(nextSeq).padStart(3,'0')}`;
     localStorage.setItem(key, num);
   }
   return num;
@@ -5356,18 +5378,31 @@ async function generateInvoice() {
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
+  // 이력 로드 (인보이스 번호 중복 방지용)
+  if (!_invHistoryCache) {
+    try {
+      const hRes = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+      const hJson = await hRes.json();
+      if (hJson.ok) _invHistoryCache = (hJson.rows||[]).reverse();
+    } catch(e) {}
+  }
+
   const invNum = getInvNum(agency, from);
   const issuedKey = `dc_inv_issued_${invNum}`;
   const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
   localStorage.setItem(issuedKey, issuedAt);
 
+  // 시트에 저장
+  toast('💾 인보이스 저장 중...', 'ok');
+  try {
+    await saveInvoiceToSheet();
+  } catch(e) {
+    toast('❌ 시트 저장 실패: ' + e.message, 'er');
+  }
+
+  // 미리보기 모달 + PDF 인쇄
   const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
   _showDocModal(html);
-
-  // 시트에도 자동 저장
-  try { await saveInvoiceToSheet(); } catch(e) { console.warn('시트 저장 실패:', e); }
-
-  // PDF 인쇄 자동 호출
   setTimeout(() => { _downloadInvPdf(); }, 600);
 }
 
