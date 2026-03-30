@@ -4154,8 +4154,8 @@ function setInvPeriod(type) {
   loadInvReports();
 }
 
-function onInvAgencyChange() { loadInvReports(); }
-function onInvDateChange()   { loadInvReports(); }
+function onInvAgencyChange() { _lastGeneratedInvNum = null; loadInvReports(); }
+function onInvDateChange()   { _lastGeneratedInvNum = null; loadInvReports(); }
 
 // ── 초기화 ──
 function toggleInvSettings() {
@@ -4966,6 +4966,7 @@ async function saveInvoiceToSheet() {
     localStorage.setItem(`dc_inv_issued_${invNum}`, new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}));
     toast(`✅ 인보이스 ${invNum} 저장 완료`,'ok');
     _invHistoryCache = null; // 캐시 무효화
+    _lastGeneratedInvNum = null; // 다음 인보이스를 위해 번호 초기화
     _refreshInvPreview();
   } catch(e) {
     toast('❌ 저장 실패: '+e.message,'er');
@@ -5551,7 +5552,10 @@ function previewInvoiceDoc() {
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
-  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:true});
+  // ★ 미리보기와 생성에서 동일한 번호를 사용하기 위해 _lastGeneratedInvNum 설정
+  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
+  _lastGeneratedInvNum = invNum;
+  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:true, invNumOverride:invNum});
   _showDocModal(html);
 }
 
@@ -5566,7 +5570,8 @@ async function downloadInvoicePdf() {
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
-  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
+  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
+  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false, invNumOverride:invNum});
   const win = window.open('', '_blank', 'width=900,height=700');
   win.document.write(html);
   win.document.close();
@@ -5605,12 +5610,11 @@ async function generateInvoice() {
     } catch(e) {}
   }
 
-  const invNum = getInvNum(agency, from);
-  const issuedKey = `dc_inv_issued_${invNum}`;
-  const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  localStorage.setItem(issuedKey, issuedAt);
+  // ★ 인보이스 번호를 한 번만 생성하고 모든 곳에서 재사용
+  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
+  _lastGeneratedInvNum = invNum;  // saveInvoiceToSheet에서 재사용
 
-  // 시트에 저장
+  // 시트에 먼저 저장 (번호가 확정된 후 localStorage에 기록)
   toast('💾 인보이스 저장 중...', 'ok');
   try {
     await saveInvoiceToSheet();
@@ -5618,8 +5622,13 @@ async function generateInvoice() {
     toast('❌ 시트 저장 실패: ' + e.message, 'er');
   }
 
-  // 미리보기 모달 + PDF 인쇄
-  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
+  // 저장 성공 후 localStorage에 발행 기록
+  const issuedKey = `dc_inv_issued_${invNum}`;
+  const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  localStorage.setItem(issuedKey, issuedAt);
+
+  // 미리보기 모달 + PDF 인쇄 (★ invNumOverride로 동일 번호 사용)
+  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false, invNumOverride:invNum});
   _showDocModal(html);
   setTimeout(() => { _downloadInvPdf(); }, 600);
 }
@@ -5721,7 +5730,8 @@ async function emailInvoice() {
 
   const client = DB.C.find(c => c.Name === agency) || {};
   let toEmail  = (client.Email || '').trim();
-  const invNum = getInvNum(agency, from);
+  // ★ 이미 생성된 번호가 있으면 재사용
+  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
 
   let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
@@ -5759,8 +5769,8 @@ async function emailInvoice() {
     `Please don't hesitate to contact us if you have any queries.\n\n` +
     `Kind regards,\n${DC_COMPANY.name||'Dong Choi Pty Ltd'}\n${DC_COMPANY.phone||''}\n${DC_COMPANY.email||''}`;
 
-  // 인보이스 PDF용 HTML 생성
-  const docHtml = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
+  // 인보이스 PDF용 HTML 생성 (★ invNumOverride로 동일 번호 사용)
+  const docHtml = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false, invNumOverride:invNum});
   const pdfName = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   const emailBtn = document.querySelector('button[onclick="emailInvoice()"]');
