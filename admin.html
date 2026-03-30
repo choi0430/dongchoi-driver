@@ -5509,15 +5509,10 @@ async function emailInvoice() {
   const pdfName = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   const emailBtn = document.querySelector('button[onclick="emailInvoice()"]');
-  if (emailBtn) { emailBtn.disabled = true; emailBtn.textContent = '⏳ PDF 생성 중...'; }
+  if (emailBtn) { emailBtn.disabled = true; emailBtn.textContent = '⏳ 발송 중...'; }
 
   try {
-    // ★ 클라이언트에서 PDF 생성 → Base64 변환
-    toast('📄 PDF 생성 중...', 'ok');
-    const pdfBlob = await _generateInvPdfBlob(docHtml);
-    const pdfBase64 = await _blobToBase64(pdfBlob);
-
-    if (emailBtn) emailBtn.textContent = '⏳ 발송 중...';
+    toast('✉️ 인보이스 발송 중...', 'ok');
 
     const res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
@@ -5527,7 +5522,7 @@ async function emailInvoice() {
         to:         toEmail,
         subject,
         body,
-        pdfBase64,
+        docHtml,
         pdfName,
         senderName: DC_COMPANY.name || 'Dong Choi Pty Ltd',
         _user:      getAdminUser()
@@ -5542,14 +5537,10 @@ async function emailInvoice() {
     }
   } catch (e) {
     toast(`⚠️ GAS 발송 실패: ${e.message}`, 'er');
-    // ★ 실패 시 PDF 다운로드 + mailto 링크
+    // ★ 실패 시 미리보기 열고 PDF 인쇄 안내
     try {
-      toast('📥 대신 PDF를 다운로드합니다...', 'ok');
-      const fallbackBlob = await _generateInvPdfBlob(docHtml);
-      const url = URL.createObjectURL(fallbackBlob);
-      const a = document.createElement('a'); a.href = url; a.download = pdfName;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      toast('📥 미리보기에서 직접 PDF를 저장하세요', 'ok');
+      _showDocModal(docHtml);
     } catch(e2) {}
     const s = encodeURIComponent(subject);
     const b = encodeURIComponent(body);
