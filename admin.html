@@ -684,7 +684,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 인보이스 발행 이력 -->
   <div style="padding:0 14px 14px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <div style="display:flex;align-items:center;gap:8px;"><div style="font-size:12px;font-weight:800;color:var(--t1);letter-spacing:.3px;">📜 발행 이력</div><button onclick="resetAllInvoices()" style="font-size:9px;padding:2px 6px;border:1px solid #fca5a5;background:#fef2f2;border-radius:4px;color:#dc2626;cursor:pointer;font-weight:600;">🗑️ 초기화</button></div>
+      <div style="font-size:12px;font-weight:800;color:var(--t1);letter-spacing:.3px;">📜 발행 이력</div>
       <button class="btn bgh sm" onclick="loadInvHistory(true)" style="font-size:11px;padding:4px 10px;">🔄 새로고침</button>
     </div>
     <div id="inv-history-list" style="max-height:400px;overflow-y:auto;">
@@ -4964,6 +4964,18 @@ async function saveInvoiceToSheet() {
 }
 
 // ─── 인보이스 이력 목록 ───
+// GAS ISO date normalizer (e.g. "2026-02-28T13:00:00.000Z" -> "2026-03-01")
+function _normInvDate(d) {
+  if (!d) return d;
+  var s = String(d);
+  if (s.indexOf('T') >= 0) {
+    var dt = new Date(s);
+    return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return s;
+}
+
 async function loadInvHistory(forceReload) {
   const listEl = document.getElementById('inv-history-list');
   if (!listEl) return;
@@ -5031,6 +5043,10 @@ function renderInvHistory() {
 }
 
 async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
+
+  // Normalize GAS ISO dates to YYYY-MM-DD
+  periodFrom = _normInvDate(periodFrom);
+  periodTo = _normInvDate(periodTo);
   if (!agency || !periodFrom || !periodTo) {
     toast('⚠️ 인보이스 정보가 부족합니다','warn');
     return;
@@ -5082,12 +5098,19 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   let _previewSavedInv = null;
   if (_invHistoryCache) {
     _previewSavedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber) || null;
-    if (_previewSavedInv && _previewSavedInv.Deductions) {
-      try { _invDeductions = JSON.parse(savedInv.Deductions); } catch(e) { _invDeductions = []; }
+    if (_previewSavedInv) {
+      // Smart deductions detection: columns may be shifted in saved data
+      let _dedJSON = '';
+      ['Deductions','Notes','CreatedBy'].forEach(function(k) {
+        var v = String(_previewSavedInv[k]||'').trim();
+        if (v.startsWith('[') && v.indexOf('"type"') >= 0) _dedJSON = v;
+      });
+      if (_dedJSON) {
+        try { _invDeductions = JSON.parse(_dedJSON); } catch(e) { _invDeductions = []; }
+      } else { _invDeductions = []; }
       _renderInvDeductionInputs();
       _updateInvDeductionDisplay();
     }
-  }
 
 
   // ⑤-2 저장된 인보이스 데이터로 미리보기 (저장된 Items 우선)
