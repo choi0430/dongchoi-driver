@@ -8342,6 +8342,14 @@ function _normalizeEOS(r) {
   if (!r.Signature && r[''] && String(r['']).startsWith('data:image')) {
     r.Signature = r[''];
   }
+  // preSignature / eosSignature 폴백 (드라이버 앱 Active_Shifts 경유)
+  if (!r.Signature && r.preSignature) r.Signature = r.preSignature;
+  if (!r.Signature && r.eosSignature) r.Signature = r.eosSignature;
+  // Remarks에 base64 서명이 들어간 경우
+  if (!r.Signature && r.Remarks && String(r.Remarks).startsWith('data:image')) {
+    r.Signature = r.Remarks;
+    r.Remarks = '';
+  }
   // End_Time에 KM 값이 들어간 경우 (숫자 > 10000)
   const et = String(r.End_Time||'').trim();
   if (et && !et.includes('T') && !et.includes(':') && Number(et) > 10000) {
