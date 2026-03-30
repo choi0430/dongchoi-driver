@@ -36,7 +36,7 @@ const REPORT_HEADERS = {
 // ── Master Sheet Headers ──
 const MASTER_HEADERS = {
   'M_Vehicles': ['Rego','Make','Model','Manufacture_Date','Capacity','Owner','Rego_Date','HVIS_Date',
-                 'Current_KM','Last_Service_KM','Service_Interval','VIN','Engine_Number',
+                 'Current_KM','Next_Service_KM','Last_Service_KM','Service_Interval','VIN','Engine_Number',
                  'Accreditation','Current_Status','Transmission','Active'],
   'M_Drivers':  ['Name_EN','Name_KR','Initials','DriverID','Mobile_1','NEXT_OF_KIN','Moblie_2','License_Class',
                  'License_No','License_Expiry','Authority_No','Authority_Expiry',
@@ -186,19 +186,7 @@ function doGet(e) {
       case 'get_notices':
         return cors(getNoticesSheet());
 
-      case 'clear_invoices': {
-        try {
-          const ss = SpreadsheetApp.openById(SHEET_ID);
-          const sheet = ss.getSheetByName('Invoices');
-          if (sheet && sheet.getLastRow() > 1) {
-            sheet.deleteRows(2, sheet.getLastRow() - 1);
-          }
-          appendAuditLog(_user, 'clear_invoices', 'Invoices', '', 'All invoices cleared');
-          return cors({ok: true});
-        } catch(e) { return cors({ok: false, error: e.toString()}); }
-      }
-
-            case 'get_invoices':
+      case 'get_invoices':
         return cors(getInvoices());
 
       case 'get_active_regos':
@@ -1561,7 +1549,7 @@ function saveInvoice(data) {
   try {
     const ss    = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, 'Invoices');
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const headers = MASTER_HEADERS['Invoices'];
     const invNum  = data.InvNumber || data.invNumber || '';
     if (!invNum) return { ok: false, error: 'InvNumber required' };
 
@@ -1582,11 +1570,11 @@ function saveInvoice(data) {
     });
 
     if (existingRow > 0) {
-      // Overwrite protection: prevent overwriting issued/emailed/paid invoices
+      // 기존 행이 issued/emailed 상태이면 덮어쓰기 방지
       const statusCol = headers.indexOf('Status');
       const existingStatus = statusCol >= 0 ? String(allData[existingRow-1][statusCol]).trim().toLowerCase() : '';
       if (existingStatus === 'issued' || existingStatus === 'emailed' || existingStatus === 'paid') {
-        return { ok: false, error: 'Already issued invoice (' + invNum + '). Refresh page and retry.' };
+        return { ok: false, error: '이미 발행된 인보이스입니다 (' + invNum + '). 중복 번호를 방지하기 위해 페이지를 새로고침 후 다시 시도하세요.' };
       }
       sheet.getRange(existingRow, 1, 1, headers.length).setValues([rowArr]);
     } else {
