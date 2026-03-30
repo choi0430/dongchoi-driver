@@ -126,7 +126,7 @@ function ensureSheet(ss, sheetName) {
       }
     } else {
       // ── 기존 시트에 누락된 컬럼 자동 추가 ──
-      const expected = MASTER_HEADERS[sheetName];
+      const expected = MASTER_HEADERS[sheetName] || REPORT_HEADERS[sheetName];
       if (expected) {
         const lastCol = sheet.getLastColumn();
         const existing = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : [];
@@ -460,7 +460,7 @@ function doPost(e) {
 function getReports(sheetName, driver) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
-    const sheet = ss.getSheetByName(sheetName);
+    const sheet = ensureSheet(ss, sheetName);
     if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
 
     const data = sheet.getDataRange().getValues();
