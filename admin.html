@@ -4067,6 +4067,8 @@ function _refreshInvPreview() {
   // 재렌더 후 차감 입력 복원
   _renderInvDeductionInputs();
   _updateInvDeductionDisplay();
+  // ★ 수동 항목 목록도 갱신 (inv-manual-inline이 renderInvPreview에서 재생성되므로)
+  renderInvManualList();
 }
 
 // 수동 항목을 report rows 형식으로 변환
@@ -4095,6 +4097,7 @@ function _manualItemsToRows(agency, from) {
     Pickup:         item.pickup   || '',
     Dropoff:        item.dropoff  || '',
     _manual:        true,
+    _manualId:      item.id       || '',
   }));
 }
 
@@ -4738,7 +4741,7 @@ function renderInvPreview(rows, agency, from, to) {
       return header + `<tr style="border-bottom:1px solid var(--bd);${exclStyle}" data-inv-row="${ri}">
         <td style="padding:6px;white-space:nowrap;vertical-align:top;">
           ${fmtDate(r._iso)}
-          ${_invEditMode ? `<div style="margin-top:3px;"><button onclick="_toggleInvExclude('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid ${excl?'#86efac':'#fecaca'};background:${excl?'#f0fdf4':'#fef2f2'};color:${excl?'#166534':'#ef4444'};cursor:pointer;">${excl?'포함':'제외'}</button></div>` : ''}
+          ${_invEditMode ? `<div style="margin-top:3px;display:flex;gap:2px;flex-wrap:wrap;"><button onclick="_toggleInvExclude('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid ${excl?'#86efac':'#fecaca'};background:${excl?'#f0fdf4':'#fef2f2'};color:${excl?'#166534':'#ef4444'};cursor:pointer;">${excl?'포함':'제외'}</button>${r._manual && r._manualId ? `<button onclick="openInvItemModal('${escH(r._manualId)}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;">✏️</button><button onclick="deleteInvItem('${escH(r._manualId)}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;">🗑</button>` : ''}</div>` : ''}
         </td>
         <td style="padding:6px;vertical-align:top;">
           <div style="font-weight:600;">${escH(r.Attraction||'—')}</div>
