@@ -3996,6 +3996,10 @@ function _onDeductionChange(idx, field, val) {
   else if (field === 'type') _invDeductions[idx].type = val;
   else if (field === 'note') _invDeductions[idx].note = val||'';
   _updateInvDeductionDisplay();
+  // localStorage 백업
+  const ag = document.getElementById('inv-agency')?.value||'';
+  const fr = document.getElementById('inv-from')?.value||'';
+  if (ag && fr) localStorage.setItem(`dc_inv_deductions_${ag}_${fr.slice(0,7)}`, JSON.stringify(_invDeductions));
 }
 
 function _renderInvDeductionInputs() {
@@ -4062,6 +4066,12 @@ function _refreshInvPreview() {
   if (!agency || !from || !to) return;
   const rows = _buildInvRows(agency, from, to);
   renderInvPreview(rows, agency, from, to);
+
+  // localStorage에서 크레딧/선수금 복원 (비어있을 때만)
+  if (_invDeductions.length === 0) {
+    const savedDed = localStorage.getItem(`dc_inv_deductions_${agency}_${from.slice(0,7)}`);
+    if (savedDed) { try { _invDeductions = JSON.parse(savedDed); } catch(e) {} }
+  }
 
   // 재렌더 후 차감 입력 복원
   _renderInvDeductionInputs();
@@ -4873,6 +4883,7 @@ async function saveInvoiceToSheet() {
     IssuedDate:  '',   // GAS에서 자동 설정
     Items:       JSON.stringify(itemsSummary).slice(0,49000),
     ManualItems: JSON.stringify(manualItems).slice(0,49000),
+    Deductions:  JSON.stringify(_invDeductions.filter(d=>d.amount>0)),
     Notes:       `${rows.length}건, 그룹:${_invGroupMode}`,
     CreatedBy:   getAdminUser()
   };
@@ -5014,7 +5025,17 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     selAgency.value = agency;
   }
 
-  // ④ 바로 모달로 미리보기
+  // ④ 저장된 크레딧/선수금 복원
+  if (_invHistoryCache) {
+    const savedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber);
+    if (savedInv && savedInv.Deductions) {
+      try { _invDeductions = JSON.parse(savedInv.Deductions); } catch(e) { _invDeductions = []; }
+      _renderInvDeductionInputs();
+      _updateInvDeductionDisplay();
+    }
+  }
+
+  // ⑤ 바로 모달로 미리보기
   let rows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
