@@ -5040,7 +5040,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
-  const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false});
+  const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false, invNumOverride:invNumber});
   _showDocModal(html);
 }
 
@@ -5104,7 +5104,7 @@ function _isoToSunday(iso) {
 
 // ─── generateInvoice: 그룹 모드 반영 ───
 // ─── 공용 인보이스 HTML 빌더 ───
-function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
+function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverride=null}={}) {
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
   const client  = DB.C.find(c => c.Name === agency) || {};
   const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
@@ -5116,7 +5116,7 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false}={}) {
   const creditNote = _invDeductions.map(d=>d.note).filter(Boolean).join(', ');
   const totalDeductions = prepaid + credit;
   const amountDue  = roundMoney(grandTotal - totalDeductions);
-  const invNum = getInvNum(agency, from);
+  const invNum = invNumOverride || getInvNum(agency, from);
   const _todayD = new Date();
   const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
   // Due date — 거래처별 다른 규칙:
