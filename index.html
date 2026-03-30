@@ -417,26 +417,36 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   <div id="home-shift-section" style="margin-top:10px;"></div>
 
   <!-- TODAY'S REPORTS -->
-  <div class="sec-head">
-    <div>
-      <div class="sec-title">오늘의 리포트</div>
-      <div class="sec-sub" id="today-label"></div>
+  <div class="sec-head" onclick="toggleSection('today-reports-body')" style="cursor:pointer;">
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span id="today-reports-arrow" style="font-size:10px;transition:transform .2s;">▼</span>
+      <div>
+        <div class="sec-title">오늘의 리포트</div>
+        <div class="sec-sub" id="today-label"></div>
+      </div>
     </div>
     <span class="pill pill-blue" id="today-report-count">0건</span>
   </div>
-  <div id="today-reports-list"></div>
-  <!-- Completed shift history (서명 포함, localStorage 기반) -->
-  <div id="shift-history-section" style="display:none;padding:0 12px 10px;">
-    <div style="font-weight:700;font-size:14px;margin-bottom:8px;">📄 완료된 시프트 리포트</div>
-    <div id="shift-history-list"></div>
+  <div id="today-reports-body">
+    <div id="today-reports-list"></div>
+    <!-- Completed shift history (서명 포함, localStorage 기반) -->
+    <div id="shift-history-section" style="display:none;padding:0 12px 10px;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:8px;">📄 완료된 시프트 리포트</div>
+      <div id="shift-history-list"></div>
+    </div>
   </div>
 
   <!-- PAST SHIFT REPORTS -->
-  <div id="past-reports-head" style="display:none;padding:0 12px;display:flex;align-items:center;justify-content:space-between;margin-top:16px;">
-    <div style="font-weight:700;font-size:14px;">📁 지난 운행 일지</div>
-    <button onclick="loadMyPastShifts(true)" style="font-size:11px;background:var(--surface,#f8fafc);color:var(--muted,#6b7280);border:1px solid #e5e7eb;border-radius:8px;padding:4px 10px;cursor:pointer;">🔄 새로고침</button>
+  <div id="past-reports-head" onclick="toggleSection('past-reports-body')" style="display:none;padding:0 12px;display:flex;align-items:center;justify-content:space-between;margin-top:16px;cursor:pointer;">
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span id="past-reports-arrow" style="font-size:10px;transition:transform .2s;">▼</span>
+      <div style="font-weight:700;font-size:14px;">📁 지난 운행 일지</div>
+    </div>
+    <button onclick="event.stopPropagation();loadMyPastShifts(true)" style="font-size:11px;background:var(--surface,#f8fafc);color:var(--muted,#6b7280);border:1px solid #e5e7eb;border-radius:8px;padding:4px 10px;cursor:pointer;">🔄 새로고침</button>
   </div>
-  <div id="past-reports-list" style="padding:6px 12px 0;"></div>
+  <div id="past-reports-body">
+    <div id="past-reports-list" style="padding:6px 12px 0;"></div>
+  </div>
 
   <!-- QUICK NAV -->
   <div style="padding:0 12px 8px;">
@@ -455,17 +465,22 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   </div>
 
   <!-- SALARY SUMMARY -->
-  <div class="sec-head">
-    <div style="display:flex;align-items:center;gap:8px;">
-      <div class="sec-title">급여 현황</div>
-      <span id="sync-badge" style="font-size:10px;color:var(--muted);">—</span>
+  <div class="sec-head" onclick="toggleSection('salary-body')" style="cursor:pointer;">
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span id="salary-arrow" style="font-size:10px;transition:transform .2s;">▼</span>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="sec-title">급여 현황</div>
+        <span id="sync-badge" style="font-size:10px;color:var(--muted);">—</span>
+      </div>
     </div>
     <div style="display:flex;align-items:center;gap:6px;">
       <span class="pill pill-green" id="salary-balance">미지급 $0</span>
-      <button onclick="runSync(false)" style="background:none;border:1px solid var(--border);border-radius:8px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer;">🔄</button>
+      <button onclick="event.stopPropagation();runSync(false)" style="background:none;border:1px solid var(--border);border-radius:8px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer;">🔄</button>
     </div>
   </div>
-  <div id="salary-list"></div>
+  <div id="salary-body">
+    <div id="salary-list"></div>
+  </div>
 
 </div>
 
@@ -2865,6 +2880,7 @@ function doLogin() {
   renderShiftSection();
   renderTodayReports();
   renderSalary();
+  restoreSectionStates();
   initMyInfoPage();
   // 지난 운행 일지 로드 (비동기)
   _myPastShiftsLoaded = false;
@@ -3388,6 +3404,33 @@ function initChecks(){
 // ═══════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════
+// ── 홈 화면 섹션 접기/펼치기 ──
+function toggleSection(bodyId) {
+  const body = document.getElementById(bodyId);
+  if (!body) return;
+  const arrowId = bodyId.replace('-body', '-arrow');
+  const arrow = document.getElementById(arrowId);
+  const isHidden = body.style.display === 'none';
+  body.style.display = isHidden ? '' : 'none';
+  if (arrow) arrow.style.transform = isHidden ? '' : 'rotate(-90deg)';
+  // 상태 저장
+  localStorage.setItem('section_' + bodyId, isHidden ? 'open' : 'closed');
+}
+
+// 저장된 섹션 상태 복원
+function restoreSectionStates() {
+  ['today-reports-body', 'past-reports-body', 'salary-body'].forEach(id => {
+    const state = localStorage.getItem('section_' + id);
+    if (state === 'closed') {
+      const body = document.getElementById(id);
+      if (body) body.style.display = 'none';
+      const arrowId = id.replace('-body', '-arrow');
+      const arrow = document.getElementById(arrowId);
+      if (arrow) arrow.style.transform = 'rotate(-90deg)';
+    }
+  });
+}
+
 function showPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
