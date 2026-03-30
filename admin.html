@@ -4233,7 +4233,9 @@ function calcInvRow(r) {
     const trailerVal = parseFloat(r.Trailer) || 0;
     const tollVal = parseFloat(r.Toll) || 0;
     const total = baseRate + ot + hotel + dist + trailerVal + tollVal;
-    return { baseRate, ot, hotel, dist, earlyTA:0, parkingFee:0, autoParking:0, _pkKey:'', trailerVal, nightTA:0, tipVal:0, mealVal:0, tollVal, etcVal:0, etcTA:0, _etcKey:'', total, rateSource:'manual' };
+    // 저장된 rateSource가 있으면 유지 (Rate Table vs SVC 구분)
+    const savedRS = r._rateSource || 'manual';
+    return { baseRate, ot, hotel, dist, earlyTA:0, parkingFee:0, autoParking:0, _pkKey:'', trailerVal, nightTA:0, tipVal:0, mealVal:0, tollVal, etcVal:0, etcTA:0, _etcKey:'', total, rateSource: savedRS };
   }
 
   // ── OT DR → TA 역산 ──
@@ -4603,6 +4605,7 @@ function renderInvPreview(rows, agency, from, to) {
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
   const invNum = getInvNum(agency, from);
+  _lastGeneratedInvNum = invNum;  // saveInvoiceToSheet에서 재사용
 
   // 발행 이력 확인
   const histKey = `dc_inv_issued_${invNum}`;
@@ -4838,6 +4841,7 @@ let _invEditMode   = false;           // 수정 모드 토글
 let _invOverrides  = {};              // { rowKey: { base?, ot?, extra? } }
 let _invExcludes   = {};              // { rowKey: true } — 제외된 항목
 let _invHistoryCache = null;          // 인보이스 이력 캐시
+let _lastGeneratedInvNum = null;      // generateInvoice에서 생성한 번호 (saveInvoiceToSheet에서 재사용)
 
 // 항목 고유 키 (날짜+차량+인덱스)
 function _invRowKey(r, idx) {
@@ -4896,7 +4900,8 @@ async function saveInvoiceToSheet() {
   const grandTotal = _calcInvGrandTotal(rows);
   const gst   = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
-  const invNum = getInvNum(agency, from);
+  // generateInvoice에서 생성한 번호가 있으면 재사용 (번호 불일치 방지)
+  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
 
   // ★ 중복 번호 방지: 발행 이력에서 동일 번호가 이미 있는지 확인
   if (_invHistoryCache) {
@@ -4918,6 +4923,7 @@ async function saveInvoiceToSheet() {
       base: ov.base !== undefined ? ov.base : c.baseRate,
       ot:   ov.ot   !== undefined ? ov.ot   : c.ot,
       extra:ov.extra!== undefined ? ov.extra : (c.earlyTA+c.hotel+c.dist+(c.parkingFee||0)+(c.trailerVal||0)+(c.nightTA||0)+(c.tipVal||0)+(c.mealVal||0)+(c.tollVal||0)+(c.etcTA||0)),
+      rateSource: c.rateSource||'svc',
       overridden: !!(ov.base !== undefined || ov.ot !== undefined || ov.extra !== undefined)
     };
   });
@@ -5100,10 +5106,17 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   let _previewSavedInv = null;
   if (_invHistoryCache) {
     _previewSavedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber) || null;
+    console.log('[InvPreview] invNumber:', invNumber, '| found in cache:', !!_previewSavedInv);
     if (_previewSavedInv) {
+      console.log('[InvPreview] Saved inv keys:', Object.keys(_previewSavedInv).join(', '));
+      // Debug: 모든 필드값의 첫 80자 출력
+      Object.keys(_previewSavedInv).forEach(function(k) {
+        var v = String(_previewSavedInv[k]||'');
+        console.log('[InvPreview]  ' + k + ' = ' + v.substring(0,80) + (v.length>80?'...':''));
+      });
       // Smart deductions detection: columns may be shifted in saved data
       let _dedJSON = '';
-      ['Deductions','Notes','CreatedBy'].forEach(function(k) {
+      Object.keys(_previewSavedInv).forEach(function(k) {
         var v = String(_previewSavedInv[k]||'').trim();
         if (v.startsWith('[') && v.indexOf('"type"') >= 0) _dedJSON = v;
       });
@@ -5113,6 +5126,8 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
       _renderInvDeductionInputs();
       _updateInvDeductionDisplay();
     }
+  } else {
+    console.log('[InvPreview] _invHistoryCache is null/empty');
   }
 
 
@@ -5121,22 +5136,41 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   let _itemsJSON = '', _manualJSON = '', _savedGT = 0;
   if (_previewSavedInv) {
     _savedGT = parseFloat(_previewSavedInv.GrandTotal) || 0;
-    // Items 찾기: date+tour 키를 가진 JSON 배열 탐지
+    // 모든 필드 스캔: JSON 배열 탐지 (date+tour 키, 또는 date+rego 키)
     Object.keys(_previewSavedInv).forEach(function(k) {
       var v = String(_previewSavedInv[k]||'').trim();
-      if (v.startsWith('[') && v.indexOf('"date"') >= 0 && v.indexOf('"tour"') >= 0) {
-        if (v.indexOf('"amount"') >= 0 || v.indexOf('"start"') >= 0) _manualJSON = v;
-        else _itemsJSON = v;
+      if (!v.startsWith('[')) return;
+      // JSON 배열이 date 키를 가지고 있는지 확인
+      var hasDate = v.indexOf('"date"') >= 0;
+      var hasTour = v.indexOf('"tour"') >= 0;
+      var hasRego = v.indexOf('"rego"') >= 0;
+      var hasAmount = v.indexOf('"amount"') >= 0;
+      var hasStart = v.indexOf('"start"') >= 0;
+      if (hasDate && (hasTour || hasRego)) {
+        console.log('[InvPreview] Found JSON array in field "' + k + '": hasAmount=' + hasAmount + ' hasStart=' + hasStart);
+        if (hasAmount || hasStart) {
+          if (!_manualJSON) _manualJSON = v;
+        } else {
+          if (!_itemsJSON) _itemsJSON = v;
+        }
       }
     });
-    // 정확한 필드가 있으면 우선 사용
-    if (_previewSavedInv.Items && String(_previewSavedInv.Items).startsWith('[')) _itemsJSON = String(_previewSavedInv.Items);
-    if (_previewSavedInv.ManualItems && String(_previewSavedInv.ManualItems).startsWith('[')) _manualJSON = String(_previewSavedInv.ManualItems);
+    // 정확한 필드명이 있으면 우선 사용
+    if (_previewSavedInv.Items && String(_previewSavedInv.Items).trim().startsWith('[')) {
+      var _chk = String(_previewSavedInv.Items).trim();
+      if (_chk.indexOf('"date"') >= 0) _itemsJSON = _chk;
+    }
+    if (_previewSavedInv.ManualItems && String(_previewSavedInv.ManualItems).trim().startsWith('[')) {
+      var _chk2 = String(_previewSavedInv.ManualItems).trim();
+      if (_chk2.indexOf('"date"') >= 0) _manualJSON = _chk2;
+    }
+    console.log('[InvPreview] _itemsJSON found:', !!_itemsJSON, '| _manualJSON found:', !!_manualJSON, '| _savedGT:', _savedGT);
   }
   if (_itemsJSON) {
     try {
       const _si = JSON.parse(_itemsJSON);
       const _sm = _manualJSON ? JSON.parse(_manualJSON) : [];
+      console.log('[InvPreview] Using saved Items:', _si.length, 'items +', _sm.length, 'manual items');
       const _savedRows = _si.map(item => ({
         _iso: item.date||'', Date: item.date||'',
         Attraction: item.tour||'-', Rego: item.rego||'', Seats: item.seats||'',
@@ -5144,6 +5178,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
         Pickup: item.pickup||'', Dropoff: item.dropoff||'',
         _timeStart: item.timeStart||'', _timeEnd: item.timeEnd||'',
         _manual: true,
+        _rateSource: item.rateSource||'price_table',
         SVC_Charge: item.base||0, OT: item.ot||0,
         Hotel_Surcharge: item.extra||0,
         Dist_Surcharge: 0, Trailer: 0, Toll: 0
@@ -5172,7 +5207,8 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     } catch(e) { console.error('Saved invoice preview error:', e); }
   }
 
-  // ⑤-2b fallback: localStorage 방식 (저장된 Items가 없는 경우)
+  // ⑤-2b fallback: Daily_Report에서 다시 빌드 (저장된 Items가 없는 경우)
+  console.warn('[InvPreview] FALLBACK: No saved Items found, building from Daily_Report');
   const _manualKey = 'dc_inv_manual_' + agency + '_' + periodFrom.slice(0,7);
   const _origManualJSON = localStorage.getItem(_manualKey);
   if (_previewSavedInv && _previewSavedInv.ManualItems) {
