@@ -5027,13 +5027,22 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   }
 
   // ④ 저장된 크레딧/선수금 복원
+  if (!_invHistoryCache) {
+    try {
+      const hRes = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+      const hJson = await hRes.json();
+      if (hJson.ok) _invHistoryCache = (hJson.rows||[]).reverse();
+    } catch(e) { /* ignore */ }
+  }
   if (_invHistoryCache) {
     const savedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber);
     if (savedInv && savedInv.Deductions) {
       try { _invDeductions = JSON.parse(savedInv.Deductions); } catch(e) { _invDeductions = []; }
-      _renderInvDeductionInputs();
-      _updateInvDeductionDisplay();
+    } else {
+      _invDeductions = [];
     }
+    _renderInvDeductionInputs();
+    _updateInvDeductionDisplay();
   }
 
   // ⑤ 바로 모달로 미리보기
