@@ -186,7 +186,19 @@ function doGet(e) {
       case 'get_notices':
         return cors(getNoticesSheet());
 
-      case 'get_invoices':
+      case 'clear_invoices': {
+        try {
+          const ss = SpreadsheetApp.openById(SHEET_ID);
+          const sheet = ss.getSheetByName('Invoices');
+          if (sheet && sheet.getLastRow() > 1) {
+            sheet.deleteRows(2, sheet.getLastRow() - 1);
+          }
+          appendAuditLog(_user, 'clear_invoices', 'Invoices', '', 'All invoices cleared');
+          return cors({ok: true});
+        } catch(e) { return cors({ok: false, error: e.toString()}); }
+      }
+
+            case 'get_invoices':
         return cors(getInvoices());
 
       case 'get_active_regos':
@@ -1570,6 +1582,12 @@ function saveInvoice(data) {
     });
 
     if (existingRow > 0) {
+      // Overwrite protection: prevent overwriting issued/emailed/paid invoices
+      const statusCol = headers.indexOf('Status');
+      const existingStatus = statusCol >= 0 ? String(allData[existingRow-1][statusCol]).trim().toLowerCase() : '';
+      if (existingStatus === 'issued' || existingStatus === 'emailed' || existingStatus === 'paid') {
+        return { ok: false, error: 'Already issued invoice (' + invNum + '). Refresh page and retry.' };
+      }
       sheet.getRange(existingRow, 1, 1, headers.length).setValues([rowArr]);
     } else {
       sheet.appendRow(rowArr);
