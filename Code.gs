@@ -769,8 +769,8 @@ function getMyShifts(driverName) {
 function saveReport(sheetName, data) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
-    let sheet = ss.getSheetByName(sheetName);
     const headers = REPORT_HEADERS[sheetName];
+    let sheet = ensureSheet(ss, sheetName);
 
     if (!sheet) {
       sheet = ss.insertSheet(sheetName);
