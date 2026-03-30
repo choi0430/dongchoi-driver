@@ -1722,8 +1722,8 @@ function rDash(){
     const rd=du(v.Rego_Date),hd=du(v.HVIS_Date);
     if(v.Rego_Date&&rd<90)als.push({c:rd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — Rego ${rd<0?'만료됨':rd+'일 남음'}`});
     if(v.HVIS_Date&&hd<90)als.push({c:hd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — HVIS ${hd<0?'만료됨':hd+'일 남음'}`});
-    const _cKM=Math.max(Number(v.Current_KM)||0, DB.regoMaxKM[v.Rego]||0),_lKM=Number(v.Last_Service_KM)||0,_iKM=Number(v.Service_Interval)||10000;
-    if(_cKM>0&&(_lKM+_iKM-_cKM)<=1000)als.push({c:'var(--pu)',m:v.Rego+' — 서비스까지 '+Math.max(0,_lKM+_iKM-_cKM)+'km 남음'});
+    const _nSKM=Number(v.Next_Service_KM)||0,_mKM=DB.regoMaxKM[v.Rego]||0,_svcRem=_nSKM-_mKM;
+    if(_nSKM>0&&_mKM>0&&_svcRem<=1000)als.push({c:'var(--pu)',m:v.Rego+' — 서비스까지 '+Math.max(0,_svcRem)+'km 남음'});
   });
   document.getElementById('alct').textContent=als.length+'건';
   document.getElementById('als').innerHTML=als.length
@@ -1785,8 +1785,8 @@ function renderHvis(){
     var sch=getHvisSchedule(v.Rego_Date);
     var regoDays=vDaysDiff(v.Rego_Date);
     var hvisDays=vDaysDiff(v.HVIS_Date);
-    var curKM=Math.max(Number(v.Current_KM)||0, DB.regoMaxKM[v.Rego]||0),lastSvc=Number(v.Last_Service_KM)||0,svcInt=Number(v.Service_Interval)||10000;
-    var nextSvcKM=lastSvc+svcInt,kmToSvc=nextSvcKM-curKM;
+    var curKM=DB.regoMaxKM[v.Rego]||0;
+    var nextSvcKM=Number(v.Next_Service_KM)||0,kmToSvc=nextSvcKM>0?nextSvcKM-curKM:99999;
 
     if(v.Rego_Date&&regoDays!==null&&regoDays<=30){
       alertHtml+='<div style="background:#fff7ed;border:1.5px solid #fb923c;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
@@ -1918,11 +1918,9 @@ function renderMaint(){
   summaryHtml+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
   DB.V.forEach(function(v){
     if(!v.Rego||v.Current_Status==='Retired') return;
-    var curKM = Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0);
-    var lastSvc = Number(v.Last_Service_KM)||0;
-    var svcInt = Number(v.Service_Interval)||10000;
-    var nextSvcKM = lastSvc + svcInt;
-    var remainKM = nextSvcKM - curKM;
+    var curKM = DB.regoMaxKM?.[v.Rego]||0;
+    var nextSvcKM = Number(v.Next_Service_KM)||0;
+    var remainKM = nextSvcKM>0&&curKM>0 ? nextSvcKM - curKM : 99999;
     var urgColor = remainKM<=0?'var(--rd)':remainKM<=1000?'var(--or)':remainKM<=3000?'var(--yl)':'var(--gn)';
     var urgLabel = remainKM<=0?'OVERDUE':remainKM<=1000?'긴급':remainKM<=3000?'주의':'양호';
     summaryHtml+='<div style="background:var(--sf2);border-radius:10px;padding:10px 12px;border-left:3px solid '+urgColor+';">';
@@ -1939,7 +1937,7 @@ function renderMaint(){
   if(!records.length){list.innerHTML=summaryHtml+'<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">No maintenance records</div>';return;}
   list.innerHTML=summaryHtml+'<div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:8px;">📋 정비 이력</div>'+records.map(function(r){
     var v=DB.V.find(function(vv){return vv.Rego===r.rego;});
-    var curKM=v?Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0):0;
+    var curKM=v?DB.regoMaxKM?.[v.Rego]||0:0;
     var remainInfo='';
     if(r.nextServiceKM && curKM){
       var remain=r.nextServiceKM-curKM;
@@ -2007,7 +2005,7 @@ function saveMaintEntry(id){
   if(id){var ix=recs.findIndex(function(r){return r.id===id;});if(ix>=0)recs[ix]=entry;else recs.push(entry);}
   else recs.push(entry);
   saveMaintRecords(recs);
-  if(entry.km){var vi=DB.V.findIndex(function(v){return v.Rego===entry.rego;});if(vi>=0&&entry.km>(DB.V[vi].Last_Service_KM||0)){DB.V[vi].Last_Service_KM=entry.km;if(entry.nextServiceKM)DB.V[vi].Service_Interval=entry.nextServiceKM-entry.km;}}
+  if(entry.km){var vi=DB.V.findIndex(function(v){return v.Rego===entry.rego;});if(vi>=0){if(entry.nextServiceKM)DB.V[vi].Next_Service_KM=entry.nextServiceKM;}}
   document.getElementById('maint-modal-overlay').remove();
   renderMaint();toast('Maintenance record saved','ok');
 }
@@ -2080,11 +2078,10 @@ async function rV(q=''){
       <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}</div>
         <div class="msb">${v['Manufacture Date']||''}년 · ${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
         <div class="mtg">${etag(v.Rego_Date,'Rego')}${etag(v.HVIS_Date,'HVIS')}${(()=>{
-          const cKM=Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0);
-          const lKM=Number(v.Last_Service_KM)||0;
-          const iKM=Number(v.Service_Interval)||10000;
-          const remain=(lKM+iKM)-cKM;
-          if(!cKM&&!lKM) return '';
+          const cKM=DB.regoMaxKM?.[v.Rego]||0;
+          const nSKM=Number(v.Next_Service_KM)||0;
+          const remain=nSKM>0&&cKM>0?nSKM-cKM:99999;
+          if(!nSKM||!cKM) return '';
           const col=remain<=0?'tr':remain<=1000?'to':remain<=3000?'ty':'tg';
           const lbl=remain<=0?'초과 '+Math.abs(remain).toLocaleString()+'km':'정비: '+remain.toLocaleString()+'km';
           return `<span class="tag ${col}">${lbl}</span>`;
@@ -7087,9 +7084,11 @@ function openView(type, idx) {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">📅 만료일</div>`;
     html += row2A([['Rego 만료일', fmtDate(d.Rego_Date||'')], ['HVIS 만료일', fmtDate(d.HVIS_Date||'')]]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔧 정비</div>`;
-    html += row2A([['현재 KM', d.Current_KM ? Number(d.Current_KM).toLocaleString()+' km' : ''],
-                   ['마지막 정비 KM', d.Last_Service_KM ? Number(d.Last_Service_KM).toLocaleString()+' km' : '']]);
-    html += rowA('정비 간격', d.Service_Interval ? Number(d.Service_Interval).toLocaleString()+' km' : '');
+    var _curMax = DB.regoMaxKM[d.Rego]||0;
+    var _nxtSvc = Number(d.Next_Service_KM)||0;
+    var _svcRem = (_nxtSvc>0&&_curMax>0) ? (_nxtSvc - _curMax) : null;
+    html += row2A([['다음 서비스 KM', _nxtSvc ? Number(_nxtSvc).toLocaleString()+' km' : '미설정'],
+                   ['서비스까지 남은 KM', _svcRem!==null ? Number(_svcRem).toLocaleString()+' km' : '']]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔢 식별 번호</div>`;
     html += row2A([['VIN', d.VIN], ['Engine No.', engNum]]);
     html += rowA('Accreditation', d.Accreditation);
@@ -7159,10 +7158,9 @@ function openM(type,idx){
       <div class="fr2">
         <div><label class="fl">Rego 만료일</label><input class="fi" id="f7" type="date" value="${parseToISO(d.Rego_Date||'')}"></div>
         <div><label class="fl">HVIS 만료일</label><input class="fi" id="f8" type="date" value="${parseToISO(d.HVIS_Date||'')}"></div></div>
-      <div class="fr3">
-        <div><label class="fl">현재 KM</label><input class="fi" id="f9" type="number" value="${d.Current_KM||''}"></div>
-        <div><label class="fl">마지막 정비 KM</label><input class="fi" id="f10" type="number" value="${d.Last_Service_KM||''}"></div>
-        <div><label class="fl">정비 간격(km)</label><input class="fi" id="f11" type="number" value="${d.Service_Interval||10000}"></div></div>
+      <div class="fr2">
+        <div><label class="fl">다음 서비스 KM</label><input class="fi" id="f9" type="number" value="${d.Next_Service_KM||''}" placeholder="예: 601000"></div>
+        <div><label class="fl">현재 최대 KM (자동)</label><input class="fi" type="text" value="${DB.regoMaxKM[d.Rego]?Number(DB.regoMaxKM[d.Rego]).toLocaleString()+' km':'부킹 데이터 없음'}" readonly style="background:var(--s2);color:var(--t2)"></div></div>
       <div class="fr2">
         <div><label class="fl">VIN</label><input class="fi" id="f12" value="${d.VIN||''}"></div>
         <div><label class="fl">Engine No.</label><input class="fi" id="f13" value="${engNum}"></div></div>
@@ -7348,7 +7346,7 @@ function saveM(){
     obj={_rowIndex:ie?(DB.V[idx]?._rowIndex||null):null,
          Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),Manufacture_Date:gn('f4'),
          Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:fmtDate(gv('f7')),HVIS_Date:fmtDate(gv('f8')),
-         Current_KM:gn('f9'),Last_Service_KM:gn('f10'),Service_Interval:gn('f11')||10000,
+         Next_Service_KM:gn('f9'),
          VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14'),Transmission:gv('f15')||'Auto'};
     ie?DB.V[idx]=obj:DB.V.push(obj);
     // 서브 차량이면 DB.PS에 슬롯 보장
@@ -7730,8 +7728,7 @@ async function syncVehicles(){
     Manufacture_Date: rf(r,'Manufacture_Date','Manufacture Date'),
     Capacity:r.Capacity||0, Owner:r.Owner||'',
     Rego_Date:fmtDate(r.Rego_Date||''), HVIS_Date:fmtDate(r.HVIS_Date||''),
-    Current_KM:r.Current_KM||0, Last_Service_KM:r.Last_Service_KM||0,
-    Service_Interval:r.Service_Interval||10000,
+    Current_KM:r.Current_KM||0, Next_Service_KM:r.Next_Service_KM||0,
     VIN:r.VIN||'',
     Engine_Number: rf(r,'Engine_Number','Engine Number'),
     Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
@@ -7862,8 +7859,7 @@ async function loadAllFromSheets(){
         Manufacture_Date: _rf(r,'Manufacture_Date','Manufacture Date'),
         Capacity:r.Capacity||0, Owner:r.Owner||'',
         Rego_Date:fmtDate(r.Rego_Date||''), HVIS_Date:fmtDate(r.HVIS_Date||''),
-        Current_KM:r.Current_KM||0, Last_Service_KM:r.Last_Service_KM||0,
-        Service_Interval:r.Service_Interval||10000,
+        Current_KM:r.Current_KM||0, Next_Service_KM:r.Next_Service_KM||0,
         VIN:r.VIN||'',
         Engine_Number: _rf(r,'Engine_Number','Engine Number'),
         Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
