@@ -425,11 +425,10 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
     <span class="pill pill-blue" id="today-report-count">0건</span>
   </div>
   <div id="today-reports-list"></div>
-  <!-- Last shift PDF re-download button -->
-  <div id="last-shift-pdf-btn" style="display:none;padding:0 12px 10px;">
-    <button onclick="redownloadLastShiftPDF()" style="width:100%;background:#eff6ff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:12px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
-      📄 <span>마지막 시프트 리포트 PDF 다시 보기</span>
-    </button>
+  <!-- Completed shift history (서명 포함, localStorage 기반) -->
+  <div id="shift-history-section" style="display:none;padding:0 12px 10px;">
+    <div style="font-weight:700;font-size:14px;margin-bottom:8px;">📄 완료된 시프트 리포트</div>
+    <div id="shift-history-list"></div>
   </div>
 
   <!-- PAST SHIFT REPORTS -->
@@ -4294,6 +4293,14 @@ function submitEndShift(){
     localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
     // 마지막 완료 시프트 저장 (PDF 재생성 대비)
     localStorage.setItem('lastShift_'+currentDriver.name, JSON.stringify(completedShiftSnapshot));
+    // 최근 완료 시프트 리스트 (최대 10건)
+    try {
+      const histKey = 'shiftHistory_'+currentDriver.name;
+      const hist = JSON.parse(localStorage.getItem(histKey)||'[]');
+      hist.unshift(completedShiftSnapshot);
+      if (hist.length > 10) hist.length = 10;
+      localStorage.setItem(histKey, JSON.stringify(hist));
+    } catch(e) { console.warn('shift history save error', e); }
   }
   renderShiftSection();
   renderTodayReports();
@@ -4660,21 +4667,56 @@ function renderTodayReports(){
         ${r.tourcode?`<span class="report-tag">🏷 ${r.tourcode}</span>`:''}
       </div>
     </div>`).join('');
-  // Show re-download button if last completed shift exists
-  const lastShiftBtn = document.getElementById('last-shift-pdf-btn');
-  if (lastShiftBtn) {
-    const savedShift = localStorage.getItem('lastShift_'+(currentDriver?.name||''));
-    lastShiftBtn.style.display = savedShift ? 'block' : 'none';
+  // Show completed shift history from localStorage
+  renderShiftHistory();
+}
+
+function renderShiftHistory() {
+  const section = document.getElementById('shift-history-section');
+  const listEl = document.getElementById('shift-history-list');
+  if (!section || !listEl) return;
+
+  const histKey = 'shiftHistory_'+(currentDriver?.name||'');
+  let hist = [];
+  try { hist = JSON.parse(localStorage.getItem(histKey)||'[]'); } catch(e) {}
+  // 기존 단건 lastShift도 포함
+  if (hist.length === 0) {
+    const last = localStorage.getItem('lastShift_'+(currentDriver?.name||''));
+    if (last) { try { hist = [JSON.parse(last)]; } catch(e) {} }
   }
+
+  if (!hist.length) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+
+  listEl.innerHTML = hist.map((s, i) => {
+    const d = fmtDate(s.date || s.endDate || '') || s.date || '—';
+    const rego = s.rego || '—';
+    const drCount = (s.dailyReports||[]).length;
+    return `<div style="background:white;border-radius:10px;padding:10px 12px;margin-bottom:6px;box-shadow:0 1px 3px rgba(0,0,0,0.06);display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:#1a1a1a;">${d} · ${rego}</div>
+        <div style="font-size:11px;color:#9ca3af;">DR ${drCount}건${s.endKm?' · '+Number(s.endKm).toLocaleString()+' km':''}</div>
+      </div>
+      <button onclick="openShiftHistoryPdf(${i})" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;">📄 PDF</button>
+    </div>`;
+  }).join('');
+}
+
+function openShiftHistoryPdf(idx) {
+  const histKey = 'shiftHistory_'+(currentDriver?.name||'');
+  let hist = [];
+  try { hist = JSON.parse(localStorage.getItem(histKey)||'[]'); } catch(e) {}
+  if (hist.length === 0) {
+    const last = localStorage.getItem('lastShift_'+(currentDriver?.name||''));
+    if (last) { try { hist = [JSON.parse(last)]; } catch(e) {} }
+  }
+  const shift = hist[idx];
+  if (!shift) { showToast('리포트를 찾을 수 없습니다', 'error'); return; }
+  openShiftReport(shift, 'eos');
 }
 
 function redownloadLastShiftPDF() {
-  const saved = localStorage.getItem('lastShift_'+(currentDriver?.name||''));
-  if (!saved) { showToast('저장된 시프트 리포트가 없습니다', 'error'); return; }
-  try {
-    const shift = JSON.parse(saved);
-    openShiftReport(shift, 'eos');
-  } catch(e) { showToast('리포트 불러오기 실패', 'error'); }
+  openShiftHistoryPdf(0);
 }
 
 // ═══════════════════════════════════════
