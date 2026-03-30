@@ -1561,7 +1561,7 @@ function saveInvoice(data) {
   try {
     const ss    = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, 'Invoices');
-    const headers = MASTER_HEADERS['Invoices'];
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     const invNum  = data.InvNumber || data.invNumber || '';
     if (!invNum) return { ok: false, error: 'InvNumber required' };
 
