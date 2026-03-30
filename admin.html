@@ -676,14 +676,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     </div>
   </div>
 
-  <!-- 인보이스 수동 항목 관리 -->
-  <div style="padding:0 14px 10px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-      <div style="font-size:11px;font-weight:700;color:var(--t3);letter-spacing:.5px;">📝 수동 항목 추가 / 편집</div>
-      <button onclick="openInvItemModal(null)" style="padding:2px 8px;border:1px solid var(--ac);background:var(--sf);border-radius:6px;font-size:10px;font-weight:700;color:var(--ac);cursor:pointer;">+ 추가</button>
-    </div>
-    <div id="inv-manual-list" style="display:none;"></div>
-  </div>
+
 
   <!-- 리포트 미리보기 -->
   <div id="inv-preview" style="padding:0 14px 14px"></div>
@@ -691,7 +684,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 인보이스 발행 이력 -->
   <div style="padding:0 14px 14px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <div style="font-size:12px;font-weight:800;color:var(--t1);letter-spacing:.3px;">📜 발행 이력</div>
+      <div style="display:flex;align-items:center;gap:8px;"><div style="font-size:12px;font-weight:800;color:var(--t1);letter-spacing:.3px;">📜 발행 이력</div><button onclick="resetAllInvoices()" style="font-size:9px;padding:2px 6px;border:1px solid #fca5a5;background:#fef2f2;border-radius:4px;color:#dc2626;cursor:pointer;font-weight:600;">🗑️ 초기화</button></div>
       <button class="btn bgh sm" onclick="loadInvHistory(true)" style="font-size:11px;padding:4px 10px;">🔄 새로고침</button>
     </div>
     <div id="inv-history-list" style="max-height:400px;overflow-y:auto;">
@@ -4543,6 +4536,36 @@ function getInvNum(agency, from) {
   const num = `${prefix}${String(nextSeq).padStart(3,'0')}`;
   return num;
 }
+// 인보이스 초기화 (발행 이력 전체 삭제 + 번호 1번부터 재시작)
+async function resetAllInvoices() {
+  if (!confirm('⚠️ 모든 인보이스 발행 이력을 삭제하고 번호를 001부터 재시작합니다.\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?')) return;
+  if (!confirm('정말로 삭제하시겠습니까? 모든 인보이스 데이터가 영구적으로 삭제됩니다.')) return;
+  try {
+    toast('⏳ 인보이스 초기화 중...','ok');
+    // 1) GAS에서 Invoices 시트 전체 삭제
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'clear_invoices', _user:getAdminUser()})
+    });
+    const json = await res.json();
+    // 2) localStorage 인보이스 관련 키 정리
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('dc_inv_num_') || k.startsWith('dc_inv_issued_'))) keysToRemove.push(k);
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+    // 3) 캐시 초기화
+    _invHistoryCache = null;
+    // 4) 이력 다시 로드
+    await loadInvHistory();
+    toast('✅ 인보이스가 초기화되었습니다. 번호가 001부터 시작됩니다.','ok');
+  } catch(e) {
+    toast('초기화 실패: ' + e.message, 'er');
+  }
+}
+
+
 
 function renderInvPreview(rows, agency, from, to) {
   const prev = document.getElementById('inv-preview');
@@ -5067,24 +5090,59 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   }
 
 
-  // ⑤-2 저장된 수동 항목을 localStorage에 임시 복원
+  // ⑤-2 저장된 인보이스 데이터로 미리보기 (저장된 Items 우선)
+  if (_previewSavedInv && _previewSavedInv.Items) {
+    try {
+      const _si = JSON.parse(_previewSavedInv.Items);
+      const _sm = _previewSavedInv.ManualItems ? JSON.parse(_previewSavedInv.ManualItems) : [];
+      const _sGT = parseFloat(_previewSavedInv.GrandTotal) || 0;
+      const _savedRows = _si.map(item => ({
+        _iso: item.date||'', Date: item.date||'',
+        Attraction: item.tour||'-', Rego: item.rego||'', Seats: item.seats||'',
+        Driver: item.driver||'', Tour_Code: '', Pickup: '', Dropoff: '',
+        _timeStart: '', _timeEnd: '',
+        _manual: true,
+        SVC_Charge: item.base||0, OT: item.ot||0,
+        Hotel_Surcharge: item.extra||0,
+        Dist_Surcharge: 0, Trailer: 0, Toll: 0
+      }));
+      _sm.forEach(m => {
+        _savedRows.push({
+          _iso: parseToISO(m.date)||m.date||'', Date: m.date||'',
+          Attraction: m.tour||'-', Rego: m.rego||'', Seats: m.seats||'',
+          Driver: m.driver||'', Tour_Code: m.tourcode||'',
+          Pickup: m.pickup||'', Dropoff: m.dropoff||'',
+          _timeStart: m.start||'', _timeEnd: m.end||'',
+          _manual: true,
+          SVC_Charge: m.amount||0, OT: m.ot||0,
+          Hotel_Surcharge: m.hotel||0, Dist_Surcharge: m.dist||0,
+          Trailer: m.trailer||0, Toll: m.toll||0
+        });
+      });
+      _savedRows.sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
+      const _origExcl = _invExcludes, _origOver = _invOverrides;
+      _invExcludes = {}; _invOverrides = {};
+      const html = _buildInvoiceHTML(agency, periodFrom, periodTo, _savedRows,
+        {isDraft:false, invNumOverride:invNumber, grandTotalOverride:_sGT});
+      _invExcludes = _origExcl; _invOverrides = _origOver;
+      _showDocModal(html);
+      return;
+    } catch(e) { console.error('Saved invoice preview error:', e); }
+  }
+
+  // ⑤-2b fallback: localStorage 방식 (저장된 Items가 없는 경우)
   const _manualKey = 'dc_inv_manual_' + agency + '_' + periodFrom.slice(0,7);
   const _origManualJSON = localStorage.getItem(_manualKey);
   if (_previewSavedInv && _previewSavedInv.ManualItems) {
     try { localStorage.setItem(_manualKey, _previewSavedInv.ManualItems); } catch(e) {}
   }
-  // ⑤ 바로 모달로 미리보기
   let rows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
-
-  // ⑦ localStorage 원래 값 복원
   try {
     if (_origManualJSON !== null) localStorage.setItem(_manualKey, _origManualJSON);
     else localStorage.removeItem(_manualKey);
   } catch(e) {}
-
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
-
   const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false, invNumOverride:invNumber});
   _showDocModal(html);
 }
@@ -5149,11 +5207,11 @@ function _isoToSunday(iso) {
 
 // ─── generateInvoice: 그룹 모드 반영 ───
 // ─── 공용 인보이스 HTML 빌더 ───
-function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverride=null}={}) {
+function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverride=null, grandTotalOverride=undefined}={}) {
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
   const client  = DB.C.find(c => c.Name === agency) || {};
   const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
-  let grandTotal = _calcInvGrandTotal(_buildInvRows(agency, from, to));
+  let grandTotal = grandTotalOverride !== undefined ? grandTotalOverride : _calcInvGrandTotal(_buildInvRows(agency, from, to));
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
   // ★ 선수금 / 크레딧 (다건)
