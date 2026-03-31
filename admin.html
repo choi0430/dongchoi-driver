@@ -72,7 +72,6 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .fr{margin-bottom:12px}
 .fr2{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px}
 .fr3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:12px}
-.fr4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:7px;margin-bottom:12px}
 .fsw{position:relative}.fsw::after{content:"▼";position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:9px;color:var(--t3);pointer-events:none}
 .pfw{position:relative}.pfw .ps{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:13px;pointer-events:none}.pfw input{padding-left:22px}
 .btn{display:flex;align-items:center;justify-content:center;gap:5px;padding:11px 14px;border-radius:var(--rr);font-size:12px;font-weight:700;font-family:var(--fd);letter-spacing:1px;text-transform:uppercase;cursor:pointer;border:none;transition:all .2s;width:100%}
@@ -677,14 +676,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     </div>
   </div>
 
-  <!-- 인보이스 수동 항목 관리 -->
-  <div style="padding:0 14px 10px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-      <div style="font-size:11px;font-weight:700;color:var(--t3);letter-spacing:.5px;">📝 수동 항목 추가 / 편집</div>
-      <button class="btn bac sm" onclick="openInvItemModal(null)" style="font-size:11px;padding:4px 10px;">+ 항목 추가</button>
-    </div>
-    <div id="inv-manual-list" style="display:none;"></div>
-  </div>
+
 
   <!-- 리포트 미리보기 -->
   <div id="inv-preview" style="padding:0 14px 14px"></div>
@@ -748,11 +740,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">픽업 장소</div>
-          <input type="text" id="iim-pickup" class="profit-finp" style="width:100%;" placeholder="픽업">
+          <input type="text" id="iim-pickup" class="profit-finp" style="width:100%;" placeholder="픽업" list="iim-pickup-list"><datalist id="iim-pickup-list"></datalist>
         </div>
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">드롭오프 장소</div>
-          <input type="text" id="iim-dropoff" class="profit-finp" style="width:100%;" placeholder="드롭오프">
+          <input type="text" id="iim-dropoff" class="profit-finp" style="width:100%;" placeholder="드롭오프" list="iim-dropoff-list"><datalist id="iim-dropoff-list"></datalist>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
@@ -1069,8 +1061,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div id="wage-view-single">
     <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;">
       <select id="wage-driver-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
-      <select id="wage-week-sel" class="profit-sel" style="flex:1;" onchange="ST.wageWeek=this.value;renderWage()">
-      </select>
+      <select id="wage-week-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
       <button class="btn brd sm" onclick="deleteWageWeek()" style="padding:0 10px;" title="주간 삭제">🗑</button>
     </div>
     <div id="wage-summary" style="padding:10px 14px 0;"></div>
@@ -1247,7 +1238,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 <div class="pg" id="pbal">
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">📊 거래처 잔액</div><div class="ssb">여행사 · 외주 · 드라이버 잔액 관리</div></div>
-    <button class="btn bgh sm" onclick="this.textContent='⏳ 로딩...';this.disabled=true;syncBalanceData(true).then(()=>renderBalance()).catch(e=>toast('동기화 실패: '+e.message,'er')).finally(()=>{this.textContent='🔄 동기화';this.disabled=false;})">🔄 동기화</button>
+    <button class="btn bgh sm" onclick="syncBalanceData(true)">🔄 동기화</button>
   </div>
 
   <!-- 3-way 탭 -->
@@ -1717,23 +1708,19 @@ function rDash(){
   const als=[];
   DB.D.forEach(d=>{
     const ld=du(d.License_Expiry),la=du(d.Authority_Expiry);
-    if(ld<90)als.push({c:ld<30?'#dc2626':'#f59e0b',bg:ld<30?'#fef2f2':'#fffbeb',icon:'🪪',m:`${d.Name_KR||d.Name_EN} — 면허 ${ld<0?'만료됨':ld+'일 남음'}`});
-    if(la<90)als.push({c:la<30?'#dc2626':'#f59e0b',bg:la<30?'#fef2f2':'#fffbeb',icon:'📋',m:`${d.Name_KR||d.Name_EN} — Authority ${la<0?'만료됨':la+'일 남음'}`});
+    if(ld<90)als.push({c:ld<30?'var(--rd)':'var(--yl)',m:`${d.Name_KR||d.Name_EN} — 면허 ${ld<0?'만료됨':ld+'일 남음'}`});
+    if(la<90)als.push({c:la<30?'var(--rd)':'var(--yl)',m:`${d.Name_KR||d.Name_EN} — Authority ${la<0?'만료됨':la+'일 남음'}`});
   });
   DB.V.forEach(v=>{
     const rd=du(v.Rego_Date),hd=du(v.HVIS_Date);
-    if(v.Rego_Date&&rd<90)als.push({c:rd<30?'#dc2626':'#f59e0b',bg:rd<30?'#fef2f2':'#fffbeb',icon:'🚌',m:`${v.Rego} — Rego ${rd<0?'만료됨':rd+'일 남음'}`});
-    if(v.HVIS_Date&&hd<90)als.push({c:hd<30?'#dc2626':'#f59e0b',bg:hd<30?'#fef2f2':'#fffbeb',icon:'🔧',m:`${v.Rego} — HVIS ${hd<0?'만료됨':hd+'일 남음'}`});
-    const _cKM=Math.max(Number(v.Current_KM)||0, DB.regoMaxKM[v.Rego]||0),_lKM=Number(v.Last_Service_KM)||0,_iKM=Number(v.Service_Interval)||10000;
-    const _nKM=Number(v.Next_Service_KM)||(_lKM+_iKM);
-    const _remKM=_nKM-_cKM;
-    if(_cKM>0&&(_remKM)<=1000)als.push({c:_remKM<=0?'#dc2626':'#7c3aed',bg:_remKM<=0?'#fef2f2':'#f5f3ff',icon:'⛽',m:v.Rego+' — '+(_remKM<=0?'정비 초과 '+Math.abs(_remKM).toLocaleString()+'km':'서비스까지 '+_remKM+'km 남음')});
+    if(v.Rego_Date&&rd<90)als.push({c:rd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — Rego ${rd<0?'만료됨':rd+'일 남음'}`});
+    if(v.HVIS_Date&&hd<90)als.push({c:hd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — HVIS ${hd<0?'만료됨':hd+'일 남음'}`});
+    const _nSKM=Number(v.Next_Service_KM)||0,_mKM=DB.regoMaxKM[v.Rego]||0,_svcRem=_nSKM-_mKM;
+    if(_nSKM>0&&_mKM>0&&_svcRem<=1000)als.push({c:'var(--pu)',m:v.Rego+' — 서비스까지 '+Math.max(0,_svcRem)+'km 남음'});
   });
-  // 긴급도순 정렬: 빨간(만료/초과) → 노란(주의) → 보라(정비)
-  als.sort((a,b)=>{ const p={'#dc2626':0,'#f59e0b':1,'#7c3aed':2}; return (p[a.c]??3)-(p[b.c]??3); });
   document.getElementById('alct').textContent=als.length+'건';
   document.getElementById('als').innerHTML=als.length
-    ?als.map(a=>`<div style="background:${a.bg||'var(--s1)'};border-left:4px solid ${a.c};border-radius:var(--rr);padding:10px 12px;margin-bottom:6px;font-size:13px;font-weight:600;color:${a.c}"><span style="margin-right:6px">${a.icon||''}</span>${a.m}</div>`).join('')
+    ?als.map(a=>`<div style="background:var(--s1);border:1px solid var(--b2);border-left:3px solid ${a.c};border-radius:var(--rr);padding:9px 12px;margin-bottom:6px;font-size:13px">${a.m}</div>`).join('')
     :'<div class="crd" style="color:var(--gn);text-align:center">✅ 현재 만료 예정 없음</div>';
 }
 
@@ -1791,8 +1778,8 @@ function renderHvis(){
     var sch=getHvisSchedule(v.Rego_Date);
     var regoDays=vDaysDiff(v.Rego_Date);
     var hvisDays=vDaysDiff(v.HVIS_Date);
-    var curKM=Math.max(Number(v.Current_KM)||0, DB.regoMaxKM[v.Rego]||0),lastSvc=Number(v.Last_Service_KM)||0,svcInt=Number(v.Service_Interval)||10000;
-    var nextSvcKM=lastSvc+svcInt,kmToSvc=nextSvcKM-curKM;
+    var curKM=DB.regoMaxKM[v.Rego]||0;
+    var nextSvcKM=Number(v.Next_Service_KM)||0,kmToSvc=nextSvcKM>0?nextSvcKM-curKM:99999;
 
     if(v.Rego_Date&&regoDays!==null&&regoDays<=30){
       alertHtml+='<div style="background:#fff7ed;border:1.5px solid #fb923c;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
@@ -1924,11 +1911,9 @@ function renderMaint(){
   summaryHtml+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
   DB.V.forEach(function(v){
     if(!v.Rego||v.Current_Status==='Retired') return;
-    var curKM = Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0);
-    var lastSvc = Number(v.Last_Service_KM)||0;
-    var svcInt = Number(v.Service_Interval)||10000;
-    var nextSvcKM = Number(v.Next_Service_KM)||(lastSvc+svcInt);
-    var remainKM = nextSvcKM - curKM;
+    var curKM = DB.regoMaxKM?.[v.Rego]||0;
+    var nextSvcKM = Number(v.Next_Service_KM)||0;
+    var remainKM = nextSvcKM>0&&curKM>0 ? nextSvcKM - curKM : 99999;
     var urgColor = remainKM<=0?'var(--rd)':remainKM<=1000?'var(--or)':remainKM<=3000?'var(--yl)':'var(--gn)';
     var urgLabel = remainKM<=0?'OVERDUE':remainKM<=1000?'긴급':remainKM<=3000?'주의':'양호';
     summaryHtml+='<div style="background:var(--sf2);border-radius:10px;padding:10px 12px;border-left:3px solid '+urgColor+';">';
@@ -1945,7 +1930,7 @@ function renderMaint(){
   if(!records.length){list.innerHTML=summaryHtml+'<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">No maintenance records</div>';return;}
   list.innerHTML=summaryHtml+'<div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:8px;">📋 정비 이력</div>'+records.map(function(r){
     var v=DB.V.find(function(vv){return vv.Rego===r.rego;});
-    var curKM=v?Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0):0;
+    var curKM=v?DB.regoMaxKM?.[v.Rego]||0:0;
     var remainInfo='';
     if(r.nextServiceKM && curKM){
       var remain=r.nextServiceKM-curKM;
@@ -2013,7 +1998,7 @@ function saveMaintEntry(id){
   if(id){var ix=recs.findIndex(function(r){return r.id===id;});if(ix>=0)recs[ix]=entry;else recs.push(entry);}
   else recs.push(entry);
   saveMaintRecords(recs);
-  if(entry.km){var vi=DB.V.findIndex(function(v){return v.Rego===entry.rego;});if(vi>=0&&entry.km>(DB.V[vi].Last_Service_KM||0)){DB.V[vi].Last_Service_KM=entry.km;if(entry.nextServiceKM)DB.V[vi].Service_Interval=entry.nextServiceKM-entry.km;}}
+  if(entry.km){var vi=DB.V.findIndex(function(v){return v.Rego===entry.rego;});if(vi>=0){if(entry.nextServiceKM)DB.V[vi].Next_Service_KM=entry.nextServiceKM;}}
   document.getElementById('maint-modal-overlay').remove();
   renderMaint();toast('Maintenance record saved','ok');
 }
@@ -2086,12 +2071,10 @@ async function rV(q=''){
       <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}</div>
         <div class="msb">${v['Manufacture Date']||''}년 · ${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
         <div class="mtg">${etag(v.Rego_Date,'Rego')}${etag(v.HVIS_Date,'HVIS')}${(()=>{
-          const cKM=Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0);
-          const lKM=Number(v.Last_Service_KM)||0;
-          const iKM=Number(v.Service_Interval)||10000;
-          const nKM=Number(v.Next_Service_KM)||(lKM+iKM);
-          const remain=nKM-cKM;
-          if(!cKM) return '';
+          const cKM=DB.regoMaxKM?.[v.Rego]||0;
+          const nSKM=Number(v.Next_Service_KM)||0;
+          const remain=nSKM>0&&cKM>0?nSKM-cKM:99999;
+          if(!nSKM||!cKM) return '';
           const col=remain<=0?'tr':remain<=1000?'to':remain<=3000?'ty':'tg';
           const lbl=remain<=0?'초과 '+Math.abs(remain).toLocaleString()+'km':'정비: '+remain.toLocaleString()+'km';
           return `<span class="tag ${col}">${lbl}</span>`;
@@ -3179,27 +3162,79 @@ function showBalTab(tab){
 }
 
 async function initBalance(){
-  try {
-    if(!_balLoaded) await syncBalanceData(false);
-    renderBalance();
-  } catch(e) {
-    console.warn('initBalance 실패:', e);
-    toast('잔액 로드 실패: '+e.message,'er');
-  }
+  if(!_balLoaded) await syncBalanceData(false);
+  renderBalance();
 }
 
 async function syncBalanceData(force){
   try {
     // DR 리포트 캐시 확보 (드라이버 잔액 계산에 필요)
     if(!_reportsCache) await ensureReportsCache();
-    const [agRes, subRes] = await Promise.all([
+    const [agRes, subRes, invRes] = await Promise.all([
       fetch(APPS_SCRIPT_URL+'?action=get_agency_txn'),
-      fetch(APPS_SCRIPT_URL+'?action=get_sub_txn')
+      fetch(APPS_SCRIPT_URL+'?action=get_sub_txn'),
+      fetch(APPS_SCRIPT_URL+'?action=get_invoices')
     ]);
     const agJson = await agRes.json();
     const subJson = await subRes.json();
+    const invJson = await invRes.json();
     if(agJson.ok && agJson.rows) _balAgencyTxns = agJson.rows;
     if(subJson.ok && subJson.rows) _balSubTxns = subJson.rows;
+
+    // ★ 발행된 인보이스 중 Agency_Txn에 없는 건 자동 추가
+    if(invJson.ok && invJson.rows){
+      const invoices = invJson.rows.filter(inv => {
+        const st = String(inv.Status||'').trim().toLowerCase();
+        return st === 'issued' || st === 'emailed' || st === 'paid';
+      });
+      const existingInvIds = new Set(_balAgencyTxns.map(t=>String(t.InvoiceID||'').trim()));
+      const missingInvs = invoices.filter(inv => !existingInvIds.has(String(inv.InvNumber||'').trim()));
+      if(missingInvs.length > 0){
+        console.log('[Balance Sync] 인보이스→거래 자동 등록:', missingInvs.length, '건');
+        for(const inv of missingInvs){
+          const gt = parseFloat(inv.GrandTotal)||0;
+          if(gt <= 0) continue;
+          // Deductions 파싱 (선수금/크레딧 차감)
+          let totalDeduct = 0;
+          try {
+            let dedJSON = '';
+            Object.keys(inv).forEach(k=>{
+              const v = String(inv[k]||'').trim();
+              if(v.startsWith('[') && v.indexOf('"type"')>=0) dedJSON = v;
+            });
+            if(inv.Deductions && String(inv.Deductions).trim().startsWith('[')) dedJSON = String(inv.Deductions);
+            if(dedJSON) { JSON.parse(dedJSON).forEach(d=>{ totalDeduct += (d.amount||0); }); }
+          } catch(e){}
+          const amountDue = Math.round((gt - totalDeduct)*100)/100;
+          const issuedDate = String(inv.IssuedDate||'').trim();
+          const txnDate = parseToISO(issuedDate) || toLocalISO(new Date());
+          const txnData = {
+            Agency:     inv.Agency||'',
+            Date:       txnDate,
+            InvoiceID:  inv.InvNumber||'',
+            TourCode:   '',
+            DR:         amountDue,
+            CR:         0,
+            Remark:     '인보이스 자동 동기화',
+            StartDate:  inv.PeriodFrom||'',
+            FinishDate: inv.PeriodTo||'',
+            DueDate:    ''
+          };
+          try {
+            const r = await fetch(APPS_SCRIPT_URL,{
+              method:'POST', headers:{'Content-Type':'text/plain'},
+              body:JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
+            });
+            const j = await r.json();
+            if(j.ok){
+              _balAgencyTxns.push({...txnData, _rowIndex:j.row});
+              console.log('[Balance Sync] 등록 완료:', inv.InvNumber);
+            }
+          } catch(e){ console.warn('[Balance Sync] 등록 실패:', inv.InvNumber, e); }
+        }
+      }
+    }
+
     // Driver wage: derive from Daily_Report DR_Cost + wages
     _buildWageTxns();
     _balLoaded = true;
@@ -3840,16 +3875,28 @@ function _populateIimDropdowns() {
   // ★ 드라이버 드롭다운
   const drvSel = document.getElementById('iim-driver');
   if (drvSel) {
-    const drivers = (DB.DR||[]).filter(d=>d.Active!=='N').map(d=>d.Name_EN||d.Name_KR||'').filter(Boolean).sort();
+    const drivers = (DB.D||[]).filter(d=>d.Status!=='퇴사').map(d=>d.Name_EN||d.Name_KR||'').filter(Boolean).sort();
     drvSel.innerHTML = '<option value="">선택</option>' + drivers.map(n=>`<option value="${n}">${n}</option>`).join('');
   }
   // ★ 차량(Rego) 드롭다운
   const regoSel = document.getElementById('iim-rego');
   if (regoSel) {
-    const regos = (DB.VH||[]).filter(v=>v.Active!=='N').map(v=>v.Rego||'').filter(Boolean).sort();
+    const regos = (DB.V||[]).map(v=>v.Rego||'').filter(Boolean).sort();
     regoSel.innerHTML = '<option value="">선택</option>' + regos.map(r=>`<option value="${r}">${r}</option>`).join('');
   }
+
+  // ★ 픽업/드롭오프 자동완성 (리포트 데이터 기반)
+  const pickupSet = new Set(), dropoffSet = new Set();
+  (_invReports||[]).forEach(r => {
+    const p = String(r.Pickup||'').trim(), d = String(r.Dropoff||'').trim();
+    if(p) pickupSet.add(p); if(d) dropoffSet.add(d);
+  });
+  const puList = document.getElementById('iim-pickup-list');
+  const doList = document.getElementById('iim-dropoff-list');
+  if(puList) puList.innerHTML = [...pickupSet].sort().map(v=>'<option value="'+v+'">').join('');
+  if(doList) doList.innerHTML = [...dropoffSet].sort().map(v=>'<option value="'+v+'">').join('');
 }
+
 function onIimTourChange() {
   const sel = document.getElementById('iim-tour');
   const custom = document.getElementById('iim-tour-custom');
@@ -3947,46 +3994,35 @@ function deleteInvItem(id) {
 
 function renderInvManualList() {
   const el  = document.getElementById('inv-manual-list');
-  if (!el) return;
+  const inlineEl = document.getElementById('inv-manual-inline');
   const key   = _invManualKey();
   const items = JSON.parse(localStorage.getItem(key)||'[]');
 
-  if (items.length === 0) {
-    el.style.display = 'none';
-    return;
-  }
-  el.style.display = 'block';
+  // 기존 위치 (있으면 숨김 처리 — 인라인으로 이동)
+  if (el) el.style.display = 'none';
 
-  const total = items.reduce((s,i)=> s + (i.amount||0) + (i.ot||0) + (i.hotel||0), 0);
-
-  el.innerHTML = `
-    <div style="background:var(--sf2);border-radius:12px;overflow:hidden;margin-bottom:6px;">
-      <div style="padding:8px 12px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:11px;font-weight:700;color:var(--t2);">수동 항목 ${items.length}건</span>
-        <span style="font-size:12px;font-weight:800;color:var(--gn);">합계 $${total.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-      </div>
-      ${items.map(item => {
-        const sub = (item.amount||0)+(item.ot||0)+(item.hotel||0);
-        const timeStr = item.start||item.end ? (item.start||'') + (item.end ? ' - '+item.end : '') : '';
-        return `<div style="padding:9px 12px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px;">
+  // 인라인 (요약 카드 내부)
+  if (inlineEl) {
+    if (items.length === 0) {
+      inlineEl.innerHTML = '<div style="font-size:10px;color:var(--t3);padding:4px 0;">수동 항목 없음</div>';
+    } else {
+      const total = items.reduce((s,i)=> s + (i.amount||0) + (i.ot||0) + (i.hotel||0) + (i.trailer||0) + (i.toll||0) + (i.dist||0), 0);
+      inlineEl.innerHTML = items.map(item => {
+        const sub = (item.amount||0)+(item.ot||0)+(item.hotel||0)+(item.trailer||0)+(item.toll||0)+(item.dist||0);
+        const extras = [item.ot?'OT $'+item.ot:'', item.hotel?'Hotel $'+item.hotel:'', item.trailer?'Trailer $'+item.trailer:'', item.toll?'Toll $'+item.toll:'', item.dist?'Dist $'+item.dist:''].filter(Boolean).join(' · ');
+        return `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--bd);">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:700;color:var(--t1);">${fmtDate(item.date)}${item.seats?' · '+item.seats:''}</div>
-            <div style="font-size:11px;color:var(--t2);margin-top:1px;">${escH(item.tour)}</div>
-            ${timeStr?`<div style="font-size:10px;color:var(--t3);">${escH(timeStr)}</div>`:''}
-            ${item.note?`<div style="font-size:10px;color:var(--t3);">${escH(item.note)}</div>`:''}
+            <div style="font-size:11px;font-weight:600;color:var(--t1);">${fmtDate(item.date)} · ${escH(item.tour)}${item.seats?' ('+item.seats+')':''}</div>
+            ${extras?'<div style="font-size:9px;color:var(--t3);">'+extras+'</div>':''}
           </div>
-          <div style="text-align:right;flex-shrink:0;">
-            <div style="font-size:13px;font-weight:800;color:var(--gn);">$${sub.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
-            ${item.ot?`<div style="font-size:10px;color:var(--t3);">OT $${item.ot}</div>`:''}
-            ${item.hotel?`<div style="font-size:10px;color:var(--t3);">Hotel $${item.hotel}</div>`:''}
-          </div>
-          <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
-            <button onclick="openInvItemModal('${item.id}')" style="padding:4px 8px;border-radius:6px;border:1px solid var(--bd);background:var(--sf);font-size:11px;font-weight:700;cursor:pointer;color:var(--ac);">✏️</button>
-            <button onclick="deleteInvItem('${item.id}')" style="padding:4px 8px;border-radius:6px;border:1px solid #fecaca;background:#fef2f2;font-size:11px;font-weight:700;cursor:pointer;color:#ef4444;">🗑</button>
-          </div>
+          <div style="font-size:11px;font-weight:700;color:var(--gn);flex-shrink:0;">$${sub.toLocaleString()}</div>
+          <button onclick="openInvItemModal('${item.id}')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--bd);background:var(--sf);font-size:10px;cursor:pointer;color:var(--ac);">✏️</button>
+          <button onclick="deleteInvItem('${item.id}')" style="padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fef2f2;font-size:10px;cursor:pointer;color:#ef4444;">🗑</button>
         </div>`;
-      }).join('')}
-    </div>`;
+      }).join('') +
+      `<div style="text-align:right;padding:4px 0;font-size:11px;font-weight:800;color:var(--gn);">수동 합계: $${total.toLocaleString()}</div>`;
+    }
+  }
 }
 
 // ★ 선수금/크레딧 다건 관리
@@ -4076,19 +4112,20 @@ function _refreshInvPreview() {
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) return;
+  const rows = _buildInvRows(agency, from, to);
+  renderInvPreview(rows, agency, from, to);
 
-  // localStorage에서 크레딧/선수금 복원 (비어있을 때만) — 렌더 전에 먼저 복원
+  // localStorage에서 크레딧/선수금 복원 (비어있을 때만)
   if (_invDeductions.length === 0) {
     const savedDed = localStorage.getItem(`dc_inv_deductions_${agency}_${from.slice(0,7)}`);
     if (savedDed) { try { _invDeductions = JSON.parse(savedDed); } catch(e) {} }
   }
 
-  const rows = _buildInvRows(agency, from, to);
-  renderInvPreview(rows, agency, from, to);
-
   // 재렌더 후 차감 입력 복원
   _renderInvDeductionInputs();
   _updateInvDeductionDisplay();
+  // ★ 수동 항목 목록도 갱신 (inv-manual-inline이 renderInvPreview에서 재생성되므로)
+  renderInvManualList();
 }
 
 // 수동 항목을 report rows 형식으로 변환
@@ -4117,6 +4154,7 @@ function _manualItemsToRows(agency, from) {
     Pickup:         item.pickup   || '',
     Dropoff:        item.dropoff  || '',
     _manual:        true,
+    _manualId:      item.id       || '',
   }));
 }
 
@@ -4173,8 +4211,8 @@ function setInvPeriod(type) {
   loadInvReports();
 }
 
-function onInvAgencyChange() { loadInvReports(); }
-function onInvDateChange()   { loadInvReports(); }
+function onInvAgencyChange() { _lastGeneratedInvNum = null; loadInvReports(); }
+function onInvDateChange()   { _lastGeneratedInvNum = null; loadInvReports(); }
 
 // ── 초기화 ──
 function toggleInvSettings() {
@@ -4245,6 +4283,20 @@ function calcInvRow(r) {
 
   // seats 숫자 추출: "21S" → 21
   const seatNum = parseInt(seats.replace(/[^0-9]/g,''))||21;
+
+  // ── 수동 항목: 이미 TA 금액이므로 DR→TA 변환 건너뛰 ──
+  if (r._manual) {
+    const baseRate = parseFloat(r.SVC_Charge) || 0;
+    const ot = otDR;
+    const hotel = hotelDR;
+    const dist = distDR;
+    const trailerVal = parseFloat(r.Trailer) || 0;
+    const tollVal = parseFloat(r.Toll) || 0;
+    const total = baseRate + ot + hotel + dist + trailerVal + tollVal;
+    // 저장된 rateSource가 있으면 유지 (Rate Table vs SVC 구분)
+    const savedRS = r._rateSource || 'manual';
+    return { baseRate, ot, hotel, dist, earlyTA:0, parkingFee:0, autoParking:0, _pkKey:'', trailerVal, nightTA:0, tipVal:0, mealVal:0, tollVal, etcVal:0, etcTA:0, _etcKey:'', total, rateSource: savedRS };
+  }
 
   // ── OT DR → TA 역산 ──
   // 21/25S: DR $30/h → TA $80/h, 40S: DR $40/h → TA $150/h, 50S: DR $40/h → TA $160/h
@@ -4510,39 +4562,72 @@ function _buildInvRows(agency, from, to) {
 // ── 인보이스 번호 관리 ──
 function getInvNum(agency, from) {
   const ym = from.slice(0,7).replace('-','');  // YYYYMM
-  const key = `dc_inv_num_${agency}_${ym}`;
-  let num = localStorage.getItem(key);
-  if (!num) {
-    // 발행 이력에서 같은 YYYYMM의 최대 번호 찾기
-    const prefix = `INV-${ym}-`;
-    let maxSeq = 0;
-    // localStorage에 저장된 기존 번호 스캔
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('dc_inv_num_')) {
-        const v = localStorage.getItem(k) || '';
-        if (v.startsWith(prefix)) {
-          const seq = parseInt(v.replace(prefix, '')) || 0;
-          if (seq > maxSeq) maxSeq = seq;
-        }
+  const prefix = `INV-${ym}-`;
+  let maxSeq = 0;
+
+  // ① localStorage의 dc_inv_num_ 키 스캔
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('dc_inv_num_')) {
+      const v = localStorage.getItem(k) || '';
+      if (v.startsWith(prefix)) {
+        const seq = parseInt(v.replace(prefix, '')) || 0;
+        if (seq > maxSeq) maxSeq = seq;
       }
     }
-    // 발행 이력 캐시에서도 스캔
-    if (_invHistoryCache) {
-      _invHistoryCache.forEach(inv => {
-        const n = String(inv.InvNumber || '');
-        if (n.startsWith(prefix)) {
-          const seq = parseInt(n.replace(prefix, '')) || 0;
-          if (seq > maxSeq) maxSeq = seq;
-        }
-      });
+    // ② dc_inv_issued_ 키도 스캔 (발행 완료된 번호 중복 방지)
+    if (k && k.startsWith('dc_inv_issued_')) {
+      const invN = k.replace('dc_inv_issued_', '');
+      if (invN.startsWith(prefix)) {
+        const seq = parseInt(invN.replace(prefix, '')) || 0;
+        if (seq > maxSeq) maxSeq = seq;
+      }
     }
-    const nextSeq = maxSeq + 1;
-    num = `${prefix}${String(nextSeq).padStart(3,'0')}`;
-    localStorage.setItem(key, num);
   }
+  // ③ 발행 이력 캐시에서도 스캔
+  if (_invHistoryCache) {
+    _invHistoryCache.forEach(inv => {
+      const n = String(inv.InvNumber || '');
+      if (n.startsWith(prefix)) {
+        const seq = parseInt(n.replace(prefix, '')) || 0;
+        if (seq > maxSeq) maxSeq = seq;
+      }
+    });
+  }
+  const nextSeq = maxSeq + 1;
+  const num = `${prefix}${String(nextSeq).padStart(3,'0')}`;
   return num;
 }
+// 인보이스 초기화 (발행 이력 전체 삭제 + 번호 1번부터 재시작)
+async function resetAllInvoices() {
+  if (!confirm('⚠️ 모든 인보이스 발행 이력을 삭제하고 번호를 001부터 재시작합니다.\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?')) return;
+  if (!confirm('정말로 삭제하시겠습니까? 모든 인보이스 데이터가 영구적으로 삭제됩니다.')) return;
+  try {
+    toast('⏳ 인보이스 초기화 중...','ok');
+    // 1) GAS에서 Invoices 시트 전체 삭제
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'clear_invoices', _user:getAdminUser()})
+    });
+    const json = await res.json();
+    // 2) localStorage 인보이스 관련 키 정리
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('dc_inv_num_') || k.startsWith('dc_inv_issued_'))) keysToRemove.push(k);
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+    // 3) 캐시 초기화
+    _invHistoryCache = null;
+    // 4) 이력 다시 로드
+    await loadInvHistory();
+    toast('✅ 인보이스가 초기화되었습니다. 번호가 001부터 시작됩니다.','ok');
+  } catch(e) {
+    toast('초기화 실패: ' + e.message, 'er');
+  }
+}
+
+
 
 function renderInvPreview(rows, agency, from, to) {
   const prev = document.getElementById('inv-preview');
@@ -4580,6 +4665,7 @@ function renderInvPreview(rows, agency, from, to) {
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
   const invNum = getInvNum(agency, from);
+  _lastGeneratedInvNum = invNum;  // saveInvoiceToSheet에서 재사용
 
   // 발행 이력 확인
   const histKey = `dc_inv_issued_${invNum}`;
@@ -4633,6 +4719,14 @@ function renderInvPreview(rows, agency, from, to) {
           <button onclick="_addInvDeduction()" style="padding:2px 8px;border:1px solid var(--ac);background:var(--sf);border-radius:6px;font-size:10px;font-weight:700;color:var(--ac);cursor:pointer;">+ 추가</button>
         </div>
         <div id="inv-deduction-inputs"></div>
+      </div>
+      <!-- ★ 수동 항목 (선수금/크레딧 바로 아래) -->
+      <div style="margin-bottom:8px;padding-top:6px;border-top:1px dashed var(--bd);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.5px;">📝 수동 항목</div>
+          <button onclick="openInvItemModal(null)" style="padding:2px 8px;border:1px solid var(--ac);background:var(--sf);border-radius:6px;font-size:10px;font-weight:700;color:var(--ac);cursor:pointer;">+ 추가</button>
+        </div>
+        <div id="inv-manual-inline"></div>
       </div>
     </div>
 
@@ -4704,7 +4798,7 @@ function renderInvPreview(rows, agency, from, to) {
       return header + `<tr style="border-bottom:1px solid var(--bd);${exclStyle}" data-inv-row="${ri}">
         <td style="padding:6px;white-space:nowrap;vertical-align:top;">
           ${fmtDate(r._iso)}
-          ${_invEditMode ? `<div style="margin-top:3px;"><button onclick="_toggleInvExclude('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid ${excl?'#86efac':'#fecaca'};background:${excl?'#f0fdf4':'#fef2f2'};color:${excl?'#166534':'#ef4444'};cursor:pointer;">${excl?'포함':'제외'}</button></div>` : ''}
+          ${_invEditMode ? `<div style="margin-top:3px;display:flex;gap:2px;flex-wrap:wrap;"><button onclick="_toggleInvExclude('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid ${excl?'#86efac':'#fecaca'};background:${excl?'#f0fdf4':'#fef2f2'};color:${excl?'#166534':'#ef4444'};cursor:pointer;">${excl?'포함':'제외'}</button>${r._manual && r._manualId ? `<button onclick="openInvItemModal('${escH(r._manualId)}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;">✏️</button><button onclick="deleteInvItem('${escH(r._manualId)}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;">🗑</button>` : ''}</div>` : ''}
         </td>
         <td style="padding:6px;vertical-align:top;">
           <div style="font-weight:600;">${escH(r.Attraction||'—')}</div>
@@ -4807,6 +4901,7 @@ let _invEditMode   = false;           // 수정 모드 토글
 let _invOverrides  = {};              // { rowKey: { base?, ot?, extra? } }
 let _invExcludes   = {};              // { rowKey: true } — 제외된 항목
 let _invHistoryCache = null;          // 인보이스 이력 캐시
+let _lastGeneratedInvNum = null;      // generateInvoice에서 생성한 번호 (saveInvoiceToSheet에서 재사용)
 
 // 항목 고유 키 (날짜+차량+인덱스)
 function _invRowKey(r, idx) {
@@ -4865,7 +4960,17 @@ async function saveInvoiceToSheet() {
   const grandTotal = _calcInvGrandTotal(rows);
   const gst   = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
-  const invNum = getInvNum(agency, from);
+  // generateInvoice에서 생성한 번호가 있으면 재사용 (번호 불일치 방지)
+  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
+
+  // ★ 중복 번호 방지: 발행 이력에서 동일 번호가 이미 있는지 확인
+  if (_invHistoryCache) {
+    const dup = _invHistoryCache.find(inv => String(inv.InvNumber).trim() === invNum);
+    if (dup) {
+      toast(`⚠️ ${invNum}은 이미 발행된 인보이스입니다. 페이지를 새로고침하세요.`, 'er');
+      return;
+    }
+  }
 
   // 항목 요약 JSON (DR 항목)
   const itemsSummary = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)] && !r._manual).map((r,ri) => {
@@ -4873,9 +4978,12 @@ async function saveInvoiceToSheet() {
     const ov = _invOverrides[_invRowKey(r,ri)] || {};
     return {
       date: r._iso, rego: r.Rego, tour: r.Attraction, seats: r.Seats, driver: r.Driver,
+      tourcode: r.Tour_Code||'', pickup: r.Pickup||'', dropoff: r.Dropoff||'',
+      timeStart: r._timeStart||'', timeEnd: r._timeEnd||'',
       base: ov.base !== undefined ? ov.base : c.baseRate,
       ot:   ov.ot   !== undefined ? ov.ot   : c.ot,
       extra:ov.extra!== undefined ? ov.extra : (c.earlyTA+c.hotel+c.dist+(c.parkingFee||0)+(c.trailerVal||0)+(c.nightTA||0)+(c.tipVal||0)+(c.mealVal||0)+(c.tollVal||0)+(c.etcTA||0)),
+      rateSource: c.rateSource||'svc',
       overridden: !!(ov.base !== undefined || ov.ot !== undefined || ov.extra !== undefined)
     };
   });
@@ -4896,12 +5004,10 @@ async function saveInvoiceToSheet() {
     IssuedDate:  '',   // GAS에서 자동 설정
     Items:       JSON.stringify(itemsSummary).slice(0,49000),
     ManualItems: JSON.stringify(manualItems).slice(0,49000),
+    Deductions:  JSON.stringify(_invDeductions.filter(d=>d.amount>0)),
     Notes:       `${rows.length}건, 그룹:${_invGroupMode}`,
-    CreatedBy:   getAdminUser(),
-    Deductions:  JSON.stringify(_invDeductions.filter(d=>d.amount>0))
+    CreatedBy:   getAdminUser()
   };
-  console.log('[INV-SAVE] _invDeductions:', JSON.stringify(_invDeductions));
-  console.log('[INV-SAVE] data.Deductions:', data.Deductions);
 
   const btn = document.querySelector('button[onclick="saveInvoiceToSheet()"]');
   if (btn) { btn.disabled=true; btn.textContent='⏳ 저장 중...'; }
@@ -4915,40 +5021,42 @@ async function saveInvoiceToSheet() {
     if (!json.ok) throw new Error(json.error||'저장 실패');
     // localStorage 발행 기록도 동기화
     localStorage.setItem(`dc_inv_issued_${invNum}`, new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}));
-    // 크레딧/선수금 localStorage 백업 (GAS 컬럼 누락 방어)
-    if(_invDeductions.filter(d=>d.amount>0).length>0){
-      localStorage.setItem(`dc_inv_ded_${invNum}`, JSON.stringify(_invDeductions.filter(d=>d.amount>0)));
-    }
     toast(`✅ 인보이스 ${invNum} 저장 완료`,'ok');
-    // 발행 완료 → 인보이스 번호 캐시 삭제 (다음 인보이스가 새 번호를 받도록)
-    const _ym = from.slice(0,7).replace('-','');
-    localStorage.removeItem(`dc_inv_num_${agency}_${_ym}`);
-    _invHistoryCache = null; // 캐시 무효화
 
-    // ★ 거래처 잔액에 자동 청구(DR) 등록
+    // ★ 거래처 잔액에 DR 거래 자동 등록 (Agency_Txn)
     try {
-      const { total: _dedTotal } = _getInvDeductionTotals();
-      const _amountDue = roundMoney(grandTotal - _dedTotal);
-      const txnRow = {
-        Agency: agency,
-        Date: new Date().toISOString().slice(0,10),
-        InvoiceID: invNum,
-        TourCode: '',
-        DR: _amountDue,
-        CR: 0,
-        Remark: `인보이스 발행 (${from} ~ ${to})`,
-        StartDate: from,
-        FinishDate: to,
-        DueDate: ''
-      };
-      const txnRes = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'add_agency_txn', data:txnRow})});
-      const txnJson = await txnRes.json();
-      if(txnJson.ok){
-        txnRow._rowIndex = txnJson.rowIndex;
-        _balAgencyTxns.push(txnRow);
-        console.log('[INV-SAVE] Agency_Txn DR added:', invNum, _amountDue);
+      const { prepaid, credit, total: totalDeduct } = _getInvDeductionTotals();
+      const amountDue = roundMoney(grandTotal - totalDeduct);
+      const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 14);
+      const dueDateStr = toLocalISO(dueDate);
+      const todayStr = toLocalISO(new Date());
+      // 중복 체크: 동일 InvoiceID가 이미 있는지 확인
+      const existingTxn = _balAgencyTxns.find(t => String(t.InvoiceID||'').trim() === invNum);
+      if (!existingTxn) {
+        const txnData = {
+          Agency:     agency,
+          Date:       todayStr,
+          InvoiceID:  invNum,
+          TourCode:   '',
+          DR:         amountDue,
+          CR:         0,
+          Remark:     `인보이스 발행 (${rows.length}건, ${fmtDate(from)}~${fmtDate(to)})`,
+          StartDate:  from,
+          FinishDate: to,
+          DueDate:    dueDateStr
+        };
+        fetch(APPS_SCRIPT_URL, {
+          method:'POST', headers:{'Content-Type':'text/plain'},
+          body: JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
+        }).then(r=>r.json()).then(j=>{
+          if(j.ok) { console.log('[Invoice→Balance] Agency_Txn DR 등록 완료:', invNum); _balLoaded=false; }
+          else console.warn('[Invoice→Balance] Agency_Txn 등록 실패:', j.error);
+        }).catch(e=>console.warn('[Invoice→Balance] Agency_Txn error:', e));
       }
-    } catch(e){ console.warn('[INV-SAVE] Agency_Txn 자동등록 실패:', e); }
+    } catch(e) { console.warn('[Invoice→Balance] 거래 등록 오류:', e); }
+
+    _invHistoryCache = null; // 캐시 무효화
+    _lastGeneratedInvNum = null; // 다음 인보이스를 위해 번호 초기화
     _refreshInvPreview();
   } catch(e) {
     toast('❌ 저장 실패: '+e.message,'er');
@@ -4958,6 +5066,18 @@ async function saveInvoiceToSheet() {
 }
 
 // ─── 인보이스 이력 목록 ───
+// GAS ISO date normalizer (e.g. "2026-02-28T13:00:00.000Z" -> "2026-03-01")
+function _normInvDate(d) {
+  if (!d) return d;
+  var s = String(d);
+  if (s.indexOf('T') >= 0) {
+    var dt = new Date(s);
+    return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return s;
+}
+
 async function loadInvHistory(forceReload) {
   const listEl = document.getElementById('inv-history-list');
   if (!listEl) return;
@@ -5025,109 +5145,46 @@ function renderInvHistory() {
 }
 
 async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
+
+  // Normalize GAS ISO dates to YYYY-MM-DD
+  periodFrom = _normInvDate(periodFrom);
+  periodTo = _normInvDate(periodTo);
   if (!agency || !periodFrom || !periodTo) {
     toast('⚠️ 인보이스 정보가 부족합니다','warn');
     return;
   }
 
-  // ① 인보이스 이력 캐시 확보
-  if (!_invHistoryCache) {
+  // ① 리포트 데이터 로드 (캐시 없으면 GAS에서 fetch)
+  if (!_invReports) {
     try {
-      toast('📄 인보이스 이력 로딩 중...','ok');
-      const hRes = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
-      const hJson = await hRes.json();
-      if (hJson.ok) _invHistoryCache = (hJson.rows||[]).reverse();
-    } catch(e) { toast('이력 로드 실패','er'); return; }
-  }
-
-  const savedInv = (_invHistoryCache||[]).find(inv => String(inv.InvNumber) === invNumber);
-  if (!savedInv) { toast('⚠️ 발행된 인보이스를 찾을 수 없습니다','er'); return; }
-
-  // ② 저장된 크레딧/선수금 복원
-  console.log('[INV-LOAD] savedInv keys:', Object.keys(savedInv));
-  console.log('[INV-LOAD] Deductions raw:', savedInv.Deductions);
-  if (savedInv.Deductions) {
-    try { _invDeductions = JSON.parse(savedInv.Deductions); } catch(e) { _invDeductions = []; }
-  } else {
-    // GAS에서 Deductions 컬럼 누락 시 localStorage 폴백
-    const _lsDed = localStorage.getItem(`dc_inv_ded_${invNumber}`);
-    if (_lsDed) {
-      try { _invDeductions = JSON.parse(_lsDed); } catch(e) { _invDeductions = []; }
-      console.log('[INV-LOAD] Deductions from localStorage fallback:', _lsDed);
-    } else {
-      _invDeductions = [];
-    }
-  }
-  console.log('[INV-LOAD] _invDeductions:', JSON.stringify(_invDeductions));
-
-  // ③ 저장된 Items로 rows 재구성 (Daily_Report 재조회 불필요)
-  let savedItems = [];
-  try { savedItems = JSON.parse(savedInv.Items || '[]'); } catch(e) {}
-
-  // 리포트 데이터가 있으면 Items 키로 매칭 필터링, 없으면 Items에서 직접 렌더링
-  let rows = [];
-  let useStoredGrandTotal = false;
-
-  if (_invReports) {
-    // 리포트 캐시가 있으면 저장된 Items 키로 매칭
-    const allRows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
-    if (savedItems.length > 0) {
-      const savedKeys = new Set(savedItems.map(it => it.date + '|' + (it.tour||'')));
-      rows = allRows.filter(r => savedKeys.has((r._iso||'') + '|' + (r.Attraction||'')));
-    } else {
-      rows = allRows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
-    }
-  }
-
-  // 리포트가 없거나 매칭된 rows가 비어있으면 → 리포트 로드 후 재시도
-  if (rows.length === 0 && savedItems.length > 0) {
-    if (!_invReports) {
-      try {
-        toast('📄 리포트 로딩 중...','ok');
-        const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const json = await res.json();
-        if (json.ok) {
-          _invReports = json.rows.map(r => ({
-            ...r,
-            _iso: parseToISO(r.Date || ''),
-            _agency: String(r.Agency||'').trim(),
-            _timeStart: parseSheetTime(r.Time_Start),
-            _timeEnd:   parseSheetTime(r.Time_End),
-          }));
-          await populateInvAgency();
-        }
-      } catch(e) { /* ignore */ }
-    }
-    if (_invReports) {
-      const allRows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
-      const savedKeys = new Set(savedItems.map(it => it.date + '|' + (it.tour||'')));
-      rows = allRows.filter(r => savedKeys.has((r._iso||'') + '|' + (r.Attraction||'')));
-    }
-  }
-
-  // 그래도 rows가 비면 저장된 GrandTotal로 폴백
-  if (rows.length === 0) {
-    useStoredGrandTotal = true;
-  }
-
-  // ④ 저장된 ManualItems 복원
-  if (savedInv.ManualItems) {
-    try {
-      const savedManual = JSON.parse(savedInv.ManualItems);
-      if (savedManual.length > 0) {
-        const manualKey = 'dc_inv_manual_' + agency + '_' + periodFrom.slice(0,7);
-        localStorage.setItem(manualKey, JSON.stringify(savedManual));
+      toast('📄 리포트 로딩 중...','ok');
+      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      if (json.ok) {
+        _invReports = json.rows.map(r => ({
+          ...r,
+          _iso: parseToISO(r.Date || ''),
+          _agency: String(r.Agency||'').trim(),
+          _timeStart: parseSheetTime(r.Time_Start),
+          _timeEnd:   parseSheetTime(r.Time_End),
+        }));
+        await populateInvAgency();
       }
-    } catch(e) {}
+    } catch(e) {
+      toast('리포트 로드 실패: ' + e.message, 'err');
+      return;
+    }
   }
 
-  // ⑤ 셀렉터 값 세팅 (다른 함수에서 참조할 수 있으므로)
+  // ② 인보이스 셀렉터에 값 세팅
   const selAgency = document.getElementById('inv-agency');
   const inpFrom   = document.getElementById('inv-from');
   const inpTo     = document.getElementById('inv-to');
   if (inpFrom) inpFrom.value = periodFrom;
   if (inpTo)   inpTo.value   = periodTo;
+
+  // ③ 드롭다운에 agency 옵션이 없으면 추가
   if (selAgency) {
     let found = false;
     for (const opt of selAgency.options) { if (opt.value === agency) { found = true; break; } }
@@ -5139,16 +5196,126 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     selAgency.value = agency;
   }
 
-  _renderInvDeductionInputs();
-  _updateInvDeductionDisplay();
+  // ④ 저장된 크레딧/선수금 복원
+  let _previewSavedInv = null;
+  if (_invHistoryCache) {
+    _previewSavedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber) || null;
+    console.log('[InvPreview] invNumber:', invNumber, '| found in cache:', !!_previewSavedInv);
+    if (_previewSavedInv) {
+      console.log('[InvPreview] Saved inv keys:', Object.keys(_previewSavedInv).join(', '));
+      // Debug: 모든 필드값의 첫 80자 출력
+      Object.keys(_previewSavedInv).forEach(function(k) {
+        var v = String(_previewSavedInv[k]||'');
+        console.log('[InvPreview]  ' + k + ' = ' + v.substring(0,80) + (v.length>80?'...':''));
+      });
+      // Smart deductions detection: columns may be shifted in saved data
+      let _dedJSON = '';
+      Object.keys(_previewSavedInv).forEach(function(k) {
+        var v = String(_previewSavedInv[k]||'').trim();
+        if (v.startsWith('[') && v.indexOf('"type"') >= 0) _dedJSON = v;
+      });
+      if (_dedJSON) {
+        try { _invDeductions = JSON.parse(_dedJSON); } catch(e) { _invDeductions = []; }
+      } else { _invDeductions = []; }
+      _renderInvDeductionInputs();
+      _updateInvDeductionDisplay();
+    }
+  } else {
+    console.log('[InvPreview] _invHistoryCache is null/empty');
+  }
 
-  // ⑥ 모달 미리보기 — 저장된 GrandTotal 사용
-  const gt = useStoredGrandTotal ? parseFloat(savedInv.GrandTotal)||0 : null;
-  const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {
-    isDraft: false,
-    invNumOverride: invNumber,
-    grandTotalOverride: gt
-  });
+
+  // ⑤-2 저장된 인보이스 데이터로 미리보기 (저장된 Items 우선)
+  // Smart Items detection: 컬럼이 밀려 Items 필드가 다른 컬럼에 있을 수 있음
+  let _itemsJSON = '', _manualJSON = '', _savedGT = 0;
+  if (_previewSavedInv) {
+    _savedGT = parseFloat(_previewSavedInv.GrandTotal) || 0;
+    // 모든 필드 스캔: JSON 배열 탐지 (date+tour 키, 또는 date+rego 키)
+    Object.keys(_previewSavedInv).forEach(function(k) {
+      var v = String(_previewSavedInv[k]||'').trim();
+      if (!v.startsWith('[')) return;
+      // JSON 배열이 date 키를 가지고 있는지 확인
+      var hasDate = v.indexOf('"date"') >= 0;
+      var hasTour = v.indexOf('"tour"') >= 0;
+      var hasRego = v.indexOf('"rego"') >= 0;
+      var hasAmount = v.indexOf('"amount"') >= 0;
+      var hasStart = v.indexOf('"start"') >= 0;
+      if (hasDate && (hasTour || hasRego)) {
+        console.log('[InvPreview] Found JSON array in field "' + k + '": hasAmount=' + hasAmount + ' hasStart=' + hasStart);
+        if (hasAmount || hasStart) {
+          if (!_manualJSON) _manualJSON = v;
+        } else {
+          if (!_itemsJSON) _itemsJSON = v;
+        }
+      }
+    });
+    // 정확한 필드명이 있으면 우선 사용
+    if (_previewSavedInv.Items && String(_previewSavedInv.Items).trim().startsWith('[')) {
+      var _chk = String(_previewSavedInv.Items).trim();
+      if (_chk.indexOf('"date"') >= 0) _itemsJSON = _chk;
+    }
+    if (_previewSavedInv.ManualItems && String(_previewSavedInv.ManualItems).trim().startsWith('[')) {
+      var _chk2 = String(_previewSavedInv.ManualItems).trim();
+      if (_chk2.indexOf('"date"') >= 0) _manualJSON = _chk2;
+    }
+    console.log('[InvPreview] _itemsJSON found:', !!_itemsJSON, '| _manualJSON found:', !!_manualJSON, '| _savedGT:', _savedGT);
+  }
+  if (_itemsJSON) {
+    try {
+      const _si = JSON.parse(_itemsJSON);
+      const _sm = _manualJSON ? JSON.parse(_manualJSON) : [];
+      console.log('[InvPreview] Using saved Items:', _si.length, 'items +', _sm.length, 'manual items');
+      const _savedRows = _si.map(item => ({
+        _iso: item.date||'', Date: item.date||'',
+        Attraction: item.tour||'-', Rego: item.rego||'', Seats: item.seats||'',
+        Driver: item.driver||'', Tour_Code: item.tourcode||'',
+        Pickup: item.pickup||'', Dropoff: item.dropoff||'',
+        _timeStart: item.timeStart||'', _timeEnd: item.timeEnd||'',
+        _manual: true,
+        _rateSource: item.rateSource||'price_table',
+        SVC_Charge: item.base||0, OT: item.ot||0,
+        Hotel_Surcharge: item.extra||0,
+        Dist_Surcharge: 0, Trailer: 0, Toll: 0
+      }));
+      _sm.forEach(m => {
+        _savedRows.push({
+          _iso: parseToISO(m.date)||m.date||'', Date: m.date||'',
+          Attraction: m.tour||'-', Rego: m.rego||'', Seats: m.seats||'',
+          Driver: m.driver||'', Tour_Code: m.tourcode||'',
+          Pickup: m.pickup||'', Dropoff: m.dropoff||'',
+          _timeStart: m.start||'', _timeEnd: m.end||'',
+          _manual: true,
+          SVC_Charge: m.amount||0, OT: m.ot||0,
+          Hotel_Surcharge: m.hotel||0, Dist_Surcharge: m.dist||0,
+          Trailer: m.trailer||0, Toll: m.toll||0
+        });
+      });
+      _savedRows.sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
+      const _origExcl = _invExcludes, _origOver = _invOverrides;
+      _invExcludes = {}; _invOverrides = {};
+      const html = _buildInvoiceHTML(agency, periodFrom, periodTo, _savedRows,
+        {isDraft:false, invNumOverride:invNumber, grandTotalOverride:_savedGT});
+      _invExcludes = _origExcl; _invOverrides = _origOver;
+      _showDocModal(html);
+      return;
+    } catch(e) { console.error('Saved invoice preview error:', e); }
+  }
+
+  // ⑤-2b fallback: Daily_Report에서 다시 빌드 (저장된 Items가 없는 경우)
+  console.warn('[InvPreview] FALLBACK: No saved Items found, building from Daily_Report');
+  const _manualKey = 'dc_inv_manual_' + agency + '_' + periodFrom.slice(0,7);
+  const _origManualJSON = localStorage.getItem(_manualKey);
+  if (_previewSavedInv && _previewSavedInv.ManualItems) {
+    try { localStorage.setItem(_manualKey, _previewSavedInv.ManualItems); } catch(e) {}
+  }
+  let rows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
+  rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
+  try {
+    if (_origManualJSON !== null) localStorage.setItem(_manualKey, _origManualJSON);
+    else localStorage.removeItem(_manualKey);
+  } catch(e) {}
+  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
+  const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false, invNumOverride:invNumber});
   _showDocModal(html);
 }
 
@@ -5212,11 +5379,11 @@ function _isoToSunday(iso) {
 
 // ─── generateInvoice: 그룹 모드 반영 ───
 // ─── 공용 인보이스 HTML 빌더 ───
-function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverride=null, grandTotalOverride=null}={}) {
+function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverride=null, grandTotalOverride=undefined}={}) {
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
   const client  = DB.C.find(c => c.Name === agency) || {};
   const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
-  let grandTotal = grandTotalOverride !== null ? grandTotalOverride : _calcInvGrandTotal(rows);
+  let grandTotal = grandTotalOverride !== undefined ? grandTotalOverride : _calcInvGrandTotal(_buildInvRows(agency, from, to));
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
   // ★ 선수금 / 크레딧 (다건)
@@ -5281,7 +5448,6 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     if((c.mealVal||0)>0) surParts.push('Meal $'+c.mealVal);
     if((c.tollVal||0)>0) surParts.push('Toll $'+c.tollVal);
     if((c.etcTA||0)>0) surParts.push('Etc $'+c.etcTA);
-    console.log('[INV-ROW]', r.Date, r.Attraction, 'hotel:', c.hotel, 'dist:', c.dist, 'parking:', c.parkingFee, 'trailer:', c.trailerVal, 'surParts:', surParts.join(', '));
     const extras = [
       oOT ? `OT $${oOT.toLocaleString()}` : '',
       ...surParts,
@@ -5476,7 +5642,10 @@ function previewInvoiceDoc() {
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
-  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:true});
+  // ★ 미리보기와 생성에서 동일한 번호를 사용하기 위해 _lastGeneratedInvNum 설정
+  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
+  _lastGeneratedInvNum = invNum;
+  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:true, invNumOverride:invNum});
   _showDocModal(html);
 }
 
@@ -5491,7 +5660,8 @@ async function downloadInvoicePdf() {
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
-  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
+  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
+  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false, invNumOverride:invNum});
   const win = window.open('', '_blank', 'width=900,height=700');
   win.document.write(html);
   win.document.close();
@@ -5530,12 +5700,11 @@ async function generateInvoice() {
     } catch(e) {}
   }
 
-  const invNum = getInvNum(agency, from);
-  const issuedKey = `dc_inv_issued_${invNum}`;
-  const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  localStorage.setItem(issuedKey, issuedAt);
+  // ★ 인보이스 번호를 한 번만 생성하고 모든 곳에서 재사용
+  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
+  _lastGeneratedInvNum = invNum;  // saveInvoiceToSheet에서 재사용
 
-  // 시트에 저장
+  // 시트에 먼저 저장 (번호가 확정된 후 localStorage에 기록)
   toast('💾 인보이스 저장 중...', 'ok');
   try {
     await saveInvoiceToSheet();
@@ -5543,8 +5712,13 @@ async function generateInvoice() {
     toast('❌ 시트 저장 실패: ' + e.message, 'er');
   }
 
-  // 미리보기 모달 + PDF 인쇄
-  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
+  // 저장 성공 후 localStorage에 발행 기록
+  const issuedKey = `dc_inv_issued_${invNum}`;
+  const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  localStorage.setItem(issuedKey, issuedAt);
+
+  // 미리보기 모달 + PDF 인쇄 (★ invNumOverride로 동일 번호 사용)
+  const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false, invNumOverride:invNum});
   _showDocModal(html);
   setTimeout(() => { _downloadInvPdf(); }, 600);
 }
@@ -5646,7 +5820,8 @@ async function emailInvoice() {
 
   const client = DB.C.find(c => c.Name === agency) || {};
   let toEmail  = (client.Email || '').trim();
-  const invNum = getInvNum(agency, from);
+  // ★ 이미 생성된 번호가 있으면 재사용
+  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
 
   let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
@@ -5684,8 +5859,8 @@ async function emailInvoice() {
     `Please don't hesitate to contact us if you have any queries.\n\n` +
     `Kind regards,\n${DC_COMPANY.name||'Dong Choi Pty Ltd'}\n${DC_COMPANY.phone||''}\n${DC_COMPANY.email||''}`;
 
-  // 인보이스 PDF용 HTML 생성
-  const docHtml = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false});
+  // 인보이스 PDF용 HTML 생성 (★ invNumOverride로 동일 번호 사용)
+  const docHtml = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false, invNumOverride:invNum});
   const pdfName = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   const emailBtn = document.querySelector('button[onclick="emailInvoice()"]');
@@ -6746,16 +6921,10 @@ async function ensureReportsCache() {
 }
 
 // 드라이버·주간별 DR 합계 (GAS 기준)
-async function getEarnedFromSheets(driverName, weekStart, customFrom, customTo) {
+async function getEarnedFromSheets(driverName, weekStart) {
   const rows = await ensureReportsCache();
-  let mon, sun;
-  if (customFrom && customTo) {
-    mon = customFrom;
-    sun = customTo;
-  } else {
-    mon = weekStart;
-    sun = (() => { const d = new Date(weekStart); d.setDate(d.getDate()+6); return toLocalISO(d); })();
-  }
+  const mon  = weekStart;
+  const sun  = (() => { const d = new Date(weekStart); d.setDate(d.getDate()+6); return toLocalISO(d); })();
 
   // 드라이버명 매칭: Name_KR 또는 Name_EN 또는 Driver 컬럼 직접
   const drRow = DB.D.find(d => (d.Name_KR||'')===driverName || (d.Name_EN||'')===driverName);
@@ -6763,15 +6932,14 @@ async function getEarnedFromSheets(driverName, weekStart, customFrom, customTo) 
   if (drRow) { matchNames.add(drRow.Name_KR||''); matchNames.add(drRow.Name_EN||''); }
 
   let total = 0;
-  const matchedRows = [];
   rows.forEach(r => {
     if (!matchNames.has(String(r.Driver||'').trim())) return;
     if (r._isoDate >= mon && r._isoDate <= sun) {
       total += (parseFloat(r.DR_Cost) || 0);
-      matchedRows.push(r);
+      // Night_Owner는 DR에서 차감하지 않음 (회사 비용)
     }
   });
-  return { total, rows: matchedRows };
+  return total;
 }
 
 async function selectWageDriver(drv){setWageTab('single');ST.wageDriver=drv;rWage();}
@@ -6803,32 +6971,11 @@ function initWageWeeks(){
     wages[drv] = drvWages;
     saveWages(wages);
   }
-
-  // 지급 기록이 있는 주 + 리포트가 있는 모든 주 병합
-  const paidWeeks = new Set(Object.keys(drvWages));
-
-  // 리포트 캐시에서 이 드라이버의 모든 주 찾기
-  const drRow = DB.D.find(d=>(d.Name_KR||'')===drv||(d.Name_EN||'')===drv);
-  const matchNames = new Set([drv]);
-  if(drRow){ matchNames.add(drRow.Name_KR||''); matchNames.add(drRow.Name_EN||''); }
-  const allRows = _reportsCache || [];
-  allRows.forEach(r => {
-    if(!matchNames.has(String(r.Driver||'').trim())) return;
-    const iso = r._isoDate || parseToISO(r.Date||'');
-    if(!iso) return;
-    const d = new Date(iso + 'T00:00:00');
-    const day = d.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    const mon = new Date(d);
-    mon.setDate(mon.getDate() + diff);
-    paidWeeks.add(toLocalISO(mon));
-  });
-
-  const weeks = [...paidWeeks].sort((a,b)=>b.localeCompare(a));
+  const weeks = Object.keys(drvWages).sort((a,b)=>b.localeCompare(a));
   const wSel = document.getElementById('wage-week-sel');
   if(!wSel) return;
   wSel.innerHTML = weeks.map(w=>'<option value="'+w+'">'+getWeekLabel(w)+'</option>').join('');
-  if(!ST.wageWeek || !weeks.includes(ST.wageWeek)) ST.wageWeek = weeks[0];
+  if(!ST.wageWeek || !drvWages[ST.wageWeek]) ST.wageWeek = weeks[0];
   wSel.value = ST.wageWeek;
   wSel.onchange = function(){ ST.wageWeek=this.value; renderWage(); };
   renderWage();
@@ -6849,14 +6996,18 @@ async function renderWage(){
     '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:4px;text-align:center;color:var(--t3);font-size:13px;">⏳ DR 금액 조회 중...</div>';
 
   // ── GAS Daily_Report 시트에서 드라이버 해당 주 DR_Cost 합산 ──
-  const earnResult = await getEarnedFromSheets(ST.wageDriver, ST.wageWeek);
-  const earned = earnResult.total;
-  const weekReports = earnResult.rows;
+  const earned = await getEarnedFromSheets(ST.wageDriver, ST.wageWeek);
 
   const totalPaid = entries.reduce((s,e)=>s+(e.amount||0),0);
   const balance   = earned - totalPaid;
 
   // 리포트 건수도 표시
+  const rows = _reportsCache || [];
+  const mon  = ST.wageWeek;
+  const sun  = (() => { const d=new Date(mon); d.setDate(d.getDate()+6); return toLocalISO(d); })();
+  const drRow = DB.D.find(d=>(d.Name_KR||'')===ST.wageDriver||(d.Name_EN||'')===ST.wageDriver);
+  const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+  const weekReports = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
   const nightOwnerTotal = weekReports.reduce((s,r)=>s+(parseFloat(r.Night_Owner)||0),0);
   // DR_Cost가 0/빈 문자열이면 각 항목 합산으로 재계산
   function calcDRFromReport(r) {
@@ -7220,23 +7371,11 @@ function openView(type, idx) {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">📅 만료일</div>`;
     html += row2A([['Rego 만료일', fmtDate(d.Rego_Date||'')], ['HVIS 만료일', fmtDate(d.HVIS_Date||'')]]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔧 정비</div>`;
-    const _curKM = Math.max(Number(d.Current_KM)||0, DB.regoMaxKM?.[d.Rego]||0);
-    const _lastSvc = Number(d.Last_Service_KM)||0;
-    const _svcInt = Number(d.Service_Interval)||10000;
-    const _nextSvcKM = Number(d.Next_Service_KM) || (_lastSvc + _svcInt);
-    const _remainKM = _nextSvcKM - _curKM;
-    const _remColor = _remainKM<=0?'var(--rd)':_remainKM<=1000?'var(--or)':_remainKM<=3000?'var(--yl)':'var(--gn)';
-    const _remLabel = _remainKM<=0?'⚠️ 초과 '+Math.abs(_remainKM).toLocaleString()+'km':'✅ '+_remainKM.toLocaleString()+'km 남음';
-    html += row2A([['현재 KM', _curKM ? _curKM.toLocaleString()+' km' : '—'],
-                   ['마지막 정비 KM', _lastSvc ? _lastSvc.toLocaleString()+' km' : '—']]);
-    html += row2A([['다음 서비스 KM', _nextSvcKM ? _nextSvcKM.toLocaleString()+' km' : '—'],
-                   ['정비 간격', _svcInt.toLocaleString()+' km']]);
-    if (_curKM && _nextSvcKM) {
-      html += `<div style="background:${_remColor}15;border-left:3px solid ${_remColor};border-radius:8px;padding:10px 12px;margin:6px 0 2px;">
-        <div style="font-size:14px;font-weight:800;color:${_remColor};">${_remLabel}</div>
-        <div style="font-size:10px;color:var(--t3);margin-top:2px;">다음 정비: ${_nextSvcKM.toLocaleString()} km</div>
-      </div>`;
-    }
+    var _curMax = DB.regoMaxKM[d.Rego]||0;
+    var _nxtSvc = Number(d.Next_Service_KM)||0;
+    var _svcRem = (_nxtSvc>0&&_curMax>0) ? (_nxtSvc - _curMax) : null;
+    html += row2A([['다음 서비스 KM', _nxtSvc ? Number(_nxtSvc).toLocaleString()+' km' : '미설정'],
+                   ['서비스까지 남은 KM', _svcRem!==null ? Number(_svcRem).toLocaleString()+' km' : '']]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔢 식별 번호</div>`;
     html += row2A([['VIN', d.VIN], ['Engine No.', engNum]]);
     html += rowA('Accreditation', d.Accreditation);
@@ -7306,11 +7445,9 @@ function openM(type,idx){
       <div class="fr2">
         <div><label class="fl">Rego 만료일</label><input class="fi" id="f7" type="date" value="${parseToISO(d.Rego_Date||'')}"></div>
         <div><label class="fl">HVIS 만료일</label><input class="fi" id="f8" type="date" value="${parseToISO(d.HVIS_Date||'')}"></div></div>
-      <div class="fr4">
-        <div><label class="fl">현재 KM</label><input class="fi" id="f9" type="number" value="${d.Current_KM||''}"></div>
-        <div><label class="fl">마지막 정비 KM</label><input class="fi" id="f10" type="number" value="${d.Last_Service_KM||''}"></div>
-        <div><label class="fl">정비 간격(km)</label><input class="fi" id="f11" type="number" value="${d.Service_Interval||10000}"></div>
-        <div><label class="fl">다음 정비 KM</label><input class="fi" id="f11b" type="number" value="${d.Next_Service_KM||(((Number(d.Last_Service_KM)||0)+(Number(d.Service_Interval)||10000))||'')}"></div></div>
+      <div class="fr2">
+        <div><label class="fl">다음 서비스 KM</label><input class="fi" id="f9" type="number" value="${d.Next_Service_KM||''}" placeholder="예: 601000"></div>
+        <div><label class="fl">현재 최대 KM (자동)</label><input class="fi" type="text" value="${DB.regoMaxKM[d.Rego]?Number(DB.regoMaxKM[d.Rego]).toLocaleString()+' km':'부킹 데이터 없음'}" readonly style="background:var(--s2);color:var(--t2)"></div></div>
       <div class="fr2">
         <div><label class="fl">VIN</label><input class="fi" id="f12" value="${d.VIN||''}"></div>
         <div><label class="fl">Engine No.</label><input class="fi" id="f13" value="${engNum}"></div></div>
@@ -7481,15 +7618,6 @@ function openM(type,idx){
 
   document.getElementById('mb').innerHTML=h;
   document.getElementById('modal').classList.add('on');
-  // 차량: 다음 정비 KM 자동계산
-  if(type==='V'){
-    var _f10=document.getElementById('f10'),_f11=document.getElementById('f11'),_f11b=document.getElementById('f11b');
-    if(_f10&&_f11&&_f11b){
-      var _calcNext=function(){_f11b.value=(Number(_f10.value)||0)+(Number(_f11.value)||10000);};
-      _f10.addEventListener('input',_calcNext);
-      _f11.addEventListener('input',_calcNext);
-    }
-  }
 }
 
 // ═══════════════════════════════════════
@@ -7502,11 +7630,14 @@ function saveM(){
   if(t==='V'){
     if(!gv('f0')){toast('차량번호 필수','er');return}
     sheetName='M_Vehicles';
-    obj={_rowIndex:ie?(DB.V[idx]?._rowIndex||null):null,
+    const _prevV = ie ? DB.V[idx] : {};
+    obj={_rowIndex:ie?(_prevV?._rowIndex||null):null,
          Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),Manufacture_Date:gn('f4'),
          Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:fmtDate(gv('f7')),HVIS_Date:fmtDate(gv('f8')),
-         Current_KM:gn('f9'),Last_Service_KM:gn('f10'),Service_Interval:gn('f11')||10000,Next_Service_KM:gn('f11b')||0,
-         VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14'),Transmission:gv('f15')||'Auto'};
+         Current_KM: _prevV.Current_KM||0,
+         Next_Service_KM:gn('f9'),
+         VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14'),Transmission:gv('f15')||'Auto',
+         Active: _prevV.Active||''};
     ie?DB.V[idx]=obj:DB.V.push(obj);
     // 서브 차량이면 DB.PS에 슬롯 보장
     if(obj.Owner && !DC_OWNERS.includes(obj.Owner) && !DB.PS[obj.Owner]) DB.PS[obj.Owner]={};
@@ -7887,8 +8018,7 @@ async function syncVehicles(){
     Manufacture_Date: rf(r,'Manufacture_Date','Manufacture Date'),
     Capacity:r.Capacity||0, Owner:r.Owner||'',
     Rego_Date:fmtDate(r.Rego_Date||''), HVIS_Date:fmtDate(r.HVIS_Date||''),
-    Current_KM:r.Current_KM||0, Last_Service_KM:r.Last_Service_KM||0,
-    Service_Interval:r.Service_Interval||10000, Next_Service_KM:r.Next_Service_KM||0,
+    Current_KM:r.Current_KM||0, Next_Service_KM:r.Next_Service_KM||0,
     VIN:r.VIN||'',
     Engine_Number: rf(r,'Engine_Number','Engine Number'),
     Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
@@ -8019,8 +8149,7 @@ async function loadAllFromSheets(){
         Manufacture_Date: _rf(r,'Manufacture_Date','Manufacture Date'),
         Capacity:r.Capacity||0, Owner:r.Owner||'',
         Rego_Date:fmtDate(r.Rego_Date||''), HVIS_Date:fmtDate(r.HVIS_Date||''),
-        Current_KM:r.Current_KM||0, Last_Service_KM:r.Last_Service_KM||0,
-        Service_Interval:r.Service_Interval||10000, Next_Service_KM:r.Next_Service_KM||0,
+        Current_KM:r.Current_KM||0, Next_Service_KM:r.Next_Service_KM||0,
         VIN:r.VIN||'',
         Engine_Number: _rf(r,'Engine_Number','Engine Number'),
         Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
@@ -9068,8 +9197,6 @@ async function savePDToSheets(){
   }
   // 로그인 세션이 있으면 자동 복원
   window.addEventListener('DOMContentLoaded', () => {
-    // 1회성 정리: 발행 후 삭제 안 된 인보이스 번호 캐시 제거
-    try { Object.keys(localStorage).filter(k=>k.startsWith('dc_inv_num_')).forEach(k=>localStorage.removeItem(k)); } catch(e){}
     if(localStorage.getItem('dc_admin_session')) autoRestoreAdminSession();
   });
 })();
