@@ -8527,8 +8527,8 @@ async function loadMyPastShifts(force=false) {
     ]);
 
     const myName = currentDriver.name;
-    if (preRes.ok) _myPastShifts.pre = (preRes.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})).filter(r=>r.Driver===myName);
-    if (eosRes.ok) _myPastShifts.eos = (eosRes.rows||[]).map((r,i)=>({...r,_rowIndex:i+2})).filter(r=>r.Driver===myName);
+    if (preRes.ok) _myPastShifts.pre = (preRes.rows||[]).map((r,i)=>({...r,_rowIndex:r._row||(i+2)})).filter(r=>r.Driver===myName);
+    if (eosRes.ok) _myPastShifts.eos = (eosRes.rows||[]).map((r,i)=>({...r,_rowIndex:r._row||(i+2)})).filter(r=>r.Driver===myName);
     _myPastShiftsLoaded = true;
   } catch(e) {
     if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:12px;color:#ef4444;font-size:12px;">❌ 로드 실패</div>';
@@ -8612,30 +8612,44 @@ function _normalizeEOS(r) {
   return r;
 }
 
-function openPastShiftPdf(rowIndex, type) {
+// ★ 서명 on-demand 로드 (bulk 응답에서 제외된 Signature 개별 fetch)
+async function _fetchSignature(sheetName, rowIndex) {
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_signature&sheet=' + encodeURIComponent(sheetName) + '&row=' + rowIndex);
+    const json = await res.json();
+    return (json.ok && json.sig) ? json.sig : '';
+  } catch(e) { console.warn('서명 로드 실패:', e); return ''; }
+}
+
+async function openPastShiftPdf(rowIndex, type) {
   const cache = type==='pre' ? _myPastShifts.pre : _myPastShifts.eos;
   let r = cache.find(x=>x._rowIndex===rowIndex);
   if (!r) { showToast('리포트를 찾을 수 없습니다','error'); return; }
   if (type !== 'pre') r = _normalizeEOS({...r});
 
   const isPre = type==='pre';
+  const sheetName = isPre ? 'Pre_Departure' : 'End_of_Shift';
+
+  // ★ 서명 on-demand 로드 (bulk 응답에서 Signature 제외되므로)
+  showToast('📄 리포트 불러오는 중...','info');
+  let sig = r.Signature || '';
+  if (!sig && r._hasSig) {
+    sig = await _fetchSignature(sheetName, rowIndex);
+  }
 
   if (isPre) {
-    // Pre Departure only
     const shift = {
       date: r.Date, rego: r.Rego, driver: r.Driver, seats: r.Seats,
       startKm: r.Start_KM ? Number(r.Start_KM) : null,
       fuel: r.Fuel, startTime: parseSheetTime(r.Start_Time)||r.Start_Time||'', remarks: r.Remarks,
       preChecks: (() => { try { return r.Check_Results ? JSON.parse(r.Check_Results) : []; } catch(e){return[];} })(),
-      preSignature: r.Signature || ''
+      preSignature: sig
     };
     openShiftReport(shift, 'pre');
   } else {
-    // End of Shift — try to find matching Pre record for complete report
     const matchPre = _myPastShifts.pre.find(p =>
       p.Driver === r.Driver && p.Rego === r.Rego && p.Date === r.Date
     );
-    // Parse EOS-stored fields
     const eosChecks = (() => { try { return r.Check_Results ? JSON.parse(r.Check_Results) : []; } catch(e){return[];} })();
     const eosDRs = (() => { try { return r.Daily_Reports ? JSON.parse(r.Daily_Reports) : []; } catch(e){return[];} })();
 
@@ -8645,12 +8659,11 @@ function openPastShiftPdf(rowIndex, type) {
       endKm: r.End_KM ? Number(r.End_KM) : null,
       endTime: parseSheetTime(r.End_Time)||r.End_Time||'',
       fuel: r.Fuel_End||r.Fuel||'', remarks: r.Remarks||'',
-      eosSignature: r.Signature || '',
+      eosSignature: sig,
       damage: r.Damage || '',
       endChecks: eosChecks,
       dailyReports: eosDRs
     };
-    // Merge Pre data if found (for Pre section display)
     if (matchPre) {
       if (!shift.startKm) shift.startKm = matchPre.Start_KM ? Number(matchPre.Start_KM) : null;
       shift.startTime = parseSheetTime(matchPre.Start_Time)||matchPre.Start_Time||'';
@@ -8658,7 +8671,12 @@ function openPastShiftPdf(rowIndex, type) {
       shift.seats = matchPre.Seats;
       shift.preRemarks = matchPre.Remarks;
       shift.preChecks = (() => { try { return matchPre.Check_Results ? JSON.parse(matchPre.Check_Results) : []; } catch(e){return[];} })();
-      shift.preSignature = matchPre.Signature || '';
+      // ★ Pre 서명도 on-demand 로드
+      let preSig = matchPre.Signature || '';
+      if (!preSig && matchPre._hasSig) {
+        preSig = await _fetchSignature('Pre_Departure', matchPre._rowIndex);
+      }
+      shift.preSignature = preSig;
       shift._hasPre = true;
     }
     openShiftReport(shift, 'eos');

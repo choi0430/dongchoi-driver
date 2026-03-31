@@ -9059,7 +9059,7 @@ async function loadShiftReports(force=false) {
       if (!res.ok) throw new Error('Pre HTTP ' + res.status);
       const json = await res.json();
       if (json.ok) {
-        _shiftCache.pre = (json.rows||[]).map((r,i)=>({...r, _rowIndex:i+2}));
+        _shiftCache.pre = (json.rows||[]).map((r,i)=>({...r, _rowIndex:r._row||(i+2)}));
         _shiftCacheTime.pre = Date.now();
       }
     }
@@ -9068,7 +9068,7 @@ async function loadShiftReports(force=false) {
       if (!res.ok) throw new Error('EOS HTTP ' + res.status);
       const json = await res.json();
       if (json.ok) {
-        _shiftCache.eos = (json.rows||[]).map((r,i)=>({...r, _rowIndex:i+2}));
+        _shiftCache.eos = (json.rows||[]).map((r,i)=>({...r, _rowIndex:r._row||(i+2)}));
         _shiftCacheTime.eos = Date.now();
       }
     }
@@ -9230,10 +9230,26 @@ function renderShiftTab() {
 }
 
 // ── PDF 보기 ──
-function viewShiftPdfAdmin(rowIndex, type) {
+// ★ 서명 on-demand 로드
+async function _fetchSignatureAdmin(sheetName, rowIndex) {
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_signature&sheet=' + encodeURIComponent(sheetName) + '&row=' + rowIndex);
+    const json = await res.json();
+    return (json.ok && json.sig) ? json.sig : '';
+  } catch(e) { console.warn('서명 로드 실패:', e); return ''; }
+}
+
+async function viewShiftPdfAdmin(rowIndex, type) {
   const cache = type === 'pre' ? _shiftCache.pre : _shiftCache.eos;
   const r = cache.find(x=>x._rowIndex===rowIndex);
   if (!r) { toast('리포트를 찾을 수 없습니다','er'); return; }
+
+  // ★ 서명 on-demand 로드 (bulk 응답에서 Signature 제외)
+  if (!r.Signature && r._hasSig) {
+    toast('📄 서명 로딩 중...','ok');
+    const sheetName = type === 'pre' ? 'Pre_Departure' : 'End_of_Shift';
+    r.Signature = await _fetchSignatureAdmin(sheetName, rowIndex);
+  }
   openShiftPdfAdmin(r, type);
 }
 
