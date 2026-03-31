@@ -7687,18 +7687,32 @@ async function renderWageAll(){
   if(!listEl) return;
 
   let html='';
-  weekData.forEach(wd=>{
+  weekData.forEach((wd,wi)=>{
     if(wd.wReports.length===0 && wd.entries.length===0) return;
     const wkEsc = escH(wd.wk);
-    // 주간 요약 카드
-    html += _weekSummaryCard(getWeekLabel(wd.wk), wd.drTotal, wd.sur, wd.paid, wd.wReports.length);
+    const detailId = 'wk-detail-'+wd.wk;
+    const balance = wd.drTotal - wd.paid;
+    const isPaid = balance <= 0;
+
+    // ── 주간 요약 카드 (클릭하면 접기/펼치기) ──
+    html += '<div style="cursor:pointer;" onclick="document.getElementById(\''+detailId+'\').style.display=document.getElementById(\''+detailId+'\').style.display===\'none\'?\'block\':\'none\';this.querySelector(\'.wk-arrow\').textContent=document.getElementById(\''+detailId+'\').style.display===\'none\'?\'▶\':\'▼\'">';
+    html += _weekSummaryCard(
+      '<span class="wk-arrow" style="font-size:11px;margin-right:4px;">▶</span>'+getWeekLabel(wd.wk),
+      wd.drTotal, wd.sur, wd.paid, wd.wReports.length
+    );
+    html += '</div>';
+
+    // ── 접히는 상세 영역 (기본 접힘) ──
+    html += '<div id="'+detailId+'" style="display:none;">';
+
     // 리포트 상세
     wd.wReports.forEach(r=>{ html += _reportRow(r); });
+
     // 지급 내역 + 추가 버튼
     html+='<div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:10px;">';
     html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'+
       '<div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;">💸 지급 내역</div>'+
-      '<button class="btn bac" style="font-size:10px;padding:3px 10px;border-radius:6px;" onclick="openWageEntry(null,\''+wkEsc+'\')">+ 지급 추가</button>'+
+      '<button class="btn bac" style="font-size:10px;padding:3px 10px;border-radius:6px;" onclick="event.stopPropagation();openWageEntry(null,\''+wkEsc+'\')">+ 지급 추가</button>'+
     '</div>';
     if(wd.entries.length>0){
       wd.entries.forEach((e,i)=>{
@@ -7707,15 +7721,16 @@ async function renderWageAll(){
             '<div style="font-size:10px;color:var(--t3);">'+escH(e.method||'현금')+(e.note?' · '+escH(e.note):'')+'</div></div>'+
           '<div style="display:flex;gap:6px;align-items:center;">'+
             '<span style="font-size:13px;font-weight:800;color:var(--ac);">$'+((e.amount||0)).toLocaleString()+'</span>'+
-            '<button class="btn bgh" style="font-size:10px;padding:2px 6px;" onclick="openWageEntry('+i+',\''+wkEsc+'\')">✏️</button>'+
-            '<button class="btn brd" style="font-size:10px;padding:2px 6px;" onclick="deleteWageEntry('+i+',\''+wkEsc+'\')">🗑</button>'+
+            '<button class="btn bgh" style="font-size:10px;padding:2px 6px;" onclick="event.stopPropagation();openWageEntry('+i+',\''+wkEsc+'\')">✏️</button>'+
+            '<button class="btn brd" style="font-size:10px;padding:2px 6px;" onclick="event.stopPropagation();deleteWageEntry('+i+',\''+wkEsc+'\')">🗑</button>'+
           '</div>'+
         '</div>';
       });
     } else {
       html+='<div style="text-align:center;padding:10px;color:var(--t3);font-size:11px;">지급 내역 없음</div>';
     }
-    html+='</div>';
+    html+='</div>'; // 지급 내역 div
+    html+='</div>'; // 접히는 상세 영역
   });
 
   if(!html) html='<div style="text-align:center;padding:24px;color:var(--t3);font-size:13px;">데이터가 없습니다.</div>';
