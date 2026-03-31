@@ -1706,21 +1706,87 @@ function rDash(){
   document.getElementById('qg').textContent=DB.G.length+'명';
   document.getElementById('qh').textContent=DB.H.length+'개';
   const als=[];
+  // ── 드라이버 면허 / Authority 만료 ──
   DB.D.forEach(d=>{
     const ld=du(d.License_Expiry),la=du(d.Authority_Expiry);
-    if(ld<90)als.push({c:ld<30?'var(--rd)':'var(--yl)',m:`${d.Name_KR||d.Name_EN} — 면허 ${ld<0?'만료됨':ld+'일 남음'}`});
-    if(la<90)als.push({c:la<30?'var(--rd)':'var(--yl)',m:`${d.Name_KR||d.Name_EN} — Authority ${la<0?'만료됨':la+'일 남음'}`});
+    if(ld<90){
+      const urgent=ld<0, warn=ld<30;
+      als.push({
+        sort: ld, type:'license',
+        bg: urgent?'#fef2f2':warn?'#fff7ed':'#fefce8',
+        bc: urgent?'#ef4444':warn?'#f97316':'#eab308',
+        fc: urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
+        icon: '🪪',
+        m: `${d.Name_KR||d.Name_EN} — 면허 ${urgent?'만료됨':ld+'일 남음'}`
+      });
+    }
+    if(la<90){
+      const urgent=la<0, warn=la<30;
+      als.push({
+        sort: la, type:'authority',
+        bg: urgent?'#fef2f2':warn?'#fff7ed':'#fefce8',
+        bc: urgent?'#ef4444':warn?'#f97316':'#eab308',
+        fc: urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
+        icon: '📜',
+        m: `${d.Name_KR||d.Name_EN} — Authority ${urgent?'만료됨':la+'일 남음'}`
+      });
+    }
   });
+  // ── 차량 Rego / HVIS / 서비스 KM ──
   DB.V.forEach(v=>{
     const rd=du(v.Rego_Date),hd=du(v.HVIS_Date);
-    if(v.Rego_Date&&rd<90)als.push({c:rd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — Rego ${rd<0?'만료됨':rd+'일 남음'}`});
-    if(v.HVIS_Date&&hd<90)als.push({c:hd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — HVIS ${hd<0?'만료됨':hd+'일 남음'}`});
-    const _nSKM=Number(v.Next_Service_KM)||0,_mKM=DB.regoMaxKM[v.Rego]||0,_svcRem=_nSKM-_mKM;
-    if(_nSKM>0&&_mKM>0&&_svcRem<=1000)als.push({c:'var(--pu)',m:v.Rego+' — 서비스까지 '+Math.max(0,_svcRem)+'km 남음'});
+    if(v.Rego_Date&&rd<90){
+      const urgent=rd<0, warn=rd<30;
+      als.push({
+        sort: rd, type:'rego',
+        bg: urgent?'#fef2f2':warn?'#fff7ed':'#fefce8',
+        bc: urgent?'#ef4444':warn?'#f97316':'#eab308',
+        fc: urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
+        icon: '🚗',
+        m: `${v.Rego} — Rego ${urgent?'만료됨':rd+'일 남음'}`
+      });
+    }
+    if(v.HVIS_Date&&hd<90){
+      const urgent=hd<0, warn=hd<30;
+      als.push({
+        sort: hd, type:'hvis',
+        bg: urgent?'#fef2f2':warn?'#fff7ed':'#fefce8',
+        bc: urgent?'#ef4444':warn?'#f97316':'#eab308',
+        fc: urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
+        icon: '🔧',
+        m: `${v.Rego} — HVIS ${urgent?'만료됨':hd+'일 남음'}`
+      });
+    }
+    // ★ 서비스 KM 알림 (조건 완화: 5000km 이하 또는 Next_Service_KM 미설정 시에도 표시)
+    const _nSKM=Number(v.Next_Service_KM)||0;
+    const _mKM=DB.regoMaxKM[v.Rego]||0;
+    if(_nSKM>0 && _mKM>0){
+      const _svcRem=_nSKM-_mKM;
+      if(_svcRem<=5000){
+        const urgent=_svcRem<=0, warn=_svcRem<=1000;
+        als.push({
+          sort: urgent?-9999:warn?-999:_svcRem, type:'service',
+          bg: urgent?'#fef2f2':warn?'#fdf4ff':'#f5f3ff',
+          bc: urgent?'#ef4444':warn?'#a855f7':'#8b5cf6',
+          fc: urgent?'#dc2626':warn?'#9333ea':'#7c3aed',
+          icon: '⚙️',
+          m: `${v.Rego} — 서비스 ${urgent?'기한 초과!':_svcRem.toLocaleString()+'km 남음'} (현재 ${_mKM.toLocaleString()}km / 다음 ${_nSKM.toLocaleString()}km)`
+        });
+      }
+    } else if(_nSKM>0 && _mKM===0){
+      // KM 데이터 없으면 안내만
+      als.push({
+        sort: 9998, type:'service',
+        bg:'#f0f9ff', bc:'#38bdf8', fc:'#0284c7', icon:'⚙️',
+        m: `${v.Rego} — 다음 서비스 ${_nSKM.toLocaleString()}km (현재 KM 데이터 없음)`
+      });
+    }
   });
+  // ★ 긴급도순 정렬 (낮은 값 = 더 긴급)
+  als.sort((a,b)=>a.sort-b.sort);
   document.getElementById('alct').textContent=als.length+'건';
   document.getElementById('als').innerHTML=als.length
-    ?als.map(a=>`<div style="background:var(--s1);border:1px solid var(--b2);border-left:3px solid ${a.c};border-radius:var(--rr);padding:9px 12px;margin-bottom:6px;font-size:13px">${a.m}</div>`).join('')
+    ?als.map(a=>`<div style="background:${a.bg};border:1px solid ${a.bc}33;border-left:4px solid ${a.bc};border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:13px;color:${a.fc};font-weight:500;">${a.icon} ${a.m}</div>`).join('')
     :'<div class="crd" style="color:var(--gn);text-align:center">✅ 현재 만료 예정 없음</div>';
 }
 
@@ -1792,10 +1858,16 @@ function renderHvis(){
         +(hvisDays<=30&&hvisDays>0?'<br><span style="color:#dc2626;font-size:11px;">&#x23F0; Booking required — 1 month before due date</span>':'')
         +'</div>';
     }
-    if(curKM>0&&kmToSvc<=1000){
-      alertHtml+='<div style="background:#faf5ff;border:1.5px solid #c084fc;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
-        +'&#x1F527; <b>'+v.Rego+'</b> — Service due in <b style="color:#7c3aed;">'+(kmToSvc<=0?'OVERDUE '+Math.abs(kmToSvc)+'km':kmToSvc+'km')+'</b>'
+    if(nextSvcKM>0 && curKM>0 && kmToSvc<=5000){
+      var svcBg=kmToSvc<=0?'#fef2f2':kmToSvc<=1000?'#faf5ff':'#f5f3ff';
+      var svcBd=kmToSvc<=0?'#ef4444':kmToSvc<=1000?'#c084fc':'#a78bfa';
+      var svcFc=kmToSvc<=0?'#dc2626':kmToSvc<=1000?'#7c3aed':'#6d28d9';
+      alertHtml+='<div style="background:'+svcBg+';border:1.5px solid '+svcBd+';border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
+        +'&#x1F527; <b>'+v.Rego+'</b> — Service due in <b style="color:'+svcFc+';">'+(kmToSvc<=0?'OVERDUE '+Math.abs(kmToSvc).toLocaleString()+'km':kmToSvc.toLocaleString()+'km')+'</b>'
         +' (Current: '+curKM.toLocaleString()+'km / Next: '+nextSvcKM.toLocaleString()+'km)</div>';
+    } else if(nextSvcKM>0 && curKM===0){
+      alertHtml+='<div style="background:#f0f9ff;border:1.5px solid #38bdf8;border-radius:9px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
+        +'&#x2699;&#xFE0F; <b>'+v.Rego+'</b> — Next service: '+nextSvcKM.toLocaleString()+'km (현재 KM 데이터 없음)</div>';
     }
 
     var vBk=bookings.filter(function(b){return b.rego===v.Rego;});
@@ -1827,6 +1899,21 @@ function renderHvis(){
       +'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;">'
       +'<div style="font-size:10px;color:var(--t3);margin-bottom:3px;">HVIS @1yr (Rego+12m)</div>'
       +'<div style="font-size:12px;font-weight:700;">'+fmtDate(sch12)+'</div></div></div>'
+      // ★ 서비스 KM 바 (Next_Service_KM 설정 시)
+      +(nextSvcKM>0?
+        (function(){
+          var pct=curKM>0?Math.min(100,Math.round(curKM/nextSvcKM*100)):0;
+          var barC=kmToSvc<=0?'#ef4444':kmToSvc<=1000?'#a855f7':kmToSvc<=3000?'#f59e0b':'#22c55e';
+          return '<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;margin-bottom:8px;grid-column:1/-1;">'
+            +'<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin-bottom:4px;">'
+            +'<span>⚙️ Service KM</span>'
+            +'<span style="font-weight:600;color:'+barC+';">'+(kmToSvc<=0?'OVERDUE ':'')+Math.abs(kmToSvc).toLocaleString()+'km '+(kmToSvc<=0?'초과':'남음')+'</span></div>'
+            +'<div style="background:var(--b1);border-radius:4px;height:6px;overflow:hidden;">'
+            +'<div style="background:'+barC+';height:100%;width:'+pct+'%;border-radius:4px;transition:width .3s;"></div></div>'
+            +'<div style="display:flex;justify-content:space-between;font-size:9px;color:var(--t3);margin-top:2px;">'
+            +'<span>현재 '+(curKM>0?curKM.toLocaleString()+'km':'—')+'</span>'
+            +'<span>다음 서비스 '+nextSvcKM.toLocaleString()+'km</span></div></div>';
+        })():'')
       +'<div style="font-size:11px;color:var(--t3);margin-bottom:6px;">&#x23F0; Inspection window: within 3 months of due date. Book 1 month before.</div>'
       +(lastB?'<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;font-size:11px;">'
         +'<b>Latest booking:</b> '+fmtDate(lastB.inspDate)+' '+(lastB.inspTime||'')+' — '+(lastB.location||'TBD')
