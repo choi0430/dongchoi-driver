@@ -2576,7 +2576,10 @@ async function deleteLedgerEntryFromSheet(rowIndex){
 
 function getWeekLabel(dateStr){
   // dateStr: "YYYY-MM-DD" (월요일) → Mon dd/mm/yyyy — Sun dd/mm/yyyy
-  const d = new Date(dateStr + 'T00:00:00');
+  if(!dateStr) return '(날짜 없음)';
+  const iso = parseToISO(String(dateStr)) || String(dateStr);
+  const d = new Date(iso + 'T00:00:00');
+  if(isNaN(d.getTime())) return '(잘못된 날짜)';
   const sun = new Date(d); sun.setDate(d.getDate()+6);
   const fmt = x => String(x.getDate()).padStart(2,'0')+'/'+(x.getMonth()+1).toString().padStart(2,'0')+'/'+x.getFullYear();
   return fmt(d)+' — '+fmt(sun);
@@ -6402,7 +6405,7 @@ async function renderWageAll() {
   const allWeeks = new Set();
   Object.values(wages).forEach(dw => Object.keys(dw).forEach(w => allWeeks.add(w)));
   rows.forEach(r => { if(r._isoDate) allWeeks.add(getMondayOfDate(r._isoDate)); });
-  const sortedWeeks = [...allWeeks].filter(Boolean).sort((a,b) => b.localeCompare(a));
+  const sortedWeeks = [...allWeeks].filter(w => w && /^\d{4}-\d{2}-\d{2}$/.test(w)).sort((a,b) => b.localeCompare(a));
 
   // 주차 셀렉트 채우기
   const wSel = document.getElementById('wage-all-week-sel');
@@ -6489,7 +6492,11 @@ async function renderWageAll() {
 }
 
 function getMondayOfDate(isoDate) {
-  const d = new Date(isoDate);
+  if(!isoDate) return '';
+  // dd/MM/yyyy → YYYY-MM-DD 변환
+  const iso = parseToISO(String(isoDate)) || String(isoDate);
+  const d = new Date(iso + 'T00:00:00');
+  if(isNaN(d.getTime())) return '';
   const day = d.getDay();
   const diff = (day===0) ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
@@ -6522,13 +6529,25 @@ async function loadWagesFromSheet(forceRefresh){
     const sheetWages={};
     (json.rows||[]).forEach(r=>{
       const drv=String(r.Driver||'').trim();
-      const ws=String(r.WeekStart||'').trim();
+      // ★ WeekStart 정규화: dd/MM/yyyy 등 → YYYY-MM-DD
+      let ws=String(r.WeekStart||'').trim();
+      if(ws && !/^\d{4}-\d{2}-\d{2}$/.test(ws)) {
+        const parsed = parseToISO(ws);
+        if(parsed) ws = parsed;
+        else { console.warn('[Wages] Invalid WeekStart:', ws, 'for', drv); return; }
+      }
       if(!drv||!ws) return;
+      // ★ Date 필드도 정규화
+      let entryDate = String(r.Date||'').trim();
+      if(entryDate && !/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) {
+        const pd = parseToISO(entryDate);
+        if(pd) entryDate = pd;
+      }
       if(!sheetWages[drv]) sheetWages[drv]={};
       if(!sheetWages[drv][ws]) sheetWages[drv][ws]={entries:[]};
       sheetWages[drv][ws].entries.push({
         _rowIndex: parseInt(r._rowIndex)||null,
-        date:   r.Date      ||'',
+        date:   entryDate   ||'',
         amount: Number(r.Amount)||0,
         method: r.PayMethod ||'현금',
         note:   r.Notes     ||'',
@@ -7054,7 +7073,7 @@ function initWageWeeks(){
     wages[drv] = drvWages;
     saveWages(wages);
   }
-  const weeks = Object.keys(drvWages).sort((a,b)=>b.localeCompare(a));
+  const weeks = Object.keys(drvWages).filter(w => /^\d{4}-\d{2}-\d{2}$/.test(w)).sort((a,b)=>b.localeCompare(a));
   const wSel = document.getElementById('wage-week-sel');
   if(!wSel) return;
   wSel.innerHTML = weeks.map(w=>'<option value="'+w+'">'+getWeekLabel(w)+'</option>').join('');
@@ -7264,22 +7283,22 @@ async function saveWageEntry(){
 
   // 2) GAS 시트 sync
   const row={Driver:ST.wageDriver,WeekStart:ST.wageWeek,Date:date,Amount:amount,PayMethod:method,Notes:note};
+  let gasSaveOk = false;
   try{
     if(isEdit && existingRowIndex){
-      // 기존 행 업데이트
       const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({action:'update_wage',rowIndex:existingRowIndex,data:row})});
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json=await res.json();
+      gasSaveOk = !!json.ok;
       toast(json.ok?'✅ 수정 & 시트 저장':'⚠️ 수정됨 (시트 sync 실패)','ok');
     } else {
-      // 새 행 추가
       const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({action:'add_wage',data:row})});
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json=await res.json();
+      gasSaveOk = !!json.ok;
       if(json.ok && json.row){
-        // _rowIndex 업데이트
         const w2=getWages();
         const drvEntries=w2[ST.wageDriver]?.[ST.wageWeek]?.entries||[];
         const e2=drvEntries.find(e=>e.date===date&&e.amount===amount&&!e._rowIndex);
@@ -7287,15 +7306,17 @@ async function saveWageEntry(){
       }
       toast(json.ok?'✅ 추가 & 시트 저장':'⚠️ 추가됨 (시트 sync 실패)','ok');
     }
-    // 동기화 완료 후 시트에서 재로드 (저장 성공 시에만)
-    if(true) {
-      _wagesLastSync = 0; // 강제 재조회
+    // ★ GAS 저장 성공 시에만 시트에서 재로드 (실패 시 로컬 데이터 보존)
+    if(gasSaveOk) {
+      _wagesLastSync = 0;
       try { await loadWagesFromSheet(true); } catch(e2){ console.warn('Wage reload 실패, 로컬 유지:', e2); }
-      renderWage();
     }
+    renderWage();
   }catch(e){
     console.warn('급여 시트 sync 실패:',e);
-    toast('저장됨 (오프라인 — 나중에 동기화)','ok');
+    toast('✅ 로컬 저장 완료 (시트 동기화는 나중에)','ok');
+    // ★ GAS 실패해도 로컬에는 이미 저장됨 — loadWagesFromSheet 호출하지 않음
+    renderWage();
   }
 }
 
