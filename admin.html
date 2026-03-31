@@ -1247,7 +1247,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 <div class="pg" id="pbal">
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">📊 거래처 잔액</div><div class="ssb">여행사 · 외주 · 드라이버 잔액 관리</div></div>
-    <button class="btn bgh sm" onclick="syncBalanceData(true)">🔄 동기화</button>
+    <button class="btn bgh sm" onclick="this.textContent='⏳ 로딩...';this.disabled=true;syncBalanceData(true).then(()=>renderBalance()).catch(e=>toast('동기화 실패: '+e.message,'er')).finally(()=>{this.textContent='🔄 동기화';this.disabled=false;})">🔄 동기화</button>
   </div>
 
   <!-- 3-way 탭 -->
@@ -3179,8 +3179,13 @@ function showBalTab(tab){
 }
 
 async function initBalance(){
-  if(!_balLoaded) await syncBalanceData(false);
-  renderBalance();
+  try {
+    if(!_balLoaded) await syncBalanceData(false);
+    renderBalance();
+  } catch(e) {
+    console.warn('initBalance 실패:', e);
+    toast('잔액 로드 실패: '+e.message,'er');
+  }
 }
 
 async function syncBalanceData(force){
