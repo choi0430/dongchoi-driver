@@ -800,16 +800,17 @@ function updateReport(sheetName, rowIndex, data) {
     const sheet = ss.getSheetByName(sheetName);
     if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
 
-    const headers = REPORT_HEADERS[sheetName];
-    if (!headers) return {ok: false, msg: 'Unknown sheet: ' + sheetName};
-
     const ri = parseInt(rowIndex);
     if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
 
     // ★ 실제 시트 헤더를 읽어서 매핑 (컬럼 순서 불일치 방지)
     const lastCol = sheet.getLastColumn();
-    const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : headers;
-    const row = actualHeaders.map(h => data[h] !== undefined ? data[h] : '');
+    const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : [];
+    if (actualHeaders.length === 0) return {ok: false, msg: 'No headers found'};
+
+    // ★ 기존 행 데이터 읽기 (전송되지 않은 필드 보존)
+    const existingRow = sheet.getRange(ri, 1, 1, lastCol).getValues()[0];
+    const row = actualHeaders.map((h, i) => data[h] !== undefined ? data[h] : existingRow[i]);
     sheet.getRange(ri, 1, 1, row.length).setValues([row]);
 
     return {ok: true};
@@ -982,14 +983,24 @@ function replaceMasterSheet(sheetName, rows) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, sheetName);
-    const headers = MASTER_HEADERS[sheetName];
+
+    // ★ 실제 시트 헤더 사용 (MASTER_HEADERS 대신)
+    const lastCol = sheet.getLastColumn();
+    const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : (MASTER_HEADERS[sheetName] || []);
 
     const lastRow = sheet.getLastRow();
     if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
 
     if (rows && rows.length > 0) {
-      const data = rows.map(obj => headers.map(h => obj[h] !== undefined ? obj[h] : ''));
-      sheet.getRange(2, 1, data.length, headers.length).setValues(data);
+      const data = rows.map(obj => {
+        const normMap = buildNormMap(obj);
+        return actualHeaders.map(h => {
+          if (obj[h] !== undefined) return obj[h];
+          const nk = normalizeKey(h);
+          return normMap[nk] !== undefined ? normMap[nk] : '';
+        });
+      });
+      sheet.getRange(2, 1, data.length, actualHeaders.length).setValues(data);
     }
 
     return {ok: true, count: rows ? rows.length : 0};
@@ -1029,7 +1040,7 @@ function initAllMasters() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Wages Operations (Fixed to 6 columns)
+// Wages Operations (★ 헤더 이름 기반 읽기/쓰기)
 // ═══════════════════════════════════════════════════════════════════════════
 
 function addWage(data) {
@@ -1038,17 +1049,19 @@ function addWage(data) {
     const sheet = ensureSheet(ss, 'Wages');
 
     const rowId = Date.now().toString();
-    const amount = parseFloat(data.Amount) || 0;
+    data.RowID = rowId;
+    data.Amount = parseFloat(data.Amount) || 0;
+    if (!data.PayMethod) data.PayMethod = 'Cash';
 
-    const newRow = [
-      rowId,
-      data.Driver || '',
-      data.WeekStart || '',
-      data.Date || '',
-      amount,
-      data.PayMethod || 'Cash',
-      data.Notes || ''
-    ];
+    // ★ 실제 시트 헤더 기반으로 행 구성
+    const lastCol = sheet.getLastColumn();
+    const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : MASTER_HEADERS['Wages'];
+    const normMap = buildNormMap(data);
+    const newRow = actualHeaders.map(h => {
+      if (data[h] !== undefined) return data[h];
+      const nk = normalizeKey(h);
+      return normMap[nk] !== undefined ? normMap[nk] : '';
+    });
 
     sheet.appendRow(newRow);
     return {ok: true, row: sheet.getLastRow(), rowId};
@@ -1068,17 +1081,21 @@ function updateWage(rowIndex, data) {
     const lastRow = sheet.getLastRow();
     if (ri > lastRow) return {ok: false, msg: 'Row does not exist'};
 
-    const amount = parseFloat(data.Amount) || 0;
+    data.Amount = parseFloat(data.Amount) || 0;
+    if (!data.PayMethod) data.PayMethod = 'Cash';
 
-    sheet.getRange(ri, 1, 1, 7).setValues([[
-      data.RowID || Date.now().toString(),
-      data.Driver || '',
-      data.WeekStart || '',
-      data.Date || '',
-      amount,
-      data.PayMethod || 'Cash',
-      data.Notes || ''
-    ]]);
+    // ★ 실제 시트 헤더 기반 + 기존 데이터 보존
+    const lastCol = sheet.getLastColumn();
+    const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : MASTER_HEADERS['Wages'];
+    const existingRow = sheet.getRange(ri, 1, 1, lastCol).getValues()[0];
+    const normMap = buildNormMap(data);
+    const row = actualHeaders.map((h, i) => {
+      if (data[h] !== undefined) return data[h];
+      const nk = normalizeKey(h);
+      if (normMap[nk] !== undefined) return normMap[nk];
+      return existingRow[i]; // ★ 전송되지 않은 필드 기존값 보존
+    });
+    sheet.getRange(ri, 1, 1, row.length).setValues([row]);
 
     return {ok: true};
   } catch (err) {
@@ -1111,16 +1128,21 @@ function replaceWages(rows) {
     if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
 
     if (rows && rows.length > 0) {
-      const newData = rows.map(r => [
-        r.RowID || Date.now().toString(),
-        r.Driver || '',
-        r.WeekStart || '',
-        r.Date || '',
-        parseFloat(r.Amount) || 0,
-        r.PayMethod || 'Cash',
-        r.Notes || ''
-      ]);
-      sheet.getRange(2, 1, newData.length, 7).setValues(newData);
+      // ★ 실제 시트 헤더 기반으로 행 구성
+      const lastCol = sheet.getLastColumn();
+      const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : MASTER_HEADERS['Wages'];
+      const newData = rows.map(r => {
+        const normMap = buildNormMap(r);
+        return actualHeaders.map(h => {
+          if (r[h] !== undefined) return h === 'Amount' ? (parseFloat(r[h]) || 0) : r[h];
+          const nk = normalizeKey(h);
+          if (normMap[nk] !== undefined) return nk === 'amount' ? (parseFloat(normMap[nk]) || 0) : normMap[nk];
+          if (h === 'RowID') return Date.now().toString();
+          if (h === 'PayMethod') return 'Cash';
+          return '';
+        });
+      });
+      sheet.getRange(2, 1, newData.length, actualHeaders.length).setValues(newData);
     }
 
     return {ok: true, count: rows ? rows.length : 0};
@@ -1224,15 +1246,23 @@ function replaceNotices(rows) {
     if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
 
     if (rows && rows.length > 0) {
-      const newData = rows.map(r => [
-        r.id || r.ID || String(Date.now()),
-        r.title || r.Title || '',
-        r.content || r.Content || '',
-        r.type || r.Type || 'info',
-        r.date || r.Date || '',
-        r.active === false || r.Active === 'false' ? 'false' : 'true'
-      ]);
-      sheet.getRange(2, 1, newData.length, 6).setValues(newData);
+      // ★ 실제 시트 헤더 기반으로 행 구성
+      const lastCol = sheet.getLastColumn();
+      const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : MASTER_HEADERS['Notices'];
+      const newData = rows.map(r => {
+        const normMap = buildNormMap(r);
+        return actualHeaders.map(h => {
+          if (r[h] !== undefined) return r[h];
+          const nk = normalizeKey(h);
+          if (normMap[nk] !== undefined) return normMap[nk];
+          // 필드별 기본값 처리
+          if (nk === 'id') return r.id || r.ID || String(Date.now());
+          if (nk === 'type') return 'info';
+          if (nk === 'active') return r.active === false || r.Active === 'false' ? 'false' : 'true';
+          return '';
+        });
+      });
+      sheet.getRange(2, 1, newData.length, actualHeaders.length).setValues(newData);
     }
 
     return {ok: true, count: rows ? rows.length : 0};
@@ -1564,9 +1594,12 @@ function saveInvoice(data) {
     const sydNow = Utilities.formatDate(now, 'Australia/Sydney', 'dd/MM/yyyy HH:mm:ss');
     if (!data.IssuedDate) data.IssuedDate = sydNow;
 
-    const rowArr = headers.map(h => {
+    // ★ 기존 행 데이터 보존 (전송되지 않은 필드 유지)
+    const existingData = existingRow > 0 ? allData[existingRow - 1] : [];
+    const rowArr = headers.map((h, i) => {
       if (h === 'InvNumber') return invNum;
-      return data[h] !== undefined ? data[h] : '';
+      if (data[h] !== undefined) return data[h];
+      return existingRow > 0 && i < existingData.length ? existingData[i] : '';
     });
 
     if (existingRow > 0) {
