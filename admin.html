@@ -3190,14 +3190,26 @@ async function syncBalanceData(force){
         const st = String(inv.Status||'').trim().toLowerCase();
         return st === 'issued' || st === 'emailed' || st === 'paid';
       });
+      // ★ InvNumber 기준으로 중복 제거 (같은 인보이스 번호 여러 행 → 1건만)
+      const uniqueInvMap = new Map();
+      invoices.forEach(inv => {
+        const invNum = String(inv.InvNumber||'').trim();
+        if(invNum && !uniqueInvMap.has(invNum)) uniqueInvMap.set(invNum, inv);
+      });
+      const uniqueInvoices = [...uniqueInvMap.values()];
+
       const existingInvIds = new Set(_balAgencyTxns.map(t=>String(t.InvoiceID||'').trim()));
-      const missingInvs = invoices.filter(inv => !existingInvIds.has(String(inv.InvNumber||'').trim()));
+      const missingInvs = uniqueInvoices.filter(inv => !existingInvIds.has(String(inv.InvNumber||'').trim()));
       if(missingInvs.length > 0){
         console.log('[Balance Sync] 인보이스→거래 자동 등록:', missingInvs.length, '건');
         for(const inv of missingInvs){
+          const invNum = String(inv.InvNumber||'').trim();
+          // ★ 루프 내 중복 방지: 이미 이번 배치에서 등록한 InvNumber는 스킵
+          if(existingInvIds.has(invNum)) continue;
+
           const gt = parseFloat(inv.GrandTotal)||0;
           if(gt <= 0) continue;
-          // Deductions 파싱 (선수금/크레딧 차감)
+          // Deductions 파싱 (선수금/크레딧)
           let totalDeduct = 0;
           try {
             let dedJSON = '';
@@ -3208,17 +3220,19 @@ async function syncBalanceData(force){
             if(inv.Deductions && String(inv.Deductions).trim().startsWith('[')) dedJSON = String(inv.Deductions);
             if(dedJSON) { JSON.parse(dedJSON).forEach(d=>{ totalDeduct += (d.amount||0); }); }
           } catch(e){}
-          const amountDue = Math.round((gt - totalDeduct)*100)/100;
+          // ★ DR = 총 인보이스 금액, CR = 선수금/크레딧 차감액 → Balance = DR - CR
+          const drAmount = Math.round(gt * 100) / 100;
+          const crAmount = Math.round(totalDeduct * 100) / 100;
           const issuedDate = String(inv.IssuedDate||'').trim();
           const txnDate = parseToISO(issuedDate) || toLocalISO(new Date());
           const txnData = {
             Agency:     inv.Agency||'',
             Date:       txnDate,
-            InvoiceID:  inv.InvNumber||'',
+            InvoiceID:  invNum,
             TourCode:   '',
-            DR:         amountDue,
-            CR:         0,
-            Remark:     '인보이스 자동 동기화',
+            DR:         drAmount,
+            CR:         crAmount,
+            Remark:     crAmount > 0 ? `인보이스 자동 (선수금/크레딧 $${crAmount})` : '인보이스 자동 동기화',
             StartDate:  inv.PeriodFrom||'',
             FinishDate: inv.PeriodTo||'',
             DueDate:    ''
@@ -3231,9 +3245,10 @@ async function syncBalanceData(force){
             const j = await r.json();
             if(j.ok){
               _balAgencyTxns.push({...txnData, _rowIndex:j.row});
-              console.log('[Balance Sync] 등록 완료:', inv.InvNumber);
+              existingInvIds.add(invNum); // ★ 등록 후 즉시 Set에 추가
+              console.log('[Balance Sync] 등록 완료:', invNum, 'DR:', drAmount, 'CR:', crAmount);
             }
-          } catch(e){ console.warn('[Balance Sync] 등록 실패:', inv.InvNumber, e); }
+          } catch(e){ console.warn('[Balance Sync] 등록 실패:', invNum, e); }
         }
       }
     }
@@ -3584,19 +3599,31 @@ function renderBalDetail(){
       <thead><tr style="border-bottom:1px solid var(--b2);color:var(--t3);font-size:10px;">
         <th style="text-align:left;padding:6px 4px;">날짜</th>
         <th style="text-align:left;padding:6px 4px;">인보이스</th>
-        <th style="text-align:left;padding:6px 4px;">투어</th>
+        <th style="text-align:left;padding:6px 4px;">비고</th>
         <th style="text-align:right;padding:6px 4px;">DR</th>
         <th style="text-align:right;padding:6px 4px;">CR</th>
+        <th style="text-align:right;padding:6px 4px;">잔액</th>
         <th style="text-align:center;padding:6px 2px;">⚙</th>
       </tr></thead><tbody>`;
+    // ★ 날짜 오름차순으로 누적 잔액 계산 후 다시 내림차순 표시
+    const sortedAsc = [...rows].sort((a,b)=>(a.Date||'').localeCompare(b.Date||''));
+    let runBal = 0;
+    const balMap = new Map();
+    sortedAsc.forEach(r => {
+      runBal += (Number(r.DR)||0) - (Number(r.CR)||0);
+      balMap.set(r, Math.round(runBal*100)/100);
+    });
     rows.forEach((r,i)=>{
       const realIdx = _balAgencyTxns.indexOf(r);
+      const bal = balMap.get(r)||0;
+      const remark = r.Remark || r.TourCode || '—';
       html += `<tr style="border-bottom:1px solid var(--b1);">
         <td style="padding:6px 4px;white-space:nowrap;">${r.Date||'—'}</td>
         <td style="padding:6px 4px;">${r.InvoiceID||'—'}</td>
-        <td style="padding:6px 4px;">${r.TourCode||'—'}</td>
+        <td style="padding:6px 4px;font-size:10px;color:var(--t3);">${remark}</td>
         <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
         <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+        <td style="padding:6px 4px;text-align:right;font-weight:600;font-family:var(--fn);color:${bal>0?'var(--or)':bal<0?'var(--gn)':'var(--t2)'};">$${Math.abs(bal).toLocaleString('en',{minimumFractionDigits:2})}</td>
         <td style="padding:6px 2px;text-align:center;">
           <span onclick="event.stopPropagation();openBalTxnModal('agency',${realIdx})" style="cursor:pointer;">✏️</span>
           <span onclick="event.stopPropagation();deleteBalTxn('agency',${realIdx})" style="cursor:pointer;margin-left:2px;">🗑</span>
