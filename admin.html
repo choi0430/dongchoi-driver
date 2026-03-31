@@ -3235,6 +3235,9 @@ async function syncBalanceData(force){
       }
     }
 
+    // ★ Ledger → SUB_Txn 자동 동기화 (외주 + Dong Choi 차량)
+    await _syncLedgerToSubTxn();
+
     // Driver wage: derive from Daily_Report DR_Cost + wages
     _buildWageTxns();
     _balLoaded = true;
@@ -3242,6 +3245,85 @@ async function syncBalanceData(force){
   } catch(e){
     console.warn('Balance sync 실패:', e);
     if(force) toast('동기화 실패: '+e.message,'err');
+  }
+}
+
+// ★ Ledger 데이터 → SUB_Txn 자동 등록 (외주 차량 + Dong Choi 차량 모두 포함)
+async function _syncLedgerToSubTxn(){
+  try {
+    const ledger = getLedger();
+    if(!ledger || ledger.length === 0) return;
+
+    // 기존 SUB_Txn에서 Ledger 자동 등록분 식별 (Description에 "LEDGER:" 접두사)
+    const existingKeys = new Set(
+      _balSubTxns.filter(t => String(t.Description||'').startsWith('LEDGER:'))
+        .map(t => String(t.Description||''))
+    );
+
+    const newTxns = [];
+    const vehicles = DB.V || [];
+
+    ledger.forEach(wk => {
+      (wk.entries || []).forEach(e => {
+        if(!e.rego || !e.tour) return;
+        const ta = parseFloat(e.ta) || 0;
+        if(ta <= 0) return;
+
+        // 차량 소유주 조회
+        const veh = vehicles.find(v => v.Rego === e.rego);
+        const owner = (veh?.Owner || '').trim();
+        if(!owner) return;
+
+        // 고유 키: LEDGER:날짜_차량번호_투어
+        const ledgerKey = `LEDGER:${e.date}_${e.rego}_${e.tour}`;
+        if(existingKeys.has(ledgerKey)) return; // 이미 등록됨
+
+        const isDongChoi = DC_OWNERS.includes(owner);
+        let drAmount;
+
+        if(isDongChoi) {
+          // ★ Dong Choi 차량: DR = TA (여행사 청구 금액과 동일 → 수익 0)
+          drAmount = ta;
+        } else {
+          // 외주 차량: DR = subTotal (서브 지급 비용)
+          drAmount = parseFloat(e.subTotal) || 0;
+        }
+
+        if(drAmount <= 0) return;
+
+        // SubCompany = Dong Choi일 경우 'DONG CHOI PTY LTD', 아니면 Owner
+        const subCompany = isDongChoi ? 'DONG CHOI PTY LTD' : owner;
+
+        newTxns.push({
+          SubCompany: subCompany,
+          Category: 'Outsourcing',
+          Date: e.date || '',
+          InvoiceNo: '',
+          Description: ledgerKey,
+          DR: drAmount,
+          CR: 0,
+          Remark: `${e.tour} / ${e.rego}` + (isDongChoi ? ' (자사차량)' : '')
+        });
+      });
+    });
+
+    if(newTxns.length === 0) return;
+    console.log('[SUB Sync] Ledger→SUB_Txn 자동 등록:', newTxns.length, '건');
+
+    for(const txn of newTxns) {
+      try {
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST', headers: {'Content-Type':'text/plain'},
+          body: JSON.stringify({action:'add_sub_txn', data:txn, _user:getAdminUser()})
+        });
+        const j = await res.json();
+        if(j.ok) {
+          _balSubTxns.push({...txn, _rowIndex:j.row||j.rowIndex});
+        }
+      } catch(e2) { console.warn('[SUB Sync] 등록 실패:', txn.Description, e2); }
+    }
+  } catch(e) {
+    console.warn('[SUB Sync] Ledger→SUB_Txn 동기화 오류:', e);
   }
 }
 
@@ -3642,7 +3724,8 @@ function openBalTxnModal(type, idx){
     if(idx!==null) existing = _balSubTxns[idx];
     const subs = [...new Set(_balSubTxns.map(t=>t.SubCompany).filter(Boolean))];
     // Also include Sub_Rates + M_PriceSub + M_Vehicles Owner (서브 회사)
-    const srCompanies = [...new Set([...Object.keys(getSubRates()), ...Object.keys(DB.PS||{}), ...DB.V.filter(v=>!DC_OWNERS.includes(v.Owner)).map(v=>v.Owner).filter(Boolean)])];
+    // ★ DC_OWNERS 포함: Dong Choi도 외주로 관리 (모든 차량 소유주 포함)
+    const srCompanies = [...new Set([...Object.keys(getSubRates()), ...Object.keys(DB.PS||{}), ...DB.V.map(v=>v.Owner).filter(Boolean), 'DONG CHOI PTY LTD'])];
     srCompanies.forEach(c=>{ if(!subs.includes(c)) subs.push(c); });
     body.innerHTML = `
       <div style="display:grid;gap:10px;">
@@ -6472,7 +6555,7 @@ async function pushWagesToSheet(){
     Object.entries(weeks).forEach(([ws,wk])=>
       (wk.entries||[]).forEach(e=> rows.push({
         Driver:drv, WeekStart:ws, Date:e.date,
-        Amount:e.amount, Method:e.method||'현금', Note:e.note||''
+        Amount:e.amount, PayMethod:e.method||'현금', Notes:e.note||''
       }))
     )
   );
@@ -7180,7 +7263,7 @@ async function saveWageEntry(){
   renderWage();
 
   // 2) GAS 시트 sync
-  const row={Driver:ST.wageDriver,WeekStart:ST.wageWeek,Date:date,Amount:amount,Method:method,Note:note};
+  const row={Driver:ST.wageDriver,WeekStart:ST.wageWeek,Date:date,Amount:amount,PayMethod:method,Notes:note};
   try{
     if(isEdit && existingRowIndex){
       // 기존 행 업데이트
@@ -7204,10 +7287,12 @@ async function saveWageEntry(){
       }
       toast(json.ok?'✅ 추가 & 시트 저장':'⚠️ 추가됨 (시트 sync 실패)','ok');
     }
-    // 동기화 완료 후 시트에서 재로드
-    _wagesLastSync = 0; // 강제 재조회
-    await loadWagesFromSheet(true);
-    renderWage();
+    // 동기화 완료 후 시트에서 재로드 (저장 성공 시에만)
+    if(true) {
+      _wagesLastSync = 0; // 강제 재조회
+      try { await loadWagesFromSheet(true); } catch(e2){ console.warn('Wage reload 실패, 로컬 유지:', e2); }
+      renderWage();
+    }
   }catch(e){
     console.warn('급여 시트 sync 실패:',e);
     toast('저장됨 (오프라인 — 나중에 동기화)','ok');
