@@ -1725,8 +1725,9 @@ function rDash(){
     if(v.Rego_Date&&rd<90)als.push({c:rd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — Rego ${rd<0?'만료됨':rd+'일 남음'}`});
     if(v.HVIS_Date&&hd<90)als.push({c:hd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — HVIS ${hd<0?'만료됨':hd+'일 남음'}`});
     const _cKM=Math.max(Number(v.Current_KM)||0, DB.regoMaxKM[v.Rego]||0),_lKM=Number(v.Last_Service_KM)||0,_iKM=Number(v.Service_Interval)||10000;
-    const _nKM=Number(v.Next_Service_KM)||(_lKM?_lKM+_iKM:0);
-    if(_cKM>0&&_nKM>0&&(_nKM-_cKM)<=1000)als.push({c:'var(--pu)',m:v.Rego+' — 서비스까지 '+Math.max(0,_nKM-_cKM)+'km 남음'});
+    const _nKM=Number(v.Next_Service_KM)||(_lKM+_iKM);
+    const _remKM=_nKM-_cKM;
+    if(_cKM>0&&(_remKM)<=1000)als.push({c:_remKM<=0?'var(--rd)':'var(--pu)',m:v.Rego+' — '+(_remKM<=0?'정비 초과 '+Math.abs(_remKM).toLocaleString()+'km':'서비스까지 '+_remKM+'km 남음')});
   });
   document.getElementById('alct').textContent=als.length+'건';
   document.getElementById('als').innerHTML=als.length
@@ -1924,8 +1925,8 @@ function renderMaint(){
     var curKM = Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0);
     var lastSvc = Number(v.Last_Service_KM)||0;
     var svcInt = Number(v.Service_Interval)||10000;
-    var nextSvcKM = Number(v.Next_Service_KM)||(lastSvc?lastSvc+svcInt:0);
-    var remainKM = nextSvcKM ? nextSvcKM - curKM : 0;
+    var nextSvcKM = Number(v.Next_Service_KM)||(lastSvc+svcInt);
+    var remainKM = nextSvcKM - curKM;
     var urgColor = remainKM<=0?'var(--rd)':remainKM<=1000?'var(--or)':remainKM<=3000?'var(--yl)':'var(--gn)';
     var urgLabel = remainKM<=0?'OVERDUE':remainKM<=1000?'긴급':remainKM<=3000?'주의':'양호';
     summaryHtml+='<div style="background:var(--sf2);border-radius:10px;padding:10px 12px;border-left:3px solid '+urgColor+';">';
@@ -2086,9 +2087,9 @@ async function rV(q=''){
           const cKM=Math.max(Number(v.Current_KM)||0, DB.regoMaxKM?.[v.Rego]||0);
           const lKM=Number(v.Last_Service_KM)||0;
           const iKM=Number(v.Service_Interval)||10000;
-          const nKM=Number(v.Next_Service_KM)||(lKM?lKM+iKM:0);
-          const remain=nKM?nKM-cKM:0;
-          if(!cKM||!nKM) return '';
+          const nKM=Number(v.Next_Service_KM)||(lKM+iKM);
+          const remain=nKM-cKM;
+          if(!cKM) return '';
           const col=remain<=0?'tr':remain<=1000?'to':remain<=3000?'ty':'tg';
           const lbl=remain<=0?'초과 '+Math.abs(remain).toLocaleString()+'km':'정비: '+remain.toLocaleString()+'km';
           return `<span class="tag ${col}">${lbl}</span>`;
