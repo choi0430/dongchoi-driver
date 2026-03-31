@@ -1717,21 +1717,23 @@ function rDash(){
   const als=[];
   DB.D.forEach(d=>{
     const ld=du(d.License_Expiry),la=du(d.Authority_Expiry);
-    if(ld<90)als.push({c:ld<30?'var(--rd)':'var(--yl)',m:`${d.Name_KR||d.Name_EN} — 면허 ${ld<0?'만료됨':ld+'일 남음'}`});
-    if(la<90)als.push({c:la<30?'var(--rd)':'var(--yl)',m:`${d.Name_KR||d.Name_EN} — Authority ${la<0?'만료됨':la+'일 남음'}`});
+    if(ld<90)als.push({c:ld<30?'#dc2626':'#f59e0b',bg:ld<30?'#fef2f2':'#fffbeb',icon:'🪪',m:`${d.Name_KR||d.Name_EN} — 면허 ${ld<0?'만료됨':ld+'일 남음'}`});
+    if(la<90)als.push({c:la<30?'#dc2626':'#f59e0b',bg:la<30?'#fef2f2':'#fffbeb',icon:'📋',m:`${d.Name_KR||d.Name_EN} — Authority ${la<0?'만료됨':la+'일 남음'}`});
   });
   DB.V.forEach(v=>{
     const rd=du(v.Rego_Date),hd=du(v.HVIS_Date);
-    if(v.Rego_Date&&rd<90)als.push({c:rd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — Rego ${rd<0?'만료됨':rd+'일 남음'}`});
-    if(v.HVIS_Date&&hd<90)als.push({c:hd<30?'var(--rd)':'var(--yl)',m:`${v.Rego} — HVIS ${hd<0?'만료됨':hd+'일 남음'}`});
+    if(v.Rego_Date&&rd<90)als.push({c:rd<30?'#dc2626':'#f59e0b',bg:rd<30?'#fef2f2':'#fffbeb',icon:'🚌',m:`${v.Rego} — Rego ${rd<0?'만료됨':rd+'일 남음'}`});
+    if(v.HVIS_Date&&hd<90)als.push({c:hd<30?'#dc2626':'#f59e0b',bg:hd<30?'#fef2f2':'#fffbeb',icon:'🔧',m:`${v.Rego} — HVIS ${hd<0?'만료됨':hd+'일 남음'}`});
     const _cKM=Math.max(Number(v.Current_KM)||0, DB.regoMaxKM[v.Rego]||0),_lKM=Number(v.Last_Service_KM)||0,_iKM=Number(v.Service_Interval)||10000;
     const _nKM=Number(v.Next_Service_KM)||(_lKM+_iKM);
     const _remKM=_nKM-_cKM;
-    if(_cKM>0&&(_remKM)<=1000)als.push({c:_remKM<=0?'var(--rd)':'var(--pu)',m:v.Rego+' — '+(_remKM<=0?'정비 초과 '+Math.abs(_remKM).toLocaleString()+'km':'서비스까지 '+_remKM+'km 남음')});
+    if(_cKM>0&&(_remKM)<=1000)als.push({c:_remKM<=0?'#dc2626':'#7c3aed',bg:_remKM<=0?'#fef2f2':'#f5f3ff',icon:'⛽',m:v.Rego+' — '+(_remKM<=0?'정비 초과 '+Math.abs(_remKM).toLocaleString()+'km':'서비스까지 '+_remKM+'km 남음')});
   });
+  // 긴급도순 정렬: 빨간(만료/초과) → 노란(주의) → 보라(정비)
+  als.sort((a,b)=>{ const p={'#dc2626':0,'#f59e0b':1,'#7c3aed':2}; return (p[a.c]??3)-(p[b.c]??3); });
   document.getElementById('alct').textContent=als.length+'건';
   document.getElementById('als').innerHTML=als.length
-    ?als.map(a=>`<div style="background:var(--s1);border:1px solid var(--b2);border-left:3px solid ${a.c};border-radius:var(--rr);padding:9px 12px;margin-bottom:6px;font-size:13px">${a.m}</div>`).join('')
+    ?als.map(a=>`<div style="background:${a.bg||'var(--s1)'};border-left:4px solid ${a.c};border-radius:var(--rr);padding:10px 12px;margin-bottom:6px;font-size:13px;font-weight:600;color:${a.c}"><span style="margin-right:6px">${a.icon||''}</span>${a.m}</div>`).join('')
     :'<div class="crd" style="color:var(--gn);text-align:center">✅ 현재 만료 예정 없음</div>';
 }
 
