@@ -7507,7 +7507,15 @@ async function renderWageAll(){
   const drRow  = DB.D.find(d=>(d.Name_KR||'')===ST.wageDriver||(d.Name_EN||'')===ST.wageDriver);
   const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
 
-  const weekSet = new Set(Object.keys(drvW).filter(w=>/^\d{4}-\d{2}-\d{2}$/.test(w)));
+  // ★ 모든 주차 키를 월요일로 정규화 (겹치는 주간 방지)
+  const weekSet = new Set();
+  // wages에서 주차 키 → 월요일로 변환
+  const _wageKeyToMonday = {}; // 원래 키 → 월요일 매핑
+  Object.keys(drvW).filter(w=>/^\d{4}-\d{2}-\d{2}$/.test(w)).forEach(w=>{
+    const mon = getMondayOfDate(w);
+    if(mon){ weekSet.add(mon); _wageKeyToMonday[w] = mon; }
+  });
+  // 리포트에서 주차 키
   rows.forEach(r=>{
     if(matchNames.has(String(r.Driver||'').trim()) && r._isoDate){
       const mon=getMondayOfDate(r._isoDate);
@@ -7516,17 +7524,27 @@ async function renderWageAll(){
   });
   const weeks = [...weekSet].sort((a,b)=>a.localeCompare(b));
 
+  // ★ 주차별 지급 내역 정규화 (비-월요일 키 → 해당 월요일로 병합)
+  const _normWageEntries = {};
+  Object.entries(drvW).forEach(([ws, data])=>{
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(ws)) return;
+    const mon = _wageKeyToMonday[ws] || getMondayOfDate(ws);
+    if(!mon) return;
+    if(!_normWageEntries[mon]) _normWageEntries[mon] = [];
+    _normWageEntries[mon].push(...(data.entries||[]));
+  });
+
   // ★ DR_Cost는 이미 Night_Owner 차감 후 저장됨 → 이중 차감 방지
   let grandDR=0, grandPaid=0, grandReports=0;
   const grandSur={ot:0,hotel:0,dist:0,early:0,wash:0,meal:0,night:0,trailer:0,tip:0,toll:0,fuel:0,etc:0,owner:0};
   const weekData = weeks.map(wk=>{
     const mon=wk;
-    const sunD=new Date(wk); sunD.setDate(sunD.getDate()+6);
+    const sunD=new Date(wk+'T00:00:00'); sunD.setDate(sunD.getDate()+6);
     const sun=toLocalISO(sunD);
     const wReports=rows.filter(r=>matchNames.has(String(r.Driver||'').trim())&&r._isoDate>=mon&&r._isoDate<=sun);
-    const drTotal=wReports.reduce((s,r)=>s+_calcDRFromReport(r),0); // DR_Cost 이미 야경 차감 후
+    const drTotal=wReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
     const sur=_calcWeekSurcharges(wReports);
-    const entries=(drvW[wk]||{}).entries||[];
+    const entries=_normWageEntries[wk]||[];
     const paid=entries.reduce((s,e)=>s+(e.amount||0),0);
     grandDR+=drTotal; grandPaid+=paid; grandReports+=wReports.length;
     Object.keys(grandSur).forEach(k=>grandSur[k]+=sur[k]);
@@ -7661,7 +7679,8 @@ function _refreshWageView(){
 }
 
 async function saveWageEntry(){
-  const date   = fmtDate(document.getElementById('we-date')?.value||'');
+  const rawDate = document.getElementById('we-date')?.value||'';
+  const date   = parseToISO(rawDate) || rawDate; // ★ 항상 ISO (YYYY-MM-DD) 형식으로 저장
   const amount = parseFloat(document.getElementById('we-amount')?.value)||0;
   const method = document.getElementById('we-method')?.value||'현금';
   const note   = document.getElementById('we-note')?.value||'';
@@ -7669,8 +7688,10 @@ async function saveWageEntry(){
   if(amount<=0){toast('금액을 입력하세요','er');return;}
 
   // ★ openWageEntry에서 지정한 실제 주차 키 사용 (ALL이 아닌 실제 주차)
-  const weekKey = ST._wageEntryWeek || ST.wageWeek;
+  let weekKey = ST._wageEntryWeek || ST.wageWeek;
   if(!weekKey || weekKey==='ALL'){toast('주차 정보 오류','er');return;}
+  // ★ weekKey를 월요일로 정규화 (겹치는 주간 방지)
+  weekKey = getMondayOfDate(weekKey) || weekKey;
 
   // 1) 로컬 먼저 저장
   const wages = getWages();
