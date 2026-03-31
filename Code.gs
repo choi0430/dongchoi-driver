@@ -386,6 +386,9 @@ function doPost(e) {
       case 'replace_wages':
         return cors(replaceWages(payload.rows));
 
+      case 'fix_wages':
+        return cors(fixWagesSheet());
+
       // ── Agency_Txn CRUD ──
       case 'add_agency_txn': {
         const r = addMasterRow('Agency_Txn', payload.data);
@@ -904,7 +907,14 @@ const FIELD_ALIASES = {
   'authority_no': ['authority_#'],
   'next_of_kin': ['next of kin'],
   'engine_number': ['engine number'],
-  'manufacture_date': ['manufacture date']
+  'manufacture_date': ['manufacture date'],
+  // ★ Wages 시트 필드 별칭 (Method↔PayMethod, Note↔Notes)
+  'method': ['paymethod'],
+  'paymethod': ['method'],
+  'note': ['notes'],
+  'notes': ['note'],
+  'rowid': ['row_id'],
+  'row_id': ['rowid']
 };
 
 // data 객체를 정규화 키로 조회하는 맵 생성 (별칭 포함)
@@ -1146,6 +1156,119 @@ function replaceWages(rows) {
     }
 
     return {ok: true, count: rows ? rows.length : 0};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Wages Sheet Repair — 컬럼 순서 불일치 자동 수정
+// ═══════════════════════════════════════════════════════════════════════════
+
+function fixWagesSheet() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Wages');
+    if (!sheet) return {ok: false, msg: 'Wages sheet not found'};
+
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return {ok: true, msg: 'No data to fix', fixed: 0};
+
+    const oldHeaders = data[0].map(String);
+    const targetHeaders = MASTER_HEADERS['Wages']; // ['RowID','Driver','WeekStart','Date','Amount','PayMethod','Notes']
+
+    // 1) 기존 데이터를 헤더 기반 객체로 변환
+    const rows = data.slice(1).map(row => {
+      const obj = {};
+      oldHeaders.forEach((h, i) => { if (h) obj[h] = row[i]; });
+      return obj;
+    });
+
+    // 2) 데이터 내용 분석으로 잘못된 매핑 자동 감지 및 교정
+    const fixedRows = rows.map(rawObj => {
+      const obj = {};
+      // 별칭 기반 매핑: 실제 필드를 target 필드로 매핑
+      targetHeaders.forEach(th => {
+        if (rawObj[th] !== undefined && rawObj[th] !== '') {
+          obj[th] = rawObj[th];
+        } else {
+          // 별칭 탐색
+          const nk = normalizeKey(th);
+          const aliases = FIELD_ALIASES[nk] || [];
+          for (var ai = 0; ai < aliases.length; ai++) {
+            // 별칭의 원래 헤더 이름 찾기
+            for (var hi = 0; hi < oldHeaders.length; hi++) {
+              if (normalizeKey(oldHeaders[hi]) === aliases[ai] && rawObj[oldHeaders[hi]] !== undefined && rawObj[oldHeaders[hi]] !== '') {
+                obj[th] = rawObj[oldHeaders[hi]];
+                break;
+              }
+            }
+            if (obj[th] !== undefined) break;
+          }
+        }
+      });
+
+      // 3) 값 내용으로 잘못된 배치 감지
+      // RowID는 숫자(timestamp), Driver는 한글/영문 이름
+      if (obj.RowID && !/^\d{10,}$/.test(String(obj.RowID).trim())) {
+        // RowID가 timestamp가 아님 → 데이터 밀림 감지
+        // 모든 필드의 값을 분석해서 재배치
+        var allVals = {};
+        oldHeaders.forEach(function(h, i) { allVals[h] = rawObj[h]; });
+        // 모든 값 중에서 적절한 필드 찾기
+        var vals = Object.values(rawObj).filter(function(v) { return v !== undefined && v !== ''; });
+        var foundRowId = '', foundDriver = '', foundWeek = '', foundDate = '', foundAmount = 0, foundMethod = '', foundNotes = '';
+        vals.forEach(function(v) {
+          var s = String(v).trim();
+          if (/^\d{10,}$/.test(s) && !foundRowId) foundRowId = s;
+          else if (/^[가-힣A-Za-z\s]+$/.test(s) && s.length > 1 && s !== 'Cash' && !foundDriver) foundDriver = s;
+          else if (/^\d{4}-\d{2}-\d{2}$/.test(s) && !foundWeek) foundWeek = s;
+          else if (/^\d{2}\/\d{2}\/\d{4}$/.test(s) && !foundDate) foundDate = s;
+          else if (/^\d{4}-\d{2}-\d{2}$/.test(s) && foundWeek && !foundDate) foundDate = s;
+          else if (!isNaN(parseFloat(s)) && parseFloat(s) > 0 && parseFloat(s) < 100000 && !foundAmount) foundAmount = parseFloat(s);
+          else if (s === 'Cash' || s === '현금' || s === '계좌이체' || s === 'Bank') foundMethod = s;
+        });
+        if (foundRowId || foundDriver) {
+          obj.RowID = foundRowId || String(Date.now());
+          obj.Driver = foundDriver;
+          obj.WeekStart = foundWeek;
+          obj.Date = foundDate;
+          obj.Amount = foundAmount;
+          obj.PayMethod = foundMethod || 'Cash';
+          obj.Notes = foundNotes;
+        }
+      }
+
+      // 기본값 보장
+      if (!obj.RowID) obj.RowID = String(Date.now());
+      if (!obj.PayMethod) obj.PayMethod = obj.Method || 'Cash';
+      if (!obj.Notes && obj.Note) obj.Notes = obj.Note;
+      obj.Amount = parseFloat(obj.Amount) || 0;
+
+      return obj;
+    });
+
+    // 4) 시트를 표준 헤더로 재작성
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+    // 헤더 교체
+    var lastCol = sheet.getLastColumn();
+    if (lastCol > targetHeaders.length) {
+      sheet.deleteColumns(targetHeaders.length + 1, lastCol - targetHeaders.length);
+    }
+    var color = TAB_COLORS['Wages'] || '#065f46';
+    sheet.getRange(1, 1, 1, targetHeaders.length).setValues([targetHeaders])
+      .setBackground(color).setFontColor('white').setFontWeight('bold');
+
+    // 5) 수정된 데이터 쓰기
+    if (fixedRows.length > 0) {
+      var newData = fixedRows.map(function(obj) {
+        return targetHeaders.map(function(h) { return obj[h] !== undefined ? obj[h] : ''; });
+      });
+      sheet.getRange(2, 1, newData.length, targetHeaders.length).setValues(newData);
+    }
+
+    return {ok: true, fixed: fixedRows.length, headers: targetHeaders.join(', ')};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }

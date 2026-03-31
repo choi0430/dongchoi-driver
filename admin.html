@@ -1048,6 +1048,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div><div class="stl">💵 드라이버 급여</div><div class="ssb">지급 기록 관리</div></div>
     <div style="display:flex;gap:6px;">
       <button class="btn bgh sm" onclick="exportWageCsv()" title="급여 전체 CSV 내보내기">📥 CSV</button>
+      <button class="btn bgh sm" onclick="fixWagesSheet()" title="시트 컬럼 순서 수정">🔧 수정</button>
       <button class="btn bgh sm" onclick="syncWagesNow()" title="구글 시트와 동기화">🔄 동기화</button>
       <button class="btn bac sm" onclick="openWageEntry(null)">+ 지급 추가</button>
     </div>
@@ -6798,8 +6799,8 @@ async function loadWagesFromSheet(forceRefresh){
         _rowIndex: parseInt(r._rowIndex)||null,
         date:   entryDate   ||'',
         amount: Number(r.Amount)||0,
-        method: r.PayMethod ||'현금',
-        note:   r.Notes     ||'',
+        method: r.PayMethod || r.Method || '현금',
+        note:   r.Notes || r.Note || '',
       });
     });
     // 날짜순 정렬
@@ -7632,6 +7633,26 @@ async function syncWagesNow(){
   await loadWagesFromSheet(true);
   await rWage();
   toast('✅ 동기화 완료','ok');
+}
+
+// ★ Wages 시트 컬럼 순서 자동 수정
+async function fixWagesSheet(){
+  if(!confirm('Wages 시트의 헤더와 데이터 정렬을 자동 수정합니다.\n계속하시겠습니까?')) return;
+  toast('🔧 Wages 시트 수정 중...','ok');
+  try{
+    const res = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'fix_wages',_user:getAdminUser()})});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const json = await res.json();
+    if(json.ok){
+      toast('✅ 수정 완료! '+json.fixed+'건 재정렬됨','ok');
+      _wagesLastSync=0;
+      await loadWagesFromSheet(true);
+      await rWage();
+    } else {
+      toast('⚠️ 수정 실패: '+(json.error||json.msg||''),'er');
+    }
+  }catch(e){ toast('수정 실패: '+e.message,'er'); }
 }
 
 // 전체 강제 새로고침 (모든 캐시 무효화)
