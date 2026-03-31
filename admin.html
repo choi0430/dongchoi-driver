@@ -7284,20 +7284,23 @@ async function getEarnedFromSheets(driverName, weekStart) {
   rows.forEach(r => {
     if (!matchNames.has(String(r.Driver||'').trim())) return;
     if (r._isoDate >= mon && r._isoDate <= sun) {
-      total += (parseFloat(r.DR_Cost) || 0);
-      // Night_Owner는 DR에서 차감하지 않음 (회사 비용)
+      // ★ DR_Cost 없는 경우 항목 합산으로 재계산 (calcDRFromReport는 renderWage 안에 있으므로 여기서 직접 계산)
+      const drCost = parseFloat(r.DR_Cost);
+      total += (drCost > 0 ? drCost : 0);
     }
   });
   return total;
 }
 
-async function selectWageDriver(drv){setWageTab('single');ST.wageDriver=drv;rWage();}
-function rWage(){
+async function selectWageDriver(drv){setWageTab('single');ST.wageDriver=drv;await rWage();}
+async function rWage(){
   // DB.D가 아직 로드 안됐으면 잠시 후 재시도
   if(!DB.D || DB.D.length === 0) {
     setTimeout(rWage, 300);
     return;
   }
+  // ★ 리포트 캐시 먼저 로드 (주차 목록 생성에 필요)
+  await ensureReportsCache();
   const dSel = document.getElementById('wage-driver-sel');
   if(!dSel) return;
   const drivers = DB.D.map(d=>({name:d.Name_KR||d.Name_EN, en:d.Name_EN}));
@@ -7320,7 +7323,19 @@ function initWageWeeks(){
     wages[drv] = drvWages;
     saveWages(wages);
   }
-  const weeks = Object.keys(drvWages).filter(w => /^\d{4}-\d{2}-\d{2}$/.test(w)).sort((a,b)=>b.localeCompare(a));
+  // ★ _reportsCache에서 이 드라이버의 리포트가 있는 주차도 포함
+  const weekSet = new Set(Object.keys(drvWages).filter(w => /^\d{4}-\d{2}-\d{2}$/.test(w)));
+  if(_reportsCache && _reportsCache.length > 0){
+    const drRow = DB.D.find(d=>(d.Name_KR||'')===drv||(d.Name_EN||'')===drv);
+    const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+    _reportsCache.forEach(r => {
+      if(matchNames.has(String(r.Driver||'').trim()) && r._isoDate){
+        const mon = getMondayOfDate(r._isoDate);
+        if(mon) weekSet.add(mon);
+      }
+    });
+  }
+  const weeks = [...weekSet].sort((a,b)=>b.localeCompare(a));
   const wSel = document.getElementById('wage-week-sel');
   if(!wSel) return;
   wSel.innerHTML = weeks.map(w=>'<option value="'+w+'">'+getWeekLabel(w)+'</option>').join('');
@@ -7427,7 +7442,7 @@ async function renderWage(){
                   (timeStr ? '<div style="font-size:11px;color:var(--ac);margin-top:2px;">⏱ '+timeStr+'</div>' : '')+
                 '</div>'+
                 '<div style="text-align:right;">'+
-                  '<div style="font-size:14px;font-weight:800;color:var(--gn);">$'+(parseFloat(r.DR_Cost)||0).toLocaleString()+'</div>'+
+                  '<div style="font-size:14px;font-weight:800;color:var(--gn);">$'+calcDRFromReport(r).toLocaleString()+'</div>'+
                   ((parseFloat(r.Night_Owner)||0)>0 ? '<div style="font-size:11px;color:var(--rd);font-weight:700;">-$'+(parseFloat(r.Night_Owner)||0).toLocaleString()+'</div>' : '')+
                 '</div>'+
               '</div>'+
