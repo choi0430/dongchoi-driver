@@ -5311,7 +5311,7 @@ async function saveInvoiceToSheet() {
     const ov = _invOverrides[_invRowKey(r,ri)] || {};
     return {
       date: r._iso, rego: r.Rego, tour: r.Attraction, seats: r.Seats, driver: r.Driver,
-      tourcode: r.Tour_Code||'', pickup: r.Pickup||'', dropoff: r.Dropoff||'',
+      tourcode: r.Tour_Code||r.Attraction||'', pickup: r.Pickup||'', dropoff: r.Dropoff||'',
       timeStart: r._timeStart||'', timeEnd: r._timeEnd||'',
       base: ov.base !== undefined ? ov.base : c.baseRate,
       ot:   ov.ot   !== undefined ? ov.ot   : c.ot,
@@ -5601,7 +5601,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
       const _savedRows = _si.map(item => ({
         _iso: item.date||'', Date: item.date||'',
         Attraction: item.tour||'-', Rego: item.rego||'', Seats: item.seats||'',
-        Driver: item.driver||'', Tour_Code: item.tourcode||'',
+        Driver: item.driver||'', Tour_Code: item.tourcode||item.tour||'',
         Pickup: item.pickup||'', Dropoff: item.dropoff||'',
         _timeStart: item.timeStart||'', _timeEnd: item.timeEnd||'',
         _manual: true,
@@ -5614,7 +5614,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
         _savedRows.push({
           _iso: parseToISO(m.date)||m.date||'', Date: m.date||'',
           Attraction: m.tour||'-', Rego: m.rego||'', Seats: m.seats||'',
-          Driver: m.driver||'', Tour_Code: m.tourcode||'',
+          Driver: m.driver||'', Tour_Code: m.tourcode||m.tour||'',
           Pickup: m.pickup||'', Dropoff: m.dropoff||'',
           _timeStart: m.start||'', _timeEnd: m.end||'',
           _manual: true,
@@ -5791,6 +5791,8 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
       ? '<div style="font-size:10px;color:#166534;margin-top:2px;">Rate Table $'+oBase.toLocaleString()+'</div>'
       : '<div style="font-size:10px;color:#92400e;margin-top:2px;">SVC $'+oBase.toLocaleString()+'</div>';
     const seatsStr = r.Seats ? ' ('+escH(r.Seats)+')' : '';
+    // ★ Tour_Code 비어있으면 Attraction 이름으로 대체
+    const displayTourCode = r.Tour_Code || r.Attraction || '-';
     const routeRow = routeStr ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#0369a1;font-size:10px;padding:0 6px 4px;">📍 '+routeStr+'</td></tr>' : '';
     const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">'+extras+'</td></tr>' : '';
     return '<tr>' +
@@ -5798,7 +5800,7 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
       '<td>'+escH(r.Attraction||'-')+seatsStr+baseLabel+'</td>' +
       '<td>'+escH(r.Rego||'-')+'</td>' +
       '<td style="color:#64748b;white-space:nowrap;font-size:11px;">'+timeStr+'</td>' +
-      '<td style="color:#64748b">'+escH(r.Tour_Code||'-')+'</td>' +
+      '<td style="color:#64748b">'+escH(displayTourCode)+'</td>' +
       '<td style="font-weight:700">$'+oTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})+'</td>' +
       '</tr>' + routeRow + extrasRow;
   }
