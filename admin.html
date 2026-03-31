@@ -860,6 +860,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div><div class="stl">📋 운행 리포트</div><div class="ssb">Daily Report 조회·수정·삭제</div></div>
     <div style="display:flex;gap:6px;">
       <button class="btn bgh sm" onclick="exportDrCsv()" title="현재 필터 기준 CSV 내보내기">📥 CSV</button>
+      <button class="btn bgh sm" onclick="fixReportFormats()" title="날짜/시간 서식 일괄 수정">🔧 서식수정</button>
       <button class="btn bgh sm" onclick="loadDR(true)">🔄 새로고침</button>
     </div>
   </div>
@@ -7633,6 +7634,25 @@ async function syncWagesNow(){
   await loadWagesFromSheet(true);
   await rWage();
   toast('✅ 동기화 완료','ok');
+}
+
+// ★ Daily_Report / End_of_Shift / Pre_Departure 날짜·시간 서식 일괄 수정
+async function fixReportFormats(){
+  if(!confirm('Daily_Report, End_of_Shift, Pre_Departure 시트의\n날짜/시간 서식을 일괄 수정합니다.\n계속하시겠습니까?')) return;
+  toast('🔧 서식 수정 중...','ok');
+  try{
+    const res = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'fix_report_formats',_user:getAdminUser()})});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const json = await res.json();
+    if(json.ok){
+      toast('✅ 서식 수정 완료: '+(json.results||[]).join(', '),'ok');
+      _drCache=null; _reportsCache=null;
+      loadDR(true);
+    } else {
+      toast('⚠️ 수정 실패: '+(json.error||json.msg||''),'er');
+    }
+  }catch(e){ toast('서식 수정 실패: '+e.message,'er'); }
 }
 
 // ★ Wages 시트 컬럼 순서 자동 수정

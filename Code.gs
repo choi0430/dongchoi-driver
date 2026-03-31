@@ -389,6 +389,9 @@ function doPost(e) {
       case 'fix_wages':
         return cors(fixWagesSheet());
 
+      case 'fix_report_formats':
+        return cors(fixReportFormats(body.sheet || ''));
+
       // ── Agency_Txn CRUD ──
       case 'add_agency_txn': {
         const r = addMasterRow('Agency_Txn', payload.data);
@@ -471,9 +474,29 @@ function getReports(sheetName, driver) {
 
     const headers = data[0];
     const DATE_FIELDS = ['Date', 'Submitted', 'License_Expiry', 'Authority_Expiry', 'Rego_Date', 'HVIS_Date'];
+    const TIME_FIELDS = ['Time_Start', 'Time_End', 'Start_Time', 'End_Time', 'Fuel_End'];
+    // Submitted은 날짜+시간 복합 필드 ('30/03/2026 18:43')
+    const DATETIME_FIELDS = ['Submitted'];
 
     function formatCell(h, v) {
-      if (DATE_FIELDS.indexOf(h) !== -1 && v instanceof Date && !isNaN(v)) {
+      if (v instanceof Date && !isNaN(v)) {
+        // 시간 전용 필드: 1899-12-30T... → HH:mm
+        if (TIME_FIELDS.indexOf(h) !== -1) {
+          return Utilities.formatDate(v, 'Australia/Sydney', 'HH:mm');
+        }
+        // 날짜+시간 복합 필드: dd/MM/yyyy HH:mm
+        if (DATETIME_FIELDS.indexOf(h) !== -1) {
+          return Utilities.formatDate(v, 'Australia/Sydney', 'dd/MM/yyyy HH:mm');
+        }
+        // 날짜 전용 필드: dd/MM/yyyy
+        if (DATE_FIELDS.indexOf(h) !== -1) {
+          return formatDateForSheet(v);
+        }
+        // 기타 Date 객체 — 1899-12-30 계열이면 시간으로, 아니면 날짜로
+        var y = v.getFullYear();
+        if (y < 1910) {
+          return Utilities.formatDate(v, 'Australia/Sydney', 'HH:mm');
+        }
         return formatDateForSheet(v);
       }
       return v;
@@ -784,9 +807,18 @@ function saveReport(sheetName, data) {
 
     // ★ 실제 시트 헤더를 읽어서 매핑 (컬럼 순서 불일치 방지)
     const lastCol = sheet.getLastColumn();
-    const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : headers;
+    const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : headers;
     const row = actualHeaders.map(h => data[h] !== undefined ? data[h] : '');
     sheet.appendRow(row);
+
+    // ★ 날짜/시간 컬럼 텍스트 서식 강제 (Google Sheets 자동 Date 변환 방지)
+    var newRow = sheet.getLastRow();
+    var TEXT_COLS = ['Date', 'Submitted', 'Time_Start', 'Time_End', 'Start_Time', 'End_Time', 'Fuel_End'];
+    actualHeaders.forEach(function(h, i) {
+      if (TEXT_COLS.indexOf(String(h)) !== -1) {
+        sheet.getRange(newRow, i + 1).setNumberFormat('@');
+      }
+    });
 
     // ★ 리포트 제출 시 M_Vehicles Current_KM 자동 업데이트
     try { _autoUpdateVehicleKM(ss, sheetName, data); } catch(e) { Logger.log('KM auto-update error: ' + e); }
@@ -815,6 +847,14 @@ function updateReport(sheetName, rowIndex, data) {
     const existingRow = sheet.getRange(ri, 1, 1, lastCol).getValues()[0];
     const row = actualHeaders.map((h, i) => data[h] !== undefined ? data[h] : existingRow[i]);
     sheet.getRange(ri, 1, 1, row.length).setValues([row]);
+
+    // ★ 날짜/시간 컬럼 텍스트 서식 강제
+    var TEXT_COLS_U = ['Date', 'Submitted', 'Time_Start', 'Time_End', 'Start_Time', 'End_Time', 'Fuel_End'];
+    actualHeaders.forEach(function(h, i) {
+      if (TEXT_COLS_U.indexOf(String(h)) !== -1) {
+        sheet.getRange(ri, i + 1).setNumberFormat('@');
+      }
+    });
 
     return {ok: true};
   } catch (err) {
@@ -1269,6 +1309,79 @@ function fixWagesSheet() {
     }
 
     return {ok: true, fixed: fixedRows.length, headers: targetHeaders.join(', ')};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ── Daily_Report / End_of_Shift / Pre_Departure 날짜·시간 서식 일괄 수정 ──
+function fixReportFormats(targetSheetName) {
+  try {
+    var sheetNames = targetSheetName ? [targetSheetName] : ['Daily_Report', 'End_of_Shift', 'Pre_Departure'];
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var results = [];
+
+    sheetNames.forEach(function(sn) {
+      var sheet = ss.getSheetByName(sn);
+      if (!sheet || sheet.getLastRow() < 2) { results.push(sn + ': skip'); return; }
+
+      var lastCol = sheet.getLastColumn();
+      var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+      var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastCol).getValues();
+
+      var DATE_COLS = ['Date', 'Submitted'];
+      var TIME_COLS = ['Time_Start', 'Time_End', 'Start_Time', 'End_Time', 'Fuel_End'];
+      var DATETIME_COLS = ['Submitted'];
+      var fixCount = 0;
+
+      for (var r = 0; r < data.length; r++) {
+        for (var c = 0; c < headers.length; c++) {
+          var h = headers[c];
+          var v = data[r][c];
+
+          if (v instanceof Date && !isNaN(v)) {
+            var yr = v.getFullYear();
+            if (TIME_COLS.indexOf(h) !== -1 || yr < 1910) {
+              // 시간 전용 → HH:mm
+              data[r][c] = Utilities.formatDate(v, 'Australia/Sydney', 'HH:mm');
+              fixCount++;
+            } else if (DATETIME_COLS.indexOf(h) !== -1) {
+              // 날짜+시간 → dd/MM/yyyy HH:mm
+              data[r][c] = Utilities.formatDate(v, 'Australia/Sydney', 'dd/MM/yyyy HH:mm');
+              fixCount++;
+            } else if (DATE_COLS.indexOf(h) !== -1) {
+              // 날짜 → dd/MM/yyyy
+              data[r][c] = Utilities.formatDate(v, 'Australia/Sydney', 'dd/MM/yyyy');
+              fixCount++;
+            }
+          }
+          // 문자열 ISO timestamp도 변환 (예: "1899-12-30T05:30:00.000Z")
+          else if (typeof v === 'string') {
+            var s = v.trim();
+            if (TIME_COLS.indexOf(h) !== -1 && /^1899-12-/.test(s)) {
+              var td = new Date(s);
+              if (!isNaN(td)) {
+                data[r][c] = Utilities.formatDate(td, 'Australia/Sydney', 'HH:mm');
+                fixCount++;
+              }
+            }
+          }
+        }
+      }
+
+      if (fixCount > 0) {
+        sheet.getRange(2, 1, data.length, lastCol).setValues(data);
+        // 날짜/시간 컬럼 텍스트 서식 강제 적용
+        headers.forEach(function(h, i) {
+          if (DATE_COLS.indexOf(h) !== -1 || TIME_COLS.indexOf(h) !== -1) {
+            sheet.getRange(2, i + 1, data.length, 1).setNumberFormat('@');
+          }
+        });
+      }
+      results.push(sn + ': ' + fixCount + ' cells fixed');
+    });
+
+    return {ok: true, results: results};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }

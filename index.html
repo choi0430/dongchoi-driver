@@ -3695,40 +3695,34 @@ function addDailyReport(shiftId){
   editingShiftId = shiftId;
   showPage('report');
   goStep(2);
-  // Pre Departure 정보를 초기값으로 세팅 — draft 복원보다 후순위로 실행
+  // Pre Departure 정보를 초기값으로 세팅
   const shift = activeShifts.find(s=>s.id===shiftId);
-  // 날짜/차량/인승은 항상 PD(shift) 기준으로 강제 세팅 (draft가 덮어쓰지 못하도록)
-  function _applyPDtoStep2(){
-    const drDate  = document.getElementById('dr-date');
-    const drSeats = document.getElementById('dr-seats');
-    // 날짜: 시프트 날짜 기준 (없으면 오늘)
-    if(drDate) drDate.value = (shift?.date) || todayDisplay();
-    // 차량(Rego)은 shift에서 자동 사용됨 — step2 상단 배지 및 인승 힌트 표시
-    if(shift?.rego) {
-      const v = MASTER.vehicles?.find(v=>v.Rego===shift.rego);
-      const seatsHint = document.getElementById('seats-hint');
-      if(seatsHint && v?.Seats) {
-        seatsHint.textContent = '🚌 실제 차량: ' + v.Seats + '인승 — 요금은 아래 요청 인승 기준';
-        seatsHint.style.display = 'block';
-      }
-      updateManualHint(v);
-      // step2 차량 배지 강조 갱신
-      const badge = document.getElementById('step2-rego-display');
-      if(badge){ badge.textContent = shift.rego; }
+  const drDate  = document.getElementById('dr-date');
+  const drSeats = document.getElementById('dr-seats');
+  // 날짜: 시프트 날짜 기준 (없으면 오늘)
+  if(drDate) drDate.value = (shift?.date) || todayDisplay();
+  // 차량(Rego)은 shift에서 자동 사용됨 — step2 상단 배지 및 인승 힌트 표시
+  if(shift?.rego) {
+    const v = MASTER.vehicles?.find(v=>v.Rego===shift.rego);
+    const seatsHint = document.getElementById('seats-hint');
+    if(seatsHint && v?.Seats) {
+      seatsHint.textContent = '🚌 실제 차량: ' + v.Seats + '인승 — 요금은 아래 요청 인승 기준';
+      seatsHint.style.display = 'block';
     }
-    // 이전 리포트에서 쓴 요청 인승 유지 (있으면)
-    if(drSeats && shift?.seats) {
-      drSeats.value = shift.seats;
-    }
+    updateManualHint(v);
+    // step2 차량 배지 강조 갱신
+    const badge = document.getElementById('step2-rego-display');
+    if(badge){ badge.textContent = shift.rego; }
   }
-  // 즉시 1차 세팅
-  _applyPDtoStep2();
+  // 이전 리포트에서 쓴 요청 인승 유지 (있으면)
+  if(drSeats && shift?.seats) {
+    drSeats.value = shift.seats;
+  }
   // 인승 유무와 관계없이 항상 서차지 옵션 초기화 (OT 버튼 렌더링 포함)
   updateSurchargeOptions();
   updateStep2UI();
-  // draft 복원 후에도 PD 날짜/차량/인승을 다시 강제 적용 + 힌트 재계산
+  // draft 복원 후 힌트/OT 재계산 (draft 값이 반영된 후 실행)
   setTimeout(()=>{
-    _applyPDtoStep2();
     updateManualHint();
     updateSvcHint();
     updateDistHint();
@@ -3738,7 +3732,7 @@ function addDailyReport(shiftId){
     autoFillDRSurcharges(true);
     // OT는 마지막에 (시간값 복원 후)
     updateOTHint(true);
-  }, 350);
+  }, 100);
 }
 
 function startEndShift(shiftId){
@@ -4566,7 +4560,7 @@ function restoreDailyDraft(){
     if(d._shiftId && d._shiftId !== editingShiftId){
       const matchShift = activeShifts.find(s=>s.id===d._shiftId);
       if(matchShift) editingShiftId = d._shiftId;
-      // shift를 못 찾아도 필드 복원은 계속 진행 (서버 동기화 전일 수 있음)
+      else { clearDailyDraft(); return false; } // 해당 shift가 없으면 draft 무효
     }
 
     // 1) 텍스트 / 숫자 필드
