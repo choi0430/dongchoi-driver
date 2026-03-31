@@ -3374,7 +3374,7 @@ async function syncBalanceData(force){
             };
             const allItems = [..._parseItems(inv.Items), ..._parseItems(inv.ManualItems)];
             if(allItems.length > 0){
-              const codes = [...new Set(allItems.map(it => it.tourCode||it.Tour_Code||it.tour||it.Tour||it.Attraction||'').filter(Boolean))];
+              const codes = [...new Set(allItems.map(it => it.tourcode||it.tourCode||it.Tour_Code||'').filter(Boolean))];
               tourCodes = codes.join(', ');
               // ★ 리포트 날짜 중 가장 빠른 날 = 시작일, 가장 느린 날 = 종료일
               const dates = allItems.map(it => parseToISO(String(it.date||it.Date||''))).filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
@@ -3440,7 +3440,7 @@ async function syncBalanceData(force){
         // Items에서 날짜 + 투어코드 추출
         const allItems = [..._pItems(linkedInv.Items), ..._pItems(linkedInv.ManualItems)];
         const itemDates = allItems.map(it => parseToISO(String(it.date||it.Date||''))).filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
-        const itemCodes = [...new Set(allItems.map(it => it.tourCode||it.Tour_Code||it.tour||it.Tour||it.Attraction||'').filter(Boolean))];
+        const itemCodes = [...new Set(allItems.map(it => it.tourcode||it.tourCode||it.Tour_Code||'').filter(Boolean))];
 
         // 빈 날짜 보충
         if(!txn.Date || !parseToISO(String(txn.Date||''))){
@@ -3456,11 +3456,32 @@ async function syncBalanceData(force){
           const d = itemDates.length > 0 ? itemDates[itemDates.length-1] : parseToISO(String(linkedInv.PeriodTo||''));
           if(d){ txn.FinishDate = d; needUpdate = true; }
         }
-        // 빈 투어코드 보충
-        if(!txn.TourCode && itemCodes.length > 0){
-          txn.TourCode = itemCodes.join(', ');
-          needUpdate = true;
+        // 빈/잘못된 투어코드 보충 (Attraction 이름이면 교체)
+        if(itemCodes.length > 0){
+          const newTC = itemCodes.join(', ');
+          const oldTC = String(txn.TourCode||'').trim();
+          // 투어코드가 비어있거나, Attraction 이름이 들어간 경우 교체
+          if(!oldTC || (oldTC !== newTC && allItems.some(it => oldTC.includes(it.tour||it.Tour||'')))){
+            txn.TourCode = newTC;
+            needUpdate = true;
+          }
         }
+        // ★ DR/CR 보정: DR=amountDue, CR=0인 잘못된 레코드 → DR=GrandTotal, CR=deductions
+        try {
+          const gt = parseFloat(linkedInv.GrandTotal) || 0;
+          let invDeduct = 0;
+          const dedStr = linkedInv.Deductions;
+          if(dedStr && String(dedStr).trim().startsWith('[')){ JSON.parse(dedStr).forEach(d=>{ invDeduct += (d.amount||0); }); }
+          const correctDR = Math.round(gt * 100) / 100;
+          const correctCR = Math.round(invDeduct * 100) / 100;
+          const curDR = parseFloat(txn.DR) || 0;
+          const curCR = parseFloat(txn.CR) || 0;
+          if(correctDR > 0 && (Math.abs(curDR - correctDR) > 0.01 || Math.abs(curCR - correctCR) > 0.01)){
+            txn.DR = correctDR;
+            txn.CR = correctCR;
+            needUpdate = true;
+          }
+        } catch(e){}
         // DueDate 보충 (발행일+14일)
         if(!txn.DueDate && txn.Date){
           try {
@@ -3479,7 +3500,7 @@ async function syncBalanceData(force){
               method:'POST', headers:{'Content-Type':'text/plain'},
               body:JSON.stringify({action:'update_agency_txn', rowIndex:txn._rowIndex, data:{
                 Date:txn.Date, TourCode:txn.TourCode, StartDate:txn.StartDate,
-                FinishDate:txn.FinishDate, DueDate:txn.DueDate
+                FinishDate:txn.FinishDate, DueDate:txn.DueDate, DR:txn.DR, CR:txn.CR
               }, _user:getAdminUser()})
             });
           } catch(e){ console.warn('[Balance Sync] 기존 거래 보충 실패:', invId, e); }
@@ -5423,10 +5444,16 @@ async function saveInvoiceToSheet() {
     // ★ 거래처 잔액에 DR 거래 자동 등록 (Agency_Txn)
     try {
       const { prepaid, credit, total: totalDeduct } = _getInvDeductionTotals();
-      const amountDue = roundMoney(grandTotal - totalDeduct);
       const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 14);
       const dueDateStr = toLocalISO(dueDate);
       const todayStr = toLocalISO(new Date());
+      // ★ 투어코드: items에서 Tour_Code 추출 (tourcode 필드, Attraction 아닌 실제 투어코드)
+      const _allTxnItems = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)]);
+      const _txnCodes = [...new Set(_allTxnItems.map(r=>String(r.Tour_Code||'').trim()).filter(Boolean))];
+      const txnTourCode = _txnCodes.join(', ');
+      // ★ DR = 총 청구 (GrandTotal incl GST), CR = 선수금+크레딧 차감 → Balance = DR - CR
+      const drAmount = roundMoney(grandTotal);
+      const crAmount = roundMoney(totalDeduct);
       // 중복 체크: 동일 InvoiceID가 이미 있는지 확인
       const existingTxn = _balAgencyTxns.find(t => String(t.InvoiceID||'').trim() === invNum);
       if (!existingTxn) {
@@ -5434,10 +5461,10 @@ async function saveInvoiceToSheet() {
           Agency:     agency,
           Date:       todayStr,
           InvoiceID:  invNum,
-          TourCode:   '',
-          DR:         amountDue,
-          CR:         0,
-          Remark:     `인보이스 발행 (${rows.length}건, ${fmtDate(from)}~${fmtDate(to)})`,
+          TourCode:   txnTourCode,
+          DR:         drAmount,
+          CR:         crAmount,
+          Remark:     crAmount > 0 ? `인보이스 발행 (${rows.length}건, ${fmtDate(from)}~${fmtDate(to)}) 선수금/크레딧 $${crAmount}` : `인보이스 발행 (${rows.length}건, ${fmtDate(from)}~${fmtDate(to)})`,
           StartDate:  from,
           FinishDate: to,
           DueDate:    dueDateStr
