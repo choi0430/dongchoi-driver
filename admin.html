@@ -3454,38 +3454,38 @@ async function syncBalanceData(force){
         const itemDates = allItems.map(it => parseToISO(String(it.date||it.Date||''))).filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
         const itemCodes = [...new Set(allItems.map(it => it.tourcode||it.tourCode||it.Tour_Code||'').filter(Boolean))];
 
-        // 빈 날짜 보충
+        // 날짜 보충/보정
         if(!txn.Date || !parseToISO(String(txn.Date||''))){
           const d = parseToISO(String(linkedInv.IssuedDate||''));
           if(d){ txn.Date = d; needUpdate = true; }
         }
-        // ★ 시작일 = Items 날짜 중 가장 빠른 날, 종료일 = 가장 느린 날
-        if(!txn.StartDate || !parseToISO(String(txn.StartDate||''))){
-          const d = itemDates.length > 0 ? itemDates[0] : parseToISO(String(linkedInv.PeriodFrom||''));
-          if(d){ txn.StartDate = d; needUpdate = true; }
-        }
-        if(!txn.FinishDate || !parseToISO(String(txn.FinishDate||''))){
-          const d = itemDates.length > 0 ? itemDates[itemDates.length-1] : parseToISO(String(linkedInv.PeriodTo||''));
-          if(d){ txn.FinishDate = d; needUpdate = true; }
+        // ★ 시작일/종료일: Items 날짜에서 항상 재계산 (타임존 오류 교정)
+        {
+          const correctStart = itemDates.length > 0 ? itemDates[0] : parseToISO(String(linkedInv.PeriodFrom||''));
+          const correctEnd = itemDates.length > 0 ? itemDates[itemDates.length-1] : parseToISO(String(linkedInv.PeriodTo||''));
+          if(correctStart && txn.StartDate !== correctStart){ txn.StartDate = correctStart; needUpdate = true; }
+          if(correctEnd && txn.FinishDate !== correctEnd){ txn.FinishDate = correctEnd; needUpdate = true; }
         }
         // ★ 투어코드 보충: 저장된 items의 tourcode가 Attraction 이름인 경우 → 원본 리포트에서 진짜 Tour_Code 조회
         {
           const oldTC = String(txn.TourCode||'').trim();
-          // items의 tour(=Attraction)와 tourcode가 같으면 → fallback으로 저장된 잘못된 값
           const attractionNames = new Set(allItems.map(it => String(it.tour||it.Tour||'').trim()).filter(Boolean));
           const savedCodes = [...new Set(allItems.map(it => String(it.tourcode||it.tourCode||it.Tour_Code||'').trim()).filter(Boolean))];
           const isWrongTC = savedCodes.length === 0 || savedCodes.every(c => attractionNames.has(c));
-          // 원본 리포트에서 진짜 Tour_Code 찾기
           let realCodes = [];
           if(isWrongTC && _reportsCache && _reportsCache.length > 0){
             const invAgency = String(linkedInv.Agency||'').trim();
-            const invDates = new Set(itemDates);
+            // ★ 날짜 매칭: ±1일 허용 (GAS 타임존 오류 대응)
+            const _d1 = d => { const dt=new Date(d+'T00:00:00'); dt.setDate(dt.getDate()-1); return toLocalISO(dt); };
+            const _d2 = d => { const dt=new Date(d+'T00:00:00'); dt.setDate(dt.getDate()+1); return toLocalISO(dt); };
+            const fuzzyDates = new Set();
+            itemDates.forEach(d => { fuzzyDates.add(d); fuzzyDates.add(_d1(d)); fuzzyDates.add(_d2(d)); });
             realCodes = [...new Set(
               _reportsCache
                 .filter(rpt => {
-                  const rDate = parseToISO(String(rpt.Date||rpt._isoDate||''));
+                  const rDate = rpt._isoDate || parseToISO(String(rpt.Date||''));
                   const rAgency = String(rpt.Agency||'').trim();
-                  return rDate && invDates.has(rDate) && rAgency === invAgency && String(rpt.Tour_Code||'').trim();
+                  return rDate && fuzzyDates.has(rDate) && rAgency === invAgency && String(rpt.Tour_Code||'').trim();
                 })
                 .map(rpt => String(rpt.Tour_Code).trim())
             )];
@@ -3497,20 +3497,31 @@ async function syncBalanceData(force){
             needUpdate = true;
           }
         }
-        // ★ DR/CR 보정: DR=amountDue, CR=0인 잘못된 레코드 → DR=GrandTotal, CR=deductions
+        // ★ DR/CR 보정: DR=GrandTotal, CR=deductions (Deductions 파싱 가능할 때만)
         try {
           const gt = parseFloat(linkedInv.GrandTotal) || 0;
           let invDeduct = 0;
+          let dedParsed = false;
           const dedStr = linkedInv.Deductions;
-          if(dedStr && String(dedStr).trim().startsWith('[')){ JSON.parse(dedStr).forEach(d=>{ invDeduct += (d.amount||0); }); }
+          if(dedStr && String(dedStr).trim().startsWith('[')){
+            JSON.parse(dedStr).forEach(d=>{ invDeduct += (d.amount||0); });
+            dedParsed = true;
+          }
           const correctDR = Math.round(gt * 100) / 100;
-          const correctCR = Math.round(invDeduct * 100) / 100;
           const curDR = parseFloat(txn.DR) || 0;
           const curCR = parseFloat(txn.CR) || 0;
-          if(correctDR > 0 && (Math.abs(curDR - correctDR) > 0.01 || Math.abs(curCR - correctCR) > 0.01)){
+          // DR 보정 (GrandTotal과 다르면)
+          if(correctDR > 0 && Math.abs(curDR - correctDR) > 0.01){
             txn.DR = correctDR;
-            txn.CR = correctCR;
             needUpdate = true;
+          }
+          // CR 보정: Deductions 파싱 성공했을 때만 업데이트 (실패 시 기존 CR 유지)
+          if(dedParsed){
+            const correctCR = Math.round(invDeduct * 100) / 100;
+            if(Math.abs(curCR - correctCR) > 0.01){
+              txn.CR = correctCR;
+              needUpdate = true;
+            }
           }
         } catch(e){}
         // DueDate 보충/보정 (종료일+14일)
