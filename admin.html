@@ -2603,6 +2603,55 @@ function calcProfit(){
     '</div>';
 }
 
+// ── 에이전시 TA 실시간 계산 (M_PriceClient 기반) ──
+// Daily_Report 행 데이터에서 M_PriceClient rate + 서차지 역산으로 에이전시 청구금액 산출
+function calcAgencyTA(r){
+  const agency     = String(r.Agency||r.agency||'').trim();
+  const attraction = String(r.Attraction||r.tour||'').trim();
+  const seatsRaw   = String(r.Seats||r.seats||'').replace('S','').trim();
+  const capNum     = parseInt(seatsRaw)||25;
+  const capKey     = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
+  const isLarge    = capNum>=40;
+  const svc        = parseFloat(r.SVC_Charge)||0;
+
+  // 1) M_PriceClient base rate 조회
+  const agPC = DB.PC[agency];
+  const findCourse = (pc,cn)=>{if(!pc||!cn)return null;let e=pc[cn];if(!e){const lc=cn.toLowerCase();const k=Object.keys(pc).find(x=>x.toLowerCase()===lc);if(k)e=pc[k];}return e||null;};
+  const ce = agPC ? findCourse(agPC, attraction) : null;
+  let taBase = 0;
+  if(ce){ const sd=ce[capKey]||ce['21']; taBase=parseFloat(sd?.rate)||0; }
+  if(taBase===0) taBase = svc;
+
+  // 2) 서차지 DR→TA 역산
+  const htl = parseFloat(r.Hotel_Surcharge||r.hotel||0);
+  const dst = parseFloat(r.Dist_Surcharge||r.dist||0);
+  const ot  = parseFloat(r.OT||r.ot||0);
+  const erl = parseFloat(r.Early||0);
+  const toll= parseFloat(r.Toll||0);
+
+  const htlTA = htl===0?0: capNum>=50?(htl===15?80:htl===30?160:htl*4): capNum>=40?(htl===15?75:htl===30?150:htl*4): (htl===10?40:htl===20?80:htl*4);
+  const dstTA = dst===0?0: capNum>=50?(dst===40?160:dst*4): capNum>=40?(dst===40?150:Math.round(dst*3.75)): (dst===30?80:Math.round(dst*2.67));
+
+  // OT TA rate
+  const otRateTA = capNum>=50?160:capNum>=40?150:80;
+  const otRateDR = capNum>=40?40:30;
+  const otHrs    = otRateDR>0 ? ot/otRateDR : 0;
+  const otTA     = Math.round(otHrs * otRateTA);
+
+  // Early TA: Airport Transfer rate × 0.3
+  let erlTA = 0;
+  if(erl>0){ let atE=agPC?findCourse(agPC,'Airport Transfer'):null; if(!atE){for(const ag of Object.keys(DB.PC||{})){atE=findCourse(DB.PC[ag],'Airport Transfer');if(atE)break;}} if(atE){const sd2=atE[capKey]||atE['21']; erlTA=Math.round((parseFloat(sd2?.rate)||0)*0.3);} }
+
+  // Parking (공항 픽업)
+  const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
+  const parking = apPat.test(r.Pickup||'') ? (isLarge?40:30) : 0;
+
+  // Toll (대형 버스만 TA)
+  const tollTA = isLarge ? toll : 0;
+
+  return taBase + otTA + htlTA + dstTA + erlTA + parking + tollTA;
+}
+
 // ═══════════════════════════════════════
 // LEDGER (정산 내역)
 // ═══════════════════════════════════════
@@ -3097,7 +3146,6 @@ async function importFromReports(){
     const agency     = String(r.Agency||'').trim();
     const attraction = String(r.Attraction||'').trim();
     const seats      = String(r.Seats||'').trim();           // '21S','25S','40S','50S'
-    const totalTA    = parseFloat(r.Total_TA)||0;
     const otAmt      = parseFloat(r.OT)||0;
     const trailerAmt = parseFloat(r.Trailer)||0;
     const hotelAmt   = parseFloat(r.Hotel_Surcharge)||0;  // DR 기준값
@@ -3110,6 +3158,9 @@ async function importFromReports(){
     const tollAmt    = r.Toll_Personal === 'Y' ? (parseFloat(r.Toll)||0) : 0;
     const fuelAmt    = r.Fuel_Personal === 'Y' ? (parseFloat(r.Fuel)||0) : 0;
     const svcAmt     = parseFloat(r.SVC_Charge)||0;
+
+    // ★ 에이전시 TA: M_PriceClient 실시간 계산 (Total_TA 저장값 사용하지 않음)
+    const totalTA = calcAgencyTA(r);
 
     // DR_Cost: 저장값 사용, 0이면 직접 계산 (헤더 밀림 등 이전 오류 보정)
     let drCost = parseFloat(r.DR_Cost)||0;
@@ -4475,7 +4526,7 @@ function _manualItemsToRows(agency, from) {
     Seats:          item.seats    || '',
     Tour_Code:      item.tourcode || '',
     SVC_Label:      item.note     || '',
-    Total_TA:       (item.amount||0) + (item.ot||0) + (item.hotel||0) + (item.trailer||0) + (item.toll||0) + (item.dist||0),
+    Total_TA:       item.amount||0,  // ★ SVC_Charge(= M_PriceDriver base) — 에이전시 TA는 calcInvRow/calcAgencyTA에서 실시간 계산
     OT:             item.ot       || 0,
     Hotel_Surcharge:item.hotel    || 0,
     Dist_Surcharge: item.dist     || 0,
@@ -7176,30 +7227,8 @@ async function saveDREdit(){
   const _base = _drBase > 0 ? _drBase : _svc;
   updated.DR_Cost = _base + _ot + _htl + _dst + _erl + _trl + _ngt + _wsh + _mel + _tip + _toll + _fuel - _nown;
 
-  // TA: M_PriceClient rate + surcharges (TA 기준)
-  const _agPC = DB.PC[updated.Agency];
-  const _findCourse = (pc, cn) => { if(!pc||!cn) return null; let e=pc[cn]; if(!e){ const lc=cn.toLowerCase(); const k=Object.keys(pc).find(x=>x.toLowerCase()===lc); if(k) e=pc[k]; } return e||null; };
-  const _ce = _agPC ? _findCourse(_agPC, updated.Attraction) : null;
-  let _taBase = 0;
-  if(_ce){ const sd=_ce[_ck]||_ce['21']; _taBase=parseFloat(sd?.rate)||0; }
-  if(_taBase===0) _taBase = _svc;
-  // Hotel/Dist DR→TA 역산
-  const _htlTA = _htl===0?0: _sn>=50?(_htl===15?80:_htl===30?160:_htl*4): _sn>=40?(_htl===15?75:_htl===30?150:_htl*4): (_htl===10?40:_htl===20?80:_htl*4);
-  const _dstTA = _dst===0?0: _sn>=50?(_dst===40?160:_dst*4): _sn>=40?(_dst===40?150:Math.round(_dst*3.75)): (_dst===30?80:Math.round(_dst*2.67));
-  // Early TA: Airport Transfer rate × 0.3
-  let _erlTA = 0;
-  if(_erl>0){ let _atE=_agPC?_findCourse(_agPC,'Airport Transfer'):null; if(!_atE){for(const ag of Object.keys(DB.PC)){_atE=_findCourse(DB.PC[ag],'Airport Transfer');if(_atE)break;}} if(_atE){const sd2=_atE[_ck]||_atE['21']; _erlTA=Math.round((parseFloat(sd2?.rate)||0)*0.3);} }
-  // OT TA rate
-  const _otRateTA = _sn>=50?160:_sn>=40?150:80;
-  const _otRateDR = _sn>=40?40:30;
-  const _otHrs = _otRateDR>0 ? _ot/_otRateDR : 0;
-  const _otTA = Math.round(_otHrs * _otRateTA);
-  // Parking
-  const _apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
-  const _parking = _apPat.test(updated.Pickup||'') ? (_sn>=40?40:30) : 0;
-  // Toll (large bus only for TA)
-  const _tollTA = (_sn>=40) ? (parseFloat(updated.Toll)||0) : 0;
-  updated.Total_TA = _taBase + _otTA + _htlTA + _dstTA + _erlTA + _parking + _tollTA;
+  // ★ Total_TA = M_PriceDriver base (= SVC_Charge) — 에이전시 TA는 잔액 탭에서 실시간 계산
+  updated.Total_TA = _svc;
 
   // _rowIndex는 전송하지 않음
   const { _rowIndex, _isoDate, ...sendData } = updated;
