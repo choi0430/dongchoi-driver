@@ -3310,19 +3310,41 @@ async function syncBalanceData(force){
           // ★ DR = 총 인보이스 금액, CR = 선수금/크레딧 차감액 → Balance = DR - CR
           const drAmount = Math.round(gt * 100) / 100;
           const crAmount = Math.round(totalDeduct * 100) / 100;
+          // ★ 날짜 필드를 YYYY-MM-DD로 통일 (date input 호환)
           const issuedDate = String(inv.IssuedDate||'').trim();
           const txnDate = parseToISO(issuedDate) || toLocalISO(new Date());
+          const periodFrom = parseToISO(String(inv.PeriodFrom||'')) || '';
+          const periodTo = parseToISO(String(inv.PeriodTo||'')) || '';
+          // ★ DueDate: 발행일 + 30일 (기본 결제 기한)
+          let dueDate = '';
+          try {
+            const issDt = new Date((txnDate||'')+'T00:00:00');
+            if(!isNaN(issDt.getTime())){
+              issDt.setDate(issDt.getDate()+30);
+              dueDate = toLocalISO(issDt);
+            }
+          } catch(e){}
+          // ★ 투어코드: Items JSON에서 추출
+          let tourCodes = '';
+          try {
+            let itemsJSON = inv.Items || '';
+            if(typeof itemsJSON === 'string' && itemsJSON.trim().startsWith('[')) {
+              const items = JSON.parse(itemsJSON);
+              const codes = [...new Set(items.map(it => it.tour || it.tourCode || it.Tour || '').filter(Boolean))];
+              tourCodes = codes.join(', ');
+            }
+          } catch(e){}
           const txnData = {
             Agency:     inv.Agency||'',
             Date:       txnDate,
             InvoiceID:  invNum,
-            TourCode:   '',
+            TourCode:   tourCodes,
             DR:         drAmount,
             CR:         crAmount,
             Remark:     crAmount > 0 ? `인보이스 자동 (선수금/크레딧 $${crAmount})` : '인보이스 자동 동기화',
-            StartDate:  inv.PeriodFrom||'',
-            FinishDate: inv.PeriodTo||'',
-            DueDate:    ''
+            StartDate:  periodFrom,
+            FinishDate: periodTo,
+            DueDate:    dueDate
           };
           try {
             const r = await fetch(APPS_SCRIPT_URL,{
@@ -3806,6 +3828,11 @@ function openBalTxnModal(type, idx){
     const agencies = [...new Set(_balAgencyTxns.map(t=>t.Agency).filter(Boolean))];
     // Also include M_Clients (DB.C)
     (DB.C||[]).forEach(c=>{ if(c.Name && !agencies.includes(c.Name)) agencies.push(c.Name); });
+    // ★ 날짜 필드를 YYYY-MM-DD로 변환 (date input 호환)
+    const _eDate = parseToISO(existing?.Date||'') || existing?.Date || _todayISO();
+    const _eStart = parseToISO(existing?.StartDate||'') || '';
+    const _eFinish = parseToISO(existing?.FinishDate||'') || '';
+    const _eDue = parseToISO(existing?.DueDate||'') || '';
     body.innerHTML = `
       <div style="display:grid;gap:10px;">
         <div><div class="profit-finp-label" style="font-size:10px;color:var(--t3);margin-bottom:3px;">여행사</div>
@@ -3817,7 +3844,7 @@ function openBalTxnModal(type, idx){
           <input id="btx-agency-new" class="profit-finp" style="width:100%;margin-top:4px;display:none;" placeholder="새 여행사명">
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">날짜</div><input type="date" id="btx-date" class="profit-finp" style="width:100%;" value="${existing?.Date||_todayISO()}"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">날짜</div><input type="date" id="btx-date" class="profit-finp" style="width:100%;" value="${_eDate}"></div>
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">인보이스 ID</div><input id="btx-invid" class="profit-finp" style="width:100%;" value="${existing?.InvoiceID||''}" placeholder="INV-001"></div>
         </div>
         <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">투어 코드</div><input id="btx-tour" class="profit-finp" style="width:100%;" value="${existing?.TourCode||''}" placeholder="예: BLUE MT"></div>
@@ -3827,10 +3854,10 @@ function openBalTxnModal(type, idx){
         </div>
         <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">비고</div><input id="btx-remark" class="profit-finp" style="width:100%;" value="${existing?.Remark||''}" placeholder="메모"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">시작일</div><input type="date" id="btx-start" class="profit-finp" style="width:100%;" value="${existing?.StartDate||''}"></div>
-          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">종료일</div><input type="date" id="btx-finish" class="profit-finp" style="width:100%;" value="${existing?.FinishDate||''}"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">시작일</div><input type="date" id="btx-start" class="profit-finp" style="width:100%;" value="${_eStart}"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">종료일</div><input type="date" id="btx-finish" class="profit-finp" style="width:100%;" value="${_eFinish}"></div>
         </div>
-        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">결제 기한 (DUE DATE)</div><input type="date" id="btx-due" class="profit-finp" style="width:100%;" value="${existing?.DueDate||''}"></div>
+        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">결제 기한 (DUE DATE)</div><input type="date" id="btx-due" class="profit-finp" style="width:100%;" value="${_eDue}"></div>
       </div>`;
     document.getElementById('btx-agency').addEventListener('change',function(){
       document.getElementById('btx-agency-new').style.display = this.value==='_NEW'?'':'none';
@@ -3861,7 +3888,7 @@ function openBalTxnModal(type, idx){
               <option value="Wage" ${existing?.Category==='Wage'?'selected':''}>급여 (Wage)</option>
             </select>
           </div>
-          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">날짜</div><input type="date" id="btx-date" class="profit-finp" style="width:100%;" value="${existing?.Date||_todayISO()}"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">날짜</div><input type="date" id="btx-date" class="profit-finp" style="width:100%;" value="${parseToISO(existing?.Date||'')||existing?.Date||_todayISO()}"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">인보이스 No</div><input id="btx-invno" class="profit-finp" style="width:100%;" value="${existing?.InvoiceNo||''}" placeholder="INV-001"></div>
