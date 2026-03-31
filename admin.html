@@ -3315,12 +3315,12 @@ async function syncBalanceData(force){
           const txnDate = parseToISO(issuedDate) || toLocalISO(new Date());
           const periodFrom = parseToISO(String(inv.PeriodFrom||'')) || '';
           const periodTo = parseToISO(String(inv.PeriodTo||'')) || '';
-          // ★ DueDate: 발행일 + 30일 (기본 결제 기한)
+          // ★ DueDate: 발행일 + 14일 (2주 결제 기한)
           let dueDate = '';
           try {
             const issDt = new Date((txnDate||'')+'T00:00:00');
             if(!isNaN(issDt.getTime())){
-              issDt.setDate(issDt.getDate()+30);
+              issDt.setDate(issDt.getDate()+14);
               dueDate = toLocalISO(issDt);
             }
           } catch(e){}
@@ -3358,6 +3358,64 @@ async function syncBalanceData(force){
               console.log('[Balance Sync] 등록 완료:', invNum, 'DR:', drAmount, 'CR:', crAmount);
             }
           } catch(e){ console.warn('[Balance Sync] 등록 실패:', invNum, e); }
+        }
+      }
+    }
+
+    // ★ 기존 Agency_Txn 중 인보이스 매칭되나 빈 필드 있는 건 자동 보충
+    if(invJson.ok && invJson.rows){
+      for(const txn of _balAgencyTxns){
+        const invId = String(txn.InvoiceID||'').trim();
+        if(!invId) continue;
+        const linkedInv = invJson.rows.find(inv => String(inv.InvNumber||'').trim() === invId);
+        if(!linkedInv) continue;
+        let needUpdate = false;
+        // 빈 날짜 보충
+        if(!txn.Date || !parseToISO(String(txn.Date||''))){
+          const d = parseToISO(String(linkedInv.IssuedDate||''));
+          if(d){ txn.Date = d; needUpdate = true; }
+        }
+        if(!txn.StartDate || !parseToISO(String(txn.StartDate||''))){
+          const d = parseToISO(String(linkedInv.PeriodFrom||''));
+          if(d){ txn.StartDate = d; needUpdate = true; }
+        }
+        if(!txn.FinishDate || !parseToISO(String(txn.FinishDate||''))){
+          const d = parseToISO(String(linkedInv.PeriodTo||''));
+          if(d){ txn.FinishDate = d; needUpdate = true; }
+        }
+        // 빈 투어코드 보충
+        if(!txn.TourCode){
+          try {
+            let itemsJSON = linkedInv.Items || '';
+            if(typeof itemsJSON === 'string' && itemsJSON.trim().startsWith('[')){
+              const items = JSON.parse(itemsJSON);
+              const codes = [...new Set(items.map(it => it.tour||it.tourCode||it.Tour||'').filter(Boolean))].join(', ');
+              if(codes){ txn.TourCode = codes; needUpdate = true; }
+            }
+          } catch(e){}
+        }
+        // DueDate 보충 (발행일+14일)
+        if(!txn.DueDate && txn.Date){
+          try {
+            const issDt = new Date((parseToISO(String(txn.Date))||'')+'T00:00:00');
+            if(!isNaN(issDt.getTime())){
+              issDt.setDate(issDt.getDate()+14);
+              txn.DueDate = toLocalISO(issDt);
+              needUpdate = true;
+            }
+          } catch(e){}
+        }
+        // 시트에도 반영
+        if(needUpdate && txn._rowIndex){
+          try {
+            await fetch(APPS_SCRIPT_URL, {
+              method:'POST', headers:{'Content-Type':'text/plain'},
+              body:JSON.stringify({action:'update_agency_txn', rowIndex:txn._rowIndex, data:{
+                Date:txn.Date, TourCode:txn.TourCode, StartDate:txn.StartDate,
+                FinishDate:txn.FinishDate, DueDate:txn.DueDate
+              }, _user:getAdminUser()})
+            });
+          } catch(e){ console.warn('[Balance Sync] 기존 거래 보충 실패:', invId, e); }
         }
       }
     }
@@ -3828,6 +3886,35 @@ function openBalTxnModal(type, idx){
     const agencies = [...new Set(_balAgencyTxns.map(t=>t.Agency).filter(Boolean))];
     // Also include M_Clients (DB.C)
     (DB.C||[]).forEach(c=>{ if(c.Name && !agencies.includes(c.Name)) agencies.push(c.Name); });
+
+    // ★ 인보이스 데이터에서 빈 필드 자동 보충
+    if(existing && existing.InvoiceID && _invHistoryCache){
+      const linkedInv = _invHistoryCache.find(inv => String(inv.InvNumber||'').trim() === String(existing.InvoiceID||'').trim());
+      if(linkedInv){
+        if(!existing.Date && linkedInv.IssuedDate) existing.Date = String(linkedInv.IssuedDate);
+        if(!existing.StartDate && linkedInv.PeriodFrom) existing.StartDate = String(linkedInv.PeriodFrom);
+        if(!existing.FinishDate && linkedInv.PeriodTo) existing.FinishDate = String(linkedInv.PeriodTo);
+        if(!existing.TourCode){
+          try {
+            let itemsJSON = linkedInv.Items || '';
+            if(typeof itemsJSON === 'string' && itemsJSON.trim().startsWith('[')){
+              const items = JSON.parse(itemsJSON);
+              existing.TourCode = [...new Set(items.map(it => it.tour||it.tourCode||it.Tour||'').filter(Boolean))].join(', ');
+            }
+          } catch(e){}
+        }
+        if(!existing.DueDate && existing.Date){
+          try {
+            const issDt = new Date((parseToISO(String(existing.Date))||'')+'T00:00:00');
+            if(!isNaN(issDt.getTime())){
+              issDt.setDate(issDt.getDate()+14);
+              existing.DueDate = toLocalISO(issDt);
+            }
+          } catch(e){}
+        }
+      }
+    }
+
     // ★ 날짜 필드를 YYYY-MM-DD로 변환 (date input 호환)
     const _eDate = parseToISO(existing?.Date||'') || existing?.Date || _todayISO();
     const _eStart = parseToISO(existing?.StartDate||'') || '';
