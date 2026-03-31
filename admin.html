@@ -3705,7 +3705,7 @@ function renderBalDetail(){
       const bal = balMap.get(r)||0;
       const remark = r.Remark || r.TourCode || '—';
       html += `<tr style="border-bottom:1px solid var(--b1);">
-        <td style="padding:6px 4px;white-space:nowrap;">${r.Date||'—'}</td>
+        <td style="padding:6px 4px;white-space:nowrap;">${fmtDate(r.Date)||'—'}</td>
         <td style="padding:6px 4px;">${r.InvoiceID||'—'}</td>
         <td style="padding:6px 4px;font-size:10px;color:var(--t3);">${remark}</td>
         <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
@@ -3742,7 +3742,7 @@ function renderBalDetail(){
       const realIdx = _balSubTxns.indexOf(r);
       const cat = r.Category==='Wage'?'급여':'외주';
       html += `<tr style="border-bottom:1px solid var(--b1);">
-        <td style="padding:6px 4px;white-space:nowrap;">${r.Date||'—'}</td>
+        <td style="padding:6px 4px;white-space:nowrap;">${fmtDate(r.Date)||'—'}</td>
         <td style="padding:6px 4px;"><span style="background:${r.Category==='Wage'?'var(--pud)':'var(--acd)'};padding:1px 6px;border-radius:4px;font-size:9px;">${cat}</span></td>
         <td style="padding:6px 4px;">${r.Description||r.InvoiceNo||'—'}</td>
         <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
@@ -3776,7 +3776,7 @@ function renderBalDetail(){
       </tr></thead><tbody>`;
     all.forEach(r=>{
       html += `<tr style="border-bottom:1px solid var(--b1);">
-        <td style="padding:6px 4px;white-space:nowrap;">${r.date||'—'}</td>
+        <td style="padding:6px 4px;white-space:nowrap;">${fmtDate(r.date)||'—'}</td>
         <td style="padding:6px 4px;">${r.desc||'—'}</td>
         <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${r.type==='DR'?'$'+Number(r.amount).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
         <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${r.type==='CR'?'$'+Number(r.amount).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
@@ -8497,6 +8497,8 @@ async function loadAllFromSheets(){
       const _mm = String(_d.getMinutes()).padStart(2,'0');
       _syncEl.textContent = '✅ 마지막 동기화: ' + _hh + ':' + _mm;
     }
+    // ★ 서비스 KM 데이터 로드 (대시보드 알림용)
+    try { await loadRegoMaxKM(); } catch(e) { console.warn('Initial KM load failed', e); }
     rDash();
     // 데이터 로드 완료 후 급여 탭이 열려있으면 즉시 렌더
     rWage();
@@ -9447,7 +9449,7 @@ async function runAdminSync(silent=true){
     const pg = document.querySelector('.pg.on')?.id || '';
 
     // ── 0. KM 리포트 최고값 (서비스 예정 계산용) ──
-    if(pg==='pveh' || pg==='pdsh' || !silent){
+    if(pg==='pveh' || pg==='pdash' || !silent){
       await loadRegoMaxKM();
     }
 
