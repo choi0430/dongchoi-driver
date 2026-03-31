@@ -4395,7 +4395,7 @@ function renderInvManualList() {
       const total = items.reduce((s,i)=> s + (i.amount||0) + (i.ot||0) + (i.hotel||0) + (i.trailer||0) + (i.toll||0) + (i.dist||0), 0);
       inlineEl.innerHTML = items.map(item => {
         const sub = (item.amount||0)+(item.ot||0)+(item.hotel||0)+(item.trailer||0)+(item.toll||0)+(item.dist||0);
-        const extras = [item.ot?'OT $'+item.ot:'', item.hotel?'Hotel $'+item.hotel:'', item.trailer?'Trailer $'+item.trailer:'', item.toll?'Toll $'+item.toll:'', item.dist?'Dist $'+item.dist:''].filter(Boolean).join(' · ');
+        const extras = [item.ot?'OT $'+item.ot:'', item.hotel?'Hotel_Surcharge $'+item.hotel:'', item.trailer?'Trailer $'+item.trailer:'', item.toll?'Toll $'+item.toll:'', item.dist?'Dist_Surcharge $'+item.dist:''].filter(Boolean).join(' · ');
         return `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--bd);">
           <div style="flex:1;min-width:0;">
             <div style="font-size:11px;font-weight:600;color:var(--t1);">${fmtDate(item.date)} · ${escH(item.tour)}${item.seats?' ('+item.seats+')':''}</div>
@@ -4678,10 +4678,15 @@ function calcInvRow(r) {
     const dist = distDR;
     const trailerVal = parseFloat(r.Trailer) || 0;
     const tollVal = parseFloat(r.Toll) || 0;
-    const total = baseRate + ot + hotel + dist + trailerVal + tollVal;
-    // 저장된 rateSource가 있으면 유지 (Rate Table vs SVC 구분)
+    const earlyTA = parseFloat(r.Early) || 0;
+    const parkingFee = parseFloat(r.Parking) || 0;
+    const nightTA = parseFloat(r.Night_DR) || 0;
+    const tipVal = parseFloat(r.Tip) || 0;
+    const mealVal = parseFloat(r.Meal) || 0;
+    const etcTA = parseFloat(r.Etc) || 0;
+    const total = baseRate + ot + hotel + dist + trailerVal + tollVal + earlyTA + parkingFee + nightTA + tipVal + mealVal + etcTA;
     const savedRS = r._rateSource || 'manual';
-    return { baseRate, ot, hotel, dist, earlyTA:0, parkingFee:0, autoParking:0, _pkKey:'', trailerVal, nightTA:0, tipVal:0, mealVal:0, tollVal, etcVal:0, etcTA:0, _etcKey:'', total, rateSource: savedRS };
+    return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking:0, _pkKey:'', trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal:0, etcTA, _etcKey:'', total, rateSource: savedRS };
   }
 
   // ── OT DR → TA 역산 ──
@@ -5077,17 +5082,17 @@ function renderInvPreview(rows, agency, from, to) {
       ${totalOT>0||totalHotel>0||totalDist>0 ? `
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;">
         ${totalBase>0  ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">기본요금</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalBase.toLocaleString()}</div></div>` : ''}
-        ${totalEarly>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Early/Late</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalEarly.toLocaleString()}</div></div>` : ''}
+        ${totalEarly>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Early</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalEarly.toLocaleString()}</div></div>` : ''}
         ${totalOT>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">OT</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalOT.toLocaleString()}</div></div>` : ''}
-        ${totalHotel>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">호텔</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalHotel.toLocaleString()}</div></div>` : ''}
-        ${totalDist>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">거리</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
-        ${totalParking>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">공항주차</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalParking.toLocaleString()}</div></div>` : ''}
-        ${totalTrailer>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">트레일러</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalTrailer.toLocaleString()}</div></div>` : ''}
-        ${totalNight>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">야간투어</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalNight.toLocaleString()}</div></div>` : ''}
-        ${totalTip>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">팁</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalTip.toLocaleString()}</div></div>` : ''}
-        ${totalMeal>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">식비</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalMeal.toLocaleString()}</div></div>` : ''}
-        ${totalToll>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">톨비</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalToll.toLocaleString()}</div></div>` : ''}
-        ${totalEtc>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">기타</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalEtc.toLocaleString()}</div></div>` : ''}
+        ${totalHotel>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Hotel_Surcharge</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalHotel.toLocaleString()}</div></div>` : ''}
+        ${totalDist>0    ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Dist_Surcharge</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalDist.toLocaleString()}</div></div>` : ''}
+        ${totalParking>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Parking</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalParking.toLocaleString()}</div></div>` : ''}
+        ${totalTrailer>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Trailer</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalTrailer.toLocaleString()}</div></div>` : ''}
+        ${totalNight>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Night_DR</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalNight.toLocaleString()}</div></div>` : ''}
+        ${totalTip>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Tip</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalTip.toLocaleString()}</div></div>` : ''}
+        ${totalMeal>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Meal</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalMeal.toLocaleString()}</div></div>` : ''}
+        ${totalToll>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Toll</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalToll.toLocaleString()}</div></div>` : ''}
+        ${totalEtc>0 ? `<div style="background:var(--sf3);border-radius:8px;padding:6px 8px;text-align:center;"><div style="font-size:10px;color:var(--t3);">Etc</div><div style="font-size:12px;font-weight:700;color:var(--t2);">$${totalEtc.toLocaleString()}</div></div>` : ''}
       </div>` : ''}
       <!-- 그룹 방식 선택 -->
       <div style="margin-bottom:8px;">
@@ -5362,13 +5367,19 @@ async function saveInvoiceToSheet() {
   const itemsSummary = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)] && !r._manual).map((r,ri) => {
     const c  = calcInvRow(r);
     const ov = _invOverrides[_invRowKey(r,ri)] || {};
+    const _extra = c.earlyTA+c.hotel+c.dist+(c.parkingFee||0)+(c.trailerVal||0)+(c.nightTA||0)+(c.tipVal||0)+(c.mealVal||0)+(c.tollVal||0)+(c.etcTA||0);
     return {
       date: r._iso, rego: r.Rego, tour: r.Attraction, seats: r.Seats, driver: r.Driver,
-      tourcode: r.Tour_Code||r.Attraction||'', pickup: r.Pickup||'', dropoff: r.Dropoff||'',
+      tourcode: r.Tour_Code||'', pickup: r.Pickup||'', dropoff: r.Dropoff||'',
       timeStart: r._timeStart||'', timeEnd: r._timeEnd||'',
       base: ov.base !== undefined ? ov.base : c.baseRate,
       ot:   ov.ot   !== undefined ? ov.ot   : c.ot,
-      extra:ov.extra!== undefined ? ov.extra : (c.earlyTA+c.hotel+c.dist+(c.parkingFee||0)+(c.trailerVal||0)+(c.nightTA||0)+(c.tipVal||0)+(c.mealVal||0)+(c.tollVal||0)+(c.etcTA||0)),
+      extra:ov.extra!== undefined ? ov.extra : _extra,
+      // ★ 개별 서차지 저장 (시트 헤더명 기준)
+      hotel: c.hotel||0, dist: c.dist||0, early: c.earlyTA||0,
+      parking: c.parkingFee||0, trailer: c.trailerVal||0,
+      night: c.nightTA||0, tip: c.tipVal||0, meal: c.mealVal||0,
+      toll: c.tollVal||0, etc: c.etcTA||0,
       rateSource: c.rateSource||'svc',
       overridden: !!(ov.base !== undefined || ov.ot !== undefined || ov.extra !== undefined)
     };
@@ -5651,29 +5662,39 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
       const _si = JSON.parse(_itemsJSON);
       const _sm = _manualJSON ? JSON.parse(_manualJSON) : [];
       console.log('[InvPreview] Using saved Items:', _si.length, 'items +', _sm.length, 'manual items');
-      const _savedRows = _si.map(item => ({
-        _iso: item.date||'', Date: item.date||'',
-        Attraction: item.tour||'-', Rego: item.rego||'', Seats: item.seats||'',
-        Driver: item.driver||'', Tour_Code: item.tourcode||item.tour||'',
-        Pickup: item.pickup||'', Dropoff: item.dropoff||'',
-        _timeStart: item.timeStart||'', _timeEnd: item.timeEnd||'',
-        _manual: true,
-        _rateSource: item.rateSource||'price_table',
-        SVC_Charge: item.base||0, OT: item.ot||0,
-        Hotel_Surcharge: item.extra||0,
-        Dist_Surcharge: 0, Trailer: 0, Toll: 0
-      }));
+      const _savedRows = _si.map(item => {
+        // ★ 개별 서차지가 있으면 사용, 없으면 레거시 extra → Hotel_Surcharge 폴백
+        const hasIndiv = item.hotel!==undefined || item.dist!==undefined || item.trailer!==undefined;
+        return {
+          _iso: item.date||'', Date: item.date||'',
+          Attraction: item.tour||'-', Rego: item.rego||'', Seats: item.seats||'',
+          Driver: item.driver||'', Tour_Code: item.tourcode||'',
+          Pickup: item.pickup||'', Dropoff: item.dropoff||'',
+          _timeStart: item.timeStart||'', _timeEnd: item.timeEnd||'',
+          _manual: true,
+          _rateSource: item.rateSource||'price_table',
+          SVC_Charge: item.base||0, OT: item.ot||0,
+          Hotel_Surcharge: hasIndiv ? (item.hotel||0) : (item.extra||0),
+          Dist_Surcharge: item.dist||0, Early: item.early||0,
+          Parking: item.parking||0, Trailer: item.trailer||0,
+          Night_DR: item.night||0, Tip: item.tip||0,
+          Meal: item.meal||0, Toll: item.toll||0, Etc: item.etc||0
+        };
+      });
       _sm.forEach(m => {
         _savedRows.push({
           _iso: parseToISO(m.date)||m.date||'', Date: m.date||'',
           Attraction: m.tour||'-', Rego: m.rego||'', Seats: m.seats||'',
-          Driver: m.driver||'', Tour_Code: m.tourcode||m.tour||'',
+          Driver: m.driver||'', Tour_Code: m.tourcode||'',
           Pickup: m.pickup||'', Dropoff: m.dropoff||'',
           _timeStart: m.start||'', _timeEnd: m.end||'',
           _manual: true,
           SVC_Charge: m.amount||0, OT: m.ot||0,
           Hotel_Surcharge: m.hotel||0, Dist_Surcharge: m.dist||0,
-          Trailer: m.trailer||0, Toll: m.toll||0
+          Early: m.early||0, Parking: m.parking||0,
+          Trailer: m.trailer||0, Night_DR: m.night||0,
+          Tip: m.tip||0, Meal: m.meal||0,
+          Toll: m.toll||0, Etc: m.etc||0
         });
       });
       _savedRows.sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
@@ -5823,13 +5844,14 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     const oOT    = ov.ot    !== undefined ? ov.ot    : c.ot;
     const oExtra = ov.extra !== undefined ? ov.extra : (c.earlyTA + c.hotel + c.dist + (c.parkingFee||0) + (c.trailerVal||0) + (c.nightTA||0) + (c.tipVal||0) + (c.mealVal||0) + (c.tollVal||0) + (c.etcTA||0));
     const oTotal = oBase + oOT + oExtra;
+    // ★ 시트 헤더명 기준 서차지 라벨
     const surParts = [];
-    if(c.hotel>0) surParts.push('Hotel $'+c.hotel);
-    if(c.dist>0) surParts.push('Distance $'+c.dist);
-    if(c.earlyTA>0) surParts.push('Early/Late $'+c.earlyTA);
+    if(c.hotel>0) surParts.push('Hotel_Surcharge $'+c.hotel);
+    if(c.dist>0) surParts.push('Dist_Surcharge $'+c.dist);
+    if(c.earlyTA>0) surParts.push('Early $'+c.earlyTA);
     if((c.parkingFee||0)>0) surParts.push('Parking $'+c.parkingFee);
     if((c.trailerVal||0)>0) surParts.push('Trailer $'+c.trailerVal);
-    if((c.nightTA||0)>0) surParts.push('Night Tour $'+c.nightTA);
+    if((c.nightTA||0)>0) surParts.push('Night_DR $'+c.nightTA);
     if((c.tipVal||0)>0) surParts.push('Tip $'+c.tipVal);
     if((c.mealVal||0)>0) surParts.push('Meal $'+c.mealVal);
     if((c.tollVal||0)>0) surParts.push('Toll $'+c.tollVal);
