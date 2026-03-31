@@ -7415,125 +7415,301 @@ async function renderWage(){
   if(sumEl) sumEl.innerHTML =
     '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:4px;text-align:center;color:var(--t3);font-size:13px;">⏳ DR 금액 조회 중...</div>';
 
-  // ── GAS Daily_Report 시트에서 드라이버 해당 주 DR_Cost 합산 ──
-  const earned = await getEarnedFromSheets(ST.wageDriver, ST.wageWeek);
-
-  const totalPaid = entries.reduce((s,e)=>s+(e.amount||0),0);
-  const balance   = earned - totalPaid;
-
-  // 리포트 건수도 표시
+  // ── 리포트 캐시에서 해당 주 리포트 필터 ──
   const rows = _reportsCache || [];
   const mon  = ST.wageWeek;
-  const sun  = (() => { const d=new Date(mon); d.setDate(d.getDate()+6); return toLocalISO(d); })();
+  const sunD = new Date(mon); sunD.setDate(sunD.getDate()+6);
+  const sun  = toLocalISO(sunD);
   const drRow = DB.D.find(d=>(d.Name_KR||'')===ST.wageDriver||(d.Name_EN||'')===ST.wageDriver);
   const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
   const weekReports = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
-  const nightOwnerTotal = weekReports.reduce((s,r)=>s+(parseFloat(r.Night_Owner)||0),0);
-  // DR_Cost가 0/빈 문자열이면 각 항목 합산으로 재계산
-  function calcDRFromReport(r) {
-    const stored = parseFloat(r.DR_Cost);
-    if(stored > 0) return stored;
-    // DR_Cost 없음 → M_PriceDriver base + extras
-    const svc  = parseFloat(r.SVC_Charge)||0;
-    const ot   = parseFloat(r.OT)||0;
-    const htl  = parseFloat(r.Hotel_Surcharge)||0;
-    const dst  = parseFloat(r.Dist_Surcharge)||0;
-    const erl  = parseFloat(r.Early)||0;
-    const trl  = parseFloat(r.Trailer)||0;
-    const ngt  = parseFloat(r.Night_DR)||0;
-    const wsh  = parseFloat(r.Wash)||0;
-    const mel  = parseFloat(r.Meal)||0;
-    const tip  = parseFloat(r.Tip)||0;
-    const toll = r.Toll_Personal==='Y' ? (parseFloat(r.Toll)||0) : 0;
-    const fuel = r.Fuel_Personal==='Y' ? (parseFloat(r.Fuel)||0) : 0;
-    const seats = String(r.Seats||'').replace('S','').trim();
-    const ck = parseInt(seats)>=50?'50':parseInt(seats)>=40?'40':parseInt(seats)>=25?'25':'21';
-    const att2 = String(r.Attraction||'').trim();
-    const pdEntry = DB.PD?.[att2];
-    const drBase = pdEntry ? (Number(pdEntry[ck]?.base)||0) : 0;
-    const base = drBase > 0 ? drBase : svc;
-    if(base === 0) return 0;
-    return base + ot + htl + dst + erl + trl + ngt + wsh + mel + tip + toll + fuel;
-  }
-  const grossDR = weekReports.reduce((s,r)=>s+calcDRFromReport(r),0);
 
-  // 요약 카드
-  const summaryGrid = nightOwnerTotal > 0
-    ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
-        wstat('발생 DR (총)', grossDR, 'var(--gn)')+
-        wstat('야경 납입 차감', -nightOwnerTotal, 'var(--rd)')+
-      '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
-        wstat('실 수령 DR', earned, 'var(--gn)')+
-        wstat('지급 합계', totalPaid, 'var(--ac)')+
-        wstat('잔액', balance, balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)')+
-      '</div>'
-    : '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
-        wstat('발생 DR', earned, 'var(--gn)')+
-        wstat('지급 합계', totalPaid, 'var(--ac)')+
-        wstat('잔액', balance, balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)')+
-      '</div>';
+  // ★ DR_Cost는 이미 Night_Owner 차감 후 저장됨 → 이중 차감 방지
+  const drTotal = weekReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
+  const surcharges = _calcWeekSurcharges(weekReports);
+  const totalPaid = entries.reduce((s,e)=>s+(e.amount||0),0);
 
+  // 보라색 그라디언트 요약 카드 (드라이버 앱 스타일)
   if(sumEl) sumEl.innerHTML =
-    '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:4px;">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
-        '<div style="font-size:11px;color:var(--t3);font-weight:700;">'+escH(ST.wageDriver)+' — '+getWeekLabel(ST.wageWeek)+'</div>'+
-        '<div style="font-size:11px;color:var(--t3);">리포트 '+weekReports.length+'건</div>'+
-      '</div>'+
-      summaryGrid+
-      '</div>'+
-      (weekReports.length>0 ?
-        '<div style="margin-top:10px;border-top:1px solid var(--b2);padding-top:10px;">'+
-          '<div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:6px;">리포트 내역</div>'+
-          weekReports.map(r=>{
-            const tS = r._timeStart || parseSheetTime(r.Time_Start);
-            const tE = r._timeEnd   || parseSheetTime(r.Time_End);
-            const dur = calcDuration(tS, tE);
-            const timeStr = tS ? (tS + (tE ? ' ~ ' + tE : '') + (dur ? '  (' + dur + ')' : '')) : '';
-            return '<div style="background:var(--sf3);border-radius:8px;padding:8px 10px;margin-bottom:5px;">'+
-              '<div style="display:flex;justify-content:space-between;align-items:center;">'+
-                '<div>'+
-                  '<div style="font-size:12px;font-weight:700;color:var(--t1);">'+escH(r.Attraction||r.TA_Name||r.Agency||'')+'</div>'+
-                  '<div style="font-size:11px;color:var(--t3);margin-top:1px;">'+fmtDate(r.Date||r._isoDate)+(r.Rego?' · '+escH(r.Rego):'')+'</div>'+
-                  (timeStr ? '<div style="font-size:11px;color:var(--ac);margin-top:2px;">⏱ '+timeStr+'</div>' : '')+
-                '</div>'+
-                '<div style="text-align:right;">'+
-                  '<div style="font-size:14px;font-weight:800;color:var(--gn);">$'+calcDRFromReport(r).toLocaleString()+'</div>'+
-                  ((parseFloat(r.Night_Owner)||0)>0 ? '<div style="font-size:11px;color:var(--rd);font-weight:700;">-$'+(parseFloat(r.Night_Owner)||0).toLocaleString()+'</div>' : '')+
-                '</div>'+
-              '</div>'+
-            '</div>';
-          }).join('')+
-        '</div>' : '')+
-    '</div>';
+    _weekSummaryCard(escH(ST.wageDriver)+' — '+getWeekLabel(ST.wageWeek), drTotal, surcharges, totalPaid, weekReports.length);
 
-  // 지급 내역 목록
+  // 리포트 상세 + 지급 내역
   const listEl = document.getElementById('wage-list');
   if(!listEl) return;
 
-  // 탭 헤더
-  const tabHtml =
-    '<div style="display:flex;gap:8px;margin-bottom:10px;">'+
-      '<div style="font-size:12px;font-weight:700;color:var(--t1);">💸 지급 내역</div>'+
-    '</div>';
+  let html = '';
+
+  // 리포트 내역
+  if(weekReports.length > 0){
+    html += '<div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:6px;">📋 리포트 내역</div>';
+    weekReports.forEach(r=>{ html += _reportRow(r); });
+  }
+
+  // 지급 내역
+  html += '<div style="font-size:11px;font-weight:700;color:var(--t3);margin:12px 0 6px;">💸 지급 내역</div>';
 
   if(entries.length===0){
-    listEl.innerHTML=tabHtml+'<div style="text-align:center;padding:24px;color:var(--t3);font-size:13px;">지급 내역이 없습니다.<br><span style="font-size:11px;">아래 + 버튼으로 지급 기록을 추가하세요.</span></div>';
-    return;
+    html += '<div style="text-align:center;padding:24px;color:var(--t3);font-size:13px;">지급 내역이 없습니다.<br><span style="font-size:11px;">아래 + 버튼으로 지급 기록을 추가하세요.</span></div>';
+  } else {
+    html += entries.map((e,i)=>
+      '<div style="background:var(--sf2);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">'+
+        '<div>'+
+          '<div style="font-size:13px;font-weight:700;color:var(--t1);">'+fmtDate(e.date)+'</div>'+
+          '<div style="font-size:11px;color:var(--t3);margin-top:2px;">'+escH(e.method||'현금')+(e.note?' · '+escH(e.note):'')+'</div>'+
+        '</div>'+
+        '<div style="display:flex;gap:8px;align-items:center;">'+
+          '<span style="font-size:16px;font-weight:800;color:var(--ac);">$'+((e.amount||0)).toLocaleString()+'</span>'+
+          '<button class="btn bgh xs" onclick="openWageEntry('+i+')">✏️</button>'+
+          '<button class="btn brd xs" onclick="deleteWageEntry('+i+')">🗑</button>'+
+        '</div>'+
+      '</div>'
+    ).join('');
   }
-  listEl.innerHTML = tabHtml + entries.map((e,i)=>
-    '<div style="background:var(--sf2);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">'+
+  listEl.innerHTML = html;
+}
+
+// ── DR 비용 계산 (공용) ──────────────────────────────
+function _calcDRFromReport(r){
+  const stored=parseFloat(r.DR_Cost);
+  if(stored>0) return stored;
+  const svc=parseFloat(r.SVC_Charge)||0;
+  const ot=parseFloat(r.OT)||0;
+  const htl=parseFloat(r.Hotel_Surcharge)||0;
+  const dst=parseFloat(r.Dist_Surcharge)||0;
+  const erl=parseFloat(r.Early)||0;
+  const trl=parseFloat(r.Trailer)||0;
+  const ngt=parseFloat(r.Night_DR)||0;
+  const wsh=parseFloat(r.Wash)||0;
+  const mel=parseFloat(r.Meal)||0;
+  const tip=parseFloat(r.Tip)||0;
+  const toll=r.Toll_Personal==='Y'?(parseFloat(r.Toll)||0):0;
+  const fuel=r.Fuel_Personal==='Y'?(parseFloat(r.Fuel)||0):0;
+  const seats=String(r.Seats||'').replace('S','').trim();
+  const ck=parseInt(seats)>=50?'50':parseInt(seats)>=40?'40':parseInt(seats)>=25?'25':'21';
+  const att2=String(r.Attraction||'').trim();
+  const pdEntry=DB.PD?.[att2];
+  const drBase=pdEntry?(Number(pdEntry[ck]?.base)||0):0;
+  const base=drBase>0?drBase:svc;
+  if(base===0) return 0;
+  return base+ot+htl+dst+erl+trl+ngt+wsh+mel+tip+toll+fuel;
+}
+
+// ── 주간 서차지 합계 계산 ──────────────────────────────
+function _calcWeekSurcharges(reports){
+  let ot=0,hotel=0,dist=0,early=0,wash=0,meal=0,night=0,trailer=0,tip=0,toll=0,fuel=0,etc=0,owner=0;
+  reports.forEach(r=>{
+    ot+=parseFloat(r.OT)||0;
+    hotel+=parseFloat(r.Hotel_Surcharge)||0;
+    dist+=parseFloat(r.Dist_Surcharge)||0;
+    early+=parseFloat(r.Early)||0;
+    wash+=parseFloat(r.Wash)||0;
+    meal+=parseFloat(r.Meal)||0;
+    night+=parseFloat(r.Night_DR)||0;
+    trailer+=parseFloat(r.Trailer)||0;
+    tip+=parseFloat(r.Tip)||0;
+    toll+=r.Toll_Personal==='Y'?(parseFloat(r.Toll)||0):0;
+    fuel+=r.Fuel_Personal==='Y'?(parseFloat(r.Fuel)||0):0;
+    etc+=parseFloat(r.Etc)||0;
+    owner+=parseFloat(r.Night_Owner)||0;
+  });
+  return {ot,hotel,dist,early,wash,meal,night,trailer,tip,toll,fuel,etc,owner};
+}
+
+// ── 서차지 배지 HTML ──────────────────────────────
+function _surBadges(s){
+  const items=[
+    s.ot>0&&{l:'OT',v:s.ot,c:'#3b82f6'},
+    s.hotel>0&&{l:'호텔',v:s.hotel,c:'#8b5cf6'},
+    s.dist>0&&{l:'거리',v:s.dist,c:'#0ea5e9'},
+    s.early>0&&{l:'조기출발',v:s.early,c:'#f59e0b'},
+    s.trailer>0&&{l:'트레일러',v:s.trailer,c:'#64748b'},
+    s.wash>0&&{l:'세차',v:s.wash,c:'#10b981'},
+    s.meal>0&&{l:'식비',v:s.meal,c:'#10b981'},
+    s.night>0&&{l:'야간투어',v:s.night,c:'#a5b4fc'},
+    s.tip>0&&{l:'팁',v:s.tip,c:'#eab308'},
+    s.toll>0&&{l:'톨비',v:s.toll,c:'#78716c'},
+    s.fuel>0&&{l:'연료비',v:s.fuel,c:'#78716c'},
+    s.etc>0&&{l:'기타',v:s.etc,c:'#78716c'},
+    s.owner>0&&{l:'회사납입',v:s.owner,c:'#ef4444'},
+  ].filter(Boolean);
+  if(!items.length) return '';
+  return '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">'+
+    items.map(i=>'<span style="display:inline-flex;align-items:center;gap:2px;background:'+i.c+'18;border:1px solid '+i.c+'44;border-radius:5px;padding:2px 6px;font-size:10px;font-weight:700;color:'+i.c+';">'+i.l+' $'+i.v+'</span>').join('')+'</div>';
+}
+
+// ── 주간 합계 카드 (보라색 그라디언트) ──────────────────
+function _weekSummaryCard(label, netPay, surcharges, paid, reportCount){
+  const balance=netPay-paid;
+  const isPaid=balance<=0;
+  // ★ DR_Cost는 이미 Night_Owner 차감 후 저장 → grossDR = drTotal + ownerTotal
+  const grossDR=netPay+surcharges.owner;
+  const baseAmt=grossDR-(surcharges.ot+surcharges.hotel+surcharges.dist+surcharges.early+surcharges.wash+surcharges.meal+surcharges.night+surcharges.trailer+surcharges.tip+surcharges.toll+surcharges.fuel+surcharges.etc);
+  const breakItems=[
+    {l:'기본 수당',v:baseAmt,c:'rgba(255,255,255,.9)'},
+    surcharges.ot>0&&{l:'OT',v:surcharges.ot,c:'#93c5fd'},
+    surcharges.hotel>0&&{l:'호텔 서차지',v:surcharges.hotel,c:'#c4b5fd'},
+    surcharges.dist>0&&{l:'거리 서차지',v:surcharges.dist,c:'#7dd3fc'},
+    surcharges.trailer>0&&{l:'트레일러',v:surcharges.trailer,c:'#93c5fd'},
+    surcharges.early>0&&{l:'조기 출발',v:surcharges.early,c:'#fcd34d'},
+    surcharges.wash>0&&{l:'세차',v:surcharges.wash,c:'#6ee7b7'},
+    surcharges.meal>0&&{l:'식비',v:surcharges.meal,c:'#6ee7b7'},
+    surcharges.tip>0&&{l:'팁',v:surcharges.tip,c:'#fbbf24'},
+    surcharges.night>0&&{l:'야간투어',v:surcharges.night,c:'#a5b4fc'},
+    surcharges.toll>0&&{l:'톨비 (개인)',v:surcharges.toll,c:'#d6d3d1'},
+    surcharges.fuel>0&&{l:'연료비 (개인)',v:surcharges.fuel,c:'#d6d3d1'},
+    surcharges.etc>0&&{l:'기타',v:surcharges.etc,c:'#d6d3d1'},
+    surcharges.owner>0&&{l:'회사 납입 차감',v:-surcharges.owner,c:'rgba(255,150,150,.9)'},
+  ].filter(Boolean).filter(i=>i.v!==0);
+
+  return '<div style="background:linear-gradient(135deg,var(--ac),#6d28d9);border-radius:14px;padding:16px;margin-bottom:10px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'+
       '<div>'+
-        '<div style="font-size:13px;font-weight:700;color:var(--t1);">'+fmtDate(e.date)+'</div>'+
-        '<div style="font-size:11px;color:var(--t3);margin-top:2px;">'+escH(e.method||'현금')+(e.note?' · '+escH(e.note):'')+'</div>'+
+        '<div style="color:rgba(255,255,255,.65);font-size:10px;font-weight:700;">'+escH(label)+'</div>'+
+        '<div style="color:white;font-size:28px;font-weight:800;letter-spacing:-1px;margin-top:2px;">$'+netPay.toLocaleString()+'</div>'+
+        '<div style="font-size:11px;font-weight:700;margin-top:3px;color:'+(isPaid?'#86efac':'#fcd34d')+';">'+(isPaid?'✅ 전액 지급':'⏳ 미지급 $'+Math.round(balance))+'</div>'+
       '</div>'+
-      '<div style="display:flex;gap:8px;align-items:center;">'+
-        '<span style="font-size:16px;font-weight:800;color:var(--ac);">$'+((e.amount||0)).toLocaleString()+'</span>'+
-        '<button class="btn bgh xs" onclick="openWageEntry('+i+')">✏️</button>'+
-        '<button class="btn brd xs" onclick="deleteWageEntry('+i+')">🗑</button>'+
+      '<div style="text-align:right;color:rgba(255,255,255,.5);font-size:10px;">리포트 '+reportCount+'건</div>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px;">'+
+      '<div style="background:rgba(255,255,255,.12);border-radius:8px;padding:6px 8px;text-align:center;">'+
+        '<div style="font-size:9px;color:rgba(255,255,255,.5);">발생 수당</div>'+
+        '<div style="font-size:13px;font-weight:800;color:#86efac;">$'+netPay.toLocaleString()+'</div>'+
       '</div>'+
-    '</div>'
-  ).join('');
+      '<div style="background:rgba(255,255,255,.12);border-radius:8px;padding:6px 8px;text-align:center;">'+
+        '<div style="font-size:9px;color:rgba(255,255,255,.5);">지급됨</div>'+
+        '<div style="font-size:13px;font-weight:800;color:rgba(255,255,255,.9);">$'+paid.toLocaleString()+'</div>'+
+      '</div>'+
+      '<div style="background:rgba(255,255,255,.12);border-radius:8px;padding:6px 8px;text-align:center;">'+
+        '<div style="font-size:9px;color:rgba(255,255,255,.5);">잔액</div>'+
+        '<div style="font-size:13px;font-weight:800;color:'+(isPaid?'rgba(255,255,255,.5)':'#fcd34d')+';">$'+Math.max(0,Math.round(balance)).toLocaleString()+'</div>'+
+      '</div>'+
+    '</div>'+
+    (breakItems.length>0?
+      '<div style="border-top:1px solid rgba(255,255,255,.15);margin-top:10px;padding-top:8px;display:flex;flex-direction:column;gap:4px;">'+
+        breakItems.map(i=>'<div style="display:flex;justify-content:space-between;"><span style="font-size:10px;color:rgba(255,255,255,.55);">'+i.l+'</span><span style="font-size:10px;font-weight:700;color:'+i.c+';">'+(i.v>=0?'+':'')+'\$'+Math.abs(i.v)+'</span></div>').join('')+
+      '</div>':'')+
+  '</div>';
+}
+
+// ── 리포트 행 렌더 ──────────────────────────────
+function _reportRow(r){
+  const tS=r._timeStart||parseSheetTime(r.Time_Start);
+  const tE=r._timeEnd||parseSheetTime(r.Time_End);
+  const dur=calcDuration(tS,tE);
+  const timeStr=tS?(tS+(tE?' ~ '+tE:'')+(dur?'  ('+dur+')':'')):'';
+  const drCost=_calcDRFromReport(r);
+  const nightOwn=parseFloat(r.Night_Owner)||0;
+  const kmS=r.KM_Start||r.Start_KM||'';
+  const kmE=r.KM_End||r.End_KM||'';
+  const kmDiff=kmS&&kmE?Math.abs(parseInt(kmE)-parseInt(kmS)):0;
+  const hotel=r.Hotel||r.Accommodation||'';
+  const guide=r.Guide||'';
+  const tourcode=r.Tour_Code||'';
+
+  // 개별 서차지 배지
+  const surItems=[];
+  if((parseFloat(r.OT)||0)>0) surItems.push({l:'OT',v:parseFloat(r.OT),c:'#3b82f6'});
+  if((parseFloat(r.Hotel_Surcharge)||0)>0) surItems.push({l:'호텔',v:parseFloat(r.Hotel_Surcharge),c:'#8b5cf6'});
+  if((parseFloat(r.Dist_Surcharge)||0)>0) surItems.push({l:'거리',v:parseFloat(r.Dist_Surcharge),c:'#0ea5e9'});
+  if((parseFloat(r.Early)||0)>0) surItems.push({l:'조기출발',v:parseFloat(r.Early),c:'#f59e0b'});
+  if((parseFloat(r.Trailer)||0)>0) surItems.push({l:'트레일러',v:parseFloat(r.Trailer),c:'#64748b'});
+  if((parseFloat(r.Night_DR)||0)>0) surItems.push({l:'야간',v:parseFloat(r.Night_DR),c:'#a5b4fc'});
+  if((parseFloat(r.Wash)||0)>0) surItems.push({l:'세차',v:parseFloat(r.Wash),c:'#10b981'});
+  if((parseFloat(r.Meal)||0)>0) surItems.push({l:'식비',v:parseFloat(r.Meal),c:'#10b981'});
+  if((parseFloat(r.Tip)||0)>0) surItems.push({l:'팁',v:parseFloat(r.Tip),c:'#eab308'});
+  if(r.Toll_Personal==='Y'&&(parseFloat(r.Toll)||0)>0) surItems.push({l:'톨비',v:parseFloat(r.Toll),c:'#78716c'});
+  if(r.Fuel_Personal==='Y'&&(parseFloat(r.Fuel)||0)>0) surItems.push({l:'연료',v:parseFloat(r.Fuel),c:'#78716c'});
+
+  return '<div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:6px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'+
+      '<div style="flex:1;min-width:0;">'+
+        '<div style="font-size:12px;font-weight:700;color:var(--t1);">'+escH(r.Agency||'')+' <span style="color:var(--t3);font-weight:400;">·</span> '+escH(r.Attraction||'')+'</div>'+
+        '<div style="font-size:10px;color:var(--t3);margin-top:2px;">'+escH(r.Rego||'')+(r.Seats?' · '+escH(r.Seats):'')+'</div>'+
+        (timeStr?'<div style="font-size:10px;color:var(--ac);margin-top:1px;">⏱ '+timeStr+'</div>':'')+
+        (kmS&&kmE?'<div style="font-size:10px;color:var(--t3);margin-top:1px;">🚌 '+kmS+' → '+kmE+(kmDiff?' <span style="background:#dcfce7;color:#16a34a;padding:0 4px;border-radius:3px;font-weight:700;">+'+kmDiff+' km</span>':'')+'</div>':'')+
+        (hotel?'<div style="font-size:10px;color:var(--t3);margin-top:1px;">💎 '+escH(hotel)+'</div>':'')+
+        (guide||tourcode?'<div style="font-size:10px;color:var(--t3);margin-top:1px;">👤 '+escH(guide||'')+(tourcode?' · '+escH(tourcode):'')+'</div>':'')+
+      '</div>'+
+      '<div style="text-align:right;flex-shrink:0;margin-left:8px;">'+
+        '<div style="font-size:15px;font-weight:800;color:var(--gn);">$'+drCost.toLocaleString()+'</div>'+
+        (nightOwn>0?'<div style="font-size:10px;color:var(--rd);font-weight:700;">회사납입 -$'+nightOwn.toLocaleString()+'</div>':'')+
+        '<div style="font-size:10px;color:var(--t3);margin-top:1px;">실수령</div>'+
+      '</div>'+
+    '</div>'+
+    (surItems.length>0?'<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:6px;">'+surItems.map(i=>'<span style="font-size:9px;background:'+i.c+'14;border:1px solid '+i.c+'33;border-radius:4px;padding:1px 5px;font-weight:700;color:'+i.c+';">'+i.l+' $'+i.v+'</span>').join('')+'</div>':'')+
+  '</div>';
+}
+
+// ── 전체 기간 보기 ──────────────────────────────────────
+async function renderWageAll(){
+  ST.wageDriver = document.getElementById('wage-driver-sel')?.value || ST.wageDriver;
+  if(!ST.wageDriver) return;
+
+  const wages  = getWages();
+  const drvW   = wages[ST.wageDriver] || {};
+  const rows   = _reportsCache || [];
+  const drRow  = DB.D.find(d=>(d.Name_KR||'')===ST.wageDriver||(d.Name_EN||'')===ST.wageDriver);
+  const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+
+  const weekSet = new Set(Object.keys(drvW).filter(w=>/^\d{4}-\d{2}-\d{2}$/.test(w)));
+  rows.forEach(r=>{
+    if(matchNames.has(String(r.Driver||'').trim()) && r._isoDate){
+      const mon=getMondayOfDate(r._isoDate);
+      if(mon) weekSet.add(mon);
+    }
+  });
+  const weeks = [...weekSet].sort((a,b)=>a.localeCompare(b));
+
+  // ★ DR_Cost는 이미 Night_Owner 차감 후 저장됨 → 이중 차감 방지
+  let grandDR=0, grandPaid=0, grandReports=0;
+  const grandSur={ot:0,hotel:0,dist:0,early:0,wash:0,meal:0,night:0,trailer:0,tip:0,toll:0,fuel:0,etc:0,owner:0};
+  const weekData = weeks.map(wk=>{
+    const mon=wk;
+    const sunD=new Date(wk); sunD.setDate(sunD.getDate()+6);
+    const sun=toLocalISO(sunD);
+    const wReports=rows.filter(r=>matchNames.has(String(r.Driver||'').trim())&&r._isoDate>=mon&&r._isoDate<=sun);
+    const drTotal=wReports.reduce((s,r)=>s+_calcDRFromReport(r),0); // DR_Cost 이미 야경 차감 후
+    const sur=_calcWeekSurcharges(wReports);
+    const entries=(drvW[wk]||{}).entries||[];
+    const paid=entries.reduce((s,e)=>s+(e.amount||0),0);
+    grandDR+=drTotal; grandPaid+=paid; grandReports+=wReports.length;
+    Object.keys(grandSur).forEach(k=>grandSur[k]+=sur[k]);
+    return {wk,wReports,drTotal,sur,entries,paid};
+  });
+
+  const sumEl=document.getElementById('wage-summary');
+  if(sumEl) sumEl.innerHTML = _weekSummaryCard(
+    escH(ST.wageDriver)+' — 전체 기간 ('+weeks.length+'주)',
+    grandDR, grandSur, grandPaid, grandReports
+  );
+
+  const listEl=document.getElementById('wage-list');
+  if(!listEl) return;
+
+  let html='';
+  weekData.forEach(wd=>{
+    if(wd.wReports.length===0 && wd.entries.length===0) return;
+    // 주간 요약 카드
+    html += _weekSummaryCard(getWeekLabel(wd.wk), wd.drTotal, wd.sur, wd.paid, wd.wReports.length);
+    // 리포트 상세
+    wd.wReports.forEach(r=>{ html += _reportRow(r); });
+    // 지급 내역
+    if(wd.entries.length>0){
+      html+='<div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:10px;">'+
+        '<div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;">💸 지급 내역</div>';
+      wd.entries.forEach(e=>{
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--b2);">'+
+          '<div><div style="font-size:11px;font-weight:600;color:var(--t1);">'+fmtDate(e.date)+'</div>'+
+            '<div style="font-size:10px;color:var(--t3);">'+escH(e.method||'현금')+(e.note?' · '+escH(e.note):'')+'</div></div>'+
+          '<span style="font-size:13px;font-weight:800;color:var(--ac);">$'+((e.amount||0)).toLocaleString()+'</span>'+
+        '</div>';
+      });
+      html+='</div>';
+    }
+  });
+
+  if(!html) html='<div style="text-align:center;padding:24px;color:var(--t3);font-size:13px;">데이터가 없습니다.</div>';
+  listEl.innerHTML=html;
 }
 
 // ── 전체 기간 보기 ──────────────────────────────────────

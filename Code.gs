@@ -162,6 +162,9 @@ function doGet(e) {
       case 'get_reports':
         return cors(getReports(sheet, driver));
 
+      case 'get_signature':
+        return cors(getSignature(sheet, parseInt(e.parameter.row)||0));
+
       case 'get_master':
         return cors(getMaster(sheet));
 
@@ -390,7 +393,7 @@ function doPost(e) {
         return cors(fixWagesSheet());
 
       case 'fix_report_formats':
-        return cors(fixReportFormats(body.sheet || ''));
+        return cors(fixReportFormats(payload.sheet || ''));
 
       // ── Agency_Txn CRUD ──
       case 'add_agency_txn': {
@@ -502,16 +505,50 @@ function getReports(sheetName, driver) {
       return v;
     }
 
-    let rows = data.slice(1).map(row => {
+    // ★ Signature 컬럼은 base64 데이터가 크므로 bulk 응답에서 제외 → _hasSig 플래그만 전달
+    var sigIdx = -1;
+    for (var si = 0; si < headers.length; si++) {
+      if (String(headers[si]).trim() === 'Signature') { sigIdx = si; break; }
+    }
+
+    let rows = data.slice(1).map(function(row, rowNum) {
       const obj = {};
       headers.forEach((h, i) => {
-        obj[h] = formatCell(h, row[i]);
+        if (i === sigIdx) {
+          // Signature는 존재 여부만 플래그로 전달
+          obj._hasSig = !!(row[i] && String(row[i]).length > 30);
+          // obj.Signature는 의도적으로 생략
+        } else {
+          obj[h] = formatCell(h, row[i]);
+        }
       });
+      obj._row = rowNum + 2; // 실제 시트 행 번호 (헤더=1행)
       return obj;
     });
 
     if (driver) rows = rows.filter(r => r.Driver === driver);
     return {ok: true, rows};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ★ 단일 행의 Signature 데이터 반환 (on-demand)
+function getSignature(sheetName, rowIndex) {
+  try {
+    if (!sheetName || !rowIndex || rowIndex < 2) return {ok: false, msg: 'Invalid params'};
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return {ok: false, msg: sheetName + ' not found'};
+    var lastCol = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    var sigCol = -1;
+    for (var i = 0; i < headers.length; i++) {
+      if (String(headers[i]).trim() === 'Signature') { sigCol = i; break; }
+    }
+    if (sigCol === -1) return {ok: true, sig: ''};
+    var val = sheet.getRange(rowIndex, sigCol + 1).getValue();
+    return {ok: true, sig: val ? String(val) : ''};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
