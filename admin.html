@@ -1255,7 +1255,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div id="bal-agency-summary" style="padding:10px 14px 0;"></div>
     <div style="padding:6px 14px 0;display:flex;gap:6px;align-items:center;">
       <input type="text" id="bal-agency-search" class="profit-finp" placeholder="여행사 검색..." oninput="renderBalAgencyList()" style="flex:1;font-size:12px;">
-      <button class="btn bac sm" onclick="openBalTxnModal('agency',null)">+ 거래 추가</button>
+      <button class="btn bac sm" onclick="syncBalanceData(true)" title="인보이스 동기화">🔄 동기화</button>
     </div>
     <div id="bal-agency-list" style="padding:8px 14px 80px;"></div>
   </div>
@@ -3619,10 +3619,13 @@ function renderBalance(){
   else renderBalWageList();
 }
 
-// ── AGENCY BALANCE ──
+// ── AGENCY BALANCE ── (인보이스 발행 건에 한해서만)
 function _agencyBalances(){
   const map = {};
   _balAgencyTxns.forEach(t=>{
+    // ★ 인보이스 연결된 건만 잔액에 포함
+    const invId = String(t.InvoiceID||'').trim();
+    if(!invId) return;
     const name = t.Agency||'Unknown';
     if(!map[name]) map[name]={name, dr:0, cr:0};
     map[name].dr += Number(t.DR)||0;
@@ -3808,7 +3811,8 @@ function renderBalDetail(){
   let html = '';
 
   if(type==='agency'){
-    rows = _balAgencyTxns.filter(t=>(t.Agency||'')=== name).sort((a,b)=>(b.Date||'').localeCompare(a.Date||''));
+    // ★ 인보이스 발행 건만 표시
+    rows = _balAgencyTxns.filter(t=>(t.Agency||'')=== name && String(t.InvoiceID||'').trim()).sort((a,b)=>(b.Date||'').localeCompare(a.Date||''));
     const dr = rows.reduce((s,r)=>s+(Number(r.DR)||0),0);
     const cr = rows.reduce((s,r)=>s+(Number(r.CR)||0),0);
     document.getElementById('bal-detail-summary').innerHTML = `
@@ -3921,7 +3925,9 @@ function renderBalDetail(){
     // Hide add button for wage (uses existing Wage entry system)
     document.getElementById('bal-detail-add-btn').style.display='none';
   }
-  if(type!=='wage') document.getElementById('bal-detail-add-btn').style.display='';
+  // ★ Agency: 인보이스 발행 건만이므로 수동 추가 불가, Sub: 수동 추가 가능
+  if(type==='sub') document.getElementById('bal-detail-add-btn').style.display='';
+  else document.getElementById('bal-detail-add-btn').style.display='none';
   document.getElementById('bal-detail-body').innerHTML = html;
 }
 
