@@ -3310,11 +3310,30 @@ async function syncBalanceData(force){
           // ★ DR = 총 인보이스 금액, CR = 선수금/크레딧 차감액 → Balance = DR - CR
           const drAmount = Math.round(gt * 100) / 100;
           const crAmount = Math.round(totalDeduct * 100) / 100;
-          // ★ 날짜 필드를 YYYY-MM-DD로 통일 (date input 호환)
+          // ★ Items JSON에서 투어코드 + 리포트 날짜(시작/종료) 추출
           const issuedDate = String(inv.IssuedDate||'').trim();
           const txnDate = parseToISO(issuedDate) || toLocalISO(new Date());
-          const periodFrom = parseToISO(String(inv.PeriodFrom||'')) || '';
-          const periodTo = parseToISO(String(inv.PeriodTo||'')) || '';
+          let tourCodes = '', itemStartDate = '', itemEndDate = '';
+          try {
+            const _parseItems = (json) => {
+              if(!json || typeof json !== 'string' || !json.trim().startsWith('[')) return [];
+              return JSON.parse(json);
+            };
+            const allItems = [..._parseItems(inv.Items), ..._parseItems(inv.ManualItems)];
+            if(allItems.length > 0){
+              const codes = [...new Set(allItems.map(it => it.tour||it.tourCode||it.Tour||it.Attraction||'').filter(Boolean))];
+              tourCodes = codes.join(', ');
+              // ★ 리포트 날짜 중 가장 빠른 날 = 시작일, 가장 느린 날 = 종료일
+              const dates = allItems.map(it => parseToISO(String(it.date||it.Date||''))).filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+              if(dates.length > 0){
+                itemStartDate = dates[0];
+                itemEndDate = dates[dates.length - 1];
+              }
+            }
+          } catch(e){}
+          // PeriodFrom/PeriodTo 폴백 (Items에 날짜 없으면)
+          const periodFrom = itemStartDate || parseToISO(String(inv.PeriodFrom||'')) || '';
+          const periodTo = itemEndDate || parseToISO(String(inv.PeriodTo||'')) || '';
           // ★ DueDate: 발행일 + 14일 (2주 결제 기한)
           let dueDate = '';
           try {
@@ -3322,16 +3341,6 @@ async function syncBalanceData(force){
             if(!isNaN(issDt.getTime())){
               issDt.setDate(issDt.getDate()+14);
               dueDate = toLocalISO(issDt);
-            }
-          } catch(e){}
-          // ★ 투어코드: Items JSON에서 추출
-          let tourCodes = '';
-          try {
-            let itemsJSON = inv.Items || '';
-            if(typeof itemsJSON === 'string' && itemsJSON.trim().startsWith('[')) {
-              const items = JSON.parse(itemsJSON);
-              const codes = [...new Set(items.map(it => it.tour || it.tourCode || it.Tour || '').filter(Boolean))];
-              tourCodes = codes.join(', ');
             }
           } catch(e){}
           const txnData = {
@@ -3364,35 +3373,40 @@ async function syncBalanceData(force){
 
     // ★ 기존 Agency_Txn 중 인보이스 매칭되나 빈 필드 있는 건 자동 보충
     if(invJson.ok && invJson.rows){
+      const _pItems = (json) => {
+        if(!json || typeof json !== 'string' || !json.trim().startsWith('[')) return [];
+        try { return JSON.parse(json); } catch(e){ return []; }
+      };
       for(const txn of _balAgencyTxns){
         const invId = String(txn.InvoiceID||'').trim();
         if(!invId) continue;
         const linkedInv = invJson.rows.find(inv => String(inv.InvNumber||'').trim() === invId);
         if(!linkedInv) continue;
         let needUpdate = false;
+
+        // Items에서 날짜 + 투어코드 추출
+        const allItems = [..._pItems(linkedInv.Items), ..._pItems(linkedInv.ManualItems)];
+        const itemDates = allItems.map(it => parseToISO(String(it.date||it.Date||''))).filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+        const itemCodes = [...new Set(allItems.map(it => it.tour||it.tourCode||it.Tour||it.Attraction||'').filter(Boolean))];
+
         // 빈 날짜 보충
         if(!txn.Date || !parseToISO(String(txn.Date||''))){
           const d = parseToISO(String(linkedInv.IssuedDate||''));
           if(d){ txn.Date = d; needUpdate = true; }
         }
+        // ★ 시작일 = Items 날짜 중 가장 빠른 날, 종료일 = 가장 느린 날
         if(!txn.StartDate || !parseToISO(String(txn.StartDate||''))){
-          const d = parseToISO(String(linkedInv.PeriodFrom||''));
+          const d = itemDates.length > 0 ? itemDates[0] : parseToISO(String(linkedInv.PeriodFrom||''));
           if(d){ txn.StartDate = d; needUpdate = true; }
         }
         if(!txn.FinishDate || !parseToISO(String(txn.FinishDate||''))){
-          const d = parseToISO(String(linkedInv.PeriodTo||''));
+          const d = itemDates.length > 0 ? itemDates[itemDates.length-1] : parseToISO(String(linkedInv.PeriodTo||''));
           if(d){ txn.FinishDate = d; needUpdate = true; }
         }
         // 빈 투어코드 보충
-        if(!txn.TourCode){
-          try {
-            let itemsJSON = linkedInv.Items || '';
-            if(typeof itemsJSON === 'string' && itemsJSON.trim().startsWith('[')){
-              const items = JSON.parse(itemsJSON);
-              const codes = [...new Set(items.map(it => it.tour||it.tourCode||it.Tour||'').filter(Boolean))].join(', ');
-              if(codes){ txn.TourCode = codes; needUpdate = true; }
-            }
-          } catch(e){}
+        if(!txn.TourCode && itemCodes.length > 0){
+          txn.TourCode = itemCodes.join(', ');
+          needUpdate = true;
         }
         // DueDate 보충 (발행일+14일)
         if(!txn.DueDate && txn.Date){
@@ -3887,21 +3901,26 @@ function openBalTxnModal(type, idx){
     // Also include M_Clients (DB.C)
     (DB.C||[]).forEach(c=>{ if(c.Name && !agencies.includes(c.Name)) agencies.push(c.Name); });
 
-    // ★ 인보이스 데이터에서 빈 필드 자동 보충
+    // ★ 인보이스 데이터에서 빈 필드 자동 보충 (Items 날짜 기반)
     if(existing && existing.InvoiceID && _invHistoryCache){
       const linkedInv = _invHistoryCache.find(inv => String(inv.InvNumber||'').trim() === String(existing.InvoiceID||'').trim());
       if(linkedInv){
+        // Items에서 날짜 + 투어코드 추출
+        const _pI = (json) => { try { return (json && typeof json==='string' && json.trim().startsWith('[')) ? JSON.parse(json) : []; } catch(e){ return []; } };
+        const allIt = [..._pI(linkedInv.Items), ..._pI(linkedInv.ManualItems)];
+        const itDates = allIt.map(it => parseToISO(String(it.date||it.Date||''))).filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+        const itCodes = [...new Set(allIt.map(it => it.tour||it.tourCode||it.Tour||it.Attraction||'').filter(Boolean))];
+
         if(!existing.Date && linkedInv.IssuedDate) existing.Date = String(linkedInv.IssuedDate);
-        if(!existing.StartDate && linkedInv.PeriodFrom) existing.StartDate = String(linkedInv.PeriodFrom);
-        if(!existing.FinishDate && linkedInv.PeriodTo) existing.FinishDate = String(linkedInv.PeriodTo);
-        if(!existing.TourCode){
-          try {
-            let itemsJSON = linkedInv.Items || '';
-            if(typeof itemsJSON === 'string' && itemsJSON.trim().startsWith('[')){
-              const items = JSON.parse(itemsJSON);
-              existing.TourCode = [...new Set(items.map(it => it.tour||it.tourCode||it.Tour||'').filter(Boolean))].join(', ');
-            }
-          } catch(e){}
+        // ★ 시작일 = Items 중 가장 빠른 날, 종료일 = 가장 느린 날
+        if(!existing.StartDate){
+          existing.StartDate = itDates.length > 0 ? itDates[0] : String(linkedInv.PeriodFrom||'');
+        }
+        if(!existing.FinishDate){
+          existing.FinishDate = itDates.length > 0 ? itDates[itDates.length-1] : String(linkedInv.PeriodTo||'');
+        }
+        if(!existing.TourCode && itCodes.length > 0){
+          existing.TourCode = itCodes.join(', ');
         }
         if(!existing.DueDate && existing.Date){
           try {
