@@ -4895,6 +4895,8 @@ async function saveInvoiceToSheet() {
     Notes:       `${rows.length}건, 그룹:${_invGroupMode}`,
     CreatedBy:   getAdminUser()
   };
+  console.log('[INV-SAVE] _invDeductions:', JSON.stringify(_invDeductions));
+  console.log('[INV-SAVE] data.Deductions:', data.Deductions);
 
   const btn = document.querySelector('button[onclick="saveInvoiceToSheet()"]');
   if (btn) { btn.disabled=true; btn.textContent='⏳ 저장 중...'; }
@@ -4908,6 +4910,10 @@ async function saveInvoiceToSheet() {
     if (!json.ok) throw new Error(json.error||'저장 실패');
     // localStorage 발행 기록도 동기화
     localStorage.setItem(`dc_inv_issued_${invNum}`, new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}));
+    // 크레딧/선수금 localStorage 백업 (GAS 컬럼 누락 방어)
+    if(_invDeductions.filter(d=>d.amount>0).length>0){
+      localStorage.setItem(`dc_inv_ded_${invNum}`, JSON.stringify(_invDeductions.filter(d=>d.amount>0)));
+    }
     toast(`✅ 인보이스 ${invNum} 저장 완료`,'ok');
     _invHistoryCache = null; // 캐시 무효화
     _refreshInvPreview();
@@ -5005,11 +5011,21 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   if (!savedInv) { toast('⚠️ 발행된 인보이스를 찾을 수 없습니다','er'); return; }
 
   // ② 저장된 크레딧/선수금 복원
+  console.log('[INV-LOAD] savedInv keys:', Object.keys(savedInv));
+  console.log('[INV-LOAD] Deductions raw:', savedInv.Deductions);
   if (savedInv.Deductions) {
     try { _invDeductions = JSON.parse(savedInv.Deductions); } catch(e) { _invDeductions = []; }
   } else {
-    _invDeductions = [];
+    // GAS에서 Deductions 컬럼 누락 시 localStorage 폴백
+    const _lsDed = localStorage.getItem(`dc_inv_ded_${invNumber}`);
+    if (_lsDed) {
+      try { _invDeductions = JSON.parse(_lsDed); } catch(e) { _invDeductions = []; }
+      console.log('[INV-LOAD] Deductions from localStorage fallback:', _lsDed);
+    } else {
+      _invDeductions = [];
+    }
   }
+  console.log('[INV-LOAD] _invDeductions:', JSON.stringify(_invDeductions));
 
   // ③ 저장된 Items로 rows 재구성 (Daily_Report 재조회 불필요)
   let savedItems = [];
