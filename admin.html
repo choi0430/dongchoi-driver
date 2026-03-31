@@ -4919,6 +4919,31 @@ async function saveInvoiceToSheet() {
     const _ym = from.slice(0,7).replace('-','');
     localStorage.removeItem(`dc_inv_num_${agency}_${_ym}`);
     _invHistoryCache = null; // 캐시 무효화
+
+    // ★ 거래처 잔액에 자동 청구(DR) 등록
+    try {
+      const { total: _dedTotal } = _getInvDeductionTotals();
+      const _amountDue = roundMoney(grandTotal - _dedTotal);
+      const txnRow = {
+        Agency: agency,
+        Date: new Date().toISOString().slice(0,10),
+        InvoiceID: invNum,
+        TourCode: '',
+        DR: _amountDue,
+        CR: 0,
+        Remark: `인보이스 발행 (${from} ~ ${to})`,
+        StartDate: from,
+        FinishDate: to,
+        DueDate: ''
+      };
+      const txnRes = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'add_agency_txn', data:txnRow})});
+      const txnJson = await txnRes.json();
+      if(txnJson.ok){
+        txnRow._rowIndex = txnJson.rowIndex;
+        _balAgencyTxns.push(txnRow);
+        console.log('[INV-SAVE] Agency_Txn DR added:', invNum, _amountDue);
+      }
+    } catch(e){ console.warn('[INV-SAVE] Agency_Txn 자동등록 실패:', e); }
     _refreshInvPreview();
   } catch(e) {
     toast('❌ 저장 실패: '+e.message,'er');
