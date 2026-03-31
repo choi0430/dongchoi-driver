@@ -3346,6 +3346,9 @@ async function syncBalanceData(force){
           const invNum = String(inv.InvNumber||'').trim();
           // ★ 루프 내 중복 방지: 이미 이번 배치에서 등록한 InvNumber는 스킵
           if(existingInvIds.has(invNum)) continue;
+          // ★ Agency 없는 인보이스는 Agency_Txn 생성하지 않음
+          const invAgency = String(inv.Agency||'').trim();
+          if(!invAgency){ console.warn('[Balance Sync] Agency 없는 인보이스 스킵:', invNum); continue; }
 
           const gt = parseFloat(inv.GrandTotal)||0;
           if(gt <= 0) continue;
@@ -3445,10 +3448,18 @@ async function syncBalanceData(force){
         const linkedInv = invJson.rows.find(inv => String(inv.InvNumber||'').trim() === invId);
         if(!linkedInv) continue;
         let needUpdate = false;
+        const updateData = {};
+        // ★ Agency 비어있으면 인보이스에서 보충 (Unknown 문제 수정)
+        if(!String(txn.Agency||'').trim() && String(linkedInv.Agency||'').trim()){
+          txn.Agency = String(linkedInv.Agency).trim();
+          updateData.Agency = txn.Agency;
+          needUpdate = true;
+          console.log('[Balance Sync] Agency 보충:', invId, '→', txn.Agency);
+        }
         // Date 비어있으면 발행일로 보충
         if(!txn.Date || !parseToISO(String(txn.Date||''))){
           const d = parseToISO(String(linkedInv.IssuedDate||''));
-          if(d){ txn.Date = d; needUpdate = true; }
+          if(d){ txn.Date = d; updateData.Date = d; needUpdate = true; }
         }
         // DueDate 비어있으면 종료일+14일로 보충
         if(!txn.DueDate){
@@ -3458,6 +3469,7 @@ async function syncBalanceData(force){
               const finDt = new Date(finStr+'T00:00:00');
               finDt.setDate(finDt.getDate()+14);
               txn.DueDate = toLocalISO(finDt);
+              updateData.DueDate = txn.DueDate;
               needUpdate = true;
             } catch(e){}
           }
@@ -3466,9 +3478,7 @@ async function syncBalanceData(force){
           try {
             await fetch(APPS_SCRIPT_URL, {
               method:'POST', headers:{'Content-Type':'text/plain'},
-              body:JSON.stringify({action:'update_agency_txn', rowIndex:txn._rowIndex, data:{
-                Date:txn.Date, DueDate:txn.DueDate
-              }, _user:getAdminUser()})
+              body:JSON.stringify({action:'update_agency_txn', rowIndex:txn._rowIndex, data:updateData, _user:getAdminUser()})
             });
           } catch(e){ console.warn('[Balance Sync] 기존 거래 보충 실패:', invId, e); }
         }
@@ -3623,10 +3633,11 @@ function renderBalance(){
 function _agencyBalances(){
   const map = {};
   _balAgencyTxns.forEach(t=>{
-    // ★ 인보이스 연결된 건만 잔액에 포함
+    // ★ 인보이스 연결 + Agency 이름 있는 건만 잔액에 포함
     const invId = String(t.InvoiceID||'').trim();
     if(!invId) return;
-    const name = t.Agency||'Unknown';
+    const name = String(t.Agency||'').trim();
+    if(!name) return; // Agency 없는 레코드 제외 (Unknown 방지)
     if(!map[name]) map[name]={name, dr:0, cr:0};
     map[name].dr += Number(t.DR)||0;
     map[name].cr += Number(t.CR)||0;
