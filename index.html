@@ -1719,32 +1719,6 @@ function setDateFromPicker(nativeId, textId) {
   document.getElementById(textId).value = d+'/'+m+'/'+y;
 }
 
-// ── 날짜/시간 필드 클릭 시 비어있으면 오늘/현재시간 자동 입력 ──
-function _nowTimeHHMM(){
-  const n=new Date();
-  return String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
-}
-function _initDateTimeDefaults(){
-  // 날짜 텍스트 필드 (dd/mm/yyyy)
-  ['pre-date','dr-date','end-date'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(!el||el.dataset.dtInit) return;
-    el.addEventListener('focus',function(){
-      if(!this.value.trim()) this.value=todayDisplay();
-    });
-    el.dataset.dtInit='1';
-  });
-  // 시간 필드 (type="time")
-  ['pre-time','dr-start','dr-end','end-time'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(!el||el.dataset.dtInit) return;
-    el.addEventListener('focus',function(){
-      if(!this.value) this.value=_nowTimeHHMM();
-    });
-    el.dataset.dtInit='1';
-  });
-}
-
 // ── 마스터 데이터 로드 (Google Sheets) ──
 let MASTER = { drivers:[], guides:[], vehicles:[], agencies:[], courses:[] };
 
@@ -3490,8 +3464,6 @@ function startReport(){
 function goStep(n){
   if(n===1) setTimeout(()=>busMount('pre','bus-pre-mount'), 200);
   if(n===3) setTimeout(()=>busMount('end','bus-end-mount'), 200);
-  // ★ 날짜/시간 필드 기본값 리스너 등록
-  setTimeout(()=>_initDateTimeDefaults(), 50);
   for(let i=1;i<=3;i++){
     document.getElementById('step-'+i).style.display = i===n?'block':'none';
     const sp = document.getElementById('sp'+i);
@@ -3722,14 +3694,6 @@ async function completePre(){
 function addDailyReport(shiftId){
   editingShiftId = shiftId;
   showPage('report');
-  // ★ goStep(2) 호출 전에 폼 초기화 (draft 복원과 충돌 방지)
-  ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  ['f-ot','f-night','f-tip','f-toll','f-toll-detail','f-fuel','f-etc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
-  const ntReset=document.getElementById('f-night-type');if(ntReset)ntReset.value='none'; cselSetValue('f-night-type','none');
-  const nfReset=document.getElementById('f-night');if(nfReset)nfReset.value=0;
-  selectWash(0); selectMeal(0); selectTrailer(0); selectEarly(0); selectOTAmount(0);
-
   goStep(2);
   // Pre Departure 정보를 초기값으로 세팅
   const shift = activeShifts.find(s=>s.id===shiftId);
@@ -3757,7 +3721,7 @@ function addDailyReport(shiftId){
   // 인승 유무와 관계없이 항상 서차지 옵션 초기화 (OT 버튼 렌더링 포함)
   updateSurchargeOptions();
   updateStep2UI();
-  // ★ draft 복원 완료 후에 힌트/OT 재계산 (350ms = draft 복원 150ms + 여유)
+  // draft 복원 후 힌트/OT 재계산 (draft 값이 반영된 후 실행)
   setTimeout(()=>{
     updateManualHint();
     updateSvcHint();
@@ -3768,7 +3732,7 @@ function addDailyReport(shiftId){
     autoFillDRSurcharges(true);
     // OT는 마지막에 (시간값 복원 후)
     updateOTHint(true);
-  }, 350);
+  }, 100);
 }
 
 function startEndShift(shiftId){
@@ -5699,7 +5663,7 @@ function _updateAutoFillBanner(){
 // ═══════════════════════════════════════
 
 // ★ SVC_OPTIONS: GAS M_SvcOptions 시트에서 오버라이드됨 (아래는 폴백 기본값)
-let SVC_OPTIONS = {
+const SVC_OPTIONS = {
   '21S': [
     {val:'0',   label:'$0 — 없음'},
     {val:'90',  label:'$90 — TSF (21인승 요금)'},
@@ -5746,7 +5710,7 @@ let SVC_OPTIONS = {
 // 호텔 서차지: val = 드라이버 지급액 기준
 // 21/25S: 편도 $10, 양쪽 $20 / 40/50S: 편도 $15, 양쪽 $30
 // ★ HOTEL_OPTIONS: GAS M_HotelOptions 시트에서 오버라이드됨 (아래는 폴백 기본값)
-let HOTEL_OPTIONS = {
+const HOTEL_OPTIONS = {
   '21S': [{val:'0',label:'$0',dr:0},{val:'10',label:'$10 — 편도',dr:10},{val:'20',label:'$20 — 양쪽',dr:20}],
   '25S': [{val:'0',label:'$0',dr:0},{val:'10',label:'$10 — 편도',dr:10},{val:'20',label:'$20 — 양쪽',dr:20}],
   '40S': [{val:'0',label:'$0',dr:0},{val:'15',label:'$15 — 편도',dr:15},{val:'30',label:'$30 — 양쪽',dr:30}],
@@ -5756,7 +5720,7 @@ let HOTEL_OPTIONS = {
 // 거리 서차지: val = 드라이버 지급액 기준
 // 21/25S: $30 / 40/50S: $40
 // ★ DIST_OPTIONS: GAS M_DistOptions 시트에서 오버라이드됨 (아래는 폴백 기본값)
-let DIST_OPTIONS = {
+const DIST_OPTIONS = {
   '21S': [{val:'0',label:'$0 — 없음',dr:0},{val:'30',label:'$30 — 거리 서차지',dr:30}],
   '25S': [{val:'0',label:'$0 — 없음',dr:0},{val:'30',label:'$30 — 거리 서차지',dr:30}],
   '40S': [{val:'0',label:'$0 — 없음',dr:0},{val:'40',label:'$40 — 거리 서차지',dr:40}],
@@ -5970,7 +5934,7 @@ function selectEarly(amt){
 }
 // 야간투어 요율 테이블
 // ★ NIGHT_RATES: GAS M_NightRates 시트에서 오버라이드됨 (아래는 폴백 기본값)
-let NIGHT_RATES = {
+const NIGHT_RATES = {
   guide_opt:   { small:{ ta:0,   dr:0,   owner:50  }, large:{ ta:0,   dr:0,   owner:100 } },
   agency_incl: { small:{ ta:250, dr:200, owner:50  }, large:{ ta:350, dr:300, owner:50  } },
   prepaid_opt: { small:{ ta:330, dr:250, owner:50  }, large:{ ta:450, dr:350, owner:100 } },
@@ -6861,8 +6825,10 @@ async function loadDriverWagesFromGAS(driverName, forceRefresh=false){
         note:   row.Notes      || ''
       });
     });
-    // GAS 데이터로 완전 교체 (로컬에 오래된 데이터 남지 않도록)
-    localStorage.setItem('admin_wages', JSON.stringify(wagesMap));
+    // GAS 데이터 우선으로 로컬 캐시 갱신
+    const existing = JSON.parse(localStorage.getItem('admin_wages')||'{}');
+    Object.assign(existing, wagesMap);
+    localStorage.setItem('admin_wages', JSON.stringify(existing));
     _driverWagesLastSync = Date.now();
   }catch(e){ /* 네트워크 실패 시 로컬 캐시 사용 */ }
 }
@@ -6893,7 +6859,6 @@ function wkKeyToMonISO(wkKey){
 function getWageEntriesForWeek(driverWages, wkKey){
   // ① wk.key → YYYY-MM-DD 변환 후 직접 조회
   const monISO = wkKeyToMonISO(wkKey);
-  console.log('[PAY-DEBUG] getWageEntries wkKey:', wkKey, '→ monISO:', monISO, '→ found:', !!(monISO && driverWages[monISO]), '| keys:', Object.keys(driverWages||{}).join(','));
   if(monISO && driverWages[monISO]) return driverWages[monISO].entries || [];
   // ② fallback: wk.key 직접 조회 (이전 방식 호환)
   if(driverWages[wkKey]) return driverWages[wkKey].entries || [];
@@ -7012,15 +6977,15 @@ async function renderPay(){
   const badge0 = document.getElementById('pay-unpaid-badge');
   const el0 = document.getElementById('pay-weeks-list');
 
-  // 급여 탭: 항상 GAS에서 최신 데이터 로드 (캐시 무시)
+  // 급여 탭: 항상 최신 데이터로 (캐시 무시 refresh)
+  const wagesCacheAlive = Date.now()-_driverWagesLastSync < 60000;
   if(badge0){ badge0.textContent='⏳ 불러오는 중'; badge0.style.background='var(--muted)'; }
   if(el0)  { el0.innerHTML='<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">\uD83D\uDCB0 급여 데이터를 불러오는 중...</div>'; }
   // 캐시 만료 강제 → GAS에서 새로 받아서 로컬 중복 즉시 정리
   _drCacheTime = 0;
-  _driverWagesLastSync = 0; // ★ 급여 캐시도 강제 만료
   await Promise.all([
     fetchDRCache(),
-    loadDriverWagesFromGAS(driverName, true)  // ★ 항상 forceRefresh
+    wagesCacheAlive ? Promise.resolve() : loadDriverWagesFromGAS(driverName)
   ]);
 
   // ── DR 리포트: GAS 우선, 로컬 fallback 병합
@@ -7083,9 +7048,6 @@ async function renderPay(){
 
   // ── Wages (GAS 로드 완료 후 로컬 캐시에서 읽기)
   const driverWages = getDriverWagesFromLocal(driverName);
-  // ★ DEBUG: 키 매칭 확인 로그
-  console.log('[PAY-DEBUG] driverWages keys:', Object.keys(driverWages));
-  console.log('[PAY-DEBUG] driverWages full:', JSON.stringify(driverWages).slice(0,500));
 
   // ── 미지급 배지 계산
   let totalUnpaid=0;
@@ -8793,8 +8755,3 @@ async function submitCorrectionRequest() {
 
 </body>
 </html>
-
-
-
-
-
