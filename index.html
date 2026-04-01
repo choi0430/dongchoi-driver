@@ -4730,12 +4730,19 @@ async function loadEOSFromGAS(driverName) {
     const matchNames = new Set([driverName, me?.englishName||'', me?.initials||'']);
     _eosCache = data.rows.filter(r => matchNames.has(String(r.Driver||'').trim()))
       .map(r => ({
-        date:     fmtDate(r.Date || ''),
-        rego:     r.Rego || '—',
-        endKm:    r.End_KM || '',
-        startKm:  r.Start_KM || '',
-        remarks:  r.Remarks || '',
-        _row:     r._row || r._rowIndex || ''
+        date:          fmtDate(r.Date || ''),
+        rego:          r.Rego || '—',
+        endKm:         r.End_KM || '',
+        startKm:       r.Start_KM || '',
+        endTime:       r.End_Time || '',
+        fuelEnd:       r.Fuel_End || '',
+        damage:        r.Damage || '',
+        checkResults:  r.Check_Results || '',
+        dailyReports:  r.Daily_Reports || '',
+        remarks:       r.Remarks || '',
+        signature:     r.Signature || '',
+        driver:        r.Driver || '',
+        _row:          r._row || r._rowIndex || ''
       }))
       .sort((a, b) => {
         const pa = a.date.split('/'), pb = b.date.split('/');
@@ -4746,6 +4753,56 @@ async function loadEOSFromGAS(driverName) {
     _eosCacheTime = Date.now();
     return _eosCache;
   } catch(e) { console.warn('EOS load error:', e); return _eosCache || []; }
+}
+
+// ★ GAS EOS 레코드 + DR 캐시를 openShiftReport 호환 shift 객체로 변환
+function buildShiftFromGAS(eos) {
+  const driverName = currentDriver?.name || '';
+  const me = currentDriver;
+  const matchNames = new Set([driverName, me?.englishName||'', me?.initials||'']);
+  // DR 캐시에서 해당 날짜+차량 리포트 매칭
+  const drs = (_drReportsCache||[]).filter(r => {
+    if (!matchNames.has(String(r.Driver||'').trim())) return false;
+    const rd = fmtDate(r.Date||'');
+    return rd === eos.date && (String(r.Rego||'').trim() === String(eos.rego||'').trim());
+  }).map(r => ({
+    agency:     r.Agency || '',
+    attraction: r.Attraction || '',
+    kmStart:    r.KM_Start || '',
+    kmEnd:      r.KM_End || '',
+    total:      parseFloat(r.Total_TA) || 0,
+    dr:         parseFloat(r.DR_Cost) || 0
+  }));
+
+  // Check_Results: base64 PNG 이미지 또는 JSON 배열
+  let endChecks = null;
+  let checkResultsImage = '';
+  if (eos.checkResults) {
+    const cr = String(eos.checkResults).trim();
+    if (cr.startsWith('data:image')) {
+      checkResultsImage = cr;   // base64 PNG
+    } else if (cr.startsWith('[')) {
+      try { endChecks = JSON.parse(cr); } catch(e) {}
+    }
+  }
+
+  return {
+    date:        eos.date,
+    endDate:     eos.date,
+    rego:        eos.rego || '—',
+    startKm:     eos.startKm || '',
+    endKm:       eos.endKm || '',
+    endTime:     eos.endTime || '',
+    damage:      eos.damage || '',
+    remarks:     eos.remarks || '',
+    fuel:        eos.fuelEnd || '',
+    dailyReports: drs,
+    endChecks:   endChecks,
+    _checkResultsImage: checkResultsImage,
+    eosSignature: eos.signature || '',
+    _hasPre:     false,
+    _fromGAS:    true
+  };
 }
 
 async function renderShiftHistory() {
@@ -4792,23 +4849,35 @@ async function renderShiftHistory() {
   const cntEl = document.getElementById('shift-history-count');
   if (cntEl) cntEl.textContent = showList.length + '건';
 
+  // ★ GAS EOS 데이터를 전역에 저장 (PDF 버튼에서 접근용)
+  window._eosListForPdf = eosRecords;
+
   listEl.innerHTML = showList.map((s, i) => {
     const d = s.date || '—';
     const rego = s.rego || '—';
     const drCount = s._drCount || drByDate[d] || 0;
     const kmStr = s.endKm ? Number(s.endKm).toLocaleString()+' km' : '';
-    const hasPdf = s._isLocal || localSet.has(d+':'+rego);
+    // 로컬 히스토리에서 찾기 (있으면 로컬 PDF 우선)
     const localIdx = localHist.findIndex(h => (fmtDate(h.date||h.endDate||''))===d && (h.rego||'')=== rego);
+    const hasLocal = s._isLocal || localIdx >= 0;
+    // GAS EOS 인덱스 (로컬이 없을 때 GAS 데이터로 PDF 생성)
+    const gasIdx = eosRecords.findIndex(e => e.date===d && e.rego===rego);
+
+    let pdfBtn = '';
+    if (hasLocal && localIdx >= 0) {
+      pdfBtn = `<button onclick="openShiftHistoryPdf(${localIdx})" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;">📄 PDF</button>`;
+    } else if (gasIdx >= 0) {
+      pdfBtn = `<button onclick="openShiftHistoryPdfFromGAS(${gasIdx})" style="font-size:11px;background:#f0fdf4;color:#059669;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;">📄 PDF</button>`;
+    } else {
+      pdfBtn = `<span style="font-size:10px;color:#d1d5db;">✅ 완료</span>`;
+    }
 
     return `<div style="background:white;border-radius:10px;padding:10px 12px;margin-bottom:6px;box-shadow:0 1px 3px rgba(0,0,0,0.06);display:flex;justify-content:space-between;align-items:center;">
       <div>
         <div style="font-size:13px;font-weight:700;color:#1a1a1a;">${d} · ${rego}</div>
         <div style="font-size:11px;color:#9ca3af;">DR ${drCount}건${kmStr?' · '+kmStr:''}</div>
       </div>
-      ${hasPdf && localIdx >= 0
-        ? `<button onclick="openShiftHistoryPdf(${localIdx})" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;">📄 PDF</button>`
-        : `<span style="font-size:10px;color:#d1d5db;">✅ 완료</span>`
-      }
+      ${pdfBtn}
     </div>`;
   }).join('');
 }
@@ -4823,6 +4892,15 @@ function openShiftHistoryPdf(idx) {
   }
   const shift = hist[idx];
   if (!shift) { showToast('리포트를 찾을 수 없습니다', 'error'); return; }
+  openShiftReport(shift, 'eos');
+}
+
+// ★ GAS 데이터로 PDF 생성 (다른 기기에서 완료된 시프트)
+function openShiftHistoryPdfFromGAS(gasIdx) {
+  const eosList = window._eosListForPdf || [];
+  const eos = eosList[gasIdx];
+  if (!eos) { showToast('리포트를 찾을 수 없습니다', 'error'); return; }
+  const shift = buildShiftFromGAS(eos);
   openShiftReport(shift, 'eos');
 }
 
@@ -8515,7 +8593,9 @@ function openShiftReport(shift, type) {
     ${sectionTitle('📋 일일 리포트 Daily Reports')}
     ${buildDRTable()}
     ${sectionTitle('🔍 차량 점검 Post-Shift Vehicle Check')}
-    <div style="margin-bottom:10px;">${buildChecks(shift.endChecks)}</div>
+    <div style="margin-bottom:10px;">${shift._checkResultsImage
+      ? `<div style="text-align:center;padding:4px 0;"><img src="${shift._checkResultsImage}" style="max-width:100%;border-radius:8px;border:1px solid #e5e7eb;" alt="Vehicle Check" onerror="this.outerHTML='<div style=\\'color:#d97706;font-size:11px;padding:12px;text-align:center;\\'>⚠️ 점검 이미지 로드 실패</div>'"></div>`
+      : buildChecks(shift.endChecks)}</div>
     ${sectionTitle('📋 End of Shift Declaration 종료 서약')}
     <div style="background:#fffbeb;border:1.5px solid #fbbf24;border-radius:10px;padding:14px 16px;margin-bottom:12px;">
       <div style="font-size:13px;color:#1c1917;line-height:1.65;margin-bottom:8px;">I, <strong>${driver}</strong>, confirm that all end of shift checks have been completed, all passengers have disembarked, the vehicle has been checked for lost property, and the vehicle is secured.</div>
