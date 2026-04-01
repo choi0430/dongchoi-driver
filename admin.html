@@ -5311,6 +5311,15 @@ async function saveInvoiceToSheet() {
 
     _invHistoryCache = null; // 캐시 무효화
     _lastGeneratedInvNum = null; // 다음 인보이스를 위해 번호 초기화
+
+    // ★ 저장 완료 후 크레딧/선수금 & 수동항목 localStorage 초기화 (다음 인보이스에 잔류 방지)
+    const dedKey = `dc_inv_deductions_${agency}_${from.slice(0,7)}`;
+    const manKey = `dc_inv_manual_${agency}_${from.slice(0,7)}`;
+    localStorage.removeItem(dedKey);
+    localStorage.removeItem(manKey);
+    _invDeductions = [];
+    console.log('[Invoice] 저장 완료 → 크레딧/수동항목 localStorage 초기화:', dedKey, manKey);
+
     _refreshInvPreview();
   } catch(e) {
     toast('❌ 저장 실패: '+e.message,'er');
