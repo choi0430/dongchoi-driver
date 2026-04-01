@@ -3666,7 +3666,7 @@ function renderBalDetail(){
 
   if(type==='agency'){
     // ★ 인보이스 발행 건만 표시
-    rows = _balAgencyTxns.filter(t=>(t.Agency||'')=== name && String(t.InvoiceID||'').trim()).sort((a,b)=>(b.Date||'').localeCompare(a.Date||''));
+    rows = _balAgencyTxns.filter(t=>(t.Agency||'')=== name && String(t.InvoiceID||'').trim()).sort((a,b)=>parseToISO(a.Date||'').localeCompare(parseToISO(b.Date||'')));
     const dr = rows.reduce((s,r)=>s+(Number(r.DR)||0),0);
     const cr = rows.reduce((s,r)=>s+(Number(r.CR)||0),0);
     document.getElementById('bal-detail-summary').innerHTML = `
@@ -3685,8 +3685,8 @@ function renderBalDetail(){
         <th style="text-align:right;padding:6px 4px;">잔액</th>
         <th style="text-align:center;padding:6px 2px;">⚙</th>
       </tr></thead><tbody>`;
-    // ★ 날짜 오름차순으로 누적 잔액 계산 후 다시 내림차순 표시
-    const sortedAsc = [...rows].sort((a,b)=>(a.Date||'').localeCompare(b.Date||''));
+    // ★ 날짜 오름차순으로 누적 잔액 계산 (rows가 이미 오름차순)
+    const sortedAsc = rows;
     let runBal = 0;
     const balMap = new Map();
     sortedAsc.forEach(r => {
@@ -3713,7 +3713,7 @@ function renderBalDetail(){
     html += '</tbody></table>';
 
   } else if(type==='sub'){
-    rows = _balSubTxns.filter(t=>(t.SubCompany||'')=== name).sort((a,b)=>(b.Date||'').localeCompare(a.Date||''));
+    rows = _balSubTxns.filter(t=>(t.SubCompany||'')=== name).sort((a,b)=>parseToISO(a.Date||'').localeCompare(parseToISO(b.Date||'')));
     const dr = rows.reduce((s,r)=>s+(Number(r.DR)||0),0);
     const cr = rows.reduce((s,r)=>s+(Number(r.CR)||0),0);
     document.getElementById('bal-detail-summary').innerHTML = `
@@ -3759,7 +3759,7 @@ function renderBalDetail(){
         <span style="color:var(--gn);">지급 $${cr.toLocaleString('en',{minimumFractionDigits:2})}</span>
         <span style="color:${(dr-cr)>0?'var(--or)':'var(--gn)'};">잔액 $${(dr-cr).toLocaleString('en',{minimumFractionDigits:2})}</span>
       </div>`;
-    const all = [...drRows.map(r=>({...r,_sort:r.date})), ...crRows.map(r=>({...r,_sort:r.date}))].sort((a,b)=>(b._sort||'').localeCompare(a._sort||''));
+    const all = [...drRows.map(r=>({...r,_sort:parseToISO(r.date||'')})), ...crRows.map(r=>({...r,_sort:parseToISO(r.date||'')}))].sort((a,b)=>(a._sort||'').localeCompare(b._sort||''));
     html = `<table style="width:100%;font-size:11px;border-collapse:collapse;">
       <thead><tr style="border-bottom:1px solid var(--b2);color:var(--t3);font-size:10px;">
         <th style="text-align:left;padding:6px 4px;">날짜</th>
