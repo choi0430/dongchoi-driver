@@ -6307,7 +6307,7 @@ async function loadNoticesFromGAS(){
     const json=await res.json();
     if(json.ok&&Array.isArray(json.rows)){
       const notices=json.rows.map(r=>({
-        id:r.ID||r.id||String(Date.now()),
+        id:String(r.ID||r.id||Date.now()),
         title:r.Title||r.title||'',
         body:r.Content||r.content||r.body||r.Body||'',
         type:r.Type||r.type||'info',
@@ -6380,7 +6380,7 @@ function openNoticeModal(id) {
 
   if (id) {
     const notices = getAdminNotices() || [];
-    const n = notices.find(x => x.id === id);
+    const n = notices.find(x => String(x.id) === String(id));
     if (n) {
       document.getElementById('notice-title').value = n.title || '';
       document.getElementById('notice-body').value  = n.body  || '';
@@ -6423,7 +6423,7 @@ function saveNotice() {
 
   let notices = getAdminNotices() || [];
   if (_noticeEditId) {
-    const idx = notices.findIndex(x => x.id === _noticeEditId);
+    const idx = notices.findIndex(x => String(x.id) === String(_noticeEditId));
     if (idx !== -1) notices[idx] = notice; else notices.unshift(notice);
   } else {
     notices.unshift(notice); // 최신 글이 맨 위
@@ -6437,7 +6437,7 @@ function saveNotice() {
 
 function deleteNotice(id) {
   if (!confirm('이 공지를 삭제하시겠습니까?')) return;
-  const notices = (getAdminNotices() || []).filter(x => x.id !== id);
+  const notices = (getAdminNotices() || []).filter(x => String(x.id) !== String(id));
   saveAdminNotices(notices);
   renderAdminNotices();
   toast('공지 삭제됨', 'ok');
