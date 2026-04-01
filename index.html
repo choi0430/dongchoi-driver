@@ -6814,9 +6814,11 @@ async function loadDriverWagesFromGAS(driverName, forceRefresh=false){
     const wagesMap = {};
     data.rows.forEach(row=>{
       const driver = String(row.Driver || '').trim();
-      // ★ WeekStart/Date: ISO datetime(T포함) → YYYY-MM-DD 정규화
-      let monISO = String(row.WeekStart || '').trim();
-      if(monISO.includes('T')) monISO = parseToISO(monISO);
+      // ★ WeekStart: ISO datetime(T포함) → YYYY-MM-DD → 월요일 정규화
+      let rawWS = String(row.WeekStart || '').trim();
+      if(rawWS.includes('T')) rawWS = parseToISO(rawWS);
+      const monISO = getMondayOfDate(rawWS) || rawWS;
+      // ★ Date 필드도 정규화
       let entryDate = String(row.Date || '').trim();
       if(entryDate.includes('T')) entryDate = parseToISO(entryDate);
       if(!driver || !monISO) return;
@@ -6844,6 +6846,18 @@ function getDriverWagesFromLocal(driverName){
     const wages = JSON.parse(localStorage.getItem('admin_wages')||'{}');
     return wages[driverName] || {};
   }catch(e){ return {}; }
+}
+
+// ★ 날짜 → 해당 주의 월요일 ISO (YYYY-MM-DD)
+function getMondayOfDate(isoDate) {
+  if(!isoDate) return '';
+  const iso = parseToISO(String(isoDate)) || String(isoDate);
+  const d = new Date(iso + 'T00:00:00');
+  if(isNaN(d.getTime())) return '';
+  const day = d.getDay();
+  const diff = (day===0) ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return toLocalISO(d);
 }
 
 // wk.key("dd/mm/yy~dd/mm/yy") → YYYY-MM-DD (월요일) 변환

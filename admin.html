@@ -6709,13 +6709,16 @@ async function loadWagesFromSheet(forceRefresh){
     const sheetWages={};
     (json.rows||[]).forEach(r=>{
       const drv=String(r.Driver||'').trim();
-      // ★ WeekStart 정규화: dd/MM/yyyy 등 → YYYY-MM-DD
+      // ★ WeekStart 정규화: dd/MM/yyyy 등 → YYYY-MM-DD → 월요일
       let ws=String(r.WeekStart||'').trim();
       if(ws && !/^\d{4}-\d{2}-\d{2}$/.test(ws)) {
         const parsed = parseToISO(ws);
         if(parsed) ws = parsed;
         else { console.warn('[Wages] Invalid WeekStart:', ws, 'for', drv); return; }
       }
+      // ★ 월요일로 정규화 (비-월요일 키 방지)
+      const wsMon = getMondayOfDate(ws);
+      if(wsMon) ws = wsMon;
       if(!drv||!ws) return;
       // ★ Date 필드도 정규화
       let entryDate = String(r.Date||'').trim();
