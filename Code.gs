@@ -594,6 +594,19 @@ function getMaster(sheetName) {
           }
         }
         let val = row[i];
+        // ★ Date 객체 → YYYY-MM-DD 문자열 변환 (JSON.stringify의 UTC 변환 방지)
+        if (val instanceof Date && !isNaN(val.getTime())) {
+          const y = val.getFullYear();
+          const m = String(val.getMonth() + 1).padStart(2, '0');
+          const dd = String(val.getDate()).padStart(2, '0');
+          const hh = val.getHours(), mm = val.getMinutes(), ss = val.getSeconds();
+          if (hh === 0 && mm === 0 && ss === 0) {
+            val = y + '-' + m + '-' + dd; // 날짜만 (시간 없음)
+          } else {
+            val = y + '-' + m + '-' + dd + 'T' +
+              String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0') + ':' + String(ss).padStart(2,'0');
+          }
+        }
         // ★ 전화번호 필드: 앞 0 자동 복원 (Google Sheets 숫자→텍스트 보정)
         if (phoneColIdxSet.has(i) && val !== '' && val !== null && val !== undefined) {
           let s = String(val).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
@@ -1151,7 +1164,15 @@ function addWage(data) {
     });
 
     sheet.appendRow(newRow);
-    return {ok: true, row: sheet.getLastRow(), rowId};
+    // ★ WeekStart/Date 셀을 텍스트 형식으로 강제 (날짜 자동변환 방지)
+    var lastRow = sheet.getLastRow();
+    actualHeaders.forEach(function(h, ci) {
+      var nk = normalizeKey(h);
+      if (nk === 'weekstart' || nk === 'date') {
+        sheet.getRange(lastRow, ci + 1).setNumberFormat('@');
+      }
+    });
+    return {ok: true, row: lastRow, rowId};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
@@ -1183,6 +1204,13 @@ function updateWage(rowIndex, data) {
       return existingRow[i]; // ★ 전송되지 않은 필드 기존값 보존
     });
     sheet.getRange(ri, 1, 1, row.length).setValues([row]);
+    // ★ WeekStart/Date 셀을 텍스트 형식으로 강제 (날짜 자동변환 방지)
+    actualHeaders.forEach(function(h, ci) {
+      var nk = normalizeKey(h);
+      if (nk === 'weekstart' || nk === 'date') {
+        sheet.getRange(ri, ci + 1).setNumberFormat('@');
+      }
+    });
 
     return {ok: true};
   } catch (err) {
@@ -1204,6 +1232,43 @@ function deleteWage(rowIndex) {
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
+}
+
+// ★ 기존 Wages 시트의 Date 타입 → 텍스트(YYYY-MM-DD) 일괄 변환
+// GAS 스크립트 에디터에서 직접 실행: fixWageDates()
+function fixWageDates() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('Wages');
+  if (!sheet) return 'No Wages sheet';
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return 'Empty sheet';
+
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  const dateCols = []; // WeekStart, Date 컬럼 인덱스 (0-based)
+  headers.forEach(function(h, i) {
+    var nk = h.replace(/[\s_-]+/g,'').toLowerCase();
+    if (nk === 'weekstart' || nk === 'date') dateCols.push(i);
+  });
+  if (dateCols.length === 0) return 'No date columns found';
+
+  var fixed = 0;
+  var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  dateCols.forEach(function(ci) {
+    for (var r = 0; r < data.length; r++) {
+      var val = data[r][ci];
+      if (val instanceof Date && !isNaN(val.getTime())) {
+        var y = val.getFullYear();
+        var m = String(val.getMonth() + 1).padStart(2, '0');
+        var d = String(val.getDate()).padStart(2, '0');
+        var cell = sheet.getRange(r + 2, ci + 1);
+        cell.setNumberFormat('@'); // 텍스트 형식
+        cell.setValue(y + '-' + m + '-' + d);
+        fixed++;
+      }
+    }
+  });
+  return 'Fixed ' + fixed + ' date cells in Wages sheet';
 }
 
 function replaceWages(rows) {
