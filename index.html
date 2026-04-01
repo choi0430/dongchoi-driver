@@ -6850,12 +6850,14 @@ async function loadDriverWagesFromGAS(driverName, forceRefresh=false){
     const wagesMap = {};
     data.rows.forEach(row=>{
       const driver = String(row.Driver || '').trim();
-      const monISO = String(row.WeekStart || '').trim();
+      // ★ WeekStart/Date 정규화: ISO datetime → YYYY-MM-DD
+      let monISO = parseToISO(String(row.WeekStart || '').trim());
       if(!driver || !monISO) return;
+      let entryDate = parseToISO(String(row.Date || '').trim()) || monISO;
       if(!wagesMap[driver]) wagesMap[driver] = {};
       if(!wagesMap[driver][monISO]) wagesMap[driver][monISO] = { entries:[] };
       wagesMap[driver][monISO].entries.push({
-        date:   row.Date       || monISO,
+        date:   entryDate,
         amount: Number(row.Amount || 0),
         method: row.PayMethod  || '현금',
         note:   row.Notes      || ''
@@ -8789,6 +8791,7 @@ async function submitCorrectionRequest() {
 
 </body>
 </html>
+
 
 
 
