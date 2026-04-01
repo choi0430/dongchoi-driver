@@ -6995,15 +6995,15 @@ async function renderPay(){
   const badge0 = document.getElementById('pay-unpaid-badge');
   const el0 = document.getElementById('pay-weeks-list');
 
-  // 급여 탭: 항상 최신 데이터로 (캐시 무시 refresh)
-  const wagesCacheAlive = Date.now()-_driverWagesLastSync < 60000;
+  // 급여 탭: 항상 최신 데이터로 (캐시 무시 강제 refresh)
   if(badge0){ badge0.textContent='⏳ 불러오는 중'; badge0.style.background='var(--muted)'; }
   if(el0)  { el0.innerHTML='<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">\uD83D\uDCB0 급여 데이터를 불러오는 중...</div>'; }
-  // 캐시 만료 강제 → GAS에서 새로 받아서 로컬 중복 즉시 정리
+  // ★ 급여 탭 진입 시 항상 GAS에서 새로 받아옴 (캐시 무시)
   _drCacheTime = 0;
+  _driverWagesLastSync = 0;
   await Promise.all([
     fetchDRCache(),
-    wagesCacheAlive ? Promise.resolve() : loadDriverWagesFromGAS(driverName)
+    loadDriverWagesFromGAS(driverName, true)
   ]);
 
   // ── DR 리포트: GAS 우선, 로컬 fallback 병합
