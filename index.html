@@ -7067,11 +7067,22 @@ async function renderPay(){
   // ── Wages (GAS 로드 완료 후 로컬 캐시에서 읽기)
   const driverWages = getDriverWagesFromLocal(driverName);
 
+  // ★ driverWages 키를 weekMap 키로 변환하여 지급 데이터 매칭 (renderSalary와 동일 방식)
+  const _wagesByWkKey = {};
+  Object.entries(driverWages).forEach(([monISO, wkWages])=>{
+    const d = new Date(monISO+'T00:00:00');
+    if(isNaN(d)) return;
+    const fmt = x => String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+x.getFullYear();
+    const sun = new Date(d); sun.setDate(d.getDate()+6);
+    const wkKey = fmt(d)+'~'+fmt(sun);
+    _wagesByWkKey[wkKey] = wkWages.entries || [];
+  });
+
   // ── 미지급 배지 계산
   let totalUnpaid=0;
   weeks.forEach(wk=>{
-    const net  = wk.reports.reduce((s,r)=>s+(r.dr||0),0);  // DR_Cost는 이미 야경납입 차감 후
-    const paid = getWageEntriesForWeek(driverWages,wk.key).reduce((s,e)=>s+(Number(e.amount)||0),0);
+    const net  = wk.reports.reduce((s,r)=>s+(r.dr||0),0);
+    const paid = (_wagesByWkKey[wk.key]||[]).reduce((s,e)=>s+(Number(e.amount)||0),0);
     totalUnpaid += Math.max(0, net-paid);
   });
   const badge = document.getElementById('pay-unpaid-badge');
@@ -7108,7 +7119,7 @@ async function renderPay(){
     const fuelTotal     = wk.reports.reduce((s,r)=>s+(r.fuelPersonal&&r.fuel>0?r.fuel:0),0);
     const etcTotal      = wk.reports.reduce((s,r)=>s+(r.etc||0),0);
 
-    const weekWageData = getWageEntriesForWeek(driverWages, wk.key);
+    const weekWageData = _wagesByWkKey[wk.key] || [];
     const paidAmt = weekWageData.reduce((s,e)=>s+(Number(e.amount)||0),0);
     const balance = netPay - paidAmt;
     const isPaid  = balance <= 0;
@@ -7234,10 +7245,18 @@ function showPayDetail(wk){
   const fuelGrand    = sorted.reduce((s,r)=>s+(r.fuelPersonal&&r.fuel>0?r.fuel:0),0);
   const etcGrand     = sorted.reduce((s,r)=>s+(r.etc||0),0);
 
-  // 지급 내역 (admin_wages)
+  // 지급 내역 (admin_wages) — wk.key 포맷으로 변환하여 매칭 (renderSalary 방식)
   const detailDriverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
   const detailWages = getDriverWagesFromLocal(detailDriverName);
-  const wageEntries = getWageEntriesForWeek(detailWages, wk.key);
+  let wageEntries = [];
+  Object.entries(detailWages).forEach(([monISO, wkWages])=>{
+    const d = new Date(monISO+'T00:00:00');
+    if(isNaN(d)) return;
+    const fmt = x => String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+'/'+x.getFullYear();
+    const sun = new Date(d); sun.setDate(d.getDate()+6);
+    const convKey = fmt(d)+'~'+fmt(sun);
+    if(convKey === wk.key) wageEntries = wkWages.entries || [];
+  });
   const totalPaid = wageEntries.reduce((s,e)=>s+(Number(e.amount)||0),0);
   const finalBalance = netGrand - totalPaid;
   const isAllPaid = finalBalance <= 0;
