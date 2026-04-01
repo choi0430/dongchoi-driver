@@ -3694,6 +3694,14 @@ async function completePre(){
 function addDailyReport(shiftId){
   editingShiftId = shiftId;
   showPage('report');
+  // ★ goStep(2) 호출 전에 폼 초기화 (draft 복원과 충돌 방지)
+  ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['f-ot','f-night','f-tip','f-toll','f-toll-detail','f-fuel','f-etc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
+  const ntReset=document.getElementById('f-night-type');if(ntReset)ntReset.value='none'; cselSetValue('f-night-type','none');
+  const nfReset=document.getElementById('f-night');if(nfReset)nfReset.value=0;
+  selectWash(0); selectMeal(0); selectTrailer(0); selectEarly(0); selectOTAmount(0);
+
   goStep(2);
   // Pre Departure 정보를 초기값으로 세팅
   const shift = activeShifts.find(s=>s.id===shiftId);
@@ -3721,7 +3729,7 @@ function addDailyReport(shiftId){
   // 인승 유무와 관계없이 항상 서차지 옵션 초기화 (OT 버튼 렌더링 포함)
   updateSurchargeOptions();
   updateStep2UI();
-  // draft 복원 후 힌트/OT 재계산 (draft 값이 반영된 후 실행)
+  // ★ draft 복원 완료 후에 힌트/OT 재계산 (350ms = draft 복원 150ms + 여유)
   setTimeout(()=>{
     updateManualHint();
     updateSvcHint();
@@ -3732,7 +3740,7 @@ function addDailyReport(shiftId){
     autoFillDRSurcharges(true);
     // OT는 마지막에 (시간값 복원 후)
     updateOTHint(true);
-  }, 100);
+  }, 350);
 }
 
 function startEndShift(shiftId){
@@ -8753,4 +8761,5 @@ async function submitCorrectionRequest() {
 
 </body>
 </html>
+
 
