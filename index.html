@@ -429,22 +429,26 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   </div>
   <div id="today-reports-body">
     <div id="today-reports-list"></div>
-    <!-- Completed shift history (GAS End_of_Shift 기반) -->
-    <div id="shift-history-section" style="display:none;padding:0 12px 10px;">
-      <div onclick="document.getElementById('shift-history-list').style.display=document.getElementById('shift-history-list').style.display==='none'?'':'none'; this.querySelector('.shist-arrow').textContent=document.getElementById('shift-history-list').style.display==='none'?'▶':'▼';" style="font-weight:700;font-size:14px;margin-bottom:8px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none;"><span class="shist-arrow">▼</span> 완료된 시프트 리포트 <span id="shift-history-count" style="font-size:11px;font-weight:600;color:#6b7280;"></span></div>
-      <div id="shift-history-list"></div>
-    </div>
+    <!-- shift-history section removed: 지난 운행 일지 / 급여탭에서 확인 가능 -->
   </div>
 
   <!-- PAST SHIFT REPORTS -->
   <div id="past-reports-head" onclick="toggleSection('past-reports-body')" style="display:none;padding:0 12px;display:flex;align-items:center;justify-content:space-between;margin-top:16px;cursor:pointer;">
     <div style="display:flex;align-items:center;gap:6px;">
-      <span id="past-reports-arrow" style="font-size:10px;transition:transform .2s;">▼</span>
+      <span id="past-reports-arrow" style="font-size:10px;transition:transform .2s;transform:rotate(-90deg);">▼</span>
       <div style="font-weight:700;font-size:14px;">📁 지난 운행 일지</div>
+      <span id="past-reports-count" style="font-size:11px;font-weight:600;color:#6b7280;"></span>
     </div>
     <button onclick="event.stopPropagation();loadMyPastShifts(true)" style="font-size:11px;background:var(--surface,#f8fafc);color:var(--muted,#6b7280);border:1px solid #e5e7eb;border-radius:8px;padding:4px 10px;cursor:pointer;">🔄 새로고침</button>
   </div>
-  <div id="past-reports-body">
+  <div id="past-reports-body" style="display:none;">
+    <div id="past-reports-week-nav" style="display:none;padding:6px 12px 0;">
+      <div style="display:flex;align-items:center;justify-content:space-between;background:white;border-radius:10px;padding:8px 12px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+        <button onclick="_pastWeekNav(-1)" style="font-size:16px;background:none;border:none;cursor:pointer;padding:4px 8px;">◀</button>
+        <span id="past-week-label" style="font-size:13px;font-weight:700;color:#1a1a1a;"></span>
+        <button onclick="_pastWeekNav(1)" style="font-size:16px;background:none;border:none;cursor:pointer;padding:4px 8px;">▶</button>
+      </div>
+    </div>
     <div id="past-reports-list" style="padding:6px 12px 0;"></div>
   </div>
 
@@ -3421,12 +3425,15 @@ function toggleSection(bodyId) {
 function restoreSectionStates() {
   ['today-reports-body', 'past-reports-body', 'salary-body'].forEach(id => {
     const state = localStorage.getItem('section_' + id);
+    const body = document.getElementById(id);
+    const arrowId = id.replace('-body', '-arrow');
+    const arrow = document.getElementById(arrowId);
     if (state === 'closed') {
-      const body = document.getElementById(id);
       if (body) body.style.display = 'none';
-      const arrowId = id.replace('-body', '-arrow');
-      const arrow = document.getElementById(arrowId);
       if (arrow) arrow.style.transform = 'rotate(-90deg)';
+    } else if (state === 'open') {
+      if (body) body.style.display = '';
+      if (arrow) arrow.style.transform = '';
     }
   });
 }
@@ -4710,8 +4717,7 @@ function renderTodayReports(){
         ${r.tourcode?`<span class="report-tag">🏷 ${r.tourcode}</span>`:''}
       </div>
     </div>`).join('');
-  // Show completed shift history from localStorage
-  renderShiftHistory();
+  // shift history section removed (지난 운행 일지/급여탭에서 확인 가능)
 }
 
 // ★ GAS End_of_Shift 시트에서 완료된 시프트 기록 로드
@@ -8734,25 +8740,46 @@ function _parseDDMMYYYYDriver(s) {
   const d=new Date(s); return isNaN(d)?0:d.getTime();
 }
 
-function renderMyPastShifts() {
+// ── 주간 탐색 상태 ──
+var _pastWeekIndex = 0;   // 0 = 최신 주
+var _pastWeekKeys = [];   // ['2026-03-17', '2026-03-10', ...] 내림차순
+var _pastByWeek = {};     // { '2026-03-17': [...items] }
+
+function _pastWeekNav(dir) {
+  _pastWeekIndex = Math.max(0, Math.min(_pastWeekKeys.length - 1, _pastWeekIndex + dir));
+  _renderPastWeek();
+}
+
+function _getMondayISO(dateStr) {
+  const ts = _parseDDMMYYYYDriver(dateStr);
+  if (!ts) return '0000-00-00';
+  const d = new Date(ts);
+  const day = d.getDay(); // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+function _renderPastWeek() {
   const listEl = document.getElementById('past-reports-list');
-  const headEl = document.getElementById('past-reports-head');
+  const labelEl = document.getElementById('past-week-label');
+  const navEl = document.getElementById('past-reports-week-nav');
   if (!listEl) return;
 
-  const preItems = _myPastShifts.pre.map(r=>({...r, _type:'pre'}));
-  const eosItems = _myPastShifts.eos.map(r=>({...r, _type:'eos'}));
-  let all = [...preItems, ...eosItems];
-  all.sort((a,b)=>_parseDDMMYYYYDriver(b.Date)-_parseDDMMYYYYDriver(a.Date));
-  // Show max 30 most recent
-  all = all.slice(0, 30);
-
-  if (headEl) headEl.style.display = all.length ? 'flex' : 'none';
-  if (!all.length) {
+  if (!_pastWeekKeys.length) {
+    if (navEl) navEl.style.display = 'none';
     listEl.innerHTML = '<div style="text-align:center;padding:24px 12px;color:#9ca3af;font-size:13px;">📋 기록이 없습니다</div>';
     return;
   }
+  if (navEl) navEl.style.display = '';
+  const monISO = _pastWeekKeys[_pastWeekIndex];
+  const monD = new Date(monISO+'T00:00:00');
+  const sunD = new Date(monD); sunD.setDate(monD.getDate()+6);
+  const fmt = d => String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');
+  if (labelEl) labelEl.textContent = `${fmt(monD)} ~ ${fmt(sunD)}/${sunD.getFullYear()}  (${_pastWeekIndex+1}/${_pastWeekKeys.length})`;
 
-  listEl.innerHTML = all.map(orig=>{
+  const all = _pastByWeek[monISO] || [];
+  listEl.innerHTML = all.map(orig => {
     const r = orig._type === 'eos' ? _normalizeEOS({...orig}) : orig;
     const isPre = r._type === 'pre';
     const ri = r._rowIndex;
@@ -8778,6 +8805,29 @@ function renderMyPastShifts() {
       </div>
     </div>`;
   }).join('');
+}
+
+function renderMyPastShifts() {
+  const headEl = document.getElementById('past-reports-head');
+  const preItems = _myPastShifts.pre.map(r=>({...r, _type:'pre'}));
+  const eosItems = _myPastShifts.eos.map(r=>({...r, _type:'eos'}));
+  let all = [...preItems, ...eosItems];
+  all.sort((a,b)=>_parseDDMMYYYYDriver(b.Date)-_parseDDMMYYYYDriver(a.Date));
+
+  const countEl = document.getElementById('past-reports-count');
+  if (countEl) countEl.textContent = all.length ? all.length+'건' : '';
+  if (headEl) headEl.style.display = all.length ? 'flex' : 'none';
+
+  // 주간별 그룹핑
+  _pastByWeek = {};
+  all.forEach(item => {
+    const mon = _getMondayISO(item.Date);
+    if (!_pastByWeek[mon]) _pastByWeek[mon] = [];
+    _pastByWeek[mon].push(item);
+  });
+  _pastWeekKeys = Object.keys(_pastByWeek).sort().reverse(); // 최신순
+  _pastWeekIndex = 0;
+  _renderPastWeek();
 }
 
 // ── EOS 데이터 정규화 (시트 컬럼 버전 차이 처리) ──
