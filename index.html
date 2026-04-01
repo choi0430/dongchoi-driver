@@ -6814,12 +6814,16 @@ async function loadDriverWagesFromGAS(driverName, forceRefresh=false){
     const wagesMap = {};
     data.rows.forEach(row=>{
       const driver = String(row.Driver || '').trim();
-      const monISO = String(row.WeekStart || '').trim();
+      // ★ WeekStart/Date: ISO datetime(T포함) → YYYY-MM-DD 정규화
+      let monISO = String(row.WeekStart || '').trim();
+      if(monISO.includes('T')) monISO = parseToISO(monISO);
+      let entryDate = String(row.Date || '').trim();
+      if(entryDate.includes('T')) entryDate = parseToISO(entryDate);
       if(!driver || !monISO) return;
       if(!wagesMap[driver]) wagesMap[driver] = {};
       if(!wagesMap[driver][monISO]) wagesMap[driver][monISO] = { entries:[] };
       wagesMap[driver][monISO].entries.push({
-        date:   row.Date       || monISO,
+        date:   entryDate || monISO,
         amount: Number(row.Amount || 0),
         method: row.PayMethod  || '현금',
         note:   row.Notes      || ''
@@ -7393,10 +7397,11 @@ async function renderSalary(){
   const el=document.getElementById('salary-list');
   const meEl=document.getElementById('me-salary-detail');
   const driverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
-  const driverWages = getDriverWagesFromLocal(driverName);
 
   // GAS + 로컬 DR 리포트 병합 기반 주별 발생 금액
   await Promise.all([fetchDRCache(), loadDriverWagesFromGAS(driverName)]);
+  // ★ GAS 로드 완료 후 최신 데이터 읽기
+  const driverWages = getDriverWagesFromLocal(driverName);
   const gasAll = (_drReportsCache||[]).filter(r=>{
     const nm=String(r.Driver||'').trim();
     return nm===driverName || nm===(currentDriver?.englishName||'') || nm===(currentDriver?.initials||'');
@@ -8755,3 +8760,4 @@ async function submitCorrectionRequest() {
 
 </body>
 </html>
+
