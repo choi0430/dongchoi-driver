@@ -429,7 +429,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   </div>
   <div id="today-reports-body">
     <div id="today-reports-list"></div>
-    <!-- Completed shift history (서명 포함, localStorage 기반) -->
+    <!-- Completed shift history (GAS End_of_Shift 기반) -->
     <div id="shift-history-section" style="display:none;padding:0 12px 10px;">
       <div style="font-weight:700;font-size:14px;margin-bottom:8px;">📄 완료된 시프트 리포트</div>
       <div id="shift-history-list"></div>
@@ -4714,33 +4714,99 @@ function renderTodayReports(){
   renderShiftHistory();
 }
 
-function renderShiftHistory() {
+// ★ GAS End_of_Shift 시트에서 완료된 시프트 기록 로드
+var _eosCache = null;
+var _eosCacheTime = 0;
+async function loadEOSFromGAS(driverName) {
+  if (!driverName) return [];
+  if (_eosCache && Date.now() - _eosCacheTime < 120000) return _eosCache; // 2분 캐시
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=End_of_Shift');
+    if (!res.ok) return _eosCache || [];
+    const data = await res.json();
+    if (!data.ok || !Array.isArray(data.rows)) return _eosCache || [];
+    // 전체 드라이버 데이터 중 현재 드라이버 필터
+    const me = currentDriver;
+    const matchNames = new Set([driverName, me?.englishName||'', me?.initials||'']);
+    _eosCache = data.rows.filter(r => matchNames.has(String(r.Driver||'').trim()))
+      .map(r => ({
+        date:     fmtDate(r.Date || ''),
+        rego:     r.Rego || '—',
+        endKm:    r.End_KM || '',
+        startKm:  r.Start_KM || '',
+        remarks:  r.Remarks || '',
+        _row:     r._row || r._rowIndex || ''
+      }))
+      .sort((a, b) => {
+        const pa = a.date.split('/'), pb = b.date.split('/');
+        const da = (pa[2]||'')+'-'+(pa[1]||'')+'-'+(pa[0]||'');
+        const db = (pb[2]||'')+'-'+(pb[1]||'')+'-'+(pb[0]||'');
+        return db.localeCompare(da); // 최신순
+      });
+    _eosCacheTime = Date.now();
+    return _eosCache;
+  } catch(e) { console.warn('EOS load error:', e); return _eosCache || []; }
+}
+
+async function renderShiftHistory() {
   const section = document.getElementById('shift-history-section');
   const listEl = document.getElementById('shift-history-list');
   if (!section || !listEl) return;
 
-  const histKey = 'shiftHistory_'+(currentDriver?.name||'');
-  let hist = [];
-  try { hist = JSON.parse(localStorage.getItem(histKey)||'[]'); } catch(e) {}
-  // 기존 단건 lastShift도 포함
-  if (hist.length === 0) {
-    const last = localStorage.getItem('lastShift_'+(currentDriver?.name||''));
-    if (last) { try { hist = [JSON.parse(last)]; } catch(e) {} }
-  }
+  const driverName = currentDriver?.name || '';
+  // ★ GAS에서 완료된 시프트 기록 로드
+  const eosRecords = await loadEOSFromGAS(driverName);
 
-  if (!hist.length) { section.style.display = 'none'; return; }
+  // localStorage 로컬 히스토리 (PDF용)
+  const histKey = 'shiftHistory_' + driverName;
+  let localHist = [];
+  try { localHist = JSON.parse(localStorage.getItem(histKey)||'[]'); } catch(e) {}
+  if (localHist.length === 0) {
+    const last = localStorage.getItem('lastShift_' + driverName);
+    if (last) { try { localHist = [JSON.parse(last)]; } catch(e) {} }
+  }
+  // 로컬 히스토리의 날짜+차량 세트 (PDF 버튼 활성화용)
+  const localSet = new Set(localHist.map(s => (fmtDate(s.date||s.endDate||''))+':'+(s.rego||'')));
+
+  // DR 리포트 캐시에서 날짜별 DR 건수 계산
+  const drByDate = {};
+  const me = currentDriver;
+  const matchNames = new Set([driverName, me?.englishName||'', me?.initials||'']);
+  (_drReportsCache||[]).forEach(r => {
+    if (!matchNames.has(String(r.Driver||'').trim())) return;
+    const d = fmtDate(r.Date||'');
+    if (d) drByDate[d] = (drByDate[d]||0) + 1;
+  });
+
+  // GAS 데이터가 없으면 로컬 fallback
+  const showList = eosRecords.length > 0 ? eosRecords : localHist.map(s => ({
+    date: fmtDate(s.date||s.endDate||'')||s.date||'—',
+    rego: s.rego||'—',
+    endKm: s.endKm||'',
+    _isLocal: true,
+    _drCount: (s.dailyReports||[]).length
+  }));
+
+  if (!showList.length) { section.style.display = 'none'; return; }
   section.style.display = 'block';
 
-  listEl.innerHTML = hist.map((s, i) => {
-    const d = fmtDate(s.date || s.endDate || '') || s.date || '—';
+  listEl.innerHTML = showList.map((s, i) => {
+    const d = s.date || '—';
     const rego = s.rego || '—';
-    const drCount = (s.dailyReports||[]).length;
+    const drCount = s._drCount || drByDate[d] || 0;
+    const kmStr = s.endKm ? Number(s.endKm).toLocaleString()+' km' : '';
+    const hasPdf = s._isLocal || localSet.has(d+':'+rego);
+    const localIdx = localHist.findIndex(h => (fmtDate(h.date||h.endDate||''))===d && (h.rego||'')=== rego);
+
     return `<div style="background:white;border-radius:10px;padding:10px 12px;margin-bottom:6px;box-shadow:0 1px 3px rgba(0,0,0,0.06);display:flex;justify-content:space-between;align-items:center;">
       <div>
         <div style="font-size:13px;font-weight:700;color:#1a1a1a;">${d} · ${rego}</div>
-        <div style="font-size:11px;color:#9ca3af;">DR ${drCount}건${s.endKm?' · '+Number(s.endKm).toLocaleString()+' km':''}</div>
+        <div style="font-size:11px;color:#9ca3af;">DR ${drCount}건${kmStr?' · '+kmStr:''}</div>
       </div>
-      <button onclick="openShiftHistoryPdf(${i})" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;">📄 PDF</button>
+      ${hasPdf && localIdx >= 0
+        ? `<button onclick="openShiftHistoryPdf(${localIdx})" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;">📄 PDF</button>`
+        : `<span style="font-size:10px;color:#d1d5db;">✅ 완료</span>`
+      }
     </div>`;
   }).join('');
 }
