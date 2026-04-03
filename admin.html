@@ -1682,13 +1682,15 @@ function fmtDateTime(ds){
   }
   return fmtDate(s);
 }
-/** 통합 잔여일 계산 — 대시보드 & HVIS 탭 공용 */
+/** 통합 잔여일 계산 — 대시보드 & HVIS 탭 공용 (UTC 기반, DST 영향 없음) */
 function calcDaysRemaining(dateStr){
   if(!dateStr||String(dateStr).trim()==='-'||String(dateStr).trim()==='')return null;
   const iso=parseToISO(dateStr);if(!iso)return null;
-  const target=new Date(iso+'T00:00:00'),now=new Date();
-  target.setHours(0,0,0,0);now.setHours(0,0,0,0);
-  return Math.floor((target-now)/86400000);
+  const p=iso.split('-');
+  const targetUTC=Date.UTC(+p[0],+p[1]-1,+p[2]);
+  const n=new Date();
+  const nowUTC=Date.UTC(n.getFullYear(),n.getMonth(),n.getDate());
+  return Math.round((targetUTC-nowUTC)/86400000);
 }
 function du(ds){const d=calcDaysRemaining(ds);return d===null?9999:d;}
 function etag(ds,lbl){
