@@ -2090,7 +2090,7 @@ function openMaintEntry(id){
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9000;display:flex;align-items:flex-end;justify-content:center;';
   var modal=document.createElement('div');
   modal.style.cssText='background:var(--sf);border-radius:20px 20px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;';
-  var regoOpts=DB.V.map(function(v){return'<option value="'+v.Rego+'"'+(v.Rego===(r.rego||'')?' selected':'')+'>'+v.Rego+'</option>';}).join('');
+  var regoOpts=DB.V.filter(function(v){return isHvisVehicle(v);}).map(function(v){return'<option value="'+v.Rego+'"'+(v.Rego===(r.rego||'')?' selected':'')+'>'+v.Rego+'</option>';}).join('');
   var types=['Engine Oil & Filter','Tyre Rotation','Brake Check','Full Service','Tyre Replacement','Battery','Air Filter','Coolant','Timing Belt','Other'];
   var typeOpts=types.map(function(t){return'<option value="'+t+'"'+(t===(r.type||'')?' selected':'')+'>'+t+'</option>';}).join('');
   modal.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'
@@ -2139,7 +2139,7 @@ function deleteMaint(id){
 
 function populateDefectFilter(){
   var sel=document.getElementById('defect-rego-filter');if(!sel)return;
-  sel.innerHTML='<option value="">All vehicles</option>'+DB.V.map(function(v){return'<option value="'+v.Rego+'">'+v.Rego+'</option>';}).join('');
+  sel.innerHTML='<option value="">All vehicles</option>'+DB.V.filter(function(v){return isHvisVehicle(v);}).map(function(v){return'<option value="'+v.Rego+'">'+v.Rego+'</option>';}).join('');
 }
 function renderDefects(){
   var list=document.getElementById('defect-list');if(!list)return;
@@ -4157,10 +4157,10 @@ function _populateIimDropdowns() {
     const drivers = (DB.D||[]).filter(d=>d.Status!=='퇴사').map(d=>d.Name_EN||d.Name_KR||'').filter(Boolean).sort();
     drvSel.innerHTML = '<option value="">선택</option>' + drivers.map(n=>`<option value="${n}">${n}</option>`).join('');
   }
-  // ★ 차량(Rego) 드롭다운
+  // ★ 차량(Rego) 드롭다운 — 운행용(12인승 이상)만 표시
   const regoSel = document.getElementById('iim-rego');
   if (regoSel) {
-    const regos = (DB.V||[]).map(v=>v.Rego||'').filter(Boolean).sort();
+    const regos = (DB.V||[]).filter(v=>isHvisVehicle(v)).map(v=>v.Rego||'').filter(Boolean).sort();
     regoSel.innerHTML = '<option value="">선택</option>' + regos.map(r=>`<option value="${r}">${r}</option>`).join('');
   }
 
@@ -9596,7 +9596,7 @@ function openShiftAdd() {
 
   // 차량 목록 드롭다운
   const regoOpts = ['<option value="">-- 선택 --</option>',
-    ...DB.V.map(v=>`<option value="${escH(v.Rego)}">${escH(v.Rego)}${v.Make?' — '+escH(v.Make):''}</option>`)
+    ...DB.V.filter(v=>isHvisVehicle(v)).map(v=>`<option value="${escH(v.Rego)}">${escH(v.Rego)}${v.Make?' — '+escH(v.Make):''}</option>`)
   ].join('');
   const regoSel = `<div style="margin-bottom:12px;">
     <div style="font-size:11px;font-weight:600;color:var(--t3);margin-bottom:4px;">차량 Rego</div>

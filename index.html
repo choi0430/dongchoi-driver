@@ -1658,6 +1658,7 @@ function getSydneyOffsetMs(date) {
     return (new Date(sydStr) - new Date(utcStr));
   }
 }
+function isOperationalVehicle(v){return (parseInt(v.Seats||v.Capacity)||0) >= 12;}
 function fmtDate(val) {
   // dd/mm/yyyy 표시용
   if (!val) return '';
@@ -2059,7 +2060,7 @@ function populateMasterSelects() {
   if(defRegoSel2 && MASTER.vehicles.length > 0) {
     const prev = defRegoSel2.value;
     defRegoSel2.innerHTML = '<option value="">Select (선택)</option>' +
-      MASTER.vehicles.map(v=>`<option value="${v.Rego}">${v.Rego}</option>`).join('') +
+      MASTER.vehicles.filter(v=>isOperationalVehicle(v)).map(v=>`<option value="${v.Rego}">${v.Rego}</option>`).join('') +
       '<option value="__other__">기타 직접입력...</option>';
     if(prev) defRegoSel2.value = prev;
   }
@@ -2197,8 +2198,8 @@ const SDD_CONFIG = {
       : GUIDE_LIST.map(g=>({name:g.name,sub:g.mobile}));
     return [...none,...base,...getCustomGuides().map(n=>({name:n,sub:''}))];
   }, type:'guide' },
-  rego:       { list: ()=> (MASTER.vehicles||[]).map(v=>({name:v.Rego,sub:(v.Seats?v.Seats+'인승':'')+(v.Transmission==='Manual'?' · 🔧 수동':'')})), type:'rego' },
-  prerego:    { list: ()=> (MASTER.vehicles||[]).map(v=>{
+  rego:       { list: ()=> (MASTER.vehicles||[]).filter(v=>isOperationalVehicle(v)).map(v=>({name:v.Rego,sub:(v.Seats?v.Seats+'인승':'')+(v.Transmission==='Manual'?' · 🔧 수동':'')})), type:'rego' },
+  prerego:    { list: ()=> (MASTER.vehicles||[]).filter(v=>isOperationalVehicle(v)).map(v=>{
     const activeInfo = _activeRegosCache.find(r=>r.rego===v.Rego);
     const sub = (v.Seats?v.Seats+'인승':'')+(v.Transmission==='Manual'?' · 🔧 수동':'')
                +(activeInfo ? ' 🔒 운행중: '+activeInfo.driver : '');
