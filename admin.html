@@ -10559,8 +10559,14 @@ function _closeDocModal() {
 function _printDocModal() {
   const iframe = document.getElementById('doc-preview-iframe');
   if (iframe && iframe.contentWindow) {
+    const origTitle = document.title;
+    try {
+      const iframeTitle = iframe.contentDocument?.title || '';
+      if (iframeTitle) document.title = iframeTitle;
+    } catch(e) {}
     iframe.contentWindow.focus();
     iframe.contentWindow.print();
+    setTimeout(() => { document.title = origTitle; }, 500);
   }
 }
 
@@ -10570,8 +10576,16 @@ function _downloadInvPdf() {
   const iframe = document.getElementById('doc-preview-iframe');
   if (!iframe || !iframe.contentWindow) { toast('미리보기가 없습니다','er'); return; }
   toast('🖨 인쇄 화면에서 "PDF로 저장"을 선택하세요','ok');
+  // iframe 내부 title을 메인 title에 반영 (브라우저가 PDF 파일명으로 사용)
+  const origTitle = document.title;
+  try {
+    const iframeTitle = iframe.contentDocument?.title || iframe.contentWindow.document?.title || '';
+    if (iframeTitle) document.title = iframeTitle;
+  } catch(e) {}
   iframe.contentWindow.focus();
   iframe.contentWindow.print();
+  // print dialog 닫힌 후 원래 title 복원
+  setTimeout(() => { document.title = origTitle; }, 500);
 }
 
 // ★ PDF Blob 생성 (이메일 첨부용)
