@@ -80,6 +80,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .bgh{background:transparent;border:1px solid var(--b2);color:var(--t2)}
 .bor{background:var(--or);color:#fff}
 .sm{padding:6px 12px;font-size:10px;width:auto}
+/* ── Unified Refresh/Sync Button ── */
+.btn-refresh{display:inline-flex;align-items:center;gap:4px;background:var(--sf2,#f8fafc);color:var(--t2,#6b7280);border:1px solid var(--b2,#e4e8ef);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;width:auto}
+.btn-refresh:active{opacity:.8;transform:scale(.97)}
+.btn-refresh.refreshing{pointer-events:none;opacity:.65}
+.btn-refresh .refresh-icon{display:inline-block;transition:transform .3s}
+.btn-refresh.refreshing .refresh-icon{animation:spin-refresh .8s linear infinite}
+@keyframes spin-refresh{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 .xs{padding:4px 8px;font-size:9px;width:auto}
 .tag{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;font-family:var(--fd);letter-spacing:.4px}
 .tb{background:var(--acd);color:var(--ac);border:1px solid rgba(79,70,229,.25)}
@@ -205,7 +212,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="lbdg">ADMIN PANEL</div>
   </div>
   <div class="lcrd">
-    <div class="fr"><label class="fl">Admin Account (관리자 계정)</label>
+    <div class="fr"><label class="fl">관리자 계정</label>
       <div class="lsw"><select class="fs" id="la"><option value="">-- 계정 선택 --</option><option value="Branden">Branden Choi (오너)</option></select></div>
     </div>
     <div class="fr"><label class="fl">PIN 번호</label>
@@ -273,7 +280,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <div style="font-size:11px;color:var(--t3);font-family:var(--fn)" id="ddate"></div>
       <div style="font-size:10px;color:var(--t3);margin-top:2px;" id="sync-status">📡 데이터 로딩 중...</div>
     </div>
-    <button class="btn bgh sm" onclick="forceReloadAll()" title="모든 데이터를 시트에서 새로 불러옵니다" style="margin-top:4px;">🔄 Refresh All (전체 새로고침)</button>
+    <button id="btn-refresh-all" class="btn-refresh" onclick="forceReloadAll()" title="Refresh All (모든 데이터를 시트에서 새로 불러옵니다)" style="margin-top:4px;"><span class="refresh-icon">🔄</span> Refresh All (전체 새로고침)</button>
   </div>
   <div class="sgrd">
     <div class="sc bl"><div class="slb">Vehicles (차량)</div><div class="svl" id="kv">—</div><div class="sss">Registered Vehicles (등록 차량)</div></div>
@@ -685,7 +692,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div style="padding:0 14px 14px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
       <div style="font-size:12px;font-weight:800;color:var(--t1);letter-spacing:.3px;">📜 발행 이력</div>
-      <button class="btn bgh sm" onclick="loadInvHistory(true)" style="font-size:11px;padding:4px 10px;">🔄 Refresh (새로고침)</button>
+      <button class="btn-refresh" onclick="withRefreshSpin(this,()=>loadInvHistory(true))"><span class="refresh-icon">🔄</span> Refresh (새로고침)</button>
     </div>
     <div id="inv-history-list" style="max-height:400px;overflow-y:auto;">
       <div style="text-align:center;padding:16px;color:var(--t3);font-size:12px;">⏳ 발행 이력 불러오는 중...</div>
@@ -861,7 +868,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div style="display:flex;gap:6px;">
       <button class="btn bgh sm" onclick="exportDrCsv()" title="현재 필터 기준 CSV 내보내기">📥 CSV</button>
       <button class="btn bgh sm" onclick="fixReportFormats()" title="날짜/시간 서식 일괄 수정">🔧 서식수정</button>
-      <button class="btn bgh sm" onclick="loadDR(true)">🔄 Refresh (새로고침)</button>
+      <button class="btn-refresh" onclick="withRefreshSpin(this,()=>loadDR(true))"><span class="refresh-icon">🔄</span> Refresh (새로고침)</button>
     </div>
   </div>
   <!-- 필터 -->
@@ -1028,7 +1035,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 <div class="pg" id="pmot">
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">🚔 MOT 검사 기록</div><div class="ssb">드라이버 제출 전체 조회</div></div>
-    <button class="btn bgh sm" onclick="rMot(true)">🔄 Refresh (새로고침)</button>
+    <button class="btn-refresh" onclick="withRefreshSpin(this,()=>rMot(true))"><span class="refresh-icon">🔄</span> Refresh (새로고침)</button>
   </div>
   <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
     <select id="mot-filter-driver" class="profit-sel" style="flex:1;min-width:100px;" onchange="renderMotAdmin()">
@@ -1050,7 +1057,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div style="display:flex;gap:6px;">
       <button class="btn bgh sm" onclick="exportWageCsv()" title="급여 전체 CSV 내보내기">📥 CSV</button>
       <button class="btn bgh sm" onclick="fixWagesSheet()" title="시트 컬럼 순서 수정">🔧 수정</button>
-      <button class="btn bgh sm" onclick="syncWagesNow()" title="구글 시트와 동기화">🔄 Sync (동기화)</button>
+      <button class="btn-refresh" onclick="withRefreshSpin(this,()=>syncWagesNow())" title="Sync with Google Sheets (구글 시트와 동기화)"><span class="refresh-icon">🔄</span> Sync (동기화)</button>
       <button class="btn bac sm" onclick="_openWageAddSmart()">+ 지급 추가</button>
     </div>
   </div>
@@ -1206,7 +1213,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div style="display:flex;gap:6px;">
       <button class="btn bgh sm" onclick="exportShiftCsv()" title="현재 탭 CSV 내보내기">📥 CSV</button>
       <button class="btn bac sm" onclick="openShiftAdd()" title="새 항목 추가">+ 추가</button>
-      <button class="btn bgh sm" onclick="loadShiftReports(true)" title="Refresh (새로고침)">🔄</button>
+      <button class="btn-refresh" onclick="withRefreshSpin(this,()=>loadShiftReports(true))" title="Refresh (새로고침)"><span class="refresh-icon">🔄</span> Refresh (새로고침)</button>
     </div>
   </div>
 
@@ -1240,7 +1247,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 <div class="pg" id="pbal">
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">📊 거래처 잔액</div><div class="ssb">여행사 · 외주 · 드라이버 잔액 관리</div></div>
-    <button class="btn bgh sm" onclick="syncBalanceData(true)">🔄 Sync (동기화)</button>
+    <button class="btn-refresh" onclick="withRefreshSpin(this,()=>syncBalanceData(true))"><span class="refresh-icon">🔄</span> Sync (동기화)</button>
   </div>
 
   <!-- 3-way 탭 -->
@@ -1255,7 +1262,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div id="bal-agency-summary" style="padding:10px 14px 0;"></div>
     <div style="padding:6px 14px 0;display:flex;gap:6px;align-items:center;">
       <input type="text" id="bal-agency-search" class="profit-finp" placeholder="여행사 검색..." oninput="renderBalAgencyList()" style="flex:1;font-size:12px;">
-      <button class="btn bac sm" onclick="syncBalanceData(true)" title="인보이스 동기화">🔄 Sync (동기화)</button>
+      <button class="btn-refresh" onclick="withRefreshSpin(this,()=>syncBalanceData(true))" title="Invoice Sync (인보이스 동기화)"><span class="refresh-icon">🔄</span> Sync (동기화)</button>
     </div>
     <div id="bal-agency-list" style="padding:8px 14px 80px;"></div>
   </div>
@@ -1417,7 +1424,6 @@ const DB = {
   PD: {},
   PS: {},
   regoMaxKM: {},  // { rego: maxKM } — highest KM from Pre_Departure/Daily_Report/End_of_Shift
-  HB: [],         // HVIS Bookings — Google Sheets 기반
 };
 
 // ★ NIGHT_RATES: 드라이버 앱과 동일 (M_NightRates 시트에서 오버라이드)
@@ -1682,15 +1688,13 @@ function fmtDateTime(ds){
   }
   return fmtDate(s);
 }
-/** 통합 잔여일 계산 — 대시보드 & HVIS 탭 공용 (UTC 기반, DST 영향 없음) */
+/** 통합 잔여일 계산 — 대시보드 & HVIS 탭 공용 */
 function calcDaysRemaining(dateStr){
   if(!dateStr||String(dateStr).trim()==='-'||String(dateStr).trim()==='')return null;
   const iso=parseToISO(dateStr);if(!iso)return null;
-  const p=iso.split('-');
-  const targetUTC=Date.UTC(+p[0],+p[1]-1,+p[2]);
-  const n=new Date();
-  const nowUTC=Date.UTC(n.getFullYear(),n.getMonth(),n.getDate());
-  return Math.round((targetUTC-nowUTC)/86400000);
+  const target=new Date(iso+'T00:00:00'),now=new Date();
+  target.setHours(0,0,0,0);now.setHours(0,0,0,0);
+  return Math.floor((target-now)/86400000);
 }
 function du(ds){const d=calcDaysRemaining(ds);return d===null?9999:d;}
 function etag(ds,lbl){
@@ -1720,7 +1724,7 @@ function rDash(){
   document.getElementById('qg').textContent=DB.G.length+'명';
   document.getElementById('qh').textContent=DB.H.length+'개';
   const als=[];
-  // ★ HVIS 부킹 데이터 로드 (백업 자동 복구 포함)
+  // ★ HVIS 부킹 데이터 로드
   const hvisBookings=getHvisBookings();
   function findHvisBooking(rego){
     if(!hvisBookings||!hvisBookings.length)return null;
@@ -1754,14 +1758,13 @@ function rDash(){
     }
   });
   // ── 차량 Rego / HVIS / 서비스 KM ──
-  function isEmpty(v){return !v||String(v).trim()===''||String(v).trim()==='-';}
   DB.V.forEach(v=>{
     const rd=du(v.Rego_Date),hd=du(v.HVIS_Date);
-    // ★ 데이터 미등록 차량 경고 (XO37PS 등 빈 데이터 차량 포함)
-    if(isEmpty(v.Rego_Date)&&isEmpty(v.HVIS_Date)){
+    // ★ 데이터 미등록 차량 경고
+    if(!v.Rego_Date&&!v.HVIS_Date){
       als.push({sort:9990,type:'missing',
         bg:'#f0f9ff',bc:'#38bdf8',fc:'#0284c7',icon:'⚠️',
-        m:`${v.Rego} — Not Registered (Rego/HVIS 미등록) — 날짜 정보를 입력해주세요`});
+        m:`${v.Rego} — Not Registered (Rego/HVIS 미등록)`});
     }
     if(v.Rego_Date&&rd<90){
       const urgent=rd<0,warn=rd<30;
@@ -1779,7 +1782,7 @@ function rDash(){
       if(booking){
         als.push({sort:hd+1000,type:'hvis_booked',
           bg:'#ecfdf5',bc:'#10b981',fc:'#059669',icon:'✅',
-          m:`${v.Rego} — HVIS Booked (예약완료) ${fmtDate(booking.inspDate)} @ ${booking.location||''}`});
+          m:`${v.Rego} — HVIS Booked (예약완료) ${booking.inspDate} @ ${booking.location||''}`});
       }else{
         als.push({sort:hd,type:'hvis',
           bg:urgent?'#fef2f2':warn?'#fff7ed':'#fefce8',
@@ -1818,78 +1821,8 @@ function rDash(){
 
 
 // ===== VEHICLE MANAGEMENT =====
-// ★ HVIS 부킹: Google Sheets 기반 (DB.HB = in-memory cache, Sheets가 원본)
-// — localStorage는 오프라인 캐시 전용
-function getHvisBookings(){ return DB.HB || []; }
-function saveHvisBookingsCache(d){ DB.HB = d; try{safeSetLocal('hvis_bookings', d);}catch(e){} }
-
-// ★ Google Sheets에서 HVIS 부킹 로드 (앱 시작 시 호출)
-async function loadHvisBookingsFromSheets(){
-  try {
-    const res = await fetch(APPS_SCRIPT_URL+'?action=get_master&sheet=HVIS_Bookings');
-    const json = await res.json();
-    if(json.ok && json.rows){
-      DB.HB = json.rows.map(r=>({
-        id: r.ID || r._rowIndex,
-        _rowIndex: r._rowIndex,
-        rego: r.Rego||'',
-        inspDate: r.InspDate||'',
-        inspTime: r.InspTime||'',
-        location: r.Location||'',
-        bookingNo: r.BookingNo||'',
-        vehicleType: r.VehicleType||'',
-        ownerName: r.OwnerName||'',
-        bookingDate: r.BookingDate||'',
-        status: r.Status||'Active'
-      }));
-      safeSetLocal('hvis_bookings', DB.HB);
-      console.log('[HVIS] Loaded from Sheets:', DB.HB.length, 'bookings');
-      return DB.HB;
-    }
-  } catch(e){ console.warn('[HVIS] Sheets load failed, using cache:', e.message); }
-  // Sheets 실패 시 localStorage 캐시 사용
-  DB.HB = safeGetLocal('hvis_bookings', []);
-  return DB.HB;
-}
-
-// ★ Google Sheets에 부킹 추가
-async function addHvisBookingToSheets(entry){
-  try {
-    const sheetData = {
-      ID: String(entry.id),
-      Rego: entry.rego,
-      InspDate: entry.inspDate,
-      InspTime: entry.inspTime||'',
-      Location: entry.location||'',
-      BookingNo: entry.bookingNo||'',
-      VehicleType: entry.vehicleType||'',
-      OwnerName: entry.ownerName||'',
-      BookingDate: entry.bookingDate||'',
-      Status: 'Active'
-    };
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method:'POST', headers:{'Content-Type':'text/plain'},
-      body: JSON.stringify({action:'add_master', sheet:'HVIS_Bookings', data:sheetData})
-    });
-    const json = await res.json();
-    if(json.ok){
-      entry._rowIndex = json.row;
-      console.log('[HVIS] Saved to Sheets, row:', json.row);
-    } else { console.warn('[HVIS] Sheets save failed:', json.error); }
-  } catch(e){ console.warn('[HVIS] Sheets save error:', e.message); }
-}
-
-// ★ Google Sheets에서 부킹 삭제
-async function deleteHvisBookingFromSheets(rowIndex){
-  if(!rowIndex) return;
-  try {
-    await fetch(APPS_SCRIPT_URL, {
-      method:'POST', headers:{'Content-Type':'text/plain'},
-      body: JSON.stringify({action:'delete_master', sheet:'HVIS_Bookings', rowIndex: rowIndex})
-    });
-    console.log('[HVIS] Deleted from Sheets, row:', rowIndex);
-  } catch(e){ console.warn('[HVIS] Sheets delete error:', e.message); }
-}
+function getHvisBookings(){try{return safeGetLocal('hvis_bookings', []);}catch(e){return[];}}
+function saveHvisBookings(d){safeSetLocal('hvis_bookings', d);}
 function getMaintRecords(){try{return safeGetLocal('maint_records', []);}catch(e){return[];}}
 function saveMaintRecords(d){safeSetLocal('maint_records', d);}
 function getDefectReports(){try{return safeGetLocal('defect_reports', []);}catch(e){return[];}}
@@ -2065,33 +1998,23 @@ function openHvisBooking(rego){
     +'<button class="btn bac" style="width:100%;" onclick="saveHvisBookingEntry()">&#x1F4BE; Save Booking</button>';
   overlay.appendChild(modal);document.body.appendChild(overlay);
 }
-async function saveHvisBookingEntry(){
+function saveHvisBookingEntry(){
   var entry={id:Date.now().toString(),rego:gv('hb-rego'),inspDate:fmtDate(gv('hb-date')),inspTime:gv('hb-time'),
     location:gv('hb-location'),customerNo:gv('hb-custno'),bookingNo:gv('hb-bookno'),
-    vehicleType:gv('hb-vtype')||'',
-    ownerName:gv('hb-owner'),bookingDate:fmtDate(toLocalISO(new Date())),status:'Active'};
+    ownerName:gv('hb-owner'),bookingDate:fmtDate(toLocalISO(new Date()))};
   if(!entry.rego){toast('Select a vehicle (차량을 선택하세요)','er');return;}
   if(!entry.inspDate){toast('Enter inspection date (점검 날짜를 입력하세요)','er');return;}
-  // ★ Google Sheets에 저장 + 로컬 캐시 업데이트
-  DB.HB.push(entry);
-  saveHvisBookingsCache(DB.HB);
+  var bk=getHvisBookings();bk.push(entry);saveHvisBookings(bk);
   document.getElementById('hvis-modal-overlay').remove();
   renderHvis();
-  rDash();
+  rDash(); // ★ PATCH: 대시보드 알림도 즉시 갱신
   toast('HVIS Booking Saved (HVIS 부킹 저장 완료)','ok');
-  // 비동기로 Sheets 저장 (UI 블록 안 함)
-  await addHvisBookingToSheets(entry);
 }
-async function deleteHvisBooking(id){
-  if(!confirm('Delete this booking (부킹을 삭제하시겠습니까?)?'))return;
-  // ★ 삭제할 부킹의 _rowIndex 찾기
-  var target = DB.HB.find(function(b){return b.id===id || String(b.id)===String(id);});
-  DB.HB = DB.HB.filter(function(b){return b.id!==id && String(b.id)!==String(id);});
-  saveHvisBookingsCache(DB.HB);
+function deleteHvisBooking(id){
+  if(!confirm('Delete this booking?'))return;
+  saveHvisBookings(getHvisBookings().filter(function(b){return b.id!==id;}));
   document.getElementById('hvis-modal-overlay').remove();
-  renderHvis();rDash();toast('Deleted (삭제 완료)','ok');
-  // 비동기로 Sheets 삭제
-  if(target && target._rowIndex) await deleteHvisBookingFromSheets(target._rowIndex);
+  renderHvis();toast('Deleted','ok');
 }
 
 function renderMaint(){
@@ -2262,7 +2185,7 @@ async function rV(q=''){
     return`<div class="mrow">
       <div class="mav" style="color:var(--ac);font-size:10px">${v.Rego}</div>
       <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}</div>
-        <div class="msb">${(v.Manufacture_Date||v['Manufacture Date'])?(fmtDate(v.Manufacture_Date||v['Manufacture Date'])+' · '):''}${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
+        <div class="msb">${(v.Manufacture_Date||v['Manufacture Date'])?((v.Manufacture_Date||v['Manufacture Date'])+'년 · '):''}${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
         <div class="mtg">${etag(v.Rego_Date,'Rego')}${etag(v.HVIS_Date,'HVIS')}${(()=>{
           const cKM=DB.regoMaxKM?.[v.Rego]||0;
           const nSKM=Number(v.Next_Service_KM)||0;
@@ -5368,7 +5291,7 @@ async function saveInvoiceToSheet() {
     const json = await res.json();
     if (!json.ok) throw new Error(json.error||'저장 실패');
     // localStorage 발행 기록도 동기화
-    localStorage.setItem(`dc_inv_issued_${invNum}`, (()=>{const _d=new Date();return String(_d.getDate()).padStart(2,'0')+'/'+String(_d.getMonth()+1).padStart(2,'0')+'/'+_d.getFullYear()+' '+String(_d.getHours()).padStart(2,'0')+':'+String(_d.getMinutes()).padStart(2,'0');})());
+    localStorage.setItem(`dc_inv_issued_${invNum}`, new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}));
     toast(`✅ 인보이스 ${invNum} 저장 완료`,'ok');
 
     // ★ 거래처 잔액에 DR 거래 자동 등록 (Agency_Txn)
@@ -6096,7 +6019,7 @@ async function generateInvoice() {
 
   // 저장 성공 후 localStorage에 발행 기록
   const issuedKey = `dc_inv_issued_${invNum}`;
-  const issuedAt  = (()=>{const _d=new Date();return String(_d.getDate()).padStart(2,'0')+'/'+String(_d.getMonth()+1).padStart(2,'0')+'/'+_d.getFullYear()+' '+String(_d.getHours()).padStart(2,'0')+':'+String(_d.getMinutes()).padStart(2,'0');})();
+  const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
   localStorage.setItem(issuedKey, issuedAt);
 
   // 미리보기 모달 + PDF 인쇄 (★ invNumOverride로 동일 번호 사용)
@@ -6650,7 +6573,7 @@ function renderMotAdmin() {
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">' +
           '<div>' +
             '<div style="font-size:13px;font-weight:800;color:var(--t1);">' + escH(r.Driver||'') + ' · ' + escH(r.Rego||'') + '</div>' +
-            '<div style="font-size:11px;color:var(--t3);margin-top:2px;">' + fmtDate(r.Date||'') + ' ' + escH(r.Time||'') +
+            '<div style="font-size:11px;color:var(--t3);margin-top:2px;">' + escH(String(r.Date||'')) + ' ' + escH(r.Time||'') +
               (r.Location ? ' · ' + escH(r.Location) : '') + '</div>' +
           '</div>' +
           '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">' +
@@ -6916,7 +6839,7 @@ async function loadDR(force=false){
     }
   }catch(e){
     toast('리포트 로드 실패: '+e.message,'er');
-    if(listEl) listEl.innerHTML='<div style="text-align:center;padding:30px;color:var(--rd);font-size:13px;">❌ 리포트 로드 실패<br><span style="font-size:11px;color:var(--t3);">'+escH(e.message)+'</span><br><button class="btn bac sm" style="margin-top:10px;" onclick="loadDR(true)">🔄 Retry (다시 시도)</button></div>';
+    if(listEl) listEl.innerHTML='<div style="text-align:center;padding:30px;color:var(--rd);font-size:13px;">❌ Load Failed (로드 실패)<br><span style="font-size:11px;color:var(--t3);">'+escH(e.message)+'</span><br><button class="btn-refresh" style="margin:10px auto 0;" onclick="withRefreshSpin(this,()=>loadDR(true))"><span class="refresh-icon">🔄</span> Retry (다시 시도)</button></div>';
     return;
   }
   renderDR();
@@ -7956,16 +7879,33 @@ async function fixWagesSheet(){
   }catch(e){ toast('수정 실패: '+e.message,'er'); }
 }
 
+// ── Unified refresh spin helper ──
+async function withRefreshSpin(btn, fn){
+  if(!btn) return fn();
+  btn.classList.add('refreshing');
+  try { await fn(); }
+  finally { btn.classList.remove('refreshing'); }
+}
+
 // 전체 강제 새로고침 (모든 캐시 무효화)
 async function forceReloadAll(){
+  const btn = document.getElementById('btn-refresh-all');
+  if(btn) btn.classList.add('refreshing');
   // 캐시 타임스탬프 모두 초기화
   window._tabLastSync = {};
   window._psLastSync = 0;
   window._wagesLastSync = 0;
   _reportsCache = null;
   const syncEl = document.getElementById('sync-status');
-  if(syncEl) syncEl.textContent = '⏳ 전체 새로고침 중...';
-  await loadAllFromSheets();
+  if(syncEl) syncEl.textContent = '⏳ Refreshing... (새로고침 중...)';
+  try {
+    await loadAllFromSheets();
+    toast('✅ Refresh Complete (전체 새로고침 완료)','ok');
+  } catch(e) {
+    toast('⚠️ Refresh Failed (새로고침 실패): '+e.message,'er');
+  } finally {
+    if(btn) btn.classList.remove('refreshing');
+  }
 }
 
 // ═══════════════════════════════════════
@@ -8128,17 +8068,17 @@ function openM(type,idx){
           <option value="Retired"${d.Current_Status==='Retired'?' selected':''}>Retired</option>
         </select></div></div></div>
       <div class="fr3">
-        <div><label class="fl">Make (제조사)</label><input class="fi" id="f2" value="${d.Make||''}" placeholder="TOYOTA"></div>
-        <div><label class="fl">Model (모델)</label><input class="fi" id="f3" value="${d.Model||''}" placeholder="COASTER"></div>
-        <div><label class="fl">Year (연도)</label><input class="fi" id="f4" type="number" value="${mfrDate}" placeholder="2017"></div></div>
+        <div><label class="fl">제조사</label><input class="fi" id="f2" value="${d.Make||''}" placeholder="TOYOTA"></div>
+        <div><label class="fl">모델</label><input class="fi" id="f3" value="${d.Model||''}" placeholder="COASTER"></div>
+        <div><label class="fl">연도</label><input class="fi" id="f4" type="number" value="${mfrDate}" placeholder="2017"></div></div>
       <div class="fr2">
-        <div><label class="fl">Seats (좌석수)</label><input class="fi" id="f5" type="number" value="${d.Capacity||''}"></div>
-        <div><label class="fl">Owner (소유자)</label><input class="fi" id="f6" value="${d.Owner||''}"></div></div>
+        <div><label class="fl">좌석수</label><input class="fi" id="f5" type="number" value="${d.Capacity||''}"></div>
+        <div><label class="fl">소유자</label><input class="fi" id="f6" value="${d.Owner||''}"></div></div>
       <div class="fr2">
         <div><label class="fl">Rego 만료일</label><input class="fi" id="f7" type="date" value="${parseToISO(d.Rego_Date||'')}"></div>
         <div><label class="fl">HVIS 만료일</label><input class="fi" id="f8" type="date" value="${parseToISO(d.HVIS_Date||'')}"></div></div>
       <div class="fr2">
-        <div><label class="fl">Next Service KM (다음 서비스 KM)</label><input class="fi" id="f9" type="number" value="${d.Next_Service_KM||''}" placeholder="예: 601000"></div>
+        <div><label class="fl">다음 서비스 KM</label><input class="fi" id="f9" type="number" value="${d.Next_Service_KM||''}" placeholder="예: 601000"></div>
         <div><label class="fl">현재 최대 KM (자동)</label><input class="fi" type="text" value="${DB.regoMaxKM[d.Rego]?Number(DB.regoMaxKM[d.Rego]).toLocaleString()+' km':'부킹 데이터 없음'}" readonly style="background:var(--s2);color:var(--t2)"></div></div>
       <div class="fr2">
         <div><label class="fl">VIN</label><input class="fi" id="f12" value="${d.VIN||''}"></div>
@@ -8156,70 +8096,70 @@ function openM(type,idx){
     const licNo     = d.License_No||d['License_#']||'';
     const authNo    = d.Authority_No||d['Authority_#']||'';
     h=`<div class="fr2">
-        <div><label class="fl">Name (English)*</label><input class="fi" id="f0" value="${d.Name_EN||''}" placeholder="Hong Gil Dong"></div>
-        <div><label class="fl">Name (한글)</label><input class="fi" id="f1" value="${d.Name_KR||''}"></div></div>
+        <div><label class="fl">영문 이름*</label><input class="fi" id="f0" value="${d.Name_EN||''}" placeholder="Hong Gil Dong"></div>
+        <div><label class="fl">한글 이름</label><input class="fi" id="f1" value="${d.Name_KR||''}"></div></div>
       <div class="fr"><label class="fl">🔑 PIN 번호 (4자리)</label><input class="fi" id="f15" value="${d.PIN||''}" placeholder="예) 1234" maxlength="4" inputmode="numeric" style="font-size:18px;letter-spacing:4px;font-weight:700;"></div>
       <div class="fr"><label class="fl">이메일 (DriverID)*</label><input class="fi" id="f2" value="${d.DriverID||''}"></div>
-      <div class="fr"><label class="fl">Phone (연락처)</label><input class="fi" id="f3" value="${fixPhone(d.Phone||d.Mobile_1)}"></div>
+      <div class="fr"><label class="fl">연락처</label><input class="fi" id="f3" value="${fixPhone(d.Phone||d.Mobile_1)}"></div>
       <div class="fr2">
-        <div><label class="fl">Emergency Contact (비상연락처 이름)</label><input class="fi" id="f4" value="${nokName}" placeholder="홍길동"></div>
-        <div><label class="fl">Emergency Phone (비상연락처 번호)</label><input class="fi" id="f16" value="${nokPhone}" placeholder="0400 000 000" inputmode="tel"></div></div>
+        <div><label class="fl">비상연락처 이름</label><input class="fi" id="f4" value="${nokName}" placeholder="홍길동"></div>
+        <div><label class="fl">비상연락처 번호</label><input class="fi" id="f16" value="${nokPhone}" placeholder="0400 000 000" inputmode="tel"></div></div>
       <div class="fr2">
-        <div><label class="fl">License Class (면허 등급)</label><div class="fsw"><select class="fs" id="f5">
+        <div><label class="fl">면허 등급</label><div class="fsw"><select class="fs" id="f5">
           <option value="HR"${d.License_Class==='HR'?' selected':''}>HR</option>
           <option value="LR"${d.License_Class==='LR'?' selected':''}>LR</option>
           <option value="MR"${d.License_Class==='MR'?' selected':''}>MR</option>
         </select></div></div>
-        <div><label class="fl">License No. (면허 번호)</label><input class="fi" id="f6" value="${licNo}"></div></div>
+        <div><label class="fl">면허 번호</label><input class="fi" id="f6" value="${licNo}"></div></div>
       <div class="fr2">
         <div><label class="fl">면허 만료일</label><input class="fi" id="f7" type="date" value="${parseToISO(d.License_Expiry||'')}"></div>
         <div><label class="fl">Authority 번호</label><input class="fi" id="f8" value="${authNo}"></div></div>
       <div class="fr"><label class="fl">Authority 만료일</label><input class="fi" id="f9" type="date" value="${parseToISO(d.Authority_Expiry||'')}"></div>
       <div class="fr2">
-        <div><label class="fl">Address (주소)</label><input class="fi" id="f10" value="${d.Address||''}"></div>
+        <div><label class="fl">주소</label><input class="fi" id="f10" value="${d.Address||''}"></div>
         <div><label class="fl">Suburb</label><input class="fi" id="f11" value="${d.Suburb||''}"></div></div>
       <div class="fr3">
-        <div><label class="fl">Bank (은행)</label><input class="fi" id="f12" value="${d.Bank_Name||''}"></div>
+        <div><label class="fl">은행</label><input class="fi" id="f12" value="${d.Bank_Name||''}"></div>
         <div><label class="fl">BSB</label><input class="fi" id="f13" value="${d.BSB||''}"></div>
-        <div><label class="fl">Account No. (계좌번호)</label><input class="fi" id="f14" value="${d.Account_Number||''}"></div></div>`;
+        <div><label class="fl">계좌번호</label><input class="fi" id="f14" value="${d.Account_Number||''}"></div></div>`;
   }
   else if(type==='C'){
-    h=`<div class="fr"><label class="fl">Agency Name (여행사명)*</label><input class="fi" id="f0" value="${d.Name||''}" placeholder="Hana Tour Pty Ltd"></div>
+    h=`<div class="fr"><label class="fl">여행사명*</label><input class="fi" id="f0" value="${d.Name||''}" placeholder="Hana Tour Pty Ltd"></div>
       <div class="fr2">
         <div><label class="fl">Client ID</label><input class="fi" id="f1" value="${d.ClientID||''}" placeholder="자동생성"></div>
         <div><label class="fl">ABN</label><input class="fi" id="f1b" value="${d.ABN||''}" placeholder="00 000 000 000"></div>
       </div>
       <div class="fr2">
-        <div><label class="fl">Phone (연락처)</label><input class="fi" id="f2" value="${fixPhone(d.Phone||d.Mobile)}"></div>
+        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${fixPhone(d.Phone||d.Mobile)}"></div>
         <div><label class="fl">이메일 (Invoice용)</label><input class="fi" id="f2b" value="${d.Email||''}" placeholder="billing@agencyname.com.au"></div>
       </div>
-      <div class="fr"><label class="fl">Address (주소)</label><input class="fi" id="f3" value="${d.Address||''}"></div>
+      <div class="fr"><label class="fl">주소</label><input class="fi" id="f3" value="${d.Address||''}"></div>
       <div class="fr3">
-        <div><label class="fl">Bank (은행)</label><input class="fi" id="f4" value="${d.Bank_Name||''}"></div>
+        <div><label class="fl">은행</label><input class="fi" id="f4" value="${d.Bank_Name||''}"></div>
         <div><label class="fl">BSB</label><input class="fi" id="f5" value="${d.BSB||''}"></div>
-        <div><label class="fl">Account No. (계좌번호)</label><input class="fi" id="f6" value="${d.Account_Number||''}"></div></div>`;
+        <div><label class="fl">계좌번호</label><input class="fi" id="f6" value="${d.Account_Number||''}"></div></div>`;
   }
   else if(type==='G'){
     h=`<div class="fr2">
         <div><label class="fl">Guide ID</label><input class="fi" id="f0" value="${d.GuideID||''}"></div>
-        <div><label class="fl">Guide Name (가이드명)*</label><input class="fi" id="f1" value="${d.Guide_Name||''}"></div></div>
+        <div><label class="fl">가이드명*</label><input class="fi" id="f1" value="${d.Guide_Name||''}"></div></div>
       <div class="fr2">
-        <div><label class="fl">Phone (연락처)</label><input class="fi" id="f2" value="${fixPhone(d.Phone||d.Mobile)}"></div>
-        <div><label class="fl">Agency (소속 여행사)</label><input class="fi" id="f3" value="${d.Agency||''}"></div></div>
-      <div class="fr"><label class="fl">Email (이메일)</label><input class="fi" id="f4" value="${d.Email||''}"></div>
+        <div><label class="fl">연락처</label><input class="fi" id="f2" value="${fixPhone(d.Phone||d.Mobile)}"></div>
+        <div><label class="fl">소속 여행사</label><input class="fi" id="f3" value="${d.Agency||''}"></div></div>
+      <div class="fr"><label class="fl">이메일</label><input class="fi" id="f4" value="${d.Email||''}"></div>
       <div class="fr"><label class="fl">Remarks (비고)</label><textarea class="fta" id="f5">${d.Remarks||''}</textarea></div>`;
   }
   else if(type==='AG'){
     const agNames=DB.C.map(c=>c.Name).filter(Boolean);
     h=`<p style="color:var(--t2);font-size:13px;margin-bottom:12px">Client Master에 등록된 여행사를 요금표에 추가합니다.</p>
-      <div class="fr"><label class="fl">Select Agency (여행사 선택)</label>
+      <div class="fr"><label class="fl">여행사 선택</label>
         <div class="fsw"><select class="fs" id="fagname">
           <option value="">-- 선택 --</option>
           ${agNames.map(n=>`<option value="${n}"${DB.PC[n]?' (요금표 있음)':''}>${n}${DB.PC[n]?' ✓':''}</option>`).join('')}
           <option value="__new__">+ 신규 여행사명 직접 입력</option>
         </select></div>
       </div>
-      <div class="fr" id="fnewWrap" style="display:none"><label class="fl">New Agency (새 여행사명)</label><input class="fi" id="fnewname" placeholder="예: Hana Tour Pty Ltd"></div>`;
+      <div class="fr" id="fnewWrap" style="display:none"><label class="fl">새 여행사명</label><input class="fi" id="fnewname" placeholder="예: Hana Tour Pty Ltd"></div>`;
     // show/hide new input
     setTimeout(()=>{
       document.getElementById('fagname')?.addEventListener('change',e=>{
@@ -8231,7 +8171,7 @@ function openM(type,idx){
     const p=d;
     h=`<div class="fr" style="background:var(--acd);border:1px solid var(--ac);border-radius:var(--rr);padding:8px 11px;margin-bottom:12px">
         <span style="font-size:11px;color:var(--ac);font-family:var(--fd);font-weight:700">🏢 여행사: ${ST.curAg||'선택없음'}</span></div>
-      <div class="fr"><label class="fl">Course / Attraction (코스 / 관광지)*</label><input class="fi" id="fa" value="${p.att||''}" placeholder="Blue Mountains"></div>
+      <div class="fr"><label class="fl">코스 / 관광지*</label><input class="fi" id="fa" value="${p.att||''}" placeholder="Blue Mountains"></div>
       <div class="fr"><label class="fl">Max Hours</label><input class="fi" id="fmh" type="number" value="${p.max_hours||''}" placeholder="10"></div>
       <div class="psl">🚌 21인승</div>
       <div class="fr2">
@@ -8254,7 +8194,7 @@ function openM(type,idx){
     const p=d;
     h=`<div class="fr" style="background:var(--acd);border:1px solid var(--ac);border-radius:var(--rr);padding:8px 11px;margin-bottom:12px">
         <span style="font-size:11px;color:var(--ac);font-family:var(--fd);font-weight:700">🤝 서브 회사: \${ST.curSub||'선택없음'}</span></div>
-      <div class="fr"><label class="fl">Course / Attraction (코스 / 관광지)*</label><input class="fi" id="fa" value="\${p.att||''}" placeholder="Blue Mountains"></div>
+      <div class="fr"><label class="fl">코스 / 관광지*</label><input class="fi" id="fa" value="\${p.att||''}" placeholder="Blue Mountains"></div>
       <div class="fr"><label class="fl">Max Hours</label><input class="fi" id="fmh" type="number" value="\${p.max_hours||''}" placeholder="10"></div>
       <div class="psl">🚌 21인승</div>
       <div class="fr2">
@@ -8274,12 +8214,12 @@ function openM(type,idx){
         <div><label class="fl">OT Rate ($/hr)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="o50" type="number" value="\${p['50']?.ot||''}"></div></div></div>`;
   }
   else if(type==='SG_SUB'){
-    h=`<div class="fr"><label class="fl">Sub Company (서브 회사명)*</label><input class="fi" id="fsubname" placeholder="예: ABC Bus Pty Ltd" value=""></div>
+    h=`<div class="fr"><label class="fl">서브 회사명*</label><input class="fi" id="fsubname" placeholder="예: ABC Bus Pty Ltd" value=""></div>
       <p style="color:var(--t3);font-size:12px;margin-top:4px">회사 추가 후 코스별 요금을 입력하세요.</p>`;
   }
   else if(type==='PD'){
     const p=d;
-    h=`<div class="fr"><label class="fl">Course / Attraction (코스 / 관광지)*</label><input class="fi" id="fa" value="${p.att||''}" placeholder="Blue Mountains"></div>
+    h=`<div class="fr"><label class="fl">코스 / 관광지*</label><input class="fi" id="fa" value="${p.att||''}" placeholder="Blue Mountains"></div>
       <div class="fr"><label class="fl">Max Hours</label><input class="fi" id="fmh" type="number" value="${p.max_hours||''}" placeholder="10"></div>
       <div class="psl">👤 21인승</div>
       <div class="fr2">
@@ -8299,9 +8239,9 @@ function openM(type,idx){
         <div><label class="fl">OT Rate ($/hr)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="o50" type="number" value="${p['50']?.ot||''}"></div></div></div>`;
   }
   else if(type==='H'){
-    h=`<div class="fr"><label class="fl">Hotel Name (호텔명)*</label><input class="fi" id="f0" value="${d.Hotel_Name||''}"></div>
+    h=`<div class="fr"><label class="fl">호텔명*</label><input class="fi" id="f0" value="${d.Hotel_Name||''}"></div>
       <div class="fr"><label class="fl">전화번호</label><input class="fi" id="f1" value="${fixPhone(d.Phone)}"></div>
-      <div class="fr"><label class="fl">Address (주소)</label><textarea class="fta" id="f2" style="min-height:55px">${d.Address||''}</textarea></div>
+      <div class="fr"><label class="fl">주소</label><textarea class="fta" id="f2" style="min-height:55px">${d.Address||''}</textarea></div>
       <div class="fr"><label class="fl">Surcharge Area</label><div class="fsw"><select class="fs" id="f3">
         <option value="">해당없음</option>
         <option value="YES"${d.Surcharge_Area==='YES'?' selected':''}>YES — 서차지 적용</option>
@@ -8930,36 +8870,6 @@ async function loadAllFromSheets(){
       });
     }
 
-    // ★ HVIS_Bookings → DB.HB (Google Sheets 기반)
-    if(d.HVIS_Bookings?.length){
-      DB.HB = d.HVIS_Bookings.map(r=>({
-        id: r.ID || String(r._rowIndex),
-        _rowIndex: r._rowIndex,
-        rego: r.Rego||'',
-        inspDate: r.InspDate||'',
-        inspTime: r.InspTime||'',
-        location: r.Location||'',
-        bookingNo: r.BookingNo||'',
-        vehicleType: r.VehicleType||'',
-        ownerName: r.OwnerName||'',
-        bookingDate: r.BookingDate||'',
-        status: r.Status||'Active'
-      }));
-      safeSetLocal('hvis_bookings', DB.HB);
-      console.log('[HVIS] Loaded from Sheets:', DB.HB.length, 'bookings');
-    } else {
-      // Sheets에 데이터 없을 경우 localStorage 캐시 확인 후 마이그레이션
-      const cached = safeGetLocal('hvis_bookings', []);
-      if(cached.length > 0){
-        console.log('[HVIS] Migrating', cached.length, 'bookings from cache to Sheets...');
-        DB.HB = cached;
-        // 비동기로 Sheets에 마이그레이션
-        cached.forEach(entry => addHvisBookingToSheets(entry));
-      } else {
-        DB.HB = [];
-      }
-    }
-
     // 추가 데이터 로드 (실패해도 무시)
     await Promise.allSettled([
       loadSubRatesFromSheet(),
@@ -9019,14 +8929,14 @@ async function loadAllFromSheets(){
     if(window._loadRetryCount < 2){
       window._loadRetryCount++;
       const _syncEl = document.getElementById('sync-status');
-      if(_syncEl) _syncEl.textContent = '🔄 재시도 중... (' + window._loadRetryCount + '/2)';
+      if(_syncEl) _syncEl.textContent = '🔄 Retrying... (재시도 중) (' + window._loadRetryCount + '/2)';
       toast('⏳ 서버 응답 지연 — 자동 재시도 중...','ok');
       setTimeout(()=>loadAllFromSheets(), 2000);
       return;
     }
     const _syncEl = document.getElementById('sync-status');
-    if(_syncEl) _syncEl.textContent = '❌ 연결 실패 — 새로고침 또는 재시도하세요';
-    const errMsg = e.name === 'AbortError' ? '⚠️ 서버 응답 시간 초과 — 새로고침하세요' : '⚠️ 오프라인 모드 (Sheets 연결 실패)';
+    if(_syncEl) _syncEl.textContent = '❌ Connection Failed (연결 실패) — Refresh or Retry (새로고침 또는 재시도)';
+    const errMsg = e.name === 'AbortError' ? '⚠️ Server Timeout (서버 응답 시간 초과) — Please Refresh (새로고침하세요)' : '⚠️ Offline Mode (오프라인 모드 — Sheets 연결 실패)';
     toast(errMsg,'er');
   }
 }
@@ -9173,7 +9083,7 @@ async function loadShiftReports(force=false) {
     }
   } catch(e) {
     toast('운행일지 로드 실패: '+e.message, 'er');
-    if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--rd);font-size:13px;">❌ 로드 실패<br><span style="font-size:11px;color:var(--t3);">'+escH(e.message)+'</span><br><button class="btn bac sm" style="margin-top:10px;" onclick="loadShiftReports(true)">🔄 Retry (다시 시도)</button></div>';
+    if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--rd);font-size:13px;">❌ Load Failed (로드 실패)<br><span style="font-size:11px;color:var(--t3);">'+escH(e.message)+'</span><br><button class="btn-refresh" style="margin:10px auto 0;" onclick="withRefreshSpin(this,()=>loadShiftReports(true))"><span class="refresh-icon">🔄</span> Retry (다시 시도)</button></div>';
     return;
   }
 
@@ -9222,7 +9132,7 @@ function _finishShiftLoad() {
   // 데이터가 전혀 없으면 안내
   const listEl = document.getElementById('shift-list');
   if (!allRows.length && listEl) {
-    listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">📋 기록이 없습니다 — 네트워크를 확인하고 🔄 새로고침을 눌러주세요</div>';
+    listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">📋 No Records (기록이 없습니다) — Check network and press <span class="refresh-icon">🔄</span> Refresh (네트워크 확인 후 새로고침)</div>';
   }
 }
 

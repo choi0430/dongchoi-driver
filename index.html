@@ -310,9 +310,13 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 .csel-item:last-child{border-bottom:none;}
 .csel-item:hover,.csel-item.selected{background:var(--accent-light);color:var(--accent);}
 
-/* ── Unified refresh/sync button style ── */
-.btn-refresh{display:inline-flex;align-items:center;gap:4px;background:var(--surface,#f8fafc);color:var(--muted,#6b7280);border:1px solid var(--border,#e4e8ef);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.15s;}
-.btn-refresh:active{opacity:0.8;transform:scale(0.97);}
+/* ── Unified Refresh/Sync Button ── */
+.btn-refresh{display:inline-flex;align-items:center;gap:4px;background:var(--surface,#f8fafc);color:var(--muted,#6b7280);border:1px solid var(--border,#e4e8ef);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;}
+.btn-refresh:active{opacity:.8;transform:scale(.97);}
+.btn-refresh.refreshing{pointer-events:none;opacity:.65;}
+.btn-refresh .refresh-icon{display:inline-block;transition:transform .3s;}
+.btn-refresh.refreshing .refresh-icon{animation:spin-refresh .8s linear infinite;}
+@keyframes spin-refresh{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -409,9 +413,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
     <div style="display:flex;align-items:center;gap:6px;">
       <span id="sync-badge-top" style="font-size:11px;color:var(--muted);">—</span>
     </div>
-    <button onclick="forceReloadDriver()" style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;color:#374151;cursor:pointer;display:flex;align-items:center;gap:4px;">
-      🔄 전체 새로고침
-    </button>
+    <button id="btn-refresh-all" class="btn-refresh" onclick="forceReloadDriver()"><span class="refresh-icon">🔄</span> Refresh All (전체 새로고침)</button>
   </div>
 
   <!-- NOTICE BANNER (dynamic - rendered by renderHomeBanner()) -->
@@ -443,7 +445,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
       <div style="font-weight:700;font-size:14px;">📁 Past Shifts (지난 운행 일지)</div>
       <span id="past-reports-count" style="font-size:11px;font-weight:600;color:#6b7280;"></span>
     </div>
-    <button onclick="event.stopPropagation();loadMyPastShifts(true)" class="btn-refresh">🔄 Refresh (새로고침)</button>
+    <button onclick="event.stopPropagation();withRefreshSpin(this,()=>loadMyPastShifts(true))" class="btn-refresh"><span class="refresh-icon">🔄</span> Refresh (새로고침)</button>
   </div>
   <div id="past-reports-body" style="display:none;">
     <div id="past-reports-week-nav" style="display:none;padding:6px 12px 0;">
@@ -483,7 +485,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
     </div>
     <div style="display:flex;align-items:center;gap:6px;">
       <span class="pill pill-green" id="salary-balance">Unpaid (미지급) $0</span>
-      <button onclick="event.stopPropagation();runSync(false)" class="btn-refresh">🔄</button>
+      <button onclick="event.stopPropagation();withRefreshSpin(this,()=>runSync(false))" class="btn-refresh"><span class="refresh-icon">🔄</span> Sync (동기화)</button>
     </div>
   </div>
   <div id="salary-body">
@@ -508,7 +510,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
       <div class="card-head"><span class="card-title">🔑 Pre Departure (출발 전)</span><span class="pill pill-blue">Pre-departure (출발 전)</span></div>
       <div class="card-body">
         <div class="form-row mb14">
-          <div class="form-group"><label class="form-label">Date (날짜)<span class="req">*</span></label>
+          <div class="form-group"><label class="form-label">날짜<span class="req">*</span></label>
             <div style="display:flex;gap:6px;align-items:center;position:relative;">
               <input type="text" class="form-input" id="pre-date" placeholder="dd/mm/yyyy" style="flex:1;">
               <button type="button" onclick="openDatePicker('pre-date')" title="날짜 선택" style="padding:0 11px;height:44px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:17px;cursor:pointer;flex-shrink:0;">📅</button>
@@ -608,7 +610,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
         </div>
         <div class="form-row mb14">
           <div class="form-group">
-            <label class="form-label">Requested Seats (요청 인승)</label>
+            <label class="form-label">Requested Seats (요청 인승) <span style="font-size:10px;color:var(--muted);">Requested Seats (요청 인승, 요금 기준)</span></label>
             <select class="form-select" id="dr-seats" onchange="updateSurchargeOptions();updateSvcHint();updateOTHint();updateHotelHint();updateDistHint();">
               <option value="">선택</option>
               <option value="21S">21 Seats (21인승)</option>
@@ -666,7 +668,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 
         <div class="form-row mb14">
           <div class="form-group">
-            <label class="form-label">Start KM (시작 KM)</label>
+            <label class="form-label">시작 KM</label>
             <input type="number" class="num-input" id="dr-km-start" placeholder="0" style="border-radius:10px;padding:12px 14px;">
           </div>
           <div class="form-group">
@@ -674,7 +676,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
             <input type="number" class="num-input" id="dr-km-end" placeholder="0" style="border-radius:10px;padding:12px 14px;">
           </div>
           <div class="form-group">
-            <label class="form-label">Start Time (시작 시간)</label>
+            <label class="form-label">시작 시간</label>
             <input type="time" class="form-input" id="dr-start" onchange="_lastOTToastKey='';calcOT();updateEarlyHint();" oninput="_lastOTToastKey='';calcOT();updateEarlyHint();">
           </div>
           <div class="form-group">
@@ -710,7 +712,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
             <div id="ot-hint-box" style="margin-top:6px;"></div>
           </div>
           <div class="form-group" id="trailer-group" style="display:none;">
-            <label class="form-label">Trailer (트레일러)</label>
+            <label class="form-label">트레일러</label>
             <div style="display:flex;gap:6px;margin-bottom:4px;">
               <button type="button" id="trailer-btn-0" onclick="selectTrailer(0)"
                 style="flex:1;padding:8px 0;border-radius:8px;border:1.5px solid var(--accent);background:var(--accent);color:white;font-size:13px;font-weight:700;cursor:pointer;font-family:sans-serif;">
@@ -766,7 +768,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
         <!-- Early/Late 서차지 알림 — 버튼 아래 -->
         <div id="early-hint-box" style="margin-bottom:12px;"></div>
         <div class="form-group mb14">
-          <label class="form-label">Night Tour (야간투어)</label>
+          <label class="form-label">야간투어</label>
           <div class="csel-wrap">
             <button type="button" class="csel-btn" data-csel="f-night-type" data-value="none"
               style="margin-bottom:6px;" onclick="cselOpen('f-night-type')">없음 ($0)</button>
@@ -782,11 +784,11 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:8px;">⚠️ 톨비 · 연료비 — ETAG/주유카드 사용이 기본입니다. 개인 결제 시에만 금액을 입력하고 체크하세요.</div>
           <div class="form-row" style="margin-bottom:8px;">
             <div class="form-group">
-              <label class="form-label">Toll (톨비)</label>
+              <label class="form-label">톨비</label>
               <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-toll" placeholder="0" oninput="calcTotal()"></div>
             </div>
             <div class="form-group">
-              <label class="form-label">Fuel (연료비)</label>
+              <label class="form-label">연료비</label>
               <div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-fuel" placeholder="0" oninput="calcTotal()"></div>
             </div>
           </div>
@@ -828,7 +830,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           </div>
           <div class="form-group"><label class="form-label">Other (기타)</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-etc" placeholder="0" oninput="calcTotal()"></div></div>
         </div>
-        <div class="form-group mb14"><label class="form-label">Toll Route (톨 경로)</label><textarea class="form-textarea" id="f-toll-detail" placeholder="M2, M7..." style="min-height:56px;"></textarea></div>
+        <div class="form-group mb14"><label class="form-label">톨 경로</label><textarea class="form-textarea" id="f-toll-detail" placeholder="M2, M7..." style="min-height:56px;"></textarea></div>
 
         <div class="total-box">
           <div style="display:none;"><span id="t-ta">$0</span></div>
@@ -908,7 +910,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           <textarea class="form-textarea" id="end-damage" placeholder="Describe any damage or incidents... 손상 부위 상세 기록..."></textarea>
         </div>
         <div class="form-group">
-          <label class="form-label">Remarks (비고)</label>
+          <label class="form-label">비고 / Remarks</label>
           <textarea class="form-textarea" id="eos-remarks" placeholder="기타 사항..."></textarea>
         </div>
 
@@ -1008,7 +1010,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
             </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Category (카테고리)</label>
+          <label class="form-label">카테고리</label>
           <select class="form-select" id="def-cat">
             <option value="">선택</option>
             <option>Engine (엔진)</option><option>Brakes (브레이크)</option><option>Tyres (타이어)</option>
@@ -1019,16 +1021,16 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
         </div>
       </div>
       <div class="form-group mb14">
-        <label class="form-label">Defect Location (결함 위치)</label>
+        <label class="form-label">결함 위치</label>
         <input type="text" class="form-input" id="def-location" placeholder="예: 운전석 앞 타이어, 실내 뒷줄 천장">
       </div>
       <div class="form-group mb14">
-        <label class="form-label">Defect Description (결함 내용) <span class="req">*</span></label>
+        <label class="form-label">결함 내용 <span class="req">*</span></label>
         <textarea class="form-input" id="def-desc" rows="4" placeholder="결함 증상을 자세히 설명해주세요..." style="resize:vertical;min-height:80px;"></textarea>
       </div>
       <div class="form-row mb14">
         <div class="form-group">
-          <label class="form-label">Severity (심각도)</label>
+          <label class="form-label">심각도</label>
           <select class="form-select" id="def-severity">
             <option value="low">낮음 — 운행 가능</option>
             <option value="medium">중간 — 주의 필요</option>
@@ -1036,7 +1038,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Current KM (현재 KM)</label>
+          <label class="form-label">현재 KM</label>
           <div class="num-row"><input type="number" class="num-input" id="def-km" placeholder="0" style="border-radius:10px;padding:12px 14px;"></div>
         </div>
       </div>
@@ -1082,13 +1084,13 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           <input type="date" class="form-input" id="mot-date">
         </div>
         <div class="form-group">
-          <label class="form-label">Time (시간)</label>
+          <label class="form-label">시간</label>
           <input type="time" class="form-input" id="mot-time">
         </div>
       </div>
       <div class="form-row mb14">
         <div class="form-group">
-          <label class="form-label">Driver (드라이버)</label>
+          <label class="form-label">드라이버</label>
           <input type="text" class="form-input" id="mot-driver" readonly style="background:#f1f5f9;color:var(--muted);">
         </div>
         <div class="form-group">
@@ -1097,15 +1099,15 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
         </div>
       </div>
       <div class="form-group mb14">
-        <label class="form-label">Location (검사 장소)</label>
+        <label class="form-label">검사 장소 (Location)</label>
         <input type="text" class="form-input" id="mot-location" placeholder="예: Parramatta Rd, Auburn — 노상 정차">
       </div>
       <div class="form-group mb14">
-        <label class="form-label">Officer Badge No. (검사관 배지 번호)</label>
+        <label class="form-label">검사관 배지 번호 (Officer Badge No.)</label>
         <input type="text" class="form-input" id="mot-officer" placeholder="예: T4NSW-2847">
       </div>
       <div class="form-group mb14">
-        <label class="form-label">Inspection Type (검사 유형)</label>
+        <label class="form-label">검사 유형</label>
         <select class="form-select" id="mot-type">
           <option value="">Select (선택하세요)</option>
           <option value="roadside_vehicle">🚌 차량 노상 검사 (Roadside Vehicle Check)</option>
@@ -1145,7 +1147,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
       <!-- 결과 -->
       <div style="font-size:10px;font-weight:800;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin:18px 0 10px;">📋 검사 결과</div>
       <div class="form-group mb14">
-        <label class="form-label">Inspection Result (검사 결과)</label>
+        <label class="form-label">검사 결과</label>
         <select class="form-select" id="mot-result" onchange="motUpdateResult()">
           <option value="">Select (선택하세요)</option>
           <option value="pass">✅ No Issues Found (이상 없음)</option>
@@ -1156,19 +1158,19 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
         </select>
       </div>
       <div class="form-group mb14" id="mot-notice-row" style="display:none;">
-        <label class="form-label">Notice / Infringement No. (통지서 번호)</label>
+        <label class="form-label">통지서 번호 (Notice / Infringement No.)</label>
         <input type="text" class="form-input" id="mot-notice-num" placeholder="예: INF-2024-0012847">
       </div>
       <div class="form-group mb14" id="mot-fine-row" style="display:none;">
-        <label class="form-label">Fine Amount (벌금 금액) ($)</label>
+        <label class="form-label">벌금 금액 ($)</label>
         <input type="number" class="form-input" id="mot-fine" placeholder="0">
       </div>
       <div class="form-group mb14">
-        <label class="form-label">Notes / Memo (기타 사항 / 메모)</label>
+        <label class="form-label">기타 사항 / 메모</label>
         <textarea class="form-input" id="mot-notes" rows="3" placeholder="검사 중 특이사항, 검사관 코멘트 등을 기록하세요..." style="resize:vertical;min-height:70px;"></textarea>
       </div>
       <div class="form-group mb14">
-        <label class="form-label">Photo Attachment (사진 첨부)</label>
+        <label class="form-label">사진 첨부 (선택)</label>
         <label style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1.5px dashed var(--border);border-radius:10px;padding:12px 14px;cursor:pointer;">
           <span style="font-size:22px;">📷</span>
           <span style="font-size:13px;color:var(--muted);">통지서·서류 사진 첨부 (선택)</span>
@@ -1197,7 +1199,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
     <div><div class="sec-title">💰 급여</div></div>
     <div style="display:flex;align-items:center;gap:6px;">
       <span class="pill pill-green" id="pay-unpaid-badge">집계 중...</span>
-      <button onclick="renderPay()" class="btn-refresh">🔄</button>
+      <button onclick="withRefreshSpin(this,()=>renderPay())" class="btn-refresh"><span class="refresh-icon">🔄</span> Refresh (새로고침)</button>
     </div>
   </div>
   <!-- 주별 목록 뷰 -->
@@ -1330,7 +1332,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
             <input class="form-input" id="mi-lic-no" placeholder="16064447">
           </div>
           <div>
-            <div class="form-label">License Expiry (면허 만료일)</div>
+            <div class="form-label">면허 만료일</div>
             <input class="form-input" id="mi-lic-exp" placeholder="4-Jun-2026">
           </div>
         </div>
@@ -1887,8 +1889,8 @@ function applyMasterData(data) {
 function showMasterRetryBtn() {
   const msg = document.getElementById('master-load-msg');
   if (!msg) return;
-  msg.innerHTML = '⚠️ 네트워크 오류 — <button onclick="retryMasterLoad()" '+
-    'style="background:#3b82f6;color:#fff;border:none;padding:4px 12px;border-radius:8px;font-size:12px;cursor:pointer;margin-left:6px;">🔄 Retry (재시도)</button>';
+  msg.innerHTML = '⚠️ Network Error (네트워크 오류) — <button onclick="retryMasterLoad()" '+
+    'class="btn-refresh" style="margin-left:6px;"><span class="refresh-icon">🔄</span> Retry (재시도)</button>';
 }
 
 window.retryMasterLoad = function() {
@@ -3012,7 +3014,7 @@ function requestCorrection() {
   const driver = currentDriver?.name || '';
   const shift = JSON.parse(localStorage.getItem('currentShift') || '{}');
   const rego = shift.rego || '';
-  const date = fmtDate(shift.date) || fmtDate(new Date().toISOString());
+  const date = shift.date || new Date().toLocaleDateString('ko-KR');
   const msg = encodeURIComponent(`[수정 요청]\n드라이버: ${driver}\n차량: ${rego}\n날짜: ${date}\n\n수정 내용을 입력해 주세요.`);
   document.getElementById('logout-menu').style.display = 'none';
   window.open('https://open.kakao.com/o/gwqO8ili', '_blank');
@@ -6736,7 +6738,7 @@ function renderNotices(){
   el.innerHTML=notices.map(n=>`
     <div class="notice-item ${n.type}">
       <div class="notice-badge badge-${n.type==='urgent'?'urgent':n.type==='info'?'info':'general'}">${n.type==='urgent'?'Urgent (긴급)':n.type==='info'?'Info (안내)':'Notice (공지)'}</div>
-      <div class="notice-date">${fmtDate(n.date)||''}</div>
+      <div class="notice-date">${fmtDate(n.date)||n.date||''}</div>
       <div class="notice-title">${n.title||''}</div>
       <div class="notice-body">${n.body||''}</div>
     </div>`).join('');
@@ -7484,7 +7486,7 @@ function showPayDetail(wk){
     const dayDr = reports.reduce((s,r)=>s+(r.dr||0),0);
     const dayOwner = reports.reduce((s,r)=>s+(r.nightOwner||0),0);
     html+=`<div style="padding:0 16px 6px;display:flex;justify-content:space-between;align-items:baseline;">
-      <div style="font-size:12px;font-weight:700;color:var(--muted);">${fmtDate(date)}</div>
+      <div style="font-size:12px;font-weight:700;color:var(--muted);">${date}</div>
       <div style="font-size:13px;font-weight:700;color:var(--accent);">$${dayDr.toLocaleString()}</div>
     </div>`;
     reports.forEach(r=>{
@@ -7721,8 +7723,18 @@ function setSyncBadge(state){ // 'syncing' | 'ok' | 'error'
   });
 }
 
+// ── Unified refresh spin helper ──
+async function withRefreshSpin(btn, fn){
+  if(!btn) return fn();
+  btn.classList.add('refreshing');
+  try { await fn(); }
+  finally { btn.classList.remove('refreshing'); }
+}
+
 // 전체 강제 새로고침 (마스터+리포트+급여 모두 재로드)
 async function forceReloadDriver(){
+  const btn = document.getElementById('btn-refresh-all');
+  if(btn) btn.classList.add('refreshing');
   setSyncBadge('syncing');
   try {
     // 캐시 모두 무효화
@@ -7737,7 +7749,9 @@ async function forceReloadDriver(){
     if(typeof showToast==='function') showToast('✅ Refresh Complete (전체 새로고침 완료)', 'success');
   } catch(e) {
     setSyncBadge('error');
-    if(typeof showToast==='function') showToast('⚠️ 새로고침 실패: ' + e.message, 'error');
+    if(typeof showToast==='function') showToast('⚠️ Refresh Failed (새로고침 실패): ' + e.message, 'error');
+  } finally {
+    if(btn) btn.classList.remove('refreshing');
   }
 }
 
@@ -8281,7 +8295,7 @@ function busRenderList(prefix) {
           ${needsDetail?`<span style="font-size:10px;color:#ef4444;">⚠ 상세 미입력</span>`:''}
         </div>
         ${m.note?`<div style="font-size:11px;color:#64748b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.note}</div>`:''}
-        ${m.date?`<div style="font-size:10px;color:#94a3b8;margin-top:1px;">${fmtDate(m.date)}${m.driver?' · '+m.driver:''}</div>`:''}
+        ${m.date?`<div style="font-size:10px;color:#94a3b8;margin-top:1px;">${m.date}${m.driver?' · '+m.driver:''}</div>`:''}
       </div>
       <span onclick="busEditMarker('${prefix}',${i})" style="padding:4px 6px;color:#3b82f6;font-size:15px;cursor:pointer;flex-shrink:0;">✎</span>
       <span class="dmk-del" onclick="busDeleteMarker('${prefix}',${i})" style="flex-shrink:0;">✕</span>
