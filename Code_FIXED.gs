@@ -1583,12 +1583,12 @@ function deleteInvoice(invNumber) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// INVOICE EMAIL (GAS MailApp)
+// INVOICE EMAIL (GmailApp — PDF 첨부)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * 인보이스 이메일 발송
- * payload: { to, subject, body, cc, _user }
+ * 인보이스 이메일 발송 (PDF 첨부)
+ * payload: { to, subject, body, cc, docHtml, pdfName, senderName, replyTo, _user }
  */
 function sendInvoiceEmail(payload) {
   try {
@@ -1597,23 +1597,31 @@ function sendInvoiceEmail(payload) {
     const body    = (payload.body || '').trim();
     const cc      = (payload.cc || '').trim();
     const name    = payload.senderName || 'Dong Choi Pty Ltd';
+    const replyTo = (payload.replyTo || '').trim();
+    const docHtml = payload.docHtml || '';
+    const pdfName = payload.pdfName || 'Invoice.pdf';
 
     if (!to)      return { ok: false, error: '수신자 이메일이 없습니다 (to is empty)' };
     if (!subject) return { ok: false, error: '제목이 없습니다 (subject is empty)' };
 
-    const mailOptions = {
-      to:      to,
-      subject: subject,
-      body:    body,
-      name:    name
+    const options = {
+      name: name
     };
-    if (cc) mailOptions.cc = cc;
+    if (cc) options.cc = cc;
+    if (replyTo) options.replyTo = replyTo;
 
-    MailApp.sendEmail(mailOptions);
+    // PDF 첨부: docHtml이 있으면 HTML→PDF 변환 후 첨부
+    if (docHtml) {
+      const htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
+      const pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
+      options.attachments = [pdfBlob];
+    }
+
+    GmailApp.sendEmail(to, subject, body, options);
 
     // 감사 로그
     appendAuditLog(payload._user, 'send_invoice_email', '—', '—',
-      `인보이스 이메일 발송 → ${to} | ${subject}`);
+      `인보이스 이메일 발송 (PDF 첨부) → ${to} | ${subject}`);
 
     return { ok: true, to: to };
   } catch (err) {
