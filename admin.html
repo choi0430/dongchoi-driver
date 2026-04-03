@@ -1697,6 +1697,8 @@ function calcDaysRemaining(dateStr){
   return Math.floor((target-now)/86400000);
 }
 function du(ds){const d=calcDaysRemaining(ds);return d===null?9999:d;}
+/** HVIS 대상 차량 여부 — 12인승 이상만 HVIS 해당 */
+function isHvisVehicle(v){return (parseInt(v.Capacity)||0) >= 12;}
 function etag(ds,lbl){
   if(!ds)return`<span class="tag ty">${lbl}: —</span>`;
   const d=du(ds),c=d<0?'tr':d<30?'tr':d<90?'ty':'tg';
@@ -1761,10 +1763,11 @@ function rDash(){
   DB.V.forEach(v=>{
     const rd=du(v.Rego_Date),hd=du(v.HVIS_Date);
     // ★ 데이터 미등록 차량 경고
-    if(!v.Rego_Date&&!v.HVIS_Date){
+    const _isHvis=isHvisVehicle(v);
+    if(!v.Rego_Date&&(!v.HVIS_Date||!_isHvis)){
       als.push({sort:9990,type:'missing',
         bg:'#f0f9ff',bc:'#38bdf8',fc:'#0284c7',icon:'⚠️',
-        m:`${v.Rego} — Not Registered (Rego/HVIS 미등록)`});
+        m:`${v.Rego} — Not Registered (Rego 미등록)${_isHvis?' — HVIS 날짜 정보를 입력해주세요':''}`});
     }
     if(v.Rego_Date&&rd<90){
       const urgent=rd<0,warn=rd<30;
@@ -1775,8 +1778,8 @@ function rDash(){
         icon:'🚗',
         m:`${v.Rego} — Rego (차량등록) ${fmtDays(rd)}`});
     }
-    // ★ HVIS — 부킹 상태 반영
-    if(v.HVIS_Date&&hd<90){
+    // ★ HVIS — 부킹 상태 반영 (12인승 이상만)
+    if(_isHvis&&v.HVIS_Date&&hd<90){
       const urgent=hd<0,warn=hd<30;
       const booking=findHvisBooking(v.Rego);
       if(booking){
@@ -1868,6 +1871,7 @@ function renderHvis(){
   var alertHtml='',listHtml='';
   DB.V.forEach(function(v){
     if(!v.Rego)return;
+    if(!isHvisVehicle(v))return; // 12인승 미만은 HVIS 해당 없음
     var sch=getHvisSchedule(v.Rego_Date);
     var regoDays=vDaysDiff(v.Rego_Date);
     var hvisDays=vDaysDiff(v.HVIS_Date);
@@ -2193,7 +2197,8 @@ async function rV(q=''){
       <div class="mav" style="color:var(--ac);font-size:10px">${v.Rego}</div>
       <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}</div>
         <div class="msb">${(v.Manufacture_Date||v['Manufacture Date'])?((v.Manufacture_Date||v['Manufacture Date'])+'년 · '):''}${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
-        <div class="mtg">${etag(v.Rego_Date,'Rego')}${etag(v.HVIS_Date,'HVIS')}${(()=>{
+        <div class="mtg">${etag(v.Rego_Date,'Rego')}${isHvisVehicle(v)?etag(v.HVIS_Date,'HVIS'):''}${(()=>{
+          if(!isHvisVehicle(v)) return '';
           const _hbk=getHvisBookings().filter(b=>b.rego===v.Rego).sort((a,b)=>(b.inspDate||'').localeCompare(a.inspDate||''));
           if(_hbk.length>0){const _b=_hbk[0];return '<span class="tag tg" title="'+fmtDate(_b.inspDate)+' '+parseSheetTime(_b.inspTime)+' @ '+(_b.location||'')+'">✅ HVIS Booked</span>';}
           const _hd=du(v.HVIS_Date);if(v.HVIS_Date&&_hd<90) return '<span class="tag tr">⚠️ No Booking</span>';
@@ -8013,7 +8018,9 @@ function openView(type, idx) {
     html += row2A([['연도', yr], ['좌석수', d.Capacity ? d.Capacity+'인승' : '']]);
     html += row2A([['변속기', d.Transmission||'Auto'], ['소유자', d.Owner]]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">📅 만료일</div>`;
-    html += row2A([['Rego 만료일', fmtDate(d.Rego_Date||'')], ['HVIS 만료일', fmtDate(d.HVIS_Date||'')]]);
+    html += isHvisVehicle(d)
+      ? row2A([['Rego 만료일', fmtDate(d.Rego_Date||'')], ['HVIS 만료일', fmtDate(d.HVIS_Date||'')]])
+      : row2A([['Rego 만료일', fmtDate(d.Rego_Date||'')], ['', '']]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔧 정비</div>`;
     var _curMax = DB.regoMaxKM[d.Rego]||0;
     var _nxtSvc = Number(d.Next_Service_KM)||0;
