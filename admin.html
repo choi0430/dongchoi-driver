@@ -1717,8 +1717,8 @@ function rDash(){
   document.getElementById('qg').textContent=DB.G.length+'명';
   document.getElementById('qh').textContent=DB.H.length+'개';
   const als=[];
-  // ★ HVIS 부킹 데이터 로드
-  const hvisBookings=getHvisBookings();
+  // ★ HVIS 부킹 데이터 로드 (백업 자동 복구 포함)
+  const hvisBookings=recoverHvisBookings();
   function findHvisBooking(rego){
     if(!hvisBookings||!hvisBookings.length)return null;
     const matched=hvisBookings.filter(b=>b.rego===rego).sort((a,b)=>(b.bookingDate||'').localeCompare(a.bookingDate||''));
@@ -1815,7 +1815,24 @@ function rDash(){
 
 // ===== VEHICLE MANAGEMENT =====
 function getHvisBookings(){try{return safeGetLocal('hvis_bookings', []);}catch(e){return[];}}
-function saveHvisBookings(d){safeSetLocal('hvis_bookings', d);}
+function saveHvisBookings(d){
+  safeSetLocal('hvis_bookings', d);
+  // ★ 백업: 부킹 데이터 손실 방지용 이중 저장
+  try{safeSetLocal('hvis_bookings_backup', d);}catch(e){}
+}
+// ★ localStorage 부킹 데이터 복구 함수
+function recoverHvisBookings(){
+  var current=getHvisBookings();
+  if(current&&current.length>0){console.log('[HVIS] Current bookings:',current.length);return current;}
+  var backup=safeGetLocal('hvis_bookings_backup',[]);
+  if(backup&&backup.length>0){
+    console.warn('[HVIS] Recovering from backup:',backup.length,'bookings');
+    safeSetLocal('hvis_bookings',JSON.parse(JSON.stringify(backup)));
+    return backup;
+  }
+  console.warn('[HVIS] No booking data found in localStorage or backup');
+  return [];
+}
 function getMaintRecords(){try{return safeGetLocal('maint_records', []);}catch(e){return[];}}
 function saveMaintRecords(d){safeSetLocal('maint_records', d);}
 function getDefectReports(){try{return safeGetLocal('defect_reports', []);}catch(e){return[];}}
@@ -1857,7 +1874,7 @@ function renderHvis(){
   var box=document.getElementById('hvis-alert-box');
   var list=document.getElementById('hvis-list');
   if(!box||!list)return;
-  var bookings=getHvisBookings();
+  var bookings=recoverHvisBookings();
   var alertHtml='',listHtml='';
   DB.V.forEach(function(v){
     if(!v.Rego)return;
