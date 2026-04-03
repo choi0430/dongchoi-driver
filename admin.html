@@ -1417,6 +1417,7 @@ const DB = {
   PD: {},
   PS: {},
   regoMaxKM: {},  // { rego: maxKM } — highest KM from Pre_Departure/Daily_Report/End_of_Shift
+  HB: [],         // HVIS Bookings — Google Sheets 기반
 };
 
 // ★ NIGHT_RATES: 드라이버 앱과 동일 (M_NightRates 시트에서 오버라이드)
@@ -1718,7 +1719,7 @@ function rDash(){
   document.getElementById('qh').textContent=DB.H.length+'개';
   const als=[];
   // ★ HVIS 부킹 데이터 로드 (백업 자동 복구 포함)
-  const hvisBookings=recoverHvisBookings();
+  const hvisBookings=getHvisBookings();
   function findHvisBooking(rego){
     if(!hvisBookings||!hvisBookings.length)return null;
     const matched=hvisBookings.filter(b=>b.rego===rego).sort((a,b)=>(b.bookingDate||'').localeCompare(a.bookingDate||''));
@@ -1751,13 +1752,14 @@ function rDash(){
     }
   });
   // ── 차량 Rego / HVIS / 서비스 KM ──
+  function isEmpty(v){return !v||String(v).trim()===''||String(v).trim()==='-';}
   DB.V.forEach(v=>{
     const rd=du(v.Rego_Date),hd=du(v.HVIS_Date);
-    // ★ 데이터 미등록 차량 경고
-    if(!v.Rego_Date&&!v.HVIS_Date){
+    // ★ 데이터 미등록 차량 경고 (XO37PS 등 빈 데이터 차량 포함)
+    if(isEmpty(v.Rego_Date)&&isEmpty(v.HVIS_Date)){
       als.push({sort:9990,type:'missing',
         bg:'#f0f9ff',bc:'#38bdf8',fc:'#0284c7',icon:'⚠️',
-        m:`${v.Rego} — Not Registered (Rego/HVIS 미등록)`});
+        m:`${v.Rego} — Not Registered (Rego/HVIS 미등록) — 날짜 정보를 입력해주세요`});
     }
     if(v.Rego_Date&&rd<90){
       const urgent=rd<0,warn=rd<30;
@@ -1814,24 +1816,77 @@ function rDash(){
 
 
 // ===== VEHICLE MANAGEMENT =====
-function getHvisBookings(){try{return safeGetLocal('hvis_bookings', []);}catch(e){return[];}}
-function saveHvisBookings(d){
-  safeSetLocal('hvis_bookings', d);
-  // ★ 백업: 부킹 데이터 손실 방지용 이중 저장
-  try{safeSetLocal('hvis_bookings_backup', d);}catch(e){}
+// ★ HVIS 부킹: Google Sheets 기반 (DB.HB = in-memory cache, Sheets가 원본)
+// — localStorage는 오프라인 캐시 전용
+function getHvisBookings(){ return DB.HB || []; }
+function saveHvisBookingsCache(d){ DB.HB = d; try{safeSetLocal('hvis_bookings', d);}catch(e){} }
+
+// ★ Google Sheets에서 HVIS 부킹 로드 (앱 시작 시 호출)
+async function loadHvisBookingsFromSheets(){
+  try {
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_master&sheet=HVIS_Bookings');
+    const json = await res.json();
+    if(json.ok && json.rows){
+      DB.HB = json.rows.map(r=>({
+        id: r.ID || r._rowIndex,
+        _rowIndex: r._rowIndex,
+        rego: r.Rego||'',
+        inspDate: r.InspDate||'',
+        inspTime: r.InspTime||'',
+        location: r.Location||'',
+        bookingNo: r.BookingNo||'',
+        vehicleType: r.VehicleType||'',
+        ownerName: r.OwnerName||'',
+        bookingDate: r.BookingDate||'',
+        status: r.Status||'Active'
+      }));
+      safeSetLocal('hvis_bookings', DB.HB);
+      console.log('[HVIS] Loaded from Sheets:', DB.HB.length, 'bookings');
+      return DB.HB;
+    }
+  } catch(e){ console.warn('[HVIS] Sheets load failed, using cache:', e.message); }
+  // Sheets 실패 시 localStorage 캐시 사용
+  DB.HB = safeGetLocal('hvis_bookings', []);
+  return DB.HB;
 }
-// ★ localStorage 부킹 데이터 복구 함수
-function recoverHvisBookings(){
-  var current=getHvisBookings();
-  if(current&&current.length>0){console.log('[HVIS] Current bookings:',current.length);return current;}
-  var backup=safeGetLocal('hvis_bookings_backup',[]);
-  if(backup&&backup.length>0){
-    console.warn('[HVIS] Recovering from backup:',backup.length,'bookings');
-    safeSetLocal('hvis_bookings',JSON.parse(JSON.stringify(backup)));
-    return backup;
-  }
-  console.warn('[HVIS] No booking data found in localStorage or backup');
-  return [];
+
+// ★ Google Sheets에 부킹 추가
+async function addHvisBookingToSheets(entry){
+  try {
+    const sheetData = {
+      ID: String(entry.id),
+      Rego: entry.rego,
+      InspDate: entry.inspDate,
+      InspTime: entry.inspTime||'',
+      Location: entry.location||'',
+      BookingNo: entry.bookingNo||'',
+      VehicleType: entry.vehicleType||'',
+      OwnerName: entry.ownerName||'',
+      BookingDate: entry.bookingDate||'',
+      Status: 'Active'
+    };
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'add_master', sheet:'HVIS_Bookings', data:sheetData})
+    });
+    const json = await res.json();
+    if(json.ok){
+      entry._rowIndex = json.row;
+      console.log('[HVIS] Saved to Sheets, row:', json.row);
+    } else { console.warn('[HVIS] Sheets save failed:', json.error); }
+  } catch(e){ console.warn('[HVIS] Sheets save error:', e.message); }
+}
+
+// ★ Google Sheets에서 부킹 삭제
+async function deleteHvisBookingFromSheets(rowIndex){
+  if(!rowIndex) return;
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'delete_master', sheet:'HVIS_Bookings', rowIndex: rowIndex})
+    });
+    console.log('[HVIS] Deleted from Sheets, row:', rowIndex);
+  } catch(e){ console.warn('[HVIS] Sheets delete error:', e.message); }
 }
 function getMaintRecords(){try{return safeGetLocal('maint_records', []);}catch(e){return[];}}
 function saveMaintRecords(d){safeSetLocal('maint_records', d);}
@@ -1874,7 +1929,7 @@ function renderHvis(){
   var box=document.getElementById('hvis-alert-box');
   var list=document.getElementById('hvis-list');
   if(!box||!list)return;
-  var bookings=recoverHvisBookings();
+  var bookings=getHvisBookings();
   var alertHtml='',listHtml='';
   DB.V.forEach(function(v){
     if(!v.Rego)return;
@@ -2008,23 +2063,33 @@ function openHvisBooking(rego){
     +'<button class="btn bac" style="width:100%;" onclick="saveHvisBookingEntry()">&#x1F4BE; Save Booking</button>';
   overlay.appendChild(modal);document.body.appendChild(overlay);
 }
-function saveHvisBookingEntry(){
+async function saveHvisBookingEntry(){
   var entry={id:Date.now().toString(),rego:gv('hb-rego'),inspDate:fmtDate(gv('hb-date')),inspTime:gv('hb-time'),
     location:gv('hb-location'),customerNo:gv('hb-custno'),bookingNo:gv('hb-bookno'),
-    ownerName:gv('hb-owner'),bookingDate:fmtDate(toLocalISO(new Date()))};
+    vehicleType:gv('hb-vtype')||'',
+    ownerName:gv('hb-owner'),bookingDate:fmtDate(toLocalISO(new Date())),status:'Active'};
   if(!entry.rego){toast('Select a vehicle (차량을 선택하세요)','er');return;}
   if(!entry.inspDate){toast('Enter inspection date (점검 날짜를 입력하세요)','er');return;}
-  var bk=getHvisBookings();bk.push(entry);saveHvisBookings(bk);
+  // ★ Google Sheets에 저장 + 로컬 캐시 업데이트
+  DB.HB.push(entry);
+  saveHvisBookingsCache(DB.HB);
   document.getElementById('hvis-modal-overlay').remove();
   renderHvis();
-  rDash(); // ★ PATCH: 대시보드 알림도 즉시 갱신
+  rDash();
   toast('HVIS Booking Saved (HVIS 부킹 저장 완료)','ok');
+  // 비동기로 Sheets 저장 (UI 블록 안 함)
+  await addHvisBookingToSheets(entry);
 }
-function deleteHvisBooking(id){
-  if(!confirm('Delete this booking?'))return;
-  saveHvisBookings(getHvisBookings().filter(function(b){return b.id!==id;}));
+async function deleteHvisBooking(id){
+  if(!confirm('Delete this booking (부킹을 삭제하시겠습니까?)?'))return;
+  // ★ 삭제할 부킹의 _rowIndex 찾기
+  var target = DB.HB.find(function(b){return b.id===id || String(b.id)===String(id);});
+  DB.HB = DB.HB.filter(function(b){return b.id!==id && String(b.id)!==String(id);});
+  saveHvisBookingsCache(DB.HB);
   document.getElementById('hvis-modal-overlay').remove();
-  renderHvis();toast('Deleted','ok');
+  renderHvis();rDash();toast('Deleted (삭제 완료)','ok');
+  // 비동기로 Sheets 삭제
+  if(target && target._rowIndex) await deleteHvisBookingFromSheets(target._rowIndex);
 }
 
 function renderMaint(){
@@ -8861,6 +8926,36 @@ async function loadAllFromSheets(){
           '50':{base:r.seats_50_base,ot:r.seats_50_ot}
         };
       });
+    }
+
+    // ★ HVIS_Bookings → DB.HB (Google Sheets 기반)
+    if(d.HVIS_Bookings?.length){
+      DB.HB = d.HVIS_Bookings.map(r=>({
+        id: r.ID || String(r._rowIndex),
+        _rowIndex: r._rowIndex,
+        rego: r.Rego||'',
+        inspDate: r.InspDate||'',
+        inspTime: r.InspTime||'',
+        location: r.Location||'',
+        bookingNo: r.BookingNo||'',
+        vehicleType: r.VehicleType||'',
+        ownerName: r.OwnerName||'',
+        bookingDate: r.BookingDate||'',
+        status: r.Status||'Active'
+      }));
+      safeSetLocal('hvis_bookings', DB.HB);
+      console.log('[HVIS] Loaded from Sheets:', DB.HB.length, 'bookings');
+    } else {
+      // Sheets에 데이터 없을 경우 localStorage 캐시 확인 후 마이그레이션
+      const cached = safeGetLocal('hvis_bookings', []);
+      if(cached.length > 0){
+        console.log('[HVIS] Migrating', cached.length, 'bookings from cache to Sheets...');
+        DB.HB = cached;
+        // 비동기로 Sheets에 마이그레이션
+        cached.forEach(entry => addHvisBookingToSheets(entry));
+      } else {
+        DB.HB = [];
+      }
     }
 
     // 추가 데이터 로드 (실패해도 무시)

@@ -76,7 +76,9 @@ const MASTER_HEADERS = {
   // ── 결함 리포트 ──
   'Defect_Reports': ['ID','Rego','Category','Location','Description','Severity','KM','Driver','Status','SubmittedAt','AdminNote'],
   // ── 차량 데미지 마커 ──
-  'Bus_Damage': ['Rego','Markers','UpdatedAt','UpdatedBy']
+  'Bus_Damage': ['Rego','Markers','UpdatedAt','UpdatedBy'],
+  // ── HVIS 부킹 관리 ──
+  'HVIS_Bookings': ['ID','Rego','InspDate','InspTime','Location','BookingNo','VehicleType','OwnerName','BookingDate','Status']
 };
 
 // ── Tab Colors ──
@@ -552,7 +554,7 @@ function getAllMasters() {
     const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
                     'M_PriceClient', 'M_PriceDriver', 'M_PriceSub',
                     'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions',
-                    'Sub_Rates', 'Ledger', 'MOT_Report'];
+                    'Sub_Rates', 'Ledger', 'MOT_Report', 'HVIS_Bookings'];
     const result = {};
 
     sheets.forEach(name => {
