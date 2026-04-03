@@ -1779,7 +1779,7 @@ function rDash(){
       if(booking){
         als.push({sort:hd+1000,type:'hvis_booked',
           bg:'#ecfdf5',bc:'#10b981',fc:'#059669',icon:'✅',
-          m:`${v.Rego} — HVIS Booked (예약완료) ${booking.inspDate} @ ${booking.location||''}`});
+          m:`${v.Rego} — HVIS Booked (예약완료) ${fmtDate(booking.inspDate)} @ ${booking.location||''}`});
       }else{
         als.push({sort:hd,type:'hvis',
           bg:urgent?'#fef2f2':warn?'#fff7ed':'#fefce8',
@@ -2262,7 +2262,7 @@ async function rV(q=''){
     return`<div class="mrow">
       <div class="mav" style="color:var(--ac);font-size:10px">${v.Rego}</div>
       <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}</div>
-        <div class="msb">${(v.Manufacture_Date||v['Manufacture Date'])?((v.Manufacture_Date||v['Manufacture Date'])+'년 · '):''}${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
+        <div class="msb">${(v.Manufacture_Date||v['Manufacture Date'])?(fmtDate(v.Manufacture_Date||v['Manufacture Date'])+' · '):''}${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
         <div class="mtg">${etag(v.Rego_Date,'Rego')}${etag(v.HVIS_Date,'HVIS')}${(()=>{
           const cKM=DB.regoMaxKM?.[v.Rego]||0;
           const nSKM=Number(v.Next_Service_KM)||0;
@@ -5368,7 +5368,7 @@ async function saveInvoiceToSheet() {
     const json = await res.json();
     if (!json.ok) throw new Error(json.error||'저장 실패');
     // localStorage 발행 기록도 동기화
-    localStorage.setItem(`dc_inv_issued_${invNum}`, new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}));
+    localStorage.setItem(`dc_inv_issued_${invNum}`, (()=>{const _d=new Date();return String(_d.getDate()).padStart(2,'0')+'/'+String(_d.getMonth()+1).padStart(2,'0')+'/'+_d.getFullYear()+' '+String(_d.getHours()).padStart(2,'0')+':'+String(_d.getMinutes()).padStart(2,'0');})());
     toast(`✅ 인보이스 ${invNum} 저장 완료`,'ok');
 
     // ★ 거래처 잔액에 DR 거래 자동 등록 (Agency_Txn)
@@ -6096,7 +6096,7 @@ async function generateInvoice() {
 
   // 저장 성공 후 localStorage에 발행 기록
   const issuedKey = `dc_inv_issued_${invNum}`;
-  const issuedAt  = new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const issuedAt  = (()=>{const _d=new Date();return String(_d.getDate()).padStart(2,'0')+'/'+String(_d.getMonth()+1).padStart(2,'0')+'/'+_d.getFullYear()+' '+String(_d.getHours()).padStart(2,'0')+':'+String(_d.getMinutes()).padStart(2,'0');})();
   localStorage.setItem(issuedKey, issuedAt);
 
   // 미리보기 모달 + PDF 인쇄 (★ invNumOverride로 동일 번호 사용)
@@ -6650,7 +6650,7 @@ function renderMotAdmin() {
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">' +
           '<div>' +
             '<div style="font-size:13px;font-weight:800;color:var(--t1);">' + escH(r.Driver||'') + ' · ' + escH(r.Rego||'') + '</div>' +
-            '<div style="font-size:11px;color:var(--t3);margin-top:2px;">' + escH(String(r.Date||'')) + ' ' + escH(r.Time||'') +
+            '<div style="font-size:11px;color:var(--t3);margin-top:2px;">' + fmtDate(r.Date||'') + ' ' + escH(r.Time||'') +
               (r.Location ? ' · ' + escH(r.Location) : '') + '</div>' +
           '</div>' +
           '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">' +
