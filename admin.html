@@ -6188,11 +6188,18 @@ async function emailInvoice() {
   const pdfName = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   const emailBtn = document.querySelector('button[onclick="emailInvoice()"]');
-  if (emailBtn) { emailBtn.disabled = true; emailBtn.textContent = '⏳ 발송 중...'; }
+  if (emailBtn) { emailBtn.disabled = true; emailBtn.textContent = '⏳ PDF 생성 중...'; }
 
   try {
+    // ★ 1단계: 클라이언트에서 PDF 생성 → base64 변환
+    toast('📄 인보이스 PDF 생성 중...', 'ok');
+    const pdfBlob = await _generateInvPdfBlob(docHtml);
+    const pdfBase64 = await _blobToBase64(pdfBlob);
+
+    if (emailBtn) emailBtn.textContent = '⏳ 발송 중...';
     toast('✉️ 인보이스 발송 중...', 'ok');
 
+    // ★ 2단계: base64 PDF를 GAS에 전송 → Gmail 발송
     const res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -6201,7 +6208,7 @@ async function emailInvoice() {
         to:         toEmail,
         subject,
         body,
-        docHtml,
+        pdfBase64,
         pdfName,
         senderName: DC_COMPANY.name || 'Dong Choi Pty Ltd',
         replyTo:    DC_COMPANY.email || 'branden.dongchoi@gmail.com',
@@ -6217,9 +6224,9 @@ async function emailInvoice() {
     }
   } catch (e) {
     toast(`⚠️ GAS 발송 실패: ${e.message}`, 'er');
-    // ★ 실패 시 미리보기 열고 PDF 인쇄 안내
+    // ★ 실패 시 미리보기 열고 Gmail 열기
     try {
-      toast('📥 미리보기에서 직접 PDF를 저장하세요', 'ok');
+      toast('📥 미리보기에서 직접 PDF를 저장 후 Gmail에 첨부하세요', 'ok');
       _showDocModal(docHtml);
     } catch(e2) {}
     const s = encodeURIComponent(subject);
@@ -10479,14 +10486,22 @@ async function emailQuotation() {
   const pdfName = `${quoNum}_${(agency||'Customer').replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   const emailBtn = document.querySelector('button[onclick="emailQuotation()"]');
-  if (emailBtn) { emailBtn.disabled=true; emailBtn.textContent='⏳ 발송 중...'; }
+  if (emailBtn) { emailBtn.disabled=true; emailBtn.textContent='⏳ PDF 생성 중...'; }
 
   try {
+    // ★ 클라이언트에서 PDF 생성 → base64 변환
+    toast('📄 견적서 PDF 생성 중...', 'ok');
+    const pdfBlob = await _generateInvPdfBlob(docHtml);
+    const pdfBase64 = await _blobToBase64(pdfBlob);
+
+    if (emailBtn) emailBtn.textContent='⏳ 발송 중...';
+    toast('✉️ 견적서 발송 중...', 'ok');
+
     const res = await fetch(APPS_SCRIPT_URL, {
       method:'POST', headers:{'Content-Type':'text/plain'},
       body: JSON.stringify({
         action:'send_invoice_email', to:toEmail, subject, body,
-        docHtml,
+        pdfBase64,
         pdfName,
         senderName: DC_COMPANY.name||'Dong Choi Pty Ltd',
         replyTo:    DC_COMPANY.email||'branden.dongchoi@gmail.com',

@@ -1588,30 +1588,35 @@ function deleteInvoice(invNumber) {
 
 /**
  * 인보이스 이메일 발송 (PDF 첨부)
- * payload: { to, subject, body, cc, docHtml, pdfName, senderName, replyTo, _user }
+ * payload: { to, subject, body, cc, pdfBase64, pdfName, senderName, replyTo, _user }
+ *   pdfBase64: 클라이언트에서 생성한 PDF의 base64 문자열
  */
 function sendInvoiceEmail(payload) {
   try {
-    const to      = (payload.to || '').trim();
-    const subject = (payload.subject || '').trim();
-    const body    = (payload.body || '').trim();
-    const cc      = (payload.cc || '').trim();
-    const name    = payload.senderName || 'Dong Choi Pty Ltd';
-    const replyTo = (payload.replyTo || '').trim();
-    const docHtml = payload.docHtml || '';
-    const pdfName = payload.pdfName || 'Invoice.pdf';
+    const to        = (payload.to || '').trim();
+    const subject   = (payload.subject || '').trim();
+    const body      = (payload.body || '').trim();
+    const cc        = (payload.cc || '').trim();
+    const name      = payload.senderName || 'Dong Choi Pty Ltd';
+    const replyTo   = (payload.replyTo || '').trim();
+    const pdfBase64 = payload.pdfBase64 || '';
+    const pdfName   = payload.pdfName || 'Invoice.pdf';
+    // 하위호환: 이전 버전 docHtml 지원
+    const docHtml   = payload.docHtml || '';
 
     if (!to)      return { ok: false, error: '수신자 이메일이 없습니다 (to is empty)' };
     if (!subject) return { ok: false, error: '제목이 없습니다 (subject is empty)' };
 
-    const options = {
-      name: name
-    };
+    const options = { name: name };
     if (cc) options.cc = cc;
     if (replyTo) options.replyTo = replyTo;
 
-    // PDF 첨부: docHtml이 있으면 HTML→PDF 변환 후 첨부
-    if (docHtml) {
+    // PDF 첨부: base64 우선, 없으면 docHtml → PDF 변환 시도
+    if (pdfBase64) {
+      const pdfBytes = Utilities.base64Decode(pdfBase64);
+      const pdfBlob  = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
+      options.attachments = [pdfBlob];
+    } else if (docHtml) {
       const htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
       const pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
       options.attachments = [pdfBlob];
