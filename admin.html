@@ -1697,6 +1697,8 @@ function calcDaysRemaining(dateStr){
   return Math.floor((target-now)/86400000);
 }
 function du(ds){const d=calcDaysRemaining(ds);return d===null?9999:d;}
+/** 빈 값 체크 — "-" 문자열도 빈 값으로 처리 */
+function isEmpty(v){return !v||String(v).trim()===''||String(v).trim()==='-';}
 /** HVIS 대상 차량 여부 — 12인승 이상만 HVIS 해당 */
 function isHvisVehicle(v){return (parseInt(v.Capacity)||0) >= 12;}
 function etag(ds,lbl){
@@ -1764,12 +1766,12 @@ function rDash(){
     const rd=du(v.Rego_Date),hd=du(v.HVIS_Date);
     // ★ 데이터 미등록 차량 경고
     const _isHvis=isHvisVehicle(v);
-    if(!v.Rego_Date&&(!v.HVIS_Date||!_isHvis)){
+    if(isEmpty(v.Rego_Date)&&(isEmpty(v.HVIS_Date)||!_isHvis)){
       als.push({sort:9990,type:'missing',
         bg:'#f0f9ff',bc:'#38bdf8',fc:'#0284c7',icon:'⚠️',
         m:`${v.Rego} — Not Registered (Rego 미등록)${_isHvis?' — HVIS 날짜 정보를 입력해주세요':''}`});
     }
-    if(v.Rego_Date&&rd<90){
+    if(!isEmpty(v.Rego_Date)&&rd<90){
       const urgent=rd<0,warn=rd<30;
       als.push({sort:rd,type:'rego',
         bg:urgent?'#fef2f2':warn?'#fff7ed':'#fefce8',
@@ -1779,7 +1781,7 @@ function rDash(){
         m:`${v.Rego} — Rego (차량등록) ${fmtDays(rd)}`});
     }
     // ★ HVIS — 부킹 상태 반영 (12인승 이상만)
-    if(_isHvis&&v.HVIS_Date&&hd<90){
+    if(_isHvis&&!isEmpty(v.HVIS_Date)&&hd<90){
       const urgent=hd<0,warn=hd<30;
       const booking=findHvisBooking(v.Rego);
       if(booking){
