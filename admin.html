@@ -4490,8 +4490,8 @@ function setInvPeriod(type) {
   loadInvReports();
 }
 
-function onInvAgencyChange() { _lastGeneratedInvNum = null; loadInvReports(); }
-function onInvDateChange()   { _lastGeneratedInvNum = null; loadInvReports(); }
+function onInvAgencyChange() { _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; loadInvReports(); }
+function onInvDateChange()   { _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; loadInvReports(); }
 
 // ── 초기화 ──
 function toggleInvSettings() {
@@ -4949,7 +4949,7 @@ function renderInvPreview(rows, agency, from, to) {
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
   const invNum = getInvNum(agency, from);
-  _lastGeneratedInvNum = invNum;  // saveInvoiceToSheet에서 재사용
+  _lastGeneratedInvNum = invNum;  _lastGenInvAgency = agency;  _lastGenInvFrom = from;
 
   // 발행 이력 확인
   const histKey = `dc_inv_issued_${invNum}`;
@@ -5186,6 +5186,26 @@ let _invOverrides  = {};              // { rowKey: { base?, ot?, extra? } }
 let _invExcludes   = {};              // { rowKey: true } — 제외된 항목
 let _invHistoryCache = null;          // 인보이스 이력 캐시
 let _lastGeneratedInvNum = null;      // generateInvoice에서 생성한 번호 (saveInvoiceToSheet에서 재사용)
+let _lastGenInvAgency = null;         // _lastGeneratedInvNum이 어떤 여행사 것인지 추적
+let _lastGenInvFrom = null;           // _lastGeneratedInvNum이 어떤 기간 것인지 추적
+
+// ★ 현재 여행사+기간에 맞는 인보이스 번호 조회 (이력 → _last → 신규 순)
+function getExistingOrNewInvNum(agency, from) {
+  // ① 이미 저장/발행된 인보이스가 있으면 그 번호 사용
+  if (_invHistoryCache) {
+    const match = _invHistoryCache.find(inv =>
+      String(inv.Agency||'').trim() === String(agency||'').trim() &&
+      String(inv.PeriodFrom||'').trim() === String(from||'').trim()
+    );
+    if (match && match.InvNumber) return match.InvNumber;
+  }
+  // ② 방금 생성한 번호가 같은 여행사+기간이면 재사용
+  if (_lastGeneratedInvNum && _lastGenInvAgency === agency && _lastGenInvFrom === from) {
+    return _lastGeneratedInvNum;
+  }
+  // ③ 새 번호 생성
+  return getInvNum(agency, from);
+}
 
 // 항목 고유 키 (날짜+차량+인덱스)
 function _invRowKey(r, idx) {
@@ -5244,8 +5264,8 @@ async function saveInvoiceToSheet() {
   const grandTotal = _calcInvGrandTotal(rows);
   const gst   = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
-  // generateInvoice에서 생성한 번호가 있으면 재사용 (번호 불일치 방지)
-  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
+  // 현재 여행사/기간에 맞는 번호 조회 (이력 → 현재 생성분 → 신규 순)
+  const invNum = getExistingOrNewInvNum(agency, from);
 
   // ★ 중복 번호 방지: 발행 이력에서 동일 번호가 이미 있는지 확인
   if (_invHistoryCache) {
@@ -5355,7 +5375,7 @@ async function saveInvoiceToSheet() {
     } catch(e) { console.warn('[Invoice→Balance] 거래 등록 오류:', e); }
 
     _invHistoryCache = null; // 캐시 무효화
-    _lastGeneratedInvNum = null; // 다음 인보이스를 위해 번호 초기화
+    _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; // 다음 인보이스를 위해 번호 초기화
 
     // ★ 저장 완료 후 크레딧/선수금 & 수동항목 localStorage 초기화 (다음 인보이스에 잔류 방지)
     const dedKey = `dc_inv_deductions_${agency}_${from.slice(0,7)}`;
@@ -5967,8 +5987,8 @@ function previewInvoiceDoc() {
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
   // ★ 미리보기와 생성에서 동일한 번호를 사용하기 위해 _lastGeneratedInvNum 설정
-  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
-  _lastGeneratedInvNum = invNum;
+  const invNum = getExistingOrNewInvNum(agency, from);
+  _lastGeneratedInvNum = invNum;  _lastGenInvAgency = agency;  _lastGenInvFrom = from;
   const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:true, invNumOverride:invNum});
   _showDocModal(html);
 }
@@ -6025,8 +6045,8 @@ async function generateInvoice() {
   }
 
   // ★ 인보이스 번호를 한 번만 생성하고 모든 곳에서 재사용
-  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
-  _lastGeneratedInvNum = invNum;  // saveInvoiceToSheet에서 재사용
+  const invNum = getExistingOrNewInvNum(agency, from);
+  _lastGeneratedInvNum = invNum;  _lastGenInvAgency = agency;  _lastGenInvFrom = from;
 
   // 시트에 먼저 저장 (번호가 확정된 후 localStorage에 기록)
   toast('💾 인보이스 저장 중...', 'ok');
@@ -6144,8 +6164,8 @@ async function emailInvoice() {
 
   const client = DB.C.find(c => c.Name === agency) || {};
   let toEmail  = (client.Email || '').trim();
-  // ★ 이미 생성된 번호가 있으면 재사용
-  const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
+  // ★ 현재 여행사/기간에 맞는 번호 조회 (이력 → 현재 생성분 → 신규 순)
+  const invNum = getExistingOrNewInvNum(agency, from);
 
   let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
