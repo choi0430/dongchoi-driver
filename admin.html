@@ -5462,7 +5462,7 @@ function renderInvHistory() {
           <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap;">
             <button onclick="previewIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">👁미리보기</button>
             ${inv.Status!=='paid'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','paid','PaidDate')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #86efac;background:#f0fdf4;color:#166534;cursor:pointer;font-weight:600;">✅결제</button>`:''}
-            ${inv.Status==='issued'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','emailed','EmailSentDate')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;cursor:pointer;font-weight:600;">✉️발송</button>`:''}
+            ${inv.Status!=='cancelled'?`<button onclick="resendInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;cursor:pointer;font-weight:600;">✉️발송</button>`:''}
             ${inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','cancelled','')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:600;">❌취소</button>`:''}
             <button onclick="deleteInvoiceRecord('${escH(inv.InvNumber)}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:600;">🗑삭제</button>
           </div>
@@ -5655,6 +5655,136 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
   const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false, invNumOverride:invNumber});
   _showDocModal(html);
+}
+
+// ★ 발행된 인보이스 이메일 재발송 (PDF 첨부 + 상태 업데이트)
+async function resendInvoice(invNumber, agency, periodFrom, periodTo) {
+  periodFrom = _normInvDate(periodFrom);
+  periodTo   = _normInvDate(periodTo);
+  if (!agency || !periodFrom || !periodTo) { toast('⚠️ 인보이스 정보가 부족합니다','er'); return; }
+
+  const client = DB.C.find(c => c.Name === agency) || {};
+  let toEmail  = (client.Email || '').trim();
+  if (!toEmail) {
+    toEmail = (prompt(`${agency}의 이메일 주소를 입력하세요:`, '') || '').trim();
+    if (!toEmail) return;
+  }
+  if (!confirm(`${invNumber}을(를) ${toEmail}으로 발송하시겠습니까?`)) return;
+
+  // ① 미리보기와 동일한 방식으로 인보이스 HTML 빌드
+  let docHtml = '';
+  // 리포트 데이터 로드
+  if (!_invReports) {
+    try {
+      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const json = await res.json();
+      if (json.ok) _invReports = json.rows.map(r => ({...r, _iso:parseToISO(r.Date||''), _agency:String(r.Agency||'').trim(), _timeStart:parseSheetTime(r.Time_Start), _timeEnd:parseSheetTime(r.Time_End)}));
+    } catch(e) { toast('리포트 로드 실패','er'); return; }
+  }
+
+  // 저장된 인보이스 데이터에서 HTML 빌드
+  let savedInv = null;
+  if (_invHistoryCache) savedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber);
+
+  if (savedInv) {
+    // 저장된 deductions 복원
+    let _dedJSON = '';
+    Object.keys(savedInv).forEach(k => { const v = String(savedInv[k]||'').trim(); if (v.startsWith('[') && v.indexOf('"type"') >= 0) _dedJSON = v; });
+    const origDed = [..._invDeductions];
+    if (_dedJSON) { try { _invDeductions = JSON.parse(_dedJSON); } catch(e) { _invDeductions = []; } }
+
+    // 저장된 Items로 rows 빌드
+    let _itemsJSON = '', _manualJSON = '', _savedGT = parseFloat(savedInv.GrandTotal) || 0;
+    Object.keys(savedInv).forEach(k => {
+      const v = String(savedInv[k]||'').trim();
+      if (!v.startsWith('[')) return;
+      if (v.indexOf('"date"') >= 0 && (v.indexOf('"tour"') >= 0 || v.indexOf('"rego"') >= 0)) {
+        if (v.indexOf('"amount"') >= 0 || v.indexOf('"start"') >= 0) { if (!_manualJSON) _manualJSON = v; }
+        else { if (!_itemsJSON) _itemsJSON = v; }
+      }
+    });
+    if (savedInv.Items && String(savedInv.Items).trim().startsWith('[') && String(savedInv.Items).indexOf('"date"') >= 0) _itemsJSON = String(savedInv.Items).trim();
+    if (savedInv.ManualItems && String(savedInv.ManualItems).trim().startsWith('[') && String(savedInv.ManualItems).indexOf('"date"') >= 0) _manualJSON = String(savedInv.ManualItems).trim();
+
+    if (_itemsJSON) {
+      try {
+        const _si = JSON.parse(_itemsJSON);
+        const _sm = _manualJSON ? JSON.parse(_manualJSON) : [];
+        const _savedRows = _si.map(item => {
+          const hasIndiv = item.hotel!==undefined || item.dist!==undefined || item.trailer!==undefined;
+          return { _iso:item.date||'', Date:item.date||'', Attraction:item.tour||'-', Rego:item.rego||'', Seats:item.seats||'', Driver:item.driver||'', Tour_Code:item.tourcode||'', Pickup:item.pickup||'', Dropoff:item.dropoff||'', _timeStart:item.timeStart||'', _timeEnd:item.timeEnd||'', _manual:true, _rateSource:item.rateSource||'price_table', SVC_Charge:item.base||0, OT:item.ot||0, Hotel_Surcharge:hasIndiv?(item.hotel||0):(item.extra||0), Dist_Surcharge:item.dist||0, Early:item.early||0, Parking:item.parking||0, Trailer:item.trailer||0, Night_DR:item.night||0, Tip:item.tip||0, Meal:item.meal||0, Toll:item.toll||0, Etc:item.etc||0 };
+        });
+        _sm.forEach(m => { _savedRows.push({ _iso:parseToISO(m.date)||m.date||'', Date:m.date||'', Attraction:m.tour||'-', Rego:m.rego||'', Seats:m.seats||'', Driver:m.driver||'', Tour_Code:m.tourcode||'', Pickup:m.pickup||'', Dropoff:m.dropoff||'', _timeStart:m.start||'', _timeEnd:m.end||'', _manual:true, SVC_Charge:m.amount||0, OT:m.ot||0, Hotel_Surcharge:m.hotel||0, Dist_Surcharge:m.dist||0, Early:m.early||0, Parking:m.parking||0, Trailer:m.trailer||0, Night_DR:m.night||0, Tip:m.tip||0, Meal:m.meal||0, Toll:m.toll||0, Etc:m.etc||0 }); });
+        _savedRows.sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
+        const _origExcl = _invExcludes, _origOver = _invOverrides;
+        _invExcludes = {}; _invOverrides = {};
+        docHtml = _buildInvoiceHTML(agency, periodFrom, periodTo, _savedRows, {isDraft:false, invNumOverride:invNumber, grandTotalOverride:_savedGT});
+        _invExcludes = _origExcl; _invOverrides = _origOver;
+      } catch(e) { console.error('resend build error:', e); }
+    }
+    _invDeductions = origDed; // 복원
+  }
+
+  // fallback: 저장된 Items 없으면 현재 리포트에서 빌드
+  if (!docHtml) {
+    let rows = _buildInvRows(agency, periodFrom, periodTo).sort((a,b) => a._iso.localeCompare(b._iso));
+    rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
+    if (rows.length === 0) { toast('해당 기간 리포트 없음','er'); return; }
+    docHtml = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false, invNumOverride:invNumber});
+  }
+
+  // ② 이메일 내용 생성
+  const fd = ds => ds ? fmtDate(ds) || ds : '—';
+  const grandTotal = savedInv ? (parseFloat(savedInv.GrandTotal)||0) : _calcInvGrandTotal(_buildInvRows(agency, periodFrom, periodTo));
+  const subject = `Tax Invoice ${invNumber} — ${agency} (${fd(periodFrom)} – ${fd(periodTo)})`;
+  const body =
+    `Dear ${agency},\n\n` +
+    `Please find attached Tax Invoice ${invNumber} for services provided during ${fd(periodFrom)} – ${fd(periodTo)}.\n\n` +
+    `Invoice Total: $${grandTotal.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})} (incl. GST)\n` +
+    `Due Date: 14 days from invoice date\n` +
+    `Reference: ${invNumber}\n\n` +
+    `Bank: ${DC_COMPANY.bank||''}\nBSB: ${DC_COMPANY.bsb||''}\nAccount: ${DC_COMPANY.acc||''}\nAccount Name: ${DC_COMPANY.accname||DC_COMPANY.name||''}\n\n` +
+    `Please don't hesitate to contact us if you have any queries.\n\n` +
+    `Kind regards,\n${DC_COMPANY.name||'Dong Choi Pty Ltd'}\n${DC_COMPANY.phone||''}\n${DC_COMPANY.email||''}`;
+
+  const pdfName = `${invNumber}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
+
+  // ③ PDF 생성 → base64 → GAS 발송
+  try {
+    toast('📄 인보이스 PDF 생성 중...','ok');
+    const pdfBlob = await _generateInvPdfBlob(docHtml);
+    const pdfBase64 = await _blobToBase64(pdfBlob);
+    toast('✉️ 인보이스 발송 중...','ok');
+
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action:'send_invoice_email', to:toEmail, subject, body,
+        pdfBase64, pdfName,
+        senderName: DC_COMPANY.name||'Dong Choi Pty Ltd',
+        replyTo: DC_COMPANY.email||'branden.dongchoi@gmail.com',
+        _user: getAdminUser()
+      })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error||'발송 실패');
+
+    toast(`✉️ ${toEmail} 으로 ${invNumber} 발송 완료 (PDF 첨부)`,'ok');
+
+    // ④ 상태를 'emailed'로 자동 업데이트
+    try {
+      await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'update_invoice_status', invNumber, status:'emailed', field:'EmailSentDate', _user:getAdminUser()}) });
+      _invHistoryCache = null;
+      await loadInvHistory(true);
+    } catch(e2) {}
+  } catch (e) {
+    toast(`⚠️ 발송 실패: ${e.message}`,'er');
+    _showDocModal(docHtml);
+    const s = encodeURIComponent(subject), b = encodeURIComponent(body);
+    setTimeout(() => { window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(toEmail)}&su=${s}&body=${b}`, '_blank'); }, 1000);
+  }
 }
 
 async function updateInvStatus(invNumber, status, field) {
