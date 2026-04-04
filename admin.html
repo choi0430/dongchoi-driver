@@ -5634,7 +5634,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
       const html = _buildInvoiceHTML(agency, periodFrom, periodTo, _savedRows,
         {isDraft:false, invNumOverride:invNumber, grandTotalOverride:_savedGT});
       _invExcludes = _origExcl; _invOverrides = _origOver;
-      _showDocModal(html);
+      _showDocModal(html, {invNumber, agency, from:periodFrom, to:periodTo});
       return;
     } catch(e) { console.error('Saved invoice preview error:', e); }
   }
@@ -5654,7 +5654,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   } catch(e) {}
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
   const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false, invNumOverride:invNumber});
-  _showDocModal(html);
+  _showDocModal(html, {invNumber, agency, from:periodFrom, to:periodTo});
 }
 
 // ★ 발행된 인보이스 이메일 재발송 (PDF 첨부 + 상태 업데이트)
@@ -10675,7 +10675,13 @@ async function emailQuotation() {
 
 // → 대신 풀스크린 iframe 오버레이를 사용
 
-function _showDocModal(htmlContent) {
+// ★ 미리보기에서 발송 시 사용할 컨텍스트 저장
+let _docModalSendAction = null;
+
+function _showDocModal(htmlContent, sendAction) {
+  // sendAction: null이면 기본 emailInvoice(), {invNumber,agency,from,to}이면 resendInvoice()
+  _docModalSendAction = sendAction || null;
+
   let overlay = document.getElementById('doc-preview-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -10686,7 +10692,7 @@ function _showDocModal(htmlContent) {
         <span style="color:#fff;font-size:13px;font-weight:700;">📄 문서 미리보기</span>
         <div style="display:flex;gap:8px;">
           <button onclick="_downloadInvPdf()" style="padding:6px 14px;border-radius:8px;border:none;background:#059669;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">📥 PDF</button>
-          <button onclick="_closeDocModal();emailInvoice()" style="padding:6px 14px;border-radius:8px;border:none;background:#0ea5e9;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">✉️ 발송</button>
+          <button id="doc-modal-send-btn" onclick="_docModalSend()" style="padding:6px 14px;border-radius:8px;border:none;background:#0ea5e9;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">✉️ 발송</button>
           <button onclick="_closeDocModal()" style="padding:6px 14px;border-radius:8px;border:none;background:#ef4444;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">✕ 닫기</button>
         </div>
       </div>
@@ -10719,6 +10725,18 @@ function _closeDocModal() {
   document.body.style.overflow = '';
   const iframe = document.getElementById('doc-preview-iframe');
   if (iframe) iframe.src = 'about:blank';
+  _docModalSendAction = null;
+}
+
+// ★ 미리보기 발송 버튼 디스패처
+function _docModalSend() {
+  _closeDocModal();
+  if (_docModalSendAction && _docModalSendAction.invNumber) {
+    const a = _docModalSendAction;
+    resendInvoice(a.invNumber, a.agency, a.from, a.to);
+  } else {
+    emailInvoice();
+  }
 }
 
 function _printDocModal() {
