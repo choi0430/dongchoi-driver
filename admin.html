@@ -5837,6 +5837,56 @@ async function updateInvStatus(invNumber, status, field) {
     const json = await res.json();
     if (!json.ok) throw new Error(json.error||'상태 변경 실패');
     toast(`✅ ${invNumber} → ${status}`,'ok');
+
+    // ★ 결제 시 Agency_Txn에 CR(수금) 자동 등록 → 잔액 탭 연동
+    if (status === 'paid') {
+      try {
+        const inv = (_invHistoryCache||[]).find(i => String(i.InvNumber) === invNumber);
+        if (inv) {
+          const grandTotal = parseFloat(inv.GrandTotal) || 0;
+          // 기존 선수금/크레딧 차감액 계산
+          let existingCR = 0;
+          let _dedJSON = '';
+          Object.keys(inv).forEach(k => { const v = String(inv[k]||'').trim(); if (v.startsWith('[') && v.indexOf('"type"') >= 0) _dedJSON = v; });
+          if (_dedJSON) {
+            try {
+              const deds = JSON.parse(_dedJSON);
+              existingCR = deds.filter(d=>d.amount>0).reduce((s,d)=>s+d.amount, 0);
+            } catch(e) {}
+          }
+          // 결제 금액 = GrandTotal - 이미 차감된 선수금/크레딧
+          const paymentAmount = roundMoney(grandTotal - existingCR);
+          if (paymentAmount > 0) {
+            // 중복 방지: 이미 결제 CR이 있는지 확인
+            const existingPayTxn = _balAgencyTxns.find(t =>
+              String(t.InvoiceID||'').trim() === invNumber &&
+              String(t.Remark||'').includes('결제')
+            );
+            if (!existingPayTxn) {
+              const txnData = {
+                Agency:    inv.Agency || '',
+                Date:      toLocalISO(new Date()),
+                InvoiceID: invNumber,
+                TourCode:  '',
+                DR:        0,
+                CR:        paymentAmount,
+                Remark:    `결제 완료 (${invNumber})`,
+                StartDate: inv.PeriodFrom || '',
+                FinishDate:inv.PeriodTo || '',
+                DueDate:   ''
+              };
+              fetch(APPS_SCRIPT_URL, {
+                method:'POST', headers:{'Content-Type':'text/plain'},
+                body: JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
+              }).then(r=>r.json()).then(j=>{
+                if(j.ok) { console.log('[Payment→Balance] CR 등록 완료:', invNumber, paymentAmount); _balLoaded=false; }
+              }).catch(e=>console.warn('[Payment→Balance] error:', e));
+            }
+          }
+        }
+      } catch(e) { console.warn('[Payment→Balance] 결제 CR 등록 오류:', e); }
+    }
+
     await loadInvHistory(true);
   } catch(e) { toast('❌ '+e.message,'er'); }
 }
