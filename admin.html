@@ -5733,7 +5733,7 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
     }
   }
 
-  // ② 저장된 인보이스에서 deductions 복원 (이메일 본문용)
+  // ② 저장된 인보이스에서 deductions 복원 + 실제 날짜 범위 추출 (이메일 본문용)
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
   const savedInv = (_invHistoryCache||[]).find(inv => String(inv.InvNumber) === invNumber) || null;
   const grandTotal = savedInv ? (parseFloat(savedInv.GrandTotal)||0) : _calcInvGrandTotal(_buildInvRows(agency, periodFrom, periodTo));
@@ -5750,10 +5750,30 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
   const _rsTotalDeduct = _rsPrepaid + _rsCredit;
   const _rsAmountDue = roundMoney(grandTotal - _rsTotalDeduct);
 
-  const subject = `Tax Invoice ${invNumber} — ${agency} (${fd(periodFrom)} – ${fd(periodTo)})`;
+  // ★ 실제 인보이스 아이템의 첫 날짜 ~ 마지막 날짜 추출
+  let actualFrom = periodFrom, actualTo = periodTo;
+  if (savedInv) {
+    let _itemsJSON2 = '';
+    Object.keys(savedInv).forEach(k => {
+      const v = String(savedInv[k]||'').trim();
+      if (v.startsWith('[') && v.indexOf('"date"') >= 0 && (v.indexOf('"tour"') >= 0 || v.indexOf('"rego"') >= 0)) {
+        if (v.indexOf('"amount"') < 0 && v.indexOf('"start"') < 0 && !_itemsJSON2) _itemsJSON2 = v;
+      }
+    });
+    if (savedInv.Items && String(savedInv.Items).trim().startsWith('[') && String(savedInv.Items).indexOf('"date"') >= 0) _itemsJSON2 = String(savedInv.Items).trim();
+    if (_itemsJSON2) {
+      try {
+        const items = JSON.parse(_itemsJSON2);
+        const dates = items.map(i => i.date||'').filter(Boolean).sort();
+        if (dates.length > 0) { actualFrom = dates[0]; actualTo = dates[dates.length - 1]; }
+      } catch(e) {}
+    }
+  }
+
+  const subject = `Tax Invoice ${invNumber} — ${agency} (${fd(actualFrom)} – ${fd(actualTo)})`;
   const body =
     `Dear ${agency},\n\n` +
-    `Please find attached Tax Invoice ${invNumber} for services provided during ${fd(periodFrom)} – ${fd(periodTo)}.\n\n` +
+    `Please find attached Tax Invoice ${invNumber} for services provided during ${fd(actualFrom)} – ${fd(actualTo)}.\n\n` +
     `Invoice Total: $${grandTotal.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})} (incl. GST)\n` +
     (resendDeductions.filter(d=>d.amount>0).map(d => {
       const lbl = d.type==='prepaid'?'Prepaid':'Credit';
@@ -6331,10 +6351,15 @@ async function emailInvoice() {
     if (!toEmail) return;
   }
 
-  const subject = `Tax Invoice ${invNum} — ${agency} (${fd(from)} – ${fd(to)})`;
+  // ★ 실제 인보이스 아이템의 첫 날짜 ~ 마지막 날짜 추출
+  const isoDates = rows.map(r => r._iso||'').filter(Boolean).sort();
+  const actualFrom = isoDates.length > 0 ? isoDates[0] : from;
+  const actualTo   = isoDates.length > 0 ? isoDates[isoDates.length - 1] : to;
+
+  const subject = `Tax Invoice ${invNum} — ${agency} (${fd(actualFrom)} – ${fd(actualTo)})`;
   const body =
     `Dear ${agency},\n\n` +
-    `Please find attached Tax Invoice ${invNum} for services provided during ${fd(from)} – ${fd(to)}.\n\n` +
+    `Please find attached Tax Invoice ${invNum} for services provided during ${fd(actualFrom)} – ${fd(actualTo)}.\n\n` +
     `Invoice Total: $${grandTotal.toLocaleString('en-AU', {minimumFractionDigits:2, maximumFractionDigits:2})} (incl. GST)\n` +
     (_invDeductions.filter(d=>d.amount>0).map(d => {
       const lbl = d.type==='prepaid'?'Prepaid':'Credit';
