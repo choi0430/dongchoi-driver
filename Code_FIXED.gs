@@ -1622,8 +1622,21 @@ function sendInvoiceEmail(payload) {
       options.attachments = [pdfBlob];
     }
 
-    // GmailApp으로 발송 (Gmail 전용)
-    GmailApp.sendEmail(to, subject, body, options);
+    // GmailApp 우선 시도, 실패 시 MailApp 폴백
+    try {
+      GmailApp.sendEmail(to, subject, body, options);
+    } catch (gmailErr) {
+      var mailOpts = {
+        to: to,
+        subject: subject,
+        body: body,
+        name: name,
+        attachments: options.attachments || []
+      };
+      if (cc) mailOpts.cc = cc;
+      if (replyTo) mailOpts.replyTo = replyTo;
+      MailApp.sendEmail(mailOpts);
+    }
 
     // 감사 로그
     appendAuditLog(payload._user, 'send_invoice_email', '—', '—',
