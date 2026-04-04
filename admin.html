@@ -1220,7 +1220,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 탭: Pre Departure / End of Shift -->
   <div style="display:flex;gap:0;padding:10px 14px 0;align-items:center;">
     <button id="shift-tab-pre" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;margin-bottom:0;" onclick="setShiftTab('pre')">🚦 Pre Departure</button>
-    <button id="shift-tab-eos" class="btn bac sm" style="border-radius:0 8px 8px 0;margin-bottom:0;" onclick="setShiftTab('eos')">🏁 End of Shift</button>
+    <button id="shift-tab-eos" class="btn bac sm" style="border-radius:0;border-right:none;margin-bottom:0;" onclick="setShiftTab('eos')">🏁 End of Shift</button>
+    <button id="shift-tab-paired" class="btn bac sm" style="border-radius:0 8px 8px 0;margin-bottom:0;" onclick="setShiftTab('paired')">📋 쌍 확인</button>
   </div>
 
   <!-- 필터 -->
@@ -9410,6 +9411,8 @@ function setShiftTab(tab) {
   _shiftCurrentTab = tab;
   document.getElementById('shift-tab-pre')?.classList.toggle('on', tab==='pre');
   document.getElementById('shift-tab-eos')?.classList.toggle('on', tab==='eos');
+  document.getElementById('shift-tab-paired')?.classList.toggle('on', tab==='paired');
+  if (tab === 'paired') { renderShiftPaired(); return; }
   renderShiftTab();
 }
 
@@ -9502,6 +9505,130 @@ function renderShiftTab() {
           <button class="btn bac sm" onclick="viewShiftPdfAdmin(${ri},'${tab}')" style="font-size:11px;padding:5px 9px;white-space:nowrap;">👁 보기</button>
           <button class="btn bgh sm" onclick="openShiftEdit(${ri},'${tab}')" style="font-size:11px;padding:5px 9px;white-space:nowrap;">✏️ 수정</button>
           <button class="btn brd sm" onclick="deleteShiftReport(${ri},'${tab}')" style="font-size:11px;padding:5px 9px;white-space:nowrap;">🗑 삭제</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── 쌍 확인 뷰 (Pre + EOS 매칭) ──
+function renderShiftPaired() {
+  if (!_shiftCache) _shiftCache = {pre: [], eos: []};
+  const fd = (document.getElementById('shift-filter-driver')?.value||'').trim();
+  const fr = (document.getElementById('shift-filter-rego')?.value||'').trim();
+  const fw = (document.getElementById('shift-filter-week')?.value||'').trim();
+
+  const filterRow = r => {
+    if (fd && r.Driver!==fd) return false;
+    if (fr && r.Rego!==fr)   return false;
+    if (fw) {
+      const iso = parseToISO(r.Date||'');
+      const wSun = new Date(fw+'T00:00:00'); wSun.setDate(wSun.getDate()+6);
+      if (!iso || iso < fw || iso > wSun.toISOString().slice(0,10)) return false;
+    }
+    return true;
+  };
+
+  const preFiltered = _shiftCache.pre.filter(filterRow);
+  const eosFiltered = _shiftCache.eos.filter(filterRow);
+
+  // 날짜+드라이버+차량으로 그룹핑
+  const pairs = {};
+  const makeKey = r => {
+    const iso = parseToISO(r.Date||'') || r.Date || '';
+    return `${iso}|${(r.Driver||'').trim()}|${(r.Rego||'').trim()}`;
+  };
+  preFiltered.forEach(r => {
+    const k = makeKey(r);
+    if (!pairs[k]) pairs[k] = {date:r.Date, driver:r.Driver||'', rego:r.Rego||'', pre:null, eos:null};
+    pairs[k].pre = r;
+  });
+  eosFiltered.forEach(r => {
+    const k = makeKey(r);
+    if (!pairs[k]) pairs[k] = {date:r.Date, driver:r.Driver||'', rego:r.Rego||'', pre:null, eos:null};
+    pairs[k].eos = r;
+  });
+
+  const sorted = Object.values(pairs).sort((a,b) => {
+    const da = parseToISO(a.date||'')||'', db = parseToISO(b.date||'')||'';
+    return db.localeCompare(da) || a.driver.localeCompare(b.driver);
+  });
+
+  const container = document.getElementById('shift-list');
+  if (!container) return;
+
+  // 요약
+  const totalPairs = sorted.length;
+  const complete = sorted.filter(p=>p.pre&&p.eos).length;
+  const preOnly = sorted.filter(p=>p.pre&&!p.eos).length;
+  const eosOnly = sorted.filter(p=>!p.pre&&p.eos).length;
+
+  const sumEl = document.getElementById('shift-summary');
+  if (sumEl) sumEl.textContent = `총 ${totalPairs}건 · ✅완료 ${complete} · ⚠️Pre만 ${preOnly} · ⚠️EOS만 ${eosOnly}`;
+
+  if (!sorted.length) {
+    container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">📋 기록이 없습니다</div>';
+    return;
+  }
+
+  container.innerHTML = sorted.map(p => {
+    const dateStr = fmtDate(p.date)||p.date||'—';
+    const hasPre = !!p.pre;
+    const hasEos = !!p.eos;
+    const isComplete = hasPre && hasEos;
+
+    // Pre 정보
+    let preInfo = '';
+    if (hasPre) {
+      const preTime = parseSheetTime(p.pre.Start_Time)||'—';
+      const preKM = p.pre.Start_KM ? Number(p.pre.Start_KM).toLocaleString() : '—';
+      preInfo = `⏰ ${escH(preTime)} · 🛣 ${escH(preKM)} km`;
+    }
+    // EOS 정보
+    let eosInfo = '';
+    if (hasEos) {
+      const eos = _normalizeEOS({...p.eos});
+      const eosTime = parseSheetTime(eos.End_Time)||'—';
+      const eosKM = eos.End_KM ? Number(eos.End_KM).toLocaleString() : '—';
+      eosInfo = `⏰ ${escH(eosTime)} · 🛣 ${escH(eosKM)} km`;
+    }
+    // 총 KM
+    let totalKM = '';
+    if (hasPre && hasEos) {
+      const eos = _normalizeEOS({...p.eos});
+      const start = Number(p.pre.Start_KM)||0;
+      const end = Number(eos.End_KM)||0;
+      if (start && end) totalKM = `🚗 총 ${(end-start).toLocaleString()} km`;
+    }
+
+    const statusBg = isComplete ? '#dcfce7' : '#fef3c7';
+    const statusColor = isComplete ? '#166534' : '#92400e';
+    const statusText = isComplete ? '✅ 완료' : '⚠️ 미완료';
+
+    return `<div class="crd" style="margin-bottom:8px;border-left:4px solid ${isComplete?'#22c55e':'#f59e0b'};">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+            <span style="font-size:13px;font-weight:700;">${escH(p.driver||'—')}</span>
+            <span style="color:var(--ac);font-size:13px;font-weight:700;">· ${escH(p.rego||'—')}</span>
+            <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${statusBg};color:${statusColor};font-weight:700;">${statusText}</span>
+          </div>
+          <div style="font-size:12px;color:var(--t2);margin-bottom:5px;">📅 ${escH(dateStr)}</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:140px;padding:6px 8px;border-radius:8px;background:${hasPre?'#f0fdf4':'#fef2f2'};">
+              <div style="font-size:10px;font-weight:700;color:${hasPre?'#166534':'#991b1b'};margin-bottom:2px;">🚦 Pre ${hasPre?'✅':'❌ 미작성'}</div>
+              ${hasPre?`<div style="font-size:11px;color:var(--t2);">${preInfo}</div>`:''}
+            </div>
+            <div style="flex:1;min-width:140px;padding:6px 8px;border-radius:8px;background:${hasEos?'#f0fdf4':'#fef2f2'};">
+              <div style="font-size:10px;font-weight:700;color:${hasEos?'#166534':'#991b1b'};margin-bottom:2px;">🏁 EOS ${hasEos?'✅':'❌ 미작성'}</div>
+              ${hasEos?`<div style="font-size:11px;color:var(--t2);">${eosInfo}</div>`:''}
+            </div>
+          </div>
+          ${totalKM?`<div style="font-size:11px;color:var(--ac);font-weight:600;margin-top:4px;">${totalKM}</div>`:''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+          ${hasPre?`<button class="btn bac sm" onclick="viewShiftPdfAdmin(${p.pre._rowIndex},'pre')" style="font-size:10px;padding:4px 8px;">Pre 보기</button>`:''}
+          ${hasEos?`<button class="btn bac sm" onclick="viewShiftPdfAdmin(${p.eos._rowIndex},'eos')" style="font-size:10px;padding:4px 8px;">EOS 보기</button>`:''}
         </div>
       </div>
     </div>`;
