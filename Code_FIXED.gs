@@ -1601,7 +1601,6 @@ function sendInvoiceEmail(payload) {
     const replyTo   = (payload.replyTo || '').trim();
     const pdfBase64 = payload.pdfBase64 || '';
     const pdfName   = payload.pdfName || 'Invoice.pdf';
-    // 하위호환: 이전 버전 docHtml 지원
     const docHtml   = payload.docHtml || '';
 
     if (!to)      return { ok: false, error: '수신자 이메일이 없습니다 (to is empty)' };
@@ -1611,15 +1610,15 @@ function sendInvoiceEmail(payload) {
     if (cc) options.cc = cc;
     if (replyTo) options.replyTo = replyTo;
 
-    // PDF 첨부: base64 우선, 없으면 docHtml → PDF 변환 시도
-    if (pdfBase64) {
-      const pdfBytes = Utilities.base64Decode(pdfBase64);
-      const pdfBlob  = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
+    // ★ PDF 첨부: docHtml 우선 (서버사이드 변환), base64는 폴백
+    if (docHtml) {
+      var htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
+      var pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
       options.attachments = [pdfBlob];
-    } else if (docHtml) {
-      const htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
-      const pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
-      options.attachments = [pdfBlob];
+    } else if (pdfBase64) {
+      var pdfBytes = Utilities.base64Decode(pdfBase64);
+      var pdfBlob2 = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
+      options.attachments = [pdfBlob2];
     }
 
     // GmailApp 우선 시도, 실패 시 MailApp 폴백

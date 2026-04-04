@@ -5733,15 +5733,34 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
     }
   }
 
-  // ② 이메일 내용 생성
+  // ② 저장된 인보이스에서 deductions 복원 (이메일 본문용)
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
   const savedInv = (_invHistoryCache||[]).find(inv => String(inv.InvNumber) === invNumber) || null;
   const grandTotal = savedInv ? (parseFloat(savedInv.GrandTotal)||0) : _calcInvGrandTotal(_buildInvRows(agency, periodFrom, periodTo));
+
+  // ★ 저장된 deductions 복원하여 이메일 본문에 포함
+  let resendDeductions = [];
+  if (savedInv) {
+    let _dedJSON = '';
+    Object.keys(savedInv).forEach(k => { const v = String(savedInv[k]||'').trim(); if (v.startsWith('[') && v.indexOf('"type"') >= 0) _dedJSON = v; });
+    if (_dedJSON) { try { resendDeductions = JSON.parse(_dedJSON); } catch(e) { resendDeductions = []; } }
+  }
+  const _rsPrepaid = resendDeductions.filter(d=>(d.type==='prepaid')&&d.amount>0).reduce((s,d)=>s+d.amount,0);
+  const _rsCredit  = resendDeductions.filter(d=>(d.type==='credit')&&d.amount>0).reduce((s,d)=>s+d.amount,0);
+  const _rsTotalDeduct = _rsPrepaid + _rsCredit;
+  const _rsAmountDue = roundMoney(grandTotal - _rsTotalDeduct);
+
   const subject = `Tax Invoice ${invNumber} — ${agency} (${fd(periodFrom)} – ${fd(periodTo)})`;
   const body =
     `Dear ${agency},\n\n` +
     `Please find attached Tax Invoice ${invNumber} for services provided during ${fd(periodFrom)} – ${fd(periodTo)}.\n\n` +
     `Invoice Total: $${grandTotal.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})} (incl. GST)\n` +
+    (resendDeductions.filter(d=>d.amount>0).map(d => {
+      const lbl = d.type==='prepaid'?'Prepaid':'Credit';
+      const nt = d.note ? ` (${d.note})` : '';
+      return `${lbl}${nt}: -$${d.amount.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n`;
+    }).join('')) +
+    (_rsTotalDeduct>0 ? `Amount Due: $${_rsAmountDue.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` : '') +
     `Due Date: 14 days from invoice date\n` +
     `Reference: ${invNumber}\n\n` +
     `Bank: ${DC_COMPANY.bank||''}\nBSB: ${DC_COMPANY.bsb||''}\nAccount: ${DC_COMPANY.acc||''}\nAccount Name: ${DC_COMPANY.accname||DC_COMPANY.name||''}\n\n` +
@@ -5750,24 +5769,15 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
 
   const pdfName = `${invNumber}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
-  // ③ PDF 생성 → base64 → GAS 발송
+  // ③ docHtml을 GAS에 전송 → 서버에서 PDF 변환 후 이메일 발송
   try {
-    let pdfBase64 = '';
-    try {
-      toast('📄 인보이스 PDF 생성 중...','ok');
-      const pdfBlob = await _generateInvPdfBlob(docHtml);
-      pdfBase64 = await _blobToBase64(pdfBlob);
-      console.log('[resendInvoice] PDF base64 length:', pdfBase64.length);
-    } catch (pdfErr) {
-      console.warn('[resendInvoice] Client PDF generation failed:', pdfErr);
-    }
-    toast('✉️ 인보이스 발송 중...','ok');
+    toast('✉️ 인보이스 발송 중... (PDF 첨부)','ok');
 
     const res = await fetch(APPS_SCRIPT_URL, {
       method:'POST', headers:{'Content-Type':'text/plain'},
       body: JSON.stringify({
         action:'send_invoice_email', to:toEmail, subject, body,
-        pdfBase64, pdfName, docHtml,
+        docHtml, pdfName,
         senderName: DC_COMPANY.name||'Dong Choi Pty Ltd',
         replyTo: DC_COMPANY.email||'branden.dongchoi@gmail.com',
         _user: getAdminUser()
@@ -6346,25 +6356,12 @@ async function emailInvoice() {
   const pdfName = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   const emailBtn = document.querySelector('button[onclick="emailInvoice()"]');
-  if (emailBtn) { emailBtn.disabled = true; emailBtn.textContent = '⏳ PDF 생성 중...'; }
+  if (emailBtn) { emailBtn.disabled = true; emailBtn.textContent = '⏳ 발송 중...'; }
 
   try {
-    // ★ 1단계: 클라이언트에서 PDF 생성 시도 → base64 변환
-    let pdfBase64 = '';
-    try {
-      toast('📄 인보이스 PDF 생성 중...', 'ok');
-      const pdfBlob = await _generateInvPdfBlob(docHtml);
-      pdfBase64 = await _blobToBase64(pdfBlob);
-      console.log('[emailInvoice] PDF base64 length:', pdfBase64.length);
-    } catch (pdfErr) {
-      console.warn('[emailInvoice] Client PDF generation failed:', pdfErr);
-      // 실패해도 계속 진행 — GAS에서 서버사이드 PDF 생성
-    }
+    toast('✉️ 인보이스 발송 중... (PDF 첨부)', 'ok');
 
-    if (emailBtn) emailBtn.textContent = '⏳ 발송 중...';
-    toast('✉️ 인보이스 발송 중...', 'ok');
-
-    // ★ 2단계: GAS에 전송 (base64 + docHtml 모두 전송 — GAS에서 base64 우선, 없으면 docHtml→PDF 변환)
+    // ★ docHtml을 GAS에 전송 → 서버에서 HTML→PDF 변환 후 이메일 발송
     const res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -6373,9 +6370,8 @@ async function emailInvoice() {
         to:         toEmail,
         subject,
         body,
-        pdfBase64,
-        pdfName,
         docHtml,
+        pdfName,
         senderName: DC_COMPANY.name || 'Dong Choi Pty Ltd',
         replyTo:    DC_COMPANY.email || 'branden.dongchoi@gmail.com',
         _user:      getAdminUser()
