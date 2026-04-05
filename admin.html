@@ -1333,6 +1333,24 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <button id="leave-fil-all" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="setLeaveFilter('all')">All (전체)</button>
   </div>
 
+  <!-- Driver Availability Grid -->
+  <div style="padding:12px 14px 0;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div style="font-family:var(--fd);font-size:14px;font-weight:800;color:var(--t1);">📊 Weekly Availability (주간 가용현황)</div>
+      <div style="display:flex;gap:4px;align-items:center;">
+        <button class="btn bac sm" style="padding:6px 10px;font-size:11px;" onclick="shiftLeaveWeek(-1)">◀ Prev (이전)</button>
+        <span id="leave-week-label" style="font-size:11px;font-weight:700;color:var(--t2);min-width:120px;text-align:center;"></span>
+        <button class="btn bac sm" style="padding:6px 10px;font-size:11px;" onclick="shiftLeaveWeek(1)">Next (다음) ▶</button>
+      </div>
+    </div>
+    <div id="leave-avail-grid" style="overflow-x:auto;"></div>
+    <div style="display:flex;gap:12px;margin-top:6px;font-size:11px;color:var(--t3);">
+      <span>✅ Available (가용)</span>
+      <span style="color:#dc2626;">🚫 LEAVE (휴무)</span>
+      <span style="color:#ca8a04;">⏳ Pending (대기)</span>
+    </div>
+  </div>
+
   <div id="admin-leave-list" style="padding:12px 14px 80px;"></div>
 </div>
 
@@ -1629,7 +1647,7 @@ function nv(pg,ni){
     pinv:  ()=>initInvoice(),
     pquo:  ()=>initQuotation(),
     pnotice: ()=>loadNoticesFromGAS(),
-    pleave: ()=>renderAdminLeaveList(),
+    pleave: ()=>{ renderAdminLeaveList(); renderLeaveAvailGrid(); },
   };
 
   // GAS에서 새로 로드하는 맵 (캐시 만료 시에만 실행)
@@ -1853,6 +1871,22 @@ function rDash(){
         m:`${v.Rego} — Next Service (다음 서비스) ${_nSKM.toLocaleString()}km — No Current KM Data (현재 KM 데이터 없음)`});
     }
   });
+  // ── 승인된 휴무 알림 (Approved Leaves) ──
+  if(window._adminLeaves && window._adminLeaves.length){
+    const today = parseToISO(fmtDate(new Date().toISOString()));
+    window._adminLeaves.filter(l=>l.Status==='Approved').forEach(l=>{
+      const from = parseToISO(fmtDate(l.Date_From)||l.Date_From);
+      const to = parseToISO(fmtDate(l.Date_To)||l.Date_To);
+      if(to >= today){
+        const dateFrom = fmtDate(l.Date_From)||l.Date_From;
+        const dateTo = fmtDate(l.Date_To)||l.Date_To;
+        const range = dateFrom===dateTo ? dateFrom : dateFrom+' ~ '+dateTo;
+        als.push({sort:-500,type:'leave',
+          bg:'#eff6ff',bc:'#3b82f6',fc:'#1d4ed8',icon:'📅',
+          m:`${l.Driver} — LEAVE (휴무) ${range} (${l.Days||1} day(s)) · ${l.Reason||''}`});
+      }
+    });
+  }
   als.sort((a,b)=>a.sort-b.sort);
   document.getElementById('alct').textContent=als.length+'건';
   document.getElementById('als').innerHTML=als.length
@@ -9224,6 +9258,8 @@ async function loadAllFromSheets(){
     startAdminAutoSync();
     await loadNoticesFromGAS();
     await initNoticesIfEmpty();
+    // ★ Leave 데이터 로드 (대시보드 알림 + 가용현황용)
+    try { await loadAdminLeaves(); rDash(); } catch(e) { console.warn('Leave load failed', e); }
   } catch(e){
     console.error('loadAllFromSheets error:', e);
     document.getElementById('sl').classList.remove('on');
@@ -10178,6 +10214,74 @@ async function savePDToSheets(){
 // ═══════════════════════════════════════
 let _adminLeaves = [];
 let _leaveFilter = 'Pending';
+let _leaveWeekOffset = 0;
+
+function shiftLeaveWeek(dir){
+  _leaveWeekOffset += dir;
+  renderLeaveAvailGrid();
+}
+
+function renderLeaveAvailGrid(){
+  const el = document.getElementById('leave-avail-grid');
+  if(!el) return;
+  const drivers = (DB.D||[]).map(d=>d.Name_KR||d.Name_EN).filter(Boolean);
+  if(!drivers.length){ el.innerHTML='<div style="text-align:center;color:var(--t3);padding:12px;font-size:12px;">No drivers (드라이버 없음)</div>'; return; }
+
+  // Calculate week Mon~Sun
+  const today = new Date();
+  const dayOfWeek = (today.getDay()+6)%7; // Mon=0
+  const mon = new Date(today); mon.setDate(today.getDate() - dayOfWeek + (_leaveWeekOffset*7));
+  const dates = [];
+  const dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  for(let i=0;i<7;i++){
+    const d = new Date(mon); d.setDate(mon.getDate()+i);
+    const dd=String(d.getDate()).padStart(2,'0'), mm=String(d.getMonth()+1).padStart(2,'0'), yy=d.getFullYear();
+    dates.push({iso:yy+'-'+mm+'-'+dd, display:dd+'/'+mm, ddmmyyyy:dd+'/'+mm+'/'+yy, day:dayNames[i]});
+  }
+
+  // Week label
+  document.getElementById('leave-week-label').textContent = dates[0].ddmmyyyy+' ~ '+dates[6].ddmmyyyy;
+
+  // Build leave lookup: {driver: {isoDate: status}}
+  const leaveLookup = {};
+  (_adminLeaves||[]).forEach(l=>{
+    if(l.Status!=='Approved' && l.Status!=='Pending') return;
+    const driver = l.Driver;
+    if(!leaveLookup[driver]) leaveLookup[driver]={};
+    const from = parseToISO(fmtDate(l.Date_From)||l.Date_From);
+    const to = parseToISO(fmtDate(l.Date_To)||l.Date_To);
+    if(!from) return;
+    const cur = new Date(from+'T00:00:00');
+    const end = new Date((to||from)+'T00:00:00');
+    while(cur<=end){
+      const iso = cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0')+'-'+String(cur.getDate()).padStart(2,'0');
+      leaveLookup[driver][iso] = l.Status; // Approved or Pending
+      cur.setDate(cur.getDate()+1);
+    }
+  });
+
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+  html += '<tr><th style="background:var(--s3);padding:8px 6px;text-align:left;border:1px solid var(--bd);font-weight:700;min-width:80px;">Driver (드라이버)</th>';
+  dates.forEach(d=>{
+    const isToday = d.iso === (today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0'));
+    html += `<th style="background:${isToday?'var(--acd)':'var(--s3)'};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;min-width:55px;"><div>${d.day}</div><div style="font-size:10px;font-weight:400;">${d.display}</div></th>`;
+  });
+  html += '</tr>';
+
+  drivers.forEach(drv=>{
+    html += `<tr><td style="padding:8px 6px;border:1px solid var(--bd);font-weight:700;color:var(--t1);">${drv}</td>`;
+    dates.forEach(d=>{
+      const status = leaveLookup[drv]?.[d.iso];
+      let bg='#ecfdf5', tx='#059669', label='✅';
+      if(status==='Approved'){ bg='#fef2f2'; tx='#dc2626'; label='🚫 LEAVE'; }
+      else if(status==='Pending'){ bg='#fefce8'; tx='#ca8a04'; label='⏳'; }
+      html += `<td style="background:${bg};color:${tx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;font-size:11px;">${label}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</table>';
+  el.innerHTML = html;
+}
 
 function setLeaveFilter(f){
   _leaveFilter = f;
@@ -10198,6 +10302,7 @@ async function loadAdminLeaves(){
     else { _adminLeaves = []; }
   }catch(e){ _adminLeaves = []; }
   renderAdminLeaveList();
+  renderLeaveAvailGrid();
 }
 
 function renderAdminLeaveList(){
