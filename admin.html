@@ -9310,10 +9310,12 @@ async function loadAllFromSheets(){
     startAdminAutoSync();
     await loadNoticesFromGAS();
     await initNoticesIfEmpty();
-    // ★ Leave 데이터 로드 (대시보드 알림 + 가용현황용)
-    try { await loadAdminLeaves(); } catch(e) { console.warn('Leave load failed', e); }
-    // ★ Fatigue compliance 데이터 로드
-    try { await loadFatigueAlerts(); } catch(e) { console.warn('Fatigue check failed', e); }
+    // ★ Leave + Fatigue 데이터 병렬 로드 (대시보드 알림용)
+    await Promise.allSettled([
+      loadAdminLeaves().catch(e=>console.warn('Leave load failed',e)),
+      loadFatigueAlerts().catch(e=>console.warn('Fatigue check failed',e))
+    ]);
+    console.log('[Dashboard] Leave alerts:', window._adminLeaves?.length||0, 'Fatigue alerts:', window._fatigueAlerts?.length||0);
     rDash();
   } catch(e){
     console.error('loadAllFromSheets error:', e);
