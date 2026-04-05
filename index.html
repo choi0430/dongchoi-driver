@@ -1485,6 +1485,55 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   </div>
 </div>
 
+<!-- ═══ LEAVE REQUEST PAGE ═══ -->
+<div class="page" id="page-leave">
+  <div style="padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <div>
+        <div style="font-size:20px;font-weight:800;color:var(--text);">📅 휴무 요청</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px;">기본적으로 모든 날은 근무 가능입니다</div>
+      </div>
+      <button class="btn btn-primary" style="width:auto;padding:10px 16px;font-size:13px;border-radius:10px;" onclick="showLeaveForm()">+ 새 요청</button>
+    </div>
+
+    <div id="leave-form-container" style="display:none;margin-bottom:20px;">
+      <div style="background:var(--surface);border-radius:var(--radius);padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1.5px solid var(--border);">
+        <div style="font-weight:700;font-size:15px;margin-bottom:16px;color:var(--text);">새 휴무 요청</div>
+        <div class="form-group">
+          <label class="form-label">시작일 <span class="req">*</span></label>
+          <input type="date" id="leave-date-from" class="form-input">
+        </div>
+        <div class="form-group">
+          <label class="form-label">종료일 <span class="req">*</span></label>
+          <input type="date" id="leave-date-to" class="form-input">
+        </div>
+        <div class="form-group">
+          <label class="form-label">사유</label>
+          <select id="leave-reason" class="form-select" onchange="document.getElementById('leave-reason-etc-group').style.display=this.value==='기타'?'block':'none'">
+            <option value="개인 사유">개인 사유</option>
+            <option value="병가">병가</option>
+            <option value="가족 행사">가족 행사</option>
+            <option value="차량 정비">차량 정비</option>
+            <option value="기타">기타</option>
+          </select>
+        </div>
+        <div class="form-group" id="leave-reason-etc-group" style="display:none;">
+          <label class="form-label">기타 사유</label>
+          <input type="text" id="leave-reason-etc" class="form-input" placeholder="사유를 입력하세요">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px;">
+          <button class="btn btn-green" style="flex:1;" onclick="submitLeaveRequest()">✓ 요청 제출</button>
+          <button class="btn btn-secondary" style="flex:1;" onclick="hideLeaveForm()">취소</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="my-leave-list" style="margin-top:8px;">
+      <div style="padding:40px 20px;text-align:center;color:var(--muted);"><div style="font-size:40px;margin-bottom:12px;">📋</div>휴무 요청 내역이 없습니다</div>
+    </div>
+  </div>
+</div>
+
 </div><!-- /screen -->
 
 <!-- BOTTOM NAV -->
@@ -1496,6 +1545,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   <div class="nav-item" onclick="showPage('pay');renderPay();" id="nav-pay"><div class="nav-icon">💰</div>급여</div>
   <div class="nav-item" onclick="showPage('defect');renderMyDefects();" id="nav-defect"><div class="nav-icon">🔧</div>결함</div>
   <div class="nav-item" onclick="showPage('mot');initMotForm();" id="nav-mot"><div class="nav-icon">🚔</div>MOT</div>
+  <div class="nav-item" onclick="showPage('leave');loadMyLeaves();" id="nav-leave"><div class="nav-icon">📅</div>휴무</div>
 </div>
 </div><!-- /app -->
 
@@ -9035,6 +9085,79 @@ async function submitCorrectionRequest() {
   closeCorrectionModal();
   showToast('📋 수정 요청 내용이 복사되었습니다. 카카오톡에서 붙여넣기 해주세요','success');
   setTimeout(()=>{ window.open('https://open.kakao.com/o/gwqO8ili','_blank'); }, 500);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEAVE REQUEST — 휴무 요청 기능
+// ═══════════════════════════════════════════════════════════════════════════
+
+function showLeaveForm(){
+  document.getElementById('leave-form-container').style.display='block';
+  const tm=new Date(); tm.setDate(tm.getDate()+1);
+  document.getElementById('leave-date-from').value=tm.toISOString().slice(0,10);
+  document.getElementById('leave-date-to').value=tm.toISOString().slice(0,10);
+}
+function hideLeaveForm(){ document.getElementById('leave-form-container').style.display='none'; }
+
+async function submitLeaveRequest(){
+  const dateFrom=document.getElementById('leave-date-from').value;
+  const dateTo=document.getElementById('leave-date-to').value;
+  let reason=document.getElementById('leave-reason').value;
+  if(!dateFrom||!dateTo){ showToast('⚠️ 날짜를 선택하세요','error'); return; }
+  if(new Date(dateTo)<new Date(dateFrom)){ showToast('⚠️ 종료일이 시작일보다 빠릅니다','error'); return; }
+  const today=new Date(); today.setHours(0,0,0,0);
+  if(new Date(dateFrom)<today){ showToast('⚠️ 과거 날짜는 선택할 수 없습니다','error'); return; }
+  if(reason==='기타') reason=document.getElementById('leave-reason-etc').value||'기타';
+
+  const btn=document.querySelector('button[onclick="submitLeaveRequest()"]');
+  if(btn){btn.disabled=true;btn.textContent='⏳ 제출 중...';}
+  try{
+    const res=await submitToSheets('submit_leave_request',{
+      Driver:currentDriver?.name||'',
+      Date_From:dateFrom,
+      Date_To:dateTo,
+      Reason:reason
+    });
+    if(res?.ok){
+      showToast('✅ 휴무 요청이 제출되었습니다. 관리자 승인을 기다려주세요.','success');
+      hideLeaveForm(); loadMyLeaves();
+    } else { showToast('⚠️ '+(res?.error||'제출 실패'),'error'); }
+  }catch(e){ showToast('⚠️ 네트워크 오류','error'); }
+  if(btn){btn.disabled=false;btn.textContent='✓ 요청 제출';}
+}
+
+async function loadMyLeaves(){
+  const el=document.getElementById('my-leave-list');
+  const dn=currentDriver?.name||'';
+  try{
+    const res=await fetch(APPS_SCRIPT_URL+'?action=get_my_leave_requests&driver='+encodeURIComponent(dn));
+    const json=await res.json();
+    if(!json?.ok||!json.requests?.length){
+      el.innerHTML=`<div style="padding:40px 20px;text-align:center;color:var(--muted);">
+        <div style="font-size:40px;margin-bottom:12px;">📋</div>
+        <div>휴무 요청 내역이 없습니다</div>
+        <div style="font-size:12px;margin-top:4px;">위의 "+ 새 요청" 버튼으로 휴무를 요청하세요</div></div>`;
+      return;
+    }
+    el.innerHTML=json.requests.map(r=>{
+      const sc={Pending:{bg:'#FFF2CC',tx:'#856404',ic:'⏳',lb:'대기 중'},Approved:{bg:'#C6EFCE',tx:'#155724',ic:'✅',lb:'승인됨'},Rejected:{bg:'#FFC7CE',tx:'#721C24',ic:'❌',lb:'거절됨'}};
+      const s=sc[r.Status]||sc.Pending;
+      const days=r.Days||1;
+      return `<div style="background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:10px;border:1.5px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-weight:700;font-size:14px;color:var(--text);">${r.Date_From}${r.Date_From!==r.Date_To?' ~ '+r.Date_To:''}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:3px;">${days}일 · ${r.Reason||'사유 없음'}</div>
+          </div>
+          <div style="background:${s.bg};color:${s.tx};padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;">${s.ic} ${s.lb}</div>
+        </div>
+        ${r.Admin_Note?`<div style="margin-top:10px;padding:8px 12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);">💬 관리자: ${r.Admin_Note}</div>`:''}
+        <div style="font-size:11px;color:var(--muted);margin-top:6px;">요청: ${r.Requested_At}${r.Reviewed_At?' · 검토: '+r.Reviewed_At:''}</div>
+      </div>`;
+    }).join('');
+  }catch(e){
+    el.innerHTML=`<div style="padding:20px;text-align:center;color:var(--red);">⚠️ 데이터 로딩 실패</div>`;
+  }
 }
 
 </script>

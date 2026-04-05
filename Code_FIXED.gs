@@ -216,6 +216,13 @@ function doGet(e) {
         return cors(getBusDamage(dmgRego));
       }
 
+      // ── Leave Requests (GET) ──
+      case 'get_my_leave_requests':
+        return cors(getMyLeaveRequests(driver));
+
+      case 'get_all_leave_requests':
+        return cors(getAllLeaveRequests(e.parameter.filter));
+
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
     }
@@ -443,6 +450,13 @@ function doPost(e) {
       // ── Bus Damage Markers ──
       case 'save_bus_damage':
         return cors(saveBusDamage(payload.rego, payload.markers, payload.driver));
+
+      // ── Leave Requests (POST) ──
+      case 'submit_leave_request':
+        return cors(submitLeaveRequest(payload.data));
+
+      case 'review_leave_request':
+        return cors(reviewLeaveRequest(payload.data));
 
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
@@ -1834,4 +1848,161 @@ function saveBusDamage(rego, markers, driver) {
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEAVE REQUEST SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+
+function ensureLeaveSheet_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sh = ss.getSheetByName('Leave_Requests');
+  if (!sh) {
+    sh = ss.insertSheet('Leave_Requests');
+    const headers = [
+      'Request_ID','Driver','Date_From','Date_To','Days','Reason',
+      'Status','Requested_At','Reviewed_At','Reviewed_By','Admin_Note'
+    ];
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold').setBackground('#1B2A4A').setFontColor('#FFFFFF');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function submitLeaveRequest(data) {
+  const sh = ensureLeaveSheet_();
+  const syd = Utilities.formatDate(new Date(), 'Australia/Sydney', 'dd/MM/yyyy HH:mm');
+  const from = new Date(data.Date_From);
+  const to = new Date(data.Date_To);
+  const days = Math.round((to - from) / (1000 * 60 * 60 * 24)) + 1;
+
+  const existing = sh.getDataRange().getValues();
+  const headers = existing[0];
+  const driverIdx = headers.indexOf('Driver');
+  const fromIdx = headers.indexOf('Date_From');
+  const statusIdx = headers.indexOf('Status');
+  for (let i = 1; i < existing.length; i++) {
+    if (existing[i][driverIdx] === data.Driver &&
+        existing[i][statusIdx] === 'Pending' &&
+        existing[i][fromIdx] === data.Date_From) {
+      return { ok: false, error: '이미 같은 날짜에 대기 중인 요청이 있습니다.' };
+    }
+  }
+
+  const requestId = 'LR_' + Date.now();
+  sh.appendRow([
+    requestId, data.Driver, data.Date_From, data.Date_To, days,
+    data.Reason || '', 'Pending', syd, '', '', ''
+  ]);
+  return { ok: true, requestId: requestId, message: '휴무 요청이 제출되었습니다.' };
+}
+
+function getMyLeaveRequests(driverName) {
+  const sh = ensureLeaveSheet_();
+  const data = sh.getDataRange().getValues();
+  if (data.length <= 1) return { ok: true, requests: [] };
+  const headers = data[0];
+  const results = [];
+  for (let i = 1; i < data.length; i++) {
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h] = data[i][idx]; });
+    if (obj.Driver === driverName) results.push(obj);
+  }
+  results.reverse();
+  return { ok: true, requests: results };
+}
+
+function getAllLeaveRequests(filter) {
+  const sh = ensureLeaveSheet_();
+  const data = sh.getDataRange().getValues();
+  if (data.length <= 1) return { ok: true, requests: [] };
+  const headers = data[0];
+  const results = [];
+  for (let i = 1; i < data.length; i++) {
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h] = data[i][idx]; });
+    obj._row = i + 1;
+    if (filter === 'all' || !filter || obj.Status === filter) results.push(obj);
+  }
+  results.sort((a, b) => (a.Status === 'Pending' ? -1 : 1) - (b.Status === 'Pending' ? -1 : 1));
+  return { ok: true, requests: results };
+}
+
+function reviewLeaveRequest(data) {
+  const sh = ensureLeaveSheet_();
+  const allData = sh.getDataRange().getValues();
+  const headers = allData[0];
+  const idIdx = headers.indexOf('Request_ID');
+  const statusIdx = headers.indexOf('Status');
+  const reviewedAtIdx = headers.indexOf('Reviewed_At');
+  const reviewedByIdx = headers.indexOf('Reviewed_By');
+  const adminNoteIdx = headers.indexOf('Admin_Note');
+  const syd = Utilities.formatDate(new Date(), 'Australia/Sydney', 'dd/MM/yyyy HH:mm');
+
+  let targetRow = -1;
+  for (let i = 1; i < allData.length; i++) {
+    if (allData[i][idIdx] === data.Request_ID) { targetRow = i + 1; break; }
+  }
+  if (targetRow === -1) return { ok: false, error: '요청을 찾을 수 없습니다.' };
+
+  sh.getRange(targetRow, statusIdx + 1).setValue(data.Status);
+  sh.getRange(targetRow, reviewedAtIdx + 1).setValue(syd);
+  sh.getRange(targetRow, reviewedByIdx + 1).setValue(data.Reviewed_By || 'Admin');
+  sh.getRange(targetRow, adminNoteIdx + 1).setValue(data.Admin_Note || '');
+
+  const rowRange = sh.getRange(targetRow, 1, 1, headers.length);
+  if (data.Status === 'Approved') {
+    rowRange.setBackground('#C6EFCE');
+    syncLeaveToRoster_(allData[targetRow - 1], headers);
+  } else if (data.Status === 'Rejected') {
+    rowRange.setBackground('#FFC7CE');
+  }
+  return { ok: true, message: data.Status === 'Approved' ? '승인 완료' : '거절 완료' };
+}
+
+function syncLeaveToRoster_(rowData, headers) {
+  try {
+    const driver = rowData[headers.indexOf('Driver')];
+    const dateFrom = rowData[headers.indexOf('Date_From')];
+    const dateTo = rowData[headers.indexOf('Date_To')];
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let rosterSheet = ss.getSheetByName('Driver_Roster');
+    if (!rosterSheet) {
+      rosterSheet = ss.insertSheet('Driver_Roster');
+      rosterSheet.getRange(1, 1, 1, 5).setValues([['Driver','Date','Status','Updated_At','Source']]);
+      rosterSheet.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#1B2A4A').setFontColor('#FFFFFF');
+      rosterSheet.setFrozenRows(1);
+    }
+    const syd = Utilities.formatDate(new Date(), 'Australia/Sydney', 'dd/MM/yyyy HH:mm');
+    const from = parseDateFlexible_(dateFrom);
+    const to = parseDateFlexible_(dateTo);
+    const current = new Date(from);
+    while (current <= to) {
+      const dateStr = Utilities.formatDate(current, 'Australia/Sydney', 'dd/MM/yyyy');
+      const existing = rosterSheet.getDataRange().getValues();
+      let found = false;
+      for (let i = 1; i < existing.length; i++) {
+        if (existing[i][0] === driver && existing[i][1] === dateStr) {
+          rosterSheet.getRange(i + 1, 3).setValue('LEAVE');
+          rosterSheet.getRange(i + 1, 4).setValue(syd);
+          rosterSheet.getRange(i + 1, 5).setValue('Auto - Leave Approved');
+          found = true; break;
+        }
+      }
+      if (!found) rosterSheet.appendRow([driver, dateStr, 'LEAVE', syd, 'Auto - Leave Approved']);
+      current.setDate(current.getDate() + 1);
+    }
+  } catch (e) { Logger.log('Roster sync error: ' + e.toString()); }
+}
+
+function parseDateFlexible_(dateStr) {
+  if (!dateStr) return new Date();
+  const str = String(dateStr);
+  if (str.includes('/')) {
+    const p = str.split('/');
+    return new Date(p[2], p[1] - 1, p[0]);
+  }
+  return new Date(str);
 }
