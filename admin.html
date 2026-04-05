@@ -1318,6 +1318,38 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 </div>
 </div>
 
+<!-- LEAVE MANAGEMENT (휴무 관리) -->
+<div class="pg" id="pleave">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">📅 Leave Management (휴무 관리)</div><div class="ssb">Driver leave requests - Approve / Reject (드라이버 휴무 요청 승인/거절)</div></div>
+    <button class="btn-refresh" onclick="withRefreshSpin(this,()=>loadAdminLeaves())"><span class="refresh-icon">🔄</span> Sync (동기화)</button>
+  </div>
+
+  <!-- Filter tabs -->
+  <div style="display:flex;gap:0;padding:10px 14px 0;">
+    <button id="leave-fil-pending" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;" onclick="setLeaveFilter('Pending')">⏳ Pending (대기)</button>
+    <button id="leave-fil-approved" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="setLeaveFilter('Approved')">✅ Approved (승인)</button>
+    <button id="leave-fil-rejected" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="setLeaveFilter('Rejected')">❌ Rejected (거절)</button>
+    <button id="leave-fil-all" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="setLeaveFilter('all')">All (전체)</button>
+  </div>
+
+  <div id="admin-leave-list" style="padding:12px 14px 80px;"></div>
+</div>
+
+<!-- LEAVE REVIEW MODAL -->
+<div class="movl" id="leave-review-modal" onclick="if(event.target===this)closeLeaveModal()" style="display:none;">
+<div class="msh">
+  <div class="mhd"></div>
+  <div class="mtt">📅 Leave Review (휴무 검토)</div>
+  <div id="leave-review-body" style="max-height:60vh;overflow-y:auto;padding:0 4px;"></div>
+  <div class="mft">
+    <button class="btn bgh" style="flex:1" onclick="closeLeaveModal()">Close (닫기)</button>
+    <button class="btn" style="flex:1;background:#e02424;color:#fff;" onclick="reviewLeave('Rejected')">❌ Reject (거절)</button>
+    <button class="btn" style="flex:1;background:#0e9f6e;color:#fff;" onclick="reviewLeave('Approved')">✅ Approve (승인)</button>
+  </div>
+</div>
+</div>
+
 </div><!-- /cont -->
 
 <!-- BOTTOM NAV (카테고리 그룹핑) -->
@@ -1343,6 +1375,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="ni" id="ndr" onclick="nv('pdr','ndr');loadDR()"><div class="nie">📋</div><div class="nil">리포트</div></div>
     <div class="ni" id="nshift" onclick="nv('pshift','nshift');loadShiftReports()"><div class="nie">🚌</div><div class="nil">Shift Logs (운행일지)</div></div>
     <div class="ni" id="nmot" onclick="nv('pmot','nmot');rMot()"><div class="nie">🚔</div><div class="nil">MOT</div></div>
+    <div class="ni" id="nleave" onclick="nv('pleave','nleave');loadAdminLeaves()"><div class="nie">📅</div><div class="nil">Leave (휴무)</div></div>
   </div>
   <div class="bnav-group">
     <div class="bnav-group-label">정산</div>
@@ -1596,6 +1629,7 @@ function nv(pg,ni){
     pinv:  ()=>initInvoice(),
     pquo:  ()=>initQuotation(),
     pnotice: ()=>loadNoticesFromGAS(),
+    pleave: ()=>renderAdminLeaveList(),
   };
 
   // GAS에서 새로 로드하는 맵 (캐시 만료 시에만 실행)
@@ -1614,6 +1648,7 @@ function nv(pg,ni){
     pinv:  ()=>initInvoice(),
     pquo:  ()=>initQuotation(),
     pnotice: ()=>loadNoticesFromGAS(),
+    pleave: ()=>loadAdminLeaves(),
   };
 
   if(isStale && syncMap[pg]){
@@ -10136,6 +10171,156 @@ async function savePDToSheets(){
     await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'replace_master',sheet:'M_PriceDriver',rows})});
   } catch(e){ console.error('savePDToSheets error:',e); }
+}
+
+// ═══════════════════════════════════════
+// LEAVE MANAGEMENT (휴무 관리)
+// ═══════════════════════════════════════
+let _adminLeaves = [];
+let _leaveFilter = 'Pending';
+
+function setLeaveFilter(f){
+  _leaveFilter = f;
+  ['Pending','Approved','Rejected','all'].forEach(k=>{
+    const btn = document.getElementById('leave-fil-'+k.toLowerCase());
+    if(btn){ btn.classList.toggle('on', k===f); }
+  });
+  renderAdminLeaveList();
+}
+
+async function loadAdminLeaves(){
+  const el = document.getElementById('admin-leave-list');
+  el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--t3);">⏳ Loading (로딩 중)...</div>';
+  try{
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_all_leave_requests&filter=all');
+    const json = await res.json();
+    if(json?.ok){ _adminLeaves = json.requests || []; }
+    else { _adminLeaves = []; }
+  }catch(e){ _adminLeaves = []; }
+  renderAdminLeaveList();
+}
+
+function renderAdminLeaveList(){
+  const el = document.getElementById('admin-leave-list');
+  const filtered = _leaveFilter === 'all' ? _adminLeaves : _adminLeaves.filter(r=>r.Status===_leaveFilter);
+
+  // Count badges
+  const counts = {Pending:0,Approved:0,Rejected:0};
+  _adminLeaves.forEach(r=>{ if(counts[r.Status]!==undefined) counts[r.Status]++; });
+  const total = _adminLeaves.length;
+  document.getElementById('leave-fil-pending').textContent = '⏳ Pending (대기) '+counts.Pending;
+  document.getElementById('leave-fil-approved').textContent = '✅ Approved (승인) '+counts.Approved;
+  document.getElementById('leave-fil-rejected').textContent = '❌ Rejected (거절) '+counts.Rejected;
+  document.getElementById('leave-fil-all').textContent = 'All (전체) '+total;
+
+  if(!filtered.length){
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--t3);"><div style="font-size:40px;margin-bottom:12px;">📋</div><div>No leave requests (휴무 요청 없음)</div></div>';
+    return;
+  }
+
+  el.innerHTML = filtered.map((r,i)=>{
+    const sc = {
+      Pending:  {bg:'#FFF2CC',tx:'#856404',lb:'⏳ Pending (대기)'},
+      Approved: {bg:'#C6EFCE',tx:'#155724',lb:'✅ Approved (승인)'},
+      Rejected: {bg:'#FFC7CE',tx:'#721C24',lb:'❌ Rejected (거절)'}
+    };
+    const s = sc[r.Status] || sc.Pending;
+    const dateFrom = fmtDate(r.Date_From) || r.Date_From;
+    const dateTo = fmtDate(r.Date_To) || r.Date_To;
+    const dateRange = dateFrom === dateTo ? dateFrom : dateFrom+' ~ '+dateTo;
+    const isPending = r.Status === 'Pending';
+
+    return `<div style="background:var(--s1);border-radius:var(--rr);padding:16px;margin-bottom:10px;border:1.5px solid var(--b2);${isPending?'cursor:pointer;':''}box-shadow:0 1px 3px rgba(0,0,0,.04);" ${isPending?`onclick="openLeaveReview(${i})"`:''}>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:800;font-size:15px;color:var(--t1);">👤 ${r.Driver||'-'}</div>
+          <div style="font-weight:700;font-size:13px;color:var(--t2);margin-top:4px;">📅 ${dateRange}</div>
+          <div style="font-size:12px;color:var(--t3);margin-top:3px;">${r.Days||1} day(s) (일) · ${r.Reason||'No reason (사유 없음)'}</div>
+        </div>
+        <div style="background:${s.bg};color:${s.tx};padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap;">${s.lb}</div>
+      </div>
+      ${r.Admin_Note?`<div style="margin-top:10px;padding:8px 12px;background:var(--s2);border-radius:8px;font-size:12px;color:var(--t3);">💬 Admin Note (관리자 메모): ${r.Admin_Note}</div>`:''}
+      <div style="font-size:11px;color:var(--t3);margin-top:6px;">Requested (요청): ${r.Requested_At||'-'}${r.Reviewed_At?' · Reviewed (검토): '+r.Reviewed_At:''}</div>
+    </div>`;
+  }).join('');
+}
+
+let _leaveReviewIdx = -1;
+
+function openLeaveReview(idx){
+  const filtered = _leaveFilter === 'all' ? _adminLeaves : _adminLeaves.filter(r=>r.Status===_leaveFilter);
+  const r = filtered[idx];
+  if(!r || r.Status !== 'Pending') return;
+  _leaveReviewIdx = idx;
+
+  const dateFrom = fmtDate(r.Date_From) || r.Date_From;
+  const dateTo = fmtDate(r.Date_To) || r.Date_To;
+  const dateRange = dateFrom === dateTo ? dateFrom : dateFrom+' ~ '+dateTo;
+
+  document.getElementById('leave-review-body').innerHTML = `
+    <div style="padding:8px 0;">
+      <div style="font-size:11px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Driver (드라이버)</div>
+      <div style="font-size:16px;font-weight:800;color:var(--t1);margin-top:4px;">👤 ${r.Driver}</div>
+    </div>
+    <div style="padding:8px 0;border-top:1px solid var(--b1);">
+      <div style="font-size:11px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Date (날짜)</div>
+      <div style="font-size:15px;font-weight:700;color:var(--t1);margin-top:4px;">📅 ${dateRange} (${r.Days||1} day(s))</div>
+    </div>
+    <div style="padding:8px 0;border-top:1px solid var(--b1);">
+      <div style="font-size:11px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Reason (사유)</div>
+      <div style="font-size:14px;color:var(--t1);margin-top:4px;">${r.Reason||'No reason (사유 없음)'}</div>
+    </div>
+    <div style="padding:8px 0;border-top:1px solid var(--b1);">
+      <div style="font-size:11px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Requested At (요청 일시)</div>
+      <div style="font-size:13px;color:var(--t2);margin-top:4px;">${r.Requested_At||'-'}</div>
+    </div>
+    <div style="padding:8px 0;border-top:1px solid var(--b1);">
+      <div style="font-size:11px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Admin Note (관리자 메모)</div>
+      <textarea id="leave-admin-note" style="width:100%;margin-top:6px;padding:10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;font-family:var(--fd);min-height:60px;resize:vertical;" placeholder="Optional note (선택사항)"></textarea>
+    </div>`;
+
+  document.getElementById('leave-review-modal').style.display = 'flex';
+}
+
+function closeLeaveModal(){
+  document.getElementById('leave-review-modal').style.display = 'none';
+  _leaveReviewIdx = -1;
+}
+
+async function reviewLeave(status){
+  const filtered = _leaveFilter === 'all' ? _adminLeaves : _adminLeaves.filter(r=>r.Status===_leaveFilter);
+  const r = filtered[_leaveReviewIdx];
+  if(!r) return;
+
+  const note = document.getElementById('leave-admin-note')?.value || '';
+  const confirmMsg = status === 'Approved'
+    ? `Approve leave for ${r.Driver}?\n${r.Driver}의 휴무를 승인하시겠습니까?`
+    : `Reject leave for ${r.Driver}?\n${r.Driver}의 휴무를 거절하시겠습니까?`;
+  if(!confirm(confirmMsg)) return;
+
+  try{
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({
+        action:'review_leave_request',
+        Request_ID: r.Request_ID,
+        Status: status,
+        Reviewed_By: localStorage.getItem('dc_admin_session') || 'Admin',
+        Admin_Note: note
+      })
+    });
+    const json = await res.json();
+    if(json?.ok){
+      toast(status==='Approved'?'✅ Approved (승인 완료)':'❌ Rejected (거절 완료)','ok');
+      closeLeaveModal();
+      loadAdminLeaves();
+    } else {
+      toast('⚠️ '+(json?.error||'Error'),'err');
+    }
+  }catch(e){
+    toast('⚠️ Network error (네트워크 오류)','err');
+  }
 }
 
 </script>
