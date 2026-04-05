@@ -10350,13 +10350,13 @@ function renderAdminLeaveList(){
   }).join('');
 }
 
-let _leaveReviewIdx = -1;
+let _leaveReviewItem = null;
 
 function openLeaveReview(idx){
   const filtered = _leaveFilter === 'all' ? _adminLeaves : _adminLeaves.filter(r=>r.Status===_leaveFilter);
   const r = filtered[idx];
   if(!r || r.Status !== 'Pending') return;
-  _leaveReviewIdx = idx;
+  _leaveReviewItem = r;
 
   const dateFrom = fmtDate(r.Date_From) || r.Date_From;
   const dateTo = fmtDate(r.Date_To) || r.Date_To;
@@ -10389,13 +10389,12 @@ function openLeaveReview(idx){
 
 function closeLeaveModal(){
   document.getElementById('leave-review-modal').style.display = 'none';
-  _leaveReviewIdx = -1;
+  _leaveReviewItem = null;
 }
 
 async function reviewLeave(status){
-  const filtered = _leaveFilter === 'all' ? _adminLeaves : _adminLeaves.filter(r=>r.Status===_leaveFilter);
-  const r = filtered[_leaveReviewIdx];
-  if(!r) return;
+  const r = _leaveReviewItem;
+  if(!r || !r.Request_ID) { toast('⚠️ No request selected (요청을 선택해주세요)','err'); return; }
 
   const note = document.getElementById('leave-admin-note')?.value || '';
   const confirmMsg = status === 'Approved'
