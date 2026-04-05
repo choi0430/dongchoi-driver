@@ -1501,11 +1501,19 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
         <div style="font-weight:700;font-size:15px;margin-bottom:16px;color:var(--text);">New Leave Request (새 휴무 요청)</div>
         <div class="form-group">
           <label class="form-label">Start Date (시작일) <span class="req">*</span></label>
-          <input type="date" id="leave-date-from" class="form-input">
+          <div style="display:flex;gap:6px;position:relative;">
+            <input type="text" class="form-input" id="leave-date-from" placeholder="dd/MM/yyyy" readonly style="flex:1;">
+            <button type="button" onclick="openDatePicker('leave-date-from')" style="padding:0 11px;height:44px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:17px;cursor:pointer;flex-shrink:0;">📅</button>
+            <input type="date" id="leave-date-from-native" style="position:absolute;right:0;top:0;width:44px;height:44px;opacity:0;pointer-events:none;" onchange="setDateFromPicker('leave-date-from-native','leave-date-from')">
+          </div>
         </div>
         <div class="form-group">
           <label class="form-label">End Date (종료일) <span class="req">*</span></label>
-          <input type="date" id="leave-date-to" class="form-input">
+          <div style="display:flex;gap:6px;position:relative;">
+            <input type="text" class="form-input" id="leave-date-to" placeholder="dd/MM/yyyy" readonly style="flex:1;">
+            <button type="button" onclick="openDatePicker('leave-date-to')" style="padding:0 11px;height:44px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:17px;cursor:pointer;flex-shrink:0;">📅</button>
+            <input type="date" id="leave-date-to-native" style="position:absolute;right:0;top:0;width:44px;height:44px;opacity:0;pointer-events:none;" onchange="setDateFromPicker('leave-date-to-native','leave-date-to')">
+          </div>
         </div>
         <div class="form-group">
           <label class="form-label">Reason (사유)</label>
@@ -9098,25 +9106,25 @@ async function submitCorrectionRequest() {
 function showLeaveForm(){
   document.getElementById('leave-form-container').style.display='block';
   const tm=new Date(); tm.setDate(tm.getDate()+1);
-  document.getElementById('leave-date-from').value=tm.toISOString().slice(0,10);
-  document.getElementById('leave-date-to').value=tm.toISOString().slice(0,10);
+  const dd=String(tm.getDate()).padStart(2,'0'), mm=String(tm.getMonth()+1).padStart(2,'0'), yy=tm.getFullYear();
+  const tmStr=dd+'/'+mm+'/'+yy;
+  document.getElementById('leave-date-from').value=tmStr;
+  document.getElementById('leave-date-to').value=tmStr;
 }
 function hideLeaveForm(){ document.getElementById('leave-form-container').style.display='none'; const n=document.getElementById('leave-note'); if(n)n.value=''; }
 
 async function submitLeaveRequest(){
-  const dateFromRaw=document.getElementById('leave-date-from').value;
-  const dateToRaw=document.getElementById('leave-date-to').value;
+  const dateFrom=document.getElementById('leave-date-from').value; // already dd/MM/yyyy
+  const dateTo=document.getElementById('leave-date-to').value;
   let reason=document.getElementById('leave-reason').value;
-  if(!dateFromRaw||!dateToRaw){ showToast('⚠️ Please select dates (날짜를 선택하세요)','error'); return; }
-  if(new Date(dateToRaw)<new Date(dateFromRaw)){ showToast('⚠️ End date is before start date (종료일이 시작일보다 빠릅니다)','error'); return; }
+  if(!dateFrom||!dateTo){ showToast('⚠️ Please select dates (날짜를 선택하세요)','error'); return; }
+  // dd/MM/yyyy → Date for validation
+  const _toD=s=>{const p=s.split('/');return new Date(p[2],p[1]-1,p[0]);};
+  if(_toD(dateTo)<_toD(dateFrom)){ showToast('⚠️ End date is before start date (종료일이 시작일보다 빠릅니다)','error'); return; }
   const today=new Date(); today.setHours(0,0,0,0);
-  if(new Date(dateFromRaw)<today){ showToast('⚠️ Cannot select past dates (과거 날짜는 선택할 수 없습니다)','error'); return; }
+  if(_toD(dateFrom)<today){ showToast('⚠️ Cannot select past dates (과거 날짜는 선택할 수 없습니다)','error'); return; }
   if(reason==='기타') reason=document.getElementById('leave-reason-etc').value||'기타';
   const note=document.getElementById('leave-note')?.value?.trim()||'';
-  // Convert yyyy-MM-dd → dd/MM/yyyy
-  const toDDMMYYYY=s=>{const p=s.split('-');return p[2]+'/'+p[1]+'/'+p[0];};
-  const dateFrom=toDDMMYYYY(dateFromRaw);
-  const dateTo=toDDMMYYYY(dateToRaw);
 
   const btn=document.querySelector('button[onclick="submitLeaveRequest()"]');
   if(btn){btn.disabled=true;btn.textContent='⏳ Submitting (제출 중)...';}
