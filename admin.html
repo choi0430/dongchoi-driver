@@ -1886,9 +1886,19 @@ function rDash(){
         m:`${v.Rego} — Next Service (다음 서비스) ${_nSKM.toLocaleString()}km — No Current KM Data (현재 KM 데이터 없음)`});
     }
   });
-  // ── 승인된 휴무 알림 (Approved Leaves) ──
+  // ── 휴무 알림 (Leave Alerts) ──
   if(window._adminLeaves && window._adminLeaves.length){
     const today = parseToISO(fmtDate(new Date().toISOString()));
+    // ★ Pending 요청 — 승인 대기 중 (최우선 표시)
+    window._adminLeaves.filter(l=>l.Status==='Pending').forEach(l=>{
+      const dateFrom = fmtDate(l.Date_From)||l.Date_From;
+      const dateTo = fmtDate(l.Date_To)||l.Date_To;
+      const range = dateFrom===dateTo ? dateFrom : dateFrom+' ~ '+dateTo;
+      als.push({sort:-9000,type:'leave_pending',
+        bg:'#fef3c7',bc:'#f59e0b',fc:'#92400e',icon:'🔔',
+        m:`NEW (신규) — ${l.Driver} Leave Request (휴무 요청) ${range} (${l.Days||1} day(s)) · ${l.Reason||''} <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pleave','nleave');loadAdminLeaves()">Review → (검토하기)</span>`});
+    });
+    // Approved — 확정된 휴무
     window._adminLeaves.filter(l=>l.Status==='Approved').forEach(l=>{
       const from = parseToISO(fmtDate(l.Date_From)||l.Date_From);
       const to = parseToISO(fmtDate(l.Date_To)||l.Date_To);
