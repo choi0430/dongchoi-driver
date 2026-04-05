@@ -9100,14 +9100,18 @@ function showLeaveForm(){
 function hideLeaveForm(){ document.getElementById('leave-form-container').style.display='none'; }
 
 async function submitLeaveRequest(){
-  const dateFrom=document.getElementById('leave-date-from').value;
-  const dateTo=document.getElementById('leave-date-to').value;
+  const dateFromRaw=document.getElementById('leave-date-from').value;
+  const dateToRaw=document.getElementById('leave-date-to').value;
   let reason=document.getElementById('leave-reason').value;
-  if(!dateFrom||!dateTo){ showToast('⚠️ Please select dates (날짜를 선택하세요)','error'); return; }
-  if(new Date(dateTo)<new Date(dateFrom)){ showToast('⚠️ End date is before start date (종료일이 시작일보다 빠릅니다)','error'); return; }
+  if(!dateFromRaw||!dateToRaw){ showToast('⚠️ Please select dates (날짜를 선택하세요)','error'); return; }
+  if(new Date(dateToRaw)<new Date(dateFromRaw)){ showToast('⚠️ End date is before start date (종료일이 시작일보다 빠릅니다)','error'); return; }
   const today=new Date(); today.setHours(0,0,0,0);
-  if(new Date(dateFrom)<today){ showToast('⚠️ Cannot select past dates (과거 날짜는 선택할 수 없습니다)','error'); return; }
+  if(new Date(dateFromRaw)<today){ showToast('⚠️ Cannot select past dates (과거 날짜는 선택할 수 없습니다)','error'); return; }
   if(reason==='기타') reason=document.getElementById('leave-reason-etc').value||'기타';
+  // Convert yyyy-MM-dd → dd/MM/yyyy
+  const toDDMMYYYY=s=>{const p=s.split('-');return p[2]+'/'+p[1]+'/'+p[0];};
+  const dateFrom=toDDMMYYYY(dateFromRaw);
+  const dateTo=toDDMMYYYY(dateToRaw);
 
   const btn=document.querySelector('button[onclick="submitLeaveRequest()"]');
   if(btn){btn.disabled=true;btn.textContent='⏳ Submitting (제출 중)...';}

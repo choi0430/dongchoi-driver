@@ -1818,7 +1818,7 @@ function saveBusDamage(rego, markers, driver) {
     const markersCol = headers.indexOf('Markers');
     const updatedAtCol = headers.indexOf('UpdatedAt');
     const updatedByCol = headers.indexOf('UpdatedBy');
-    const now = Utilities.formatDate(new Date(), 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
+    const now = Utilities.formatDate(new Date(), 'Australia/Sydney', 'dd/MM/yyyy HH:mm:ss');
     const markersJson = JSON.stringify(markers || []);
 
     // 기존 행 찾기
@@ -1874,8 +1874,8 @@ function ensureLeaveSheet_() {
 function submitLeaveRequest(data) {
   const sh = ensureLeaveSheet_();
   const syd = Utilities.formatDate(new Date(), 'Australia/Sydney', 'dd/MM/yyyy HH:mm');
-  const from = new Date(data.Date_From);
-  const to = new Date(data.Date_To);
+  const from = parseDateFlexible_(data.Date_From);
+  const to = parseDateFlexible_(data.Date_To);
   const days = Math.round((to - from) / (1000 * 60 * 60 * 24)) + 1;
 
   const existing = sh.getDataRange().getValues();
@@ -1887,7 +1887,7 @@ function submitLeaveRequest(data) {
     if (existing[i][driverIdx] === data.Driver &&
         existing[i][statusIdx] === 'Pending' &&
         existing[i][fromIdx] === data.Date_From) {
-      return { ok: false, error: '이미 같은 날짜에 대기 중인 요청이 있습니다.' };
+      return { ok: false, error: 'Duplicate pending request for this date (이미 같은 날짜에 대기 중인 요청이 있습니다)' };
     }
   }
 
@@ -1896,7 +1896,7 @@ function submitLeaveRequest(data) {
     requestId, data.Driver, data.Date_From, data.Date_To, days,
     data.Reason || '', 'Pending', syd, '', '', ''
   ]);
-  return { ok: true, requestId: requestId, message: '휴무 요청이 제출되었습니다.' };
+  return { ok: true, requestId: requestId, message: 'Leave request submitted (휴무 요청이 제출되었습니다)' };
 }
 
 function getMyLeaveRequests(driverName) {
@@ -1945,7 +1945,7 @@ function reviewLeaveRequest(data) {
   for (let i = 1; i < allData.length; i++) {
     if (allData[i][idIdx] === data.Request_ID) { targetRow = i + 1; break; }
   }
-  if (targetRow === -1) return { ok: false, error: '요청을 찾을 수 없습니다.' };
+  if (targetRow === -1) return { ok: false, error: 'Request not found (요청을 찾을 수 없습니다)' };
 
   sh.getRange(targetRow, statusIdx + 1).setValue(data.Status);
   sh.getRange(targetRow, reviewedAtIdx + 1).setValue(syd);
@@ -1959,7 +1959,7 @@ function reviewLeaveRequest(data) {
   } else if (data.Status === 'Rejected') {
     rowRange.setBackground('#FFC7CE');
   }
-  return { ok: true, message: data.Status === 'Approved' ? '승인 완료' : '거절 완료' };
+  return { ok: true, message: data.Status === 'Approved' ? 'Approved (승인 완료)' : 'Rejected (거절 완료)' };
 }
 
 function syncLeaveToRoster_(rowData, headers) {
