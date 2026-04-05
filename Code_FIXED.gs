@@ -1899,6 +1899,15 @@ function submitLeaveRequest(data) {
   return { ok: true, requestId: requestId, message: 'Leave request submitted (휴무 요청이 제출되었습니다)' };
 }
 
+function formatLeaveCell_(val, header) {
+  if (!(val instanceof Date)) return val;
+  const tz = 'Australia/Sydney';
+  if (header === 'Date_From' || header === 'Date_To') {
+    return Utilities.formatDate(val, tz, 'dd/MM/yyyy');
+  }
+  return Utilities.formatDate(val, tz, 'dd/MM/yyyy HH:mm');
+}
+
 function getMyLeaveRequests(driverName) {
   const sh = ensureLeaveSheet_();
   const data = sh.getDataRange().getValues();
@@ -1907,7 +1916,7 @@ function getMyLeaveRequests(driverName) {
   const results = [];
   for (let i = 1; i < data.length; i++) {
     const obj = {};
-    headers.forEach((h, idx) => { obj[h] = data[i][idx]; });
+    headers.forEach((h, idx) => { obj[h] = formatLeaveCell_(data[i][idx], h); });
     if (obj.Driver === driverName) results.push(obj);
   }
   results.reverse();
@@ -1922,7 +1931,7 @@ function getAllLeaveRequests(filter) {
   const results = [];
   for (let i = 1; i < data.length; i++) {
     const obj = {};
-    headers.forEach((h, idx) => { obj[h] = data[i][idx]; });
+    headers.forEach((h, idx) => { obj[h] = formatLeaveCell_(data[i][idx], h); });
     obj._row = i + 1;
     if (filter === 'all' || !filter || obj.Status === filter) results.push(obj);
   }
