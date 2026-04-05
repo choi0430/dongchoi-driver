@@ -1521,6 +1521,10 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           <label class="form-label">Other Reason (기타 사유)</label>
           <input type="text" id="leave-reason-etc" class="form-input" placeholder="Enter reason (사유를 입력하세요)">
         </div>
+        <div class="form-group">
+          <label class="form-label">Note (메모) <span style="font-weight:400;color:var(--muted);font-size:11px;">Optional (선택사항)</span></label>
+          <textarea id="leave-note" class="form-input" rows="2" placeholder="Additional details (추가 설명이 있으면 입력하세요)" style="resize:vertical;"></textarea>
+        </div>
         <div style="display:flex;gap:8px;margin-top:16px;">
           <button class="btn btn-green" style="flex:1;" onclick="submitLeaveRequest()">✓ Submit (제출)</button>
           <button class="btn btn-secondary" style="flex:1;" onclick="hideLeaveForm()">Cancel (취소)</button>
@@ -9097,7 +9101,7 @@ function showLeaveForm(){
   document.getElementById('leave-date-from').value=tm.toISOString().slice(0,10);
   document.getElementById('leave-date-to').value=tm.toISOString().slice(0,10);
 }
-function hideLeaveForm(){ document.getElementById('leave-form-container').style.display='none'; }
+function hideLeaveForm(){ document.getElementById('leave-form-container').style.display='none'; const n=document.getElementById('leave-note'); if(n)n.value=''; }
 
 async function submitLeaveRequest(){
   const dateFromRaw=document.getElementById('leave-date-from').value;
@@ -9108,6 +9112,7 @@ async function submitLeaveRequest(){
   const today=new Date(); today.setHours(0,0,0,0);
   if(new Date(dateFromRaw)<today){ showToast('⚠️ Cannot select past dates (과거 날짜는 선택할 수 없습니다)','error'); return; }
   if(reason==='기타') reason=document.getElementById('leave-reason-etc').value||'기타';
+  const note=document.getElementById('leave-note')?.value?.trim()||'';
   // Convert yyyy-MM-dd → dd/MM/yyyy
   const toDDMMYYYY=s=>{const p=s.split('-');return p[2]+'/'+p[1]+'/'+p[0];};
   const dateFrom=toDDMMYYYY(dateFromRaw);
@@ -9120,7 +9125,7 @@ async function submitLeaveRequest(){
       Driver:currentDriver?.name||'',
       Date_From:dateFrom,
       Date_To:dateTo,
-      Reason:reason
+      Reason:reason+(note?' — '+note:'')
     });
     if(res?.ok){
       showToast('✅ Leave request submitted. Awaiting approval (휴무 요청 제출됨. 관리자 승인 대기)','success');
