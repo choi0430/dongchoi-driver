@@ -432,6 +432,9 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   <!-- NOTICE BANNER (dynamic - rendered by renderHomeBanner()) -->
   <div id="home-notice-banner"></div>
 
+  <!-- LEAVE STATUS BANNER (dynamic - rendered by renderHomeLeaveStatus()) -->
+  <div id="home-leave-status"></div>
+
   <!-- ACTIVE SHIFT -->
   <div id="home-shift-section" style="margin-top:10px;"></div>
 
@@ -2971,6 +2974,8 @@ function doLogin() {
   // 지난 운행 일지 로드 (비동기)
   _myPastShiftsLoaded = false;
   loadMyPastShifts();
+  // ★ 휴무 요청 상태 로드 (홈 화면 배너 표시용)
+  loadMyLeaves();
   // ── 서버에서 미완료 shift 동기화 (비동기) ──
   syncShiftsFromServer(name);
   // ── GAS 전체 동기화 + 자동 폴링 시작 (오늘 리포트, 마스터 최신화) ──
@@ -3465,6 +3470,8 @@ function autoRestoreSession() {
     initMyInfoPage();
     _myPastShiftsLoaded = false;
     loadMyPastShifts();
+    // ★ 휴무 요청 상태 로드 (홈 화면 배너 표시용)
+    loadMyLeaves();
 
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
@@ -9195,6 +9202,8 @@ async function submitLeaveRequest(){
   if(btn){btn.disabled=false;btn.textContent='✓ Submit (제출)';}
 }
 
+var _myLeaveData = [];
+
 async function loadMyLeaves(){
   const el=document.getElementById('my-leave-list');
   const dn=currentDriver?.name||'';
@@ -9202,13 +9211,16 @@ async function loadMyLeaves(){
     const res=await fetch(APPS_SCRIPT_URL+'?action=get_my_leave_requests&driver='+encodeURIComponent(dn));
     const json=await res.json();
     if(!json?.ok||!json.requests?.length){
-      el.innerHTML=`<div style="padding:40px 20px;text-align:center;color:var(--muted);">
+      _myLeaveData = [];
+      if(el) el.innerHTML=`<div style="padding:40px 20px;text-align:center;color:var(--muted);">
         <div style="font-size:40px;margin-bottom:12px;">📋</div>
         <div>No leave requests (휴무 요청 내역이 없습니다)</div>
         <div style="font-size:12px;margin-top:4px;">Tap "+ New Request" to request leave (위의 버튼으로 휴무를 요청하세요)</div></div>`;
+      renderHomeLeaveStatus();
       return;
     }
-    el.innerHTML=json.requests.map(r=>{
+    _myLeaveData = json.requests;
+    if(el) el.innerHTML=json.requests.map(r=>{
       const sc={Pending:{bg:'#FFF2CC',tx:'#856404',ic:'⏳',lb:'Pending (대기 중)'},Approved:{bg:'#C6EFCE',tx:'#155724',ic:'✅',lb:'Approved (승인)'},Rejected:{bg:'#FFC7CE',tx:'#721C24',ic:'❌',lb:'Rejected (거절)'}};
       const s=sc[r.Status]||sc.Pending;
       const days=r.Days||1;
@@ -9224,9 +9236,78 @@ async function loadMyLeaves(){
         <div style="font-size:11px;color:var(--muted);margin-top:6px;">Requested (요청): ${r.Requested_At}${r.Reviewed_At?' · Reviewed (검토): '+r.Reviewed_At:''}</div>
       </div>`;
     }).join('');
+    renderHomeLeaveStatus();
   }catch(e){
-    el.innerHTML=`<div style="padding:20px;text-align:center;color:var(--red);">⚠️ Loading Failed (데이터 로딩 실패)</div>`;
+    if(el) el.innerHTML=`<div style="padding:20px;text-align:center;color:var(--red);">⚠️ Loading Failed (데이터 로딩 실패)</div>`;
   }
+}
+
+function renderHomeLeaveStatus(){
+  const box = document.getElementById('home-leave-status');
+  if(!box) return;
+  if(!_myLeaveData || !_myLeaveData.length){ box.innerHTML=''; return; }
+
+  // Show recent relevant leaves: Pending always, Approved/Rejected only if recent (within 14 days reviewed)
+  const now = new Date();
+  const alerts = [];
+
+  _myLeaveData.forEach(r => {
+    if(r.Status === 'Pending'){
+      alerts.push({
+        sort: 0,
+        bg: '#fef3c7', bc: '#f59e0b', fc: '#92400e', icon: '⏳',
+        title: 'Leave Pending (휴무 대기 중)',
+        detail: `${r.Date_From}${r.Date_From!==r.Date_To?' ~ '+r.Date_To:''} (${r.Days||1}일) · ${r.Reason||''}`,
+        sub: 'Waiting for admin approval (관리자 승인 대기 중)'
+      });
+    } else if(r.Status === 'Approved'){
+      // Show approved leaves whose end date is today or future
+      const toISO = (ds) => { if(!ds)return''; const s=String(ds).trim(); if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){const p=s.split('/');return p[2]+'-'+p[1]+'-'+p[0];} return s; };
+      const endISO = toISO(r.Date_To);
+      const todayISO = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+      if(endISO >= todayISO){
+        alerts.push({
+          sort: 1,
+          bg: '#dcfce7', bc: '#22c55e', fc: '#166534', icon: '✅',
+          title: 'Leave Approved (휴무 승인)',
+          detail: `${r.Date_From}${r.Date_From!==r.Date_To?' ~ '+r.Date_To:''} (${r.Days||1}일)`,
+          sub: r.Admin_Note ? '💬 '+r.Admin_Note : 'Approved by admin (관리자 승인 완료)'
+        });
+      }
+    } else if(r.Status === 'Rejected'){
+      // Show rejected only if reviewed within last 7 days
+      const revAt = r.Reviewed_At||'';
+      if(revAt){
+        const toISO2 = (ds) => { const s=String(ds).trim().split(' ')[0]; if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){const p=s.split('/');return p[2]+'-'+p[1]+'-'+p[0];} return s; };
+        const revISO = toISO2(revAt);
+        const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate()-7);
+        const weekAgoISO = weekAgo.getFullYear()+'-'+String(weekAgo.getMonth()+1).padStart(2,'0')+'-'+String(weekAgo.getDate()).padStart(2,'0');
+        if(revISO >= weekAgoISO){
+          alerts.push({
+            sort: 2,
+            bg: '#fee2e2', bc: '#ef4444', fc: '#991b1b', icon: '❌',
+            title: 'Leave Rejected (휴무 거절)',
+            detail: `${r.Date_From}${r.Date_From!==r.Date_To?' ~ '+r.Date_To:''} (${r.Days||1}일)`,
+            sub: r.Admin_Note ? '💬 '+r.Admin_Note : 'Rejected by admin (관리자 거절)'
+          });
+        }
+      }
+    }
+  });
+
+  if(!alerts.length){ box.innerHTML=''; return; }
+  alerts.sort((a,b)=>a.sort-b.sort);
+
+  box.innerHTML = '<div style="padding:0 12px;margin-top:8px;">' + alerts.map(a =>
+    `<div onclick="showPage('leave')" style="background:${a.bg};border:1px solid ${a.bc}33;border-left:4px solid ${a.bc};border-radius:10px;padding:12px 14px;margin-bottom:6px;cursor:pointer;">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="font-size:16px;">${a.icon}</span>
+        <span style="font-weight:800;font-size:13px;color:${a.fc};">${a.title}</span>
+      </div>
+      <div style="font-size:13px;font-weight:600;color:${a.fc};margin-top:4px;">${a.detail}</div>
+      <div style="font-size:11px;color:${a.fc}99;margin-top:3px;">${a.sub}</div>
+    </div>`
+  ).join('') + '</div>';
 }
 
 </script>
