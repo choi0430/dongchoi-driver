@@ -1912,6 +1912,33 @@ function rDash(){
       }
     });
   }
+  // ── 피로관리 알림 (Fatigue Compliance Alerts — NHVR Table 2) ──
+  if(window._fatigueAlerts && window._fatigueAlerts.length){
+    window._fatigueAlerts.forEach(a=>{
+      const isCritical = a.severity === 'critical';
+      if(a.type === 'consecutive_work'){
+        als.push({sort:-8500,type:'fatigue_consecutive',
+          bg:isCritical?'#fef2f2':'#fff7ed',bc:isCritical?'#ef4444':'#f97316',fc:isCritical?'#dc2626':'#ea580c',
+          icon:'😴',
+          m:`${a.driver} — ${a.days} Consecutive Work Days (연속 ${a.days}일 근무) — ${isCritical?'VIOLATION! 24hr rest required (위반! 24시간 휴식 필요)':'WARNING: Rest day needed (경고: 휴무 필요)'}`});
+      } else if(a.type === 'seven_day_rest'){
+        als.push({sort:-8800,type:'fatigue_7day',
+          bg:'#fef2f2',bc:'#ef4444',fc:'#dc2626',
+          icon:'🚨',
+          m:`${a.driver} — No 24hr Night Rest in 7 days (7일 내 24시간 야간 휴식 없음) — NHVR VIOLATION (규정 위반)`});
+      } else if(a.type === 'twentyeight_day_rest'){
+        als.push({sort:-8600,type:'fatigue_28day',
+          bg:isCritical?'#fef2f2':'#fff7ed',bc:isCritical?'#ef4444':'#f97316',fc:isCritical?'#dc2626':'#ea580c',
+          icon:'📋',
+          m:`${a.driver} — Only ${a.restDays} rest day(s) in 28 days (28일 내 ${a.restDays}일만 휴식) — Need 4 days (4일 필요)`});
+      } else if(a.type === 'rest_gap_violation'){
+        als.push({sort:-8700,type:'fatigue_gap',
+          bg:isCritical?'#fef2f2':'#fff7ed',bc:isCritical?'#ef4444':'#f97316',fc:isCritical?'#dc2626':'#ea580c',
+          icon:'⏰',
+          m:`${a.driver} — Rest gap only ${a.gapHours}hrs (휴식 ${a.gapHours}시간만) — EoS ${a.eosTime} → Pre ${a.preTime} — Min 7hrs required (최소 7시간 필요)`});
+      }
+    });
+  }
   als.sort((a,b)=>a.sort-b.sort);
   document.getElementById('alct').textContent=als.length+'건';
   document.getElementById('als').innerHTML=als.length
@@ -9284,7 +9311,10 @@ async function loadAllFromSheets(){
     await loadNoticesFromGAS();
     await initNoticesIfEmpty();
     // ★ Leave 데이터 로드 (대시보드 알림 + 가용현황용)
-    try { await loadAdminLeaves(); rDash(); } catch(e) { console.warn('Leave load failed', e); }
+    try { await loadAdminLeaves(); } catch(e) { console.warn('Leave load failed', e); }
+    // ★ Fatigue compliance 데이터 로드
+    try { await loadFatigueAlerts(); } catch(e) { console.warn('Fatigue check failed', e); }
+    rDash();
   } catch(e){
     console.error('loadAllFromSheets error:', e);
     document.getElementById('sl').classList.remove('on');
@@ -10232,6 +10262,20 @@ async function savePDToSheets(){
     await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'replace_master',sheet:'M_PriceDriver',rows})});
   } catch(e){ console.error('savePDToSheets error:',e); }
+}
+
+// ═══════════════════════════════════════
+// FATIGUE COMPLIANCE (피로관리 — NHVR Table 2)
+// ═══════════════════════════════════════
+window._fatigueAlerts = [];
+
+async function loadFatigueAlerts(){
+  try {
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_fatigue_check');
+    const json = await res.json();
+    if(json?.ok){ window._fatigueAlerts = json.alerts || []; }
+    else { window._fatigueAlerts = []; }
+  } catch(e){ window._fatigueAlerts = []; console.warn('Fatigue check error:', e); }
 }
 
 // ═══════════════════════════════════════

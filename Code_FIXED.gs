@@ -216,6 +216,13 @@ function doGet(e) {
         return cors(getBusDamage(dmgRego));
       }
 
+      // ── Fatigue Compliance (GET) ──
+      case 'get_fatigue_check':
+        return cors(getFatigueComplianceCheck());
+
+      case 'get_last_eos':
+        return cors(getLastEndOfShift(driver));
+
       // ── Leave Requests (GET) ──
       case 'get_my_leave_requests':
         return cors(getMyLeaveRequests(driver));
@@ -2014,4 +2021,301 @@ function parseDateFlexible_(dateStr) {
     return new Date(p[2], p[1] - 1, p[0]);
   }
   return new Date(str);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FATIGUE COMPLIANCE — NHVR (National Heavy Vehicle Regulator) Table 2
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * getFatigueComplianceCheck()
+ * Returns fatigue alerts for ALL drivers:
+ *   - consecutive_work: drivers working 6+ consecutive days without 24hr rest
+ *   - seven_day_rest: drivers missing 24hr continuous Night Rest in last 7 days
+ *   - twentyeight_day_rest: drivers missing 4× 24hr Night Rest in last 28 days
+ *   - rest_gap_violation: drivers whose last EoS → next Pre time gap < 7 hours
+ */
+function getFatigueComplianceCheck() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const tz = 'Australia/Sydney';
+    const now = new Date();
+    const sydNow = new Date(Utilities.formatDate(now, tz, "yyyy-MM-dd'T'HH:mm:ss"));
+    const alerts = [];
+
+    // ── Collect all driver names from Drivers master ──
+    const drvSheet = ss.getSheetByName('Drivers');
+    const driverNames = [];
+    if (drvSheet && drvSheet.getLastRow() > 1) {
+      const drvData = drvSheet.getDataRange().getValues();
+      const drvH = drvData[0];
+      const nameIdx = drvH.indexOf('Name_EN') >= 0 ? drvH.indexOf('Name_EN') : 0;
+      const nameKrIdx = drvH.indexOf('Name_KR');
+      drvData.slice(1).forEach(r => {
+        const n = String(r[nameIdx] || '').trim();
+        if (n) driverNames.push({ en: n, kr: nameKrIdx >= 0 ? String(r[nameKrIdx] || '').trim() : '' });
+      });
+    }
+
+    // ── Collect work dates per driver from Pre_Departure ──
+    const preSheet = ss.getSheetByName('Pre_Departure');
+    const driverWorkDates = {}; // { driverName: Set of 'yyyy-MM-dd' }
+    if (preSheet && preSheet.getLastRow() > 1) {
+      const preData = preSheet.getDataRange().getValues();
+      const preH = preData[0];
+      preData.slice(1).forEach(row => {
+        const obj = {};
+        preH.forEach((h, i) => obj[h] = row[i]);
+        const drv = String(obj.Driver || '').trim();
+        if (!drv) return;
+        if (!driverWorkDates[drv]) driverWorkDates[drv] = new Set();
+        const d = obj.Date instanceof Date
+          ? Utilities.formatDate(obj.Date, tz, 'yyyy-MM-dd')
+          : parseDateToISO_(obj.Date);
+        if (d) driverWorkDates[drv].add(d);
+      });
+    }
+
+    // ── Collect leave dates per driver from Driver_Roster ──
+    const rosterSheet = ss.getSheetByName('Driver_Roster');
+    const driverLeaveDates = {}; // { driverName: Set of 'yyyy-MM-dd' }
+    if (rosterSheet && rosterSheet.getLastRow() > 1) {
+      const rData = rosterSheet.getDataRange().getValues();
+      rData.slice(1).forEach(row => {
+        const drv = String(row[0] || '').trim();
+        const status = String(row[2] || '').trim();
+        if (drv && status === 'LEAVE') {
+          if (!driverLeaveDates[drv]) driverLeaveDates[drv] = new Set();
+          const d = row[1] instanceof Date
+            ? Utilities.formatDate(row[1], tz, 'yyyy-MM-dd')
+            : parseDateToISO_(row[1]);
+          if (d) driverLeaveDates[drv].add(d);
+        }
+      });
+    }
+
+    // ── Collect last End_of_Shift time per driver ──
+    const eosSheet = ss.getSheetByName('End_of_Shift');
+    const driverLastEos = {}; // { driverName: { date, endTime, submitted } }
+    if (eosSheet && eosSheet.getLastRow() > 1) {
+      const eosData = eosSheet.getDataRange().getValues();
+      const eosH = eosData[0];
+      eosData.slice(1).forEach(row => {
+        const obj = {};
+        eosH.forEach((h, i) => obj[h] = row[i]);
+        const drv = String(obj.Driver || '').trim();
+        if (!drv) return;
+        const dateStr = obj.Date instanceof Date
+          ? Utilities.formatDate(obj.Date, tz, 'yyyy-MM-dd')
+          : parseDateToISO_(obj.Date);
+        const endTime = obj.End_Time instanceof Date
+          ? Utilities.formatDate(obj.End_Time, tz, 'HH:mm')
+          : String(obj.End_Time || '').trim();
+        const submitted = String(obj.Submitted || '').trim();
+        // Keep latest
+        if (!driverLastEos[drv] || (dateStr && dateStr > (driverLastEos[drv].date || ''))) {
+          driverLastEos[drv] = { date: dateStr, endTime: endTime, submitted: submitted };
+        } else if (dateStr === (driverLastEos[drv].date || '') && endTime > (driverLastEos[drv].endTime || '')) {
+          driverLastEos[drv] = { date: dateStr, endTime: endTime, submitted: submitted };
+        }
+      });
+    }
+
+    // ── Collect first Pre_Departure time per driver per date ──
+    const driverFirstPre = {}; // { driverName: { date: startTime } }
+    if (preSheet && preSheet.getLastRow() > 1) {
+      const preData = preSheet.getDataRange().getValues();
+      const preH = preData[0];
+      preData.slice(1).forEach(row => {
+        const obj = {};
+        preH.forEach((h, i) => obj[h] = row[i]);
+        const drv = String(obj.Driver || '').trim();
+        if (!drv) return;
+        const dateStr = obj.Date instanceof Date
+          ? Utilities.formatDate(obj.Date, tz, 'yyyy-MM-dd')
+          : parseDateToISO_(obj.Date);
+        const startTime = obj.Start_Time instanceof Date
+          ? Utilities.formatDate(obj.Start_Time, tz, 'HH:mm')
+          : String(obj.Start_Time || '').trim();
+        if (!dateStr || !startTime) return;
+        if (!driverFirstPre[drv]) driverFirstPre[drv] = {};
+        if (!driverFirstPre[drv][dateStr] || startTime < driverFirstPre[drv][dateStr]) {
+          driverFirstPre[drv][dateStr] = startTime;
+        }
+      });
+    }
+
+    // ── Check each driver ──
+    const todayISO = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+
+    driverNames.forEach(drv => {
+      const name = drv.en;
+      const displayName = drv.kr ? drv.kr + ' (' + drv.en + ')' : drv.en;
+      const workDates = driverWorkDates[name] || new Set();
+      const leaveDates = driverLeaveDates[name] || new Set();
+
+      // ─── 1. Consecutive work days (6+ without a rest day) ───
+      let consecutive = 0;
+      for (let i = 0; i < 14; i++) {
+        const d = new Date(sydNow);
+        d.setDate(d.getDate() - i);
+        const ds = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+        if (workDates.has(ds) && !leaveDates.has(ds)) {
+          consecutive++;
+        } else {
+          break;
+        }
+      }
+      if (consecutive >= 6) {
+        alerts.push({
+          type: 'consecutive_work',
+          driver: displayName,
+          days: consecutive,
+          severity: consecutive >= 7 ? 'critical' : 'warning'
+        });
+      }
+
+      // ─── 2. 7-day rest check (need 24hr continuous Night Rest in last 7 days) ───
+      let hasNightRest7 = false;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(sydNow);
+        d.setDate(d.getDate() - i);
+        const ds = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+        // A day with no work AND no next-day early start = rest day
+        if (!workDates.has(ds) || leaveDates.has(ds)) {
+          hasNightRest7 = true;
+          break;
+        }
+      }
+      if (!hasNightRest7 && workDates.size > 0) {
+        alerts.push({
+          type: 'seven_day_rest',
+          driver: displayName,
+          severity: 'critical'
+        });
+      }
+
+      // ─── 3. 28-day rest check (need 4× 24hr Night Rest days in last 28 days) ───
+      let restDays28 = 0;
+      for (let i = 0; i < 28; i++) {
+        const d = new Date(sydNow);
+        d.setDate(d.getDate() - i);
+        const ds = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+        if (!workDates.has(ds) || leaveDates.has(ds)) {
+          restDays28++;
+        }
+      }
+      if (restDays28 < 4 && workDates.size > 0) {
+        alerts.push({
+          type: 'twentyeight_day_rest',
+          driver: displayName,
+          restDays: restDays28,
+          severity: restDays28 < 2 ? 'critical' : 'warning'
+        });
+      }
+
+      // ─── 4. 7-hour rest gap (last EoS End_Time → today's first Pre Start_Time) ───
+      const lastEos = driverLastEos[name];
+      if (lastEos && lastEos.date && lastEos.endTime && lastEos.endTime.includes(':')) {
+        // Find next day's first pre-departure
+        const eosDate = new Date(lastEos.date + 'T' + lastEos.endTime + ':00');
+        const nextDay = new Date(lastEos.date);
+        nextDay.setDate(nextDay.getDate() + 1);
+        const nextDayISO = Utilities.formatDate(nextDay, tz, 'yyyy-MM-dd');
+
+        if (driverFirstPre[name] && driverFirstPre[name][nextDayISO]) {
+          const preTime = driverFirstPre[name][nextDayISO];
+          const preDate = new Date(nextDayISO + 'T' + preTime + ':00');
+          const gapHours = (preDate.getTime() - eosDate.getTime()) / (1000 * 60 * 60);
+          if (gapHours < 7 && gapHours >= 0) {
+            alerts.push({
+              type: 'rest_gap_violation',
+              driver: displayName,
+              eosDate: lastEos.date,
+              eosTime: lastEos.endTime,
+              preDate: nextDayISO,
+              preTime: preTime,
+              gapHours: Math.round(gapHours * 10) / 10,
+              severity: gapHours < 5 ? 'critical' : 'warning'
+            });
+          }
+        }
+      }
+    });
+
+    return { ok: true, alerts: alerts };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * getLastEndOfShift(driverName)
+ * Returns the most recent End_of_Shift record for a specific driver
+ * Used by driver app to check 7-hour rest gap before allowing Pre-Departure
+ */
+function getLastEndOfShift(driverName) {
+  try {
+    if (!driverName) return { ok: false, error: 'driver param required' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const tz = 'Australia/Sydney';
+    const eosSheet = ss.getSheetByName('End_of_Shift');
+    if (!eosSheet || eosSheet.getLastRow() < 2) return { ok: true, lastEos: null };
+
+    const eosData = eosSheet.getDataRange().getValues();
+    const eosH = eosData[0];
+    let latest = null;
+    let latestKey = '';
+
+    eosData.slice(1).forEach(row => {
+      const obj = {};
+      eosH.forEach((h, i) => obj[h] = row[i]);
+      if (String(obj.Driver || '').trim() !== driverName.trim()) return;
+
+      const dateStr = obj.Date instanceof Date
+        ? Utilities.formatDate(obj.Date, tz, 'yyyy-MM-dd')
+        : parseDateToISO_(obj.Date);
+      const endTime = obj.End_Time instanceof Date
+        ? Utilities.formatDate(obj.End_Time, tz, 'HH:mm')
+        : String(obj.End_Time || '').trim();
+      const key = (dateStr || '') + 'T' + (endTime || '');
+      if (key > latestKey) {
+        latestKey = key;
+        latest = {
+          date: dateStr,
+          endTime: endTime,
+          dateDMY: dateStr ? formatDateDMY_(dateStr) : ''
+        };
+      }
+    });
+
+    return { ok: true, lastEos: latest };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/** Helper: convert various date formats to yyyy-MM-dd */
+function parseDateToISO_(val) {
+  if (!val) return '';
+  const str = String(val).trim().replace(/\s+.*/, '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+    const p = str.split('/');
+    return p[2] + '-' + p[1] + '-' + p[0];
+  }
+  try {
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) {
+      return Utilities.formatDate(d, 'Australia/Sydney', 'yyyy-MM-dd');
+    }
+  } catch(e) {}
+  return '';
+}
+
+/** Helper: yyyy-MM-dd → dd/MM/yyyy */
+function formatDateDMY_(isoStr) {
+  if (!isoStr || !isoStr.includes('-')) return isoStr;
+  const p = isoStr.split('-');
+  return p[2] + '/' + p[1] + '/' + p[0];
 }
