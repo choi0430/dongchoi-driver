@@ -8453,6 +8453,7 @@ function openView(type, idx) {
     html += row2A([['면허 등급', d.License_Class], ['면허 번호', licNo]]);
     html += row2A([['면허 만료일', fmtDate(d.License_Expiry||'')], ['Authority 번호', authNo]]);
     html += rowA('Authority 만료일', fmtDate(d.Authority_Expiry||''));
+    html += row2A([['WWC 번호', d.WWC_No||d['WWC_#']||''], ['WWC 만료일', fmtDate(d.WWC_Expiry||'')]]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🏠 주소</div>`;
     html += row2A([['주소', d.Address], ['Suburb', d.Suburb]]);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🏦 계좌 정보</div>`;
@@ -8586,14 +8587,19 @@ function openM(type,idx){
       <div class="fr2">
         <div><label class="fl">면허 등급</label><div class="fsw"><select class="fs" id="f5">
           <option value="HR"${d.License_Class==='HR'?' selected':''}>HR</option>
-          <option value="LR"${d.License_Class==='LR'?' selected':''}>LR</option>
+          <option value="HC"${d.License_Class==='HC'?' selected':''}>HC</option>
           <option value="MR"${d.License_Class==='MR'?' selected':''}>MR</option>
+          <option value="LR"${d.License_Class==='LR'?' selected':''}>LR</option>
+          <option value="C"${d.License_Class==='C'?' selected':''}>C</option>
         </select></div></div>
         <div><label class="fl">면허 번호</label><input class="fi" id="f6" value="${licNo}"></div></div>
       <div class="fr2">
         <div><label class="fl">면허 만료일</label><input class="fi" id="f7" type="date" value="${parseToISO(d.License_Expiry||'')}"></div>
         <div><label class="fl">Authority 번호</label><input class="fi" id="f8" value="${authNo}"></div></div>
       <div class="fr"><label class="fl">Authority 만료일</label><input class="fi" id="f9" type="date" value="${parseToISO(d.Authority_Expiry||'')}"></div>
+      <div class="fr2">
+        <div><label class="fl">WWC 번호</label><input class="fi" id="f17" value="${d.WWC_No||d['WWC_#']||''}"></div>
+        <div><label class="fl">WWC 만료일</label><input class="fi" id="f18" type="date" value="${parseToISO(d.WWC_Expiry||'')}"></div></div>
       <div class="fr2">
         <div><label class="fl">주소</label><input class="fi" id="f10" value="${d.Address||''}"></div>
         <div><label class="fl">Suburb</label><input class="fi" id="f11" value="${d.Suburb||''}"></div></div>
@@ -8759,6 +8765,7 @@ function saveM(){
          Name_EN:gv('f0'),Name_KR:gv('f1'),DriverID:gv('f2'),Mobile_1:gv('f3'),Phone:gv('f3'),NEXT_OF_KIN:gv('f4'),Moblie_2:gv('f16'),
          License_Class:gv('f5'),License_No:gv('f6'),License_Expiry:fmtDate(gv('f7')),
          Authority_No:gv('f8'),Authority_Expiry:fmtDate(gv('f9')),
+         WWC_No:gv('f17'),WWC_Expiry:fmtDate(gv('f18')),
          Address:gv('f10'),Suburb:gv('f11'),Bank_Name:gv('f12'),BSB:gv('f13'),
          Account_Number:gv('f14'),PIN:gv('f15')};
     ie?DB.D[idx]=obj:DB.D.push(obj);
@@ -9155,6 +9162,8 @@ async function syncDrivers(){
     License_Expiry:fmtDate(rf(r,'License_Expiry','License Expiry')||''),
     Authority_No: rf(r,'Authority_No','Authority_#','Authority #'),
     Authority_Expiry:fmtDate(rf(r,'Authority_Expiry','Authority Expiry')||''),
+    WWC_No: rf(r,'WWC_No','WWC_#','WWC No'),
+    WWC_Expiry: fmtDate(rf(r,'WWC_Expiry','WWC Expiry')||''),
     Address:r.Address||'', Suburb:r.Suburb||'',
     Bank_Name:rf(r,'Bank_Name','Bank Name')||'', BSB:r.BSB||'', Account_Number:rf(r,'Account_Number','Account Number')||'',
     PIN:r.PIN?String(r.PIN):''
@@ -9283,6 +9292,8 @@ async function loadAllFromSheets(){
         License_Expiry:fmtDate(_rf2(r,'License_Expiry','License Expiry')||''),
         Authority_No: _rf2(r,'Authority_No','Authority_#','Authority #'),
         Authority_Expiry:fmtDate(_rf2(r,'Authority_Expiry','Authority Expiry')||''),
+        WWC_No: _rf2(r,'WWC_No','WWC_#','WWC No'),
+        WWC_Expiry: fmtDate(_rf2(r,'WWC_Expiry','WWC Expiry')||''),
         Address:r.Address||'', Suburb:r.Suburb||'',
         Bank_Name:_rf2(r,'Bank_Name','Bank Name')||'', BSB:r.BSB||'', Account_Number:_rf2(r,'Account_Number','Account Number')||'',
         PIN:r.PIN?String(r.PIN):''
