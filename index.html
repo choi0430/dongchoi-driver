@@ -6218,6 +6218,8 @@ const NIGHT_RATES = {
   guide_opt:   { small:{ ta:0,   dr:0,   owner:50  }, large:{ ta:0,   dr:0,   owner:100 } },
   agency_incl: { small:{ ta:250, dr:200, owner:50  }, large:{ ta:350, dr:300, owner:50  } },
   prepaid_opt: { small:{ ta:330, dr:250, owner:50  }, large:{ ta:450, dr:350, owner:100 } },
+  private_captain: { small:{ ta:0, dr:0, owner:75 }, large:{ ta:0, dr:0, owner:75 } },
+  private_dg:      { small:{ ta:0, dr:0, owner:100}, large:{ ta:0, dr:0, owner:100} },
 };
 function getNightRate(){
   const type  = document.getElementById('f-night-type')?.value || 'none';
@@ -6229,10 +6231,12 @@ function getNightRate(){
 // 야간투어 csel 초기 빌드 (한 번만 실행)
 function initNightCsel(){
   cselBuild('f-night-type',[
-    {val:'none',         label:'없음 ($0)'},
-    {val:'guide_opt',    label:'가이드 옵션 (현장 수령)'},
-    {val:'agency_incl',  label:'여행사 포함 약식'},
-    {val:'prepaid_opt',  label:'옵션 — 한국 선결제'},
+    {val:'none',            label:'없음 ($0)'},
+    {val:'guide_opt',       label:'가이드 옵션 (현장 수령)'},
+    {val:'agency_incl',     label:'여행사 포함 약식'},
+    {val:'prepaid_opt',     label:'옵션 — 한국 선결제'},
+    {val:'private_captain', label:'개인 야경 — Captain (-$75)'},
+    {val:'private_dg',      label:'개인 야경 — Driving Guide (-$100)'},
   ],'none');
 }
 function onNightChange(){
@@ -6263,16 +6267,20 @@ function onNightChange(){
   showToast('🌃 야경 선택 — OT $0 (추가 운행 시 버튼으로 신청 가능)', 'info');
 
   const r = getNightRate();
+  const isPrivate = type.startsWith('private_');
   const typeLabel = {
-    guide_opt:   '가이드 옵션 (현장 수령)',
-    agency_incl: '여행사 포함 약식',
-    prepaid_opt: '옵션 — 한국 선결제'
+    guide_opt:       '가이드 옵션 (현장 수령)',
+    agency_incl:     '여행사 포함 약식',
+    prepaid_opt:     '옵션 — 한국 선결제',
+    private_captain: '개인 야경 — Captain',
+    private_dg:      '개인 야경 — Driving Guide'
   }[type] || type;
 
   // 입력값 설정
   if(!r){
     if(input) input.value = 0;
-  } else if(type==='guide_opt'){
+  } else if(type==='guide_opt' || isPrivate){
+    // 가이드옵션 & 개인야경: DR 수당 없음 (가이드가 직접 수령)
     if(input) input.value = 0;
   } else {
     if(input) input.value = r.dr;
@@ -6282,12 +6290,22 @@ function onNightChange(){
     const ownerAmt = r.owner || 0;
     const drAmt    = r.dr    || 0;
     const taAmt    = r.ta    || 0;
-    let hintHtml = `<div style="background:#fff5f5;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;">`;
-    hintHtml += `<div style="font-weight:700;color:var(--red);margin-bottom:4px;">🌃 야경 — ${typeLabel} (${seatsLabel})</div>`;
-    if(taAmt > 0) hintHtml += `<div style="color:var(--muted);">여행사 청구: <strong>$${taAmt}</strong></div>`;
-    if(drAmt > 0) hintHtml += `<div style="color:var(--muted);">야경 수당: <strong style="color:var(--green);">+$${drAmt}</strong></div>`;
-    if(ownerAmt > 0) hintHtml += `<div style="color:var(--red);">회사 납입 차감: <strong>-$${ownerAmt}</strong></div>`;
-    hintHtml += `</div>`;
+    let hintHtml = '';
+    if(isPrivate){
+      // 개인 야경: 간단한 차감 안내만 표시
+      hintHtml = `<div style="background:#fff5f5;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;">`;
+      hintHtml += `<div style="font-weight:700;color:var(--red);margin-bottom:4px;">🌃 ${typeLabel}</div>`;
+      hintHtml += `<div style="color:var(--muted);">야경비: 가이드 직접 수령 (Direct collection)</div>`;
+      hintHtml += `<div style="color:var(--red);">급여 차감 (Salary deduction): <strong>-$${ownerAmt}</strong></div>`;
+      hintHtml += `</div>`;
+    } else {
+      hintHtml = `<div style="background:#fff5f5;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;">`;
+      hintHtml += `<div style="font-weight:700;color:var(--red);margin-bottom:4px;">🌃 야경 — ${typeLabel} (${seatsLabel})</div>`;
+      if(taAmt > 0) hintHtml += `<div style="color:var(--muted);">여행사 청구: <strong>$${taAmt}</strong></div>`;
+      if(drAmt > 0) hintHtml += `<div style="color:var(--muted);">야경 수당: <strong style="color:var(--green);">+$${drAmt}</strong></div>`;
+      if(ownerAmt > 0) hintHtml += `<div style="color:var(--red);">회사 납입 차감: <strong>-$${ownerAmt}</strong></div>`;
+      hintHtml += `</div>`;
+    }
     hintEl.innerHTML = hintHtml;
     hintEl.style.display = '';
   } else if(hintEl){
