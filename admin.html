@@ -1948,8 +1948,8 @@ function rDash(){
 
 
 // ===== VEHICLE MANAGEMENT =====
-function getHvisBookings(){try{return safeGetLocal('hvis_bookings', []);}catch(e){return[];}}
-function saveHvisBookings(d){safeSetLocal('hvis_bookings', d);}
+function getHvisBookings(){return window._hvisBookings||[];}
+function setHvisBookingsCache(d){window._hvisBookings=d||[];}
 function getMaintRecords(){try{return safeGetLocal('maint_records', []);}catch(e){return[];}}
 function saveMaintRecords(d){safeSetLocal('maint_records', d);}
 function getDefectReports(){try{return safeGetLocal('defect_reports', []);}catch(e){return[];}}
@@ -2133,23 +2133,46 @@ function openHvisBooking(rego){
     +'<button class="btn bac" style="width:100%;" onclick="saveHvisBookingEntry()">&#x1F4BE; Save Booking</button>';
   overlay.appendChild(modal);document.body.appendChild(overlay);
 }
-function saveHvisBookingEntry(){
+async function saveHvisBookingEntry(){
   var entry={id:Date.now().toString(),rego:gv('hb-rego'),inspDate:fmtDate(gv('hb-date')),inspTime:gv('hb-time'),
     location:gv('hb-location'),customerNo:gv('hb-custno'),bookingNo:gv('hb-bookno'),
     ownerName:gv('hb-owner'),bookingDate:fmtDate(toLocalISO(new Date()))};
   if(!entry.rego){toast('Select a vehicle (차량을 선택하세요)','er');return;}
   if(!entry.inspDate){toast('Enter inspection date (점검 날짜를 입력하세요)','er');return;}
-  var bk=getHvisBookings();bk.push(entry);saveHvisBookings(bk);
-  document.getElementById('hvis-modal-overlay').remove();
-  renderHvis();
-  rDash(); // ★ PATCH: 대시보드 알림도 즉시 갱신
-  toast('HVIS Booking Saved (HVIS 부킹 저장 완료)','ok');
+  try {
+    toast('저장 중...','ok');
+    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'save_hvis_booking', data:{
+        ID: entry.id, Rego: entry.rego, InspDate: entry.inspDate, InspTime: entry.inspTime,
+        Location: entry.location, CustomerNo: entry.customerNo||'', BookingNo: entry.bookingNo,
+        VehicleType: '', OwnerName: entry.ownerName, BookingDate: entry.bookingDate, Status: ''
+      }})});
+    const json = await res.json();
+    if(!json.ok){ toast('저장 실패: '+(json.error||''),'er'); return; }
+    // 로컬 캐시 업데이트
+    var bk=getHvisBookings();bk.push(entry);setHvisBookingsCache(bk);
+    document.getElementById('hvis-modal-overlay').remove();
+    renderHvis();
+    rDash();
+    toast('HVIS Booking Saved (HVIS 부킹 저장 완료)','ok');
+  } catch(e) {
+    toast('서버 오류: '+e.message,'er');
+  }
 }
-function deleteHvisBooking(id){
+async function deleteHvisBooking(id){
   if(!confirm('Delete this booking?'))return;
-  saveHvisBookings(getHvisBookings().filter(function(b){return b.id!==id;}));
-  document.getElementById('hvis-modal-overlay').remove();
-  renderHvis();toast('Deleted','ok');
+  try {
+    toast('삭제 중...','ok');
+    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'delete_hvis_booking', id: id})});
+    const json = await res.json();
+    if(!json.ok){ toast('삭제 실패: '+(json.error||''),'er'); return; }
+    setHvisBookingsCache(getHvisBookings().filter(function(b){return b.id!==id;}));
+    document.getElementById('hvis-modal-overlay').remove();
+    renderHvis();rDash();toast('Deleted','ok');
+  } catch(e) {
+    toast('서버 오류: '+e.message,'er');
+  }
 }
 
 function renderMaint(){
@@ -9325,6 +9348,37 @@ async function loadAllFromSheets(){
         };
       });
     }
+
+    // HVIS_Bookings → window._hvisBookings (서버 동기화)
+    if(d.HVIS_Bookings?.length) {
+      setHvisBookingsCache(d.HVIS_Bookings.map(r=>({
+        id: r.ID||'', rego: r.Rego||'', inspDate: r.InspDate||'', inspTime: r.InspTime||'',
+        location: r.Location||'', customerNo: r.CustomerNo||'', bookingNo: r.BookingNo||'',
+        vehicleType: r.VehicleType||'', ownerName: r.OwnerName||'', bookingDate: r.BookingDate||'',
+        status: r.Status||''
+      })));
+    } else {
+      setHvisBookingsCache([]);
+    }
+    // ★ localStorage → Sheets 마이그레이션 (1회성)
+    try {
+      const _lsHvis = safeGetLocal('hvis_bookings', []);
+      if(_lsHvis.length > 0 && getHvisBookings().length === 0) {
+        for(const b of _lsHvis) {
+          await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+            body:JSON.stringify({action:'save_hvis_booking', data:{
+              ID: b.id||Date.now().toString(), Rego: b.rego||'', InspDate: b.inspDate||'',
+              InspTime: b.inspTime||'', Location: b.location||'', CustomerNo: b.customerNo||'',
+              BookingNo: b.bookingNo||'', VehicleType: b.vehicleType||'', OwnerName: b.ownerName||'',
+              BookingDate: b.bookingDate||'', Status: b.status||''
+            }})});
+        }
+        localStorage.removeItem('hvis_bookings');
+        toast('HVIS 부킹 데이터 서버 마이그레이션 완료','ok');
+      } else if(_lsHvis.length > 0 && getHvisBookings().length > 0) {
+        localStorage.removeItem('hvis_bookings'); // 서버에 이미 데이터 있으면 localStorage 제거
+      }
+    } catch(e) { console.warn('HVIS migration failed:', e); }
 
     // 추가 데이터 로드 (실패해도 무시)
     await Promise.allSettled([

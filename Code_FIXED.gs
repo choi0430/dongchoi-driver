@@ -78,7 +78,7 @@ const MASTER_HEADERS = {
   // ── 차량 데미지 마커 ──
   'Bus_Damage': ['Rego','Markers','UpdatedAt','UpdatedBy'],
   // ── HVIS 부킹 관리 ──
-  'HVIS_Bookings': ['ID','Rego','InspDate','InspTime','Location','BookingNo','VehicleType','OwnerName','BookingDate','Status']
+  'HVIS_Bookings': ['ID','Rego','InspDate','InspTime','Location','CustomerNo','BookingNo','VehicleType','OwnerName','BookingDate','Status']
 };
 
 // ── Tab Colors ──
@@ -464,6 +464,13 @@ function doPost(e) {
 
       case 'review_leave_request':
         return cors(reviewLeaveRequest(payload.data));
+
+      // ── HVIS Bookings (POST) ──
+      case 'save_hvis_booking':
+        return cors(saveHvisBooking(payload.data));
+
+      case 'delete_hvis_booking':
+        return cors(deleteHvisBooking(payload.id));
 
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
@@ -2318,4 +2325,50 @@ function formatDateDMY_(isoStr) {
   if (!isoStr || !isoStr.includes('-')) return isoStr;
   const p = isoStr.split('-');
   return p[2] + '/' + p[1] + '/' + p[0];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HVIS Bookings — Google Sheets 동기화
+// ═══════════════════════════════════════════════════════════════════════════
+
+function saveHvisBooking(data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'HVIS_Bookings');
+    const headers = MASTER_HEADERS['HVIS_Bookings'];
+    const row = headers.map(h => {
+      const nk = normalizeKey(h);
+      for (const k of Object.keys(data)) {
+        if (normalizeKey(k) === nk) return data[k] || '';
+      }
+      return '';
+    });
+    sheet.appendRow(row);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function deleteHvisBooking(id) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'HVIS_Bookings');
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { ok: false, error: 'No data' };
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    const idCol = headers.indexOf('ID');
+    if (idCol < 0) return { ok: false, error: 'ID column not found' };
+    const data = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        sheet.deleteRow(i + 2);
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'ID not found: ' + id };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
 }
