@@ -2800,11 +2800,12 @@ function calcAgencyTA(r){
   const htlTA = htl===0?0: capNum>=50?(htl===15?80:htl===30?160:htl*4): capNum>=40?(htl===15?75:htl===30?150:htl*4): (htl===10?40:htl===20?80:htl*4);
   const dstTA = dst===0?0: capNum>=50?(dst===40?160:dst*4): capNum>=40?(dst===40?150:Math.round(dst*3.75)): (dst===30?80:Math.round(dst*2.67));
 
-  // OT TA rate
+  // OT TA rate — 호주로(Tour Hojuro): 30분 단위, DR/TA 모두 시간당의 1/2
   const otRateTA = capNum>=50?160:capNum>=40?150:80;
   const otRateDR = capNum>=40?40:30;
-  const otHrs    = otRateDR>0 ? ot/otRateDR : 0;
-  const otTA     = Math.round(otHrs * otRateTA);
+  const _isHojuroOT = /호주로|hojuro/i.test(agency);
+  const otHrs    = _isHojuroOT ? (ot / (otRateDR/2)) * 0.5 : (otRateDR>0 ? ot/otRateDR : 0);
+  const otTA     = _isHojuroOT ? Math.round((ot / (otRateDR/2)) * (otRateTA/2)) : Math.round(otHrs * otRateTA);
 
   // Early TA: Airport Transfer rate × 0.3
   let erlTA = 0;
@@ -4707,10 +4708,14 @@ function calcInvRow(r) {
 
   // ── OT DR → TA 역산 ──
   // 21/25S: DR $30/h → TA $80/h, 40S: DR $40/h → TA $150/h, 50S: DR $40/h → TA $160/h
+  // 호주로(Tour Hojuro): 30분 단위, DR/TA 모두 시간당의 1/2
   const _otRateDR = seatNum>=40 ? 40 : 30;
   const _otRateTA = seatNum>=50 ? 160 : seatNum>=40 ? 150 : 80;
-  const _otHrs = _otRateDR>0 ? otDR/_otRateDR : 0;
-  const ot = Math.round(_otHrs * _otRateTA);
+  const _isHojuroOT = /호주로|hojuro/i.test(agency);
+  const _otHalfDR = _otRateDR / 2;  // 30분당 DR rate
+  const _otHalfTA = _otRateTA / 2;  // 30분당 TA rate
+  const _otHrs = _isHojuroOT ? (otDR / _otHalfDR) * 0.5 : (_otRateDR>0 ? otDR/_otRateDR : 0);
+  const ot = _isHojuroOT ? Math.round((otDR / _otHalfDR) * _otHalfTA) : Math.round(_otHrs * _otRateTA);
 
   // ── Hotel/Dist DR → TA 역산 ──
   // Hotel: 21/25S DR $10→TA $40, DR $20→TA $80 / 40S DR $15→TA $75, DR $30→TA $150 / 50S DR $15→TA $80, DR $30→TA $160

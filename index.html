@@ -5484,6 +5484,11 @@ function updateOTHint(fromEndTime){
     }
   }
 
+  // 호주로(Tour Hojuro): 5분 waive, 30분 단위 올림, otRate/2 per 30분
+  const _agency = document.getElementById('dr-agency')?.value || '';
+  const _isHojuro = /호주로|hojuro/i.test(_agency);
+  const WAIVE   = _isHojuro ? 5 : 15;
+
   if(!st){
     // 시간 미입력 시: 인승+코스 기준 기본 안내
     if(!seats){ renderHintBox(hintBox, []); return; }
@@ -5491,9 +5496,10 @@ function updateOTHint(fromEndTime){
     const maxH0   = att ? getMaxHours(att) : null;
     const seatsLabel0 = seats;
     const items0 = [];
+    const _waiveLabel0 = WAIVE+'분 waive 후 '+(_isHojuro?'30분':'1시간')+' 단위 올림';
     items0.push({ type:'info',
-      title: '⏱ OT 기준: 20:15 이후 또는 코스 기준시간 초과',
-      sub: seatsLabel0+' 기준 $'+otRate0+'/h · 15분 waive 후 1시간 단위 올림'
+      title: '⏱ OT 기준: 20:'+(WAIVE<10?'0':'')+WAIVE+' 이후 또는 코스 기준시간 초과',
+      sub: seatsLabel0+' 기준 $'+(_isHojuro?(otRate0/2)+'/30min':otRate0+'/h')+' · '+_waiveLabel0
         +(maxH0 ? ' · 코스 기준 '+maxH0+'h' : '')
     });
     renderHintBox(hintBox, items0);
@@ -5505,9 +5511,8 @@ function updateOTHint(fromEndTime){
   // 인승 없으면 기본 요율 사용 (21/25S 기준 $30)
   const otRate  = seats ? getOTRate(att, seats) : 30;
   const seatsLabel = seats || '21/25S';
-  const WAIVE   = 15;
   const startMin = sh*60+sm;
-  const pm8WaiveMin = 20*60 + WAIVE; // 20:15
+  const pm8WaiveMin = 20*60 + WAIVE; // 20:15 or 20:05
 
   const items = [];
   // ③ 종료 시간 있으면 실제 OT 계산 + 코스 기준 안내
@@ -5529,9 +5534,10 @@ function updateOTHint(fromEndTime){
     const totalH  = Math.floor(totalMin/60);
     const totalM  = totalMin%60;
     const durLabel = totalH+'h '+(totalM>0?totalM+'m':'');
+    const _waiveLabel = WAIVE+'분 waive 후 '+(_isHojuro?'30분':'1시간')+' 단위 올림';
     items.push({ type:'info',
       title: '🕐 총 운행: '+st+' → '+et+' ('+durLabel+')',
-      sub: (maxH?'코스 기준 '+maxH+'h · ':('' ))+'20:15 이전 종료 시 OT 없음 · 15분 waive 후 1시간 단위 올림'
+      sub: (maxH?'코스 기준 '+maxH+'h · ':'' )+'20:'+(WAIVE<10?'0':'')+WAIVE+' 이전 종료 시 OT 없음 · '+_waiveLabel
     });
 
     // OT 없을 때 ❌ 미적용 안내
@@ -5557,16 +5563,20 @@ function updateOTHint(fromEndTime){
       }
     }
     if(effOT > 0 && otRate){
-      const effOT_ceil = Math.ceil(effOT);
-      const otAmt = effOT_ceil * otRate;
+      // 호주로: 30분(0.5h) 단위 올림, otRate/2 per 30분 → 일반: 1시간 단위 올림
+      const effOT_ceil = _isHojuro ? (Math.ceil(effOT * 2) / 2) : Math.ceil(effOT);
+      const otAmt = _isHojuro ? (Math.ceil(effOT * 2) * (otRate / 2)) : (effOT_ceil * otRate);
       const curOT = parseFloat(document.getElementById('f-ot')?.value || 0);
+      const _otCalcLabel = _isHojuro
+        ? effOT.toFixed(2)+'h → 30분 올림 '+effOT_ceil+'h × $'+(otRate/2)+'/30min = $'+otAmt
+        : effOT.toFixed(2)+'h → 올림 '+effOT_ceil+'h × $'+otRate+'/h = $'+otAmt;
       if(curOT > 0){
         // 이미 입력된 경우 — 확인 힌트
         items.push({ type: curOT === otAmt ? 'apply' : 'warn',
           title: curOT === otAmt
             ? '✅ OT $'+curOT+' 입력됨 ('+seats+')'
             : '⚠️ OT 계산 $'+otAmt+' — 현재 입력 $'+curOT,
-          sub: effOT.toFixed(2)+'h → 올림 '+effOT_ceil+'h × $'+otRate+'/h = $'+otAmt
+          sub: _otCalcLabel
         });
       } else {
         // 미입력 — 야경이 아닌 경우 자동 선택
@@ -5577,13 +5587,13 @@ function updateOTHint(fromEndTime){
           selectOTAmount(otAmt);
           items.push({ type:'apply',
             title: '✅ OT $'+otAmt+' 자동 선택됨 ('+seats+')',
-            sub: effOT.toFixed(2)+'h → 올림 '+effOT_ceil+'h × $'+otRate+'/h'
+            sub: _otCalcLabel
           });
         } else {
           // 야경: OT 자동선택 안 함, 힌트 + 버튼 강조로 드라이버가 직접 선택 가능하게
           items.push({ type:'warn',
             title: '🌃 야경 — OT 미적용 (야경 수당에 포함)',
-            sub: '추가 운행 발생 시 $'+otAmt+' 신청 가능 ('+effOT_ceil+'h × $'+otRate+'/h) · 아래 버튼에서 선택하세요'
+            sub: '추가 운행 발생 시 $'+otAmt+' 신청 가능 · '+_otCalcLabel
           });
           // 해당 금액 버튼을 강조 표시 (선택은 안 하되 눈에 띄게)
           document.querySelectorAll('[id^="ot-btn-"]').forEach(b=>{
@@ -6140,9 +6150,18 @@ function renderOTButtons(seats){
   const isLarge = seats==='40S'||seats==='50S';
   const isSmall = seats==='21S'||seats==='25S';
   if(!isSmall && !isLarge){ group.innerHTML=''; if(hint) hint.textContent=''; return; }
+  const _ag = document.getElementById('dr-agency')?.value || '';
+  const _hojuro = /호주로|hojuro/i.test(_ag);
   const rate    = isSmall ? 30 : 40;
-  const amounts = [rate, rate*2, rate*3, rate*4];
-  if(hint) hint.textContent = isSmall ? '(21/25인승 시간당 $30)' : '(40/50인승 시간당 $40)';
+  const halfRate = rate / 2;
+  // 호주로: 30분 단위 ($15/$20 per 30min) → $15, $30, $45, $60, $75, $90
+  // 일반: 1시간 단위 → $30, $60, $90, $120
+  const amounts = _hojuro
+    ? [halfRate, halfRate*2, halfRate*3, halfRate*4, halfRate*5, halfRate*6]
+    : [rate, rate*2, rate*3, rate*4];
+  if(hint) hint.textContent = _hojuro
+    ? (isSmall ? '(21/25인승 30분당 $'+halfRate+')' : '(40/50인승 30분당 $'+halfRate+')')
+    : (isSmall ? '(21/25인승 시간당 $30)' : '(40/50인승 시간당 $40)');
   // $0 버튼 + 금액 버튼
   const zeroBtn = `<button type="button"
       onclick="selectOTAmount(0)"
