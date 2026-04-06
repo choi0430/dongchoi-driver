@@ -1321,6 +1321,36 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           <div id="me-account-display" style="font-weight:600;font-size:13px;">–</div>
         </div>
       </div>
+      <!-- 사진 미리보기 -->
+      <div style="font-size:11px;font-weight:700;color:var(--accent);margin:14px 0 8px;letter-spacing:.5px;">📷 면허 / Authority 카드</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
+        <div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">면허 앞면</div>
+          <div id="me-view-licFront" style="height:80px;background:var(--surface2);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+            <div style="font-size:11px;color:var(--muted);">미등록</div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">면허 뒷면</div>
+          <div id="me-view-licBack" style="height:80px;background:var(--surface2);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+            <div style="font-size:11px;color:var(--muted);">미등록</div>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">Authority 앞면</div>
+          <div id="me-view-authFront" style="height:80px;background:var(--surface2);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+            <div style="font-size:11px;color:var(--muted);">미등록</div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">Authority 뒷면</div>
+          <div id="me-view-authBack" style="height:80px;background:var(--surface2);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+            <div style="font-size:11px;color:var(--muted);">미등록</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -4242,42 +4272,47 @@ function loadMyInfoToForm() {
     if (el) el.value = val || '';
   });
 
-  // 저장된 사진 미리보기
-  ['licFront','licBack','authFront','authBack'].forEach(key => {
-    const data = saved['photo_'+key];
-    const imgId = {
-      licFront:'mi-lic-front-img', licBack:'mi-lic-back-img',
-      authFront:'mi-auth-front-img', authBack:'mi-auth-back-img'
-    }[key];
-    const phId = {
-      licFront:'mi-lic-front-placeholder', licBack:'mi-lic-back-placeholder',
-      authFront:'mi-auth-front-placeholder', authBack:'mi-auth-back-placeholder'
-    }[key];
-    if (data && imgId) {
-      const img = document.getElementById(imgId);
-      const ph  = document.getElementById(phId);
-      if (img) { img.src = data; img.style.display = 'block'; }
-      if (ph)  { ph.style.display = 'none'; }
-    }
-  });
+  // Drive에서 로드한 사진 미리보기 (편집 모드)
+  if (window._driverPhotoUrls) {
+    showPhotosInEdit(window._driverPhotoUrls);
+  }
 }
 
 function previewPhoto(input, imgId, phId, photoKey) {
   const file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const data = e.target.result;
-    _pendingPhotos[photoKey] = data;
+  // 이미지 압축 후 미리보기
+  compressImage(file, 1200, 0.8, dataUrl => {
+    _pendingPhotos[photoKey] = dataUrl;
     const img = document.getElementById(imgId);
     const ph  = document.getElementById(phId);
-    if (img) { img.src = data; img.style.display = 'block'; }
+    if (img) { img.src = dataUrl; img.style.display = 'block'; }
     if (ph)  { ph.style.display = 'none'; }
+  });
+}
+
+/** 이미지 압축 — 최대 maxPx, JPEG quality */
+function compressImage(file, maxPx, quality, cb) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if (w > maxPx || h > maxPx) {
+        const ratio = Math.min(maxPx/w, maxPx/h);
+        w = Math.round(w*ratio); h = Math.round(h*ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      cb(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
 
-function saveMyInfo() {
+async function saveMyInfo() {
   const key = 'myinfo_' + (currentDriver?.name || '');
   const existing = JSON.parse(localStorage.getItem(key) || '{}');
 
@@ -4303,22 +4338,44 @@ function saveMyInfo() {
     savedAt:  new Date().toISOString(),
   };
 
-  // 사진 병합
-  Object.entries(_pendingPhotos).forEach(([k,v]) => { data['photo_'+k] = v; });
+  // localStorage에는 사진 URL만 저장 (base64 제외)
+  const localData = {...data};
+  ['photo_licFront','photo_licBack','photo_authFront','photo_authBack'].forEach(k => delete localData[k]);
 
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-  } catch(e) {
-    showToast('⚠️ 저장 공간 부족 — 사진 용량을 줄여주세요');
-    return;
+  // ★ 사진 Google Drive 업로드
+  const photoKeys = Object.keys(_pendingPhotos);
+  if (photoKeys.length > 0) {
+    showToast('📸 사진 업로드 중... (' + photoKeys.length + '장)');
+    for (const pk of photoKeys) {
+      try {
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST', headers: {'Content-Type':'text/plain'},
+          body: JSON.stringify({
+            action: 'upload_driver_photo',
+            driverName: currentDriver?.name,
+            photoKey: pk,
+            dataUrl: _pendingPhotos[pk],
+            mimeType: 'image/jpeg'
+          })
+        });
+        const json = await res.json();
+        if (json.ok) {
+          localData['photoUrl_'+pk] = json.url;
+        }
+      } catch(e) { console.warn('Photo upload failed:', pk, e); }
+    }
+    _pendingPhotos = {};
   }
 
-  // GAS에 텍스트 데이터만 저장 (사진 제외)
-  const gasData = {...data};
-  ['photo_licFront','photo_licBack','photo_authFront','photo_authBack'].forEach(k => delete gasData[k]);
+  try {
+    localStorage.setItem(key, JSON.stringify(localData));
+  } catch(e) { /* 저장 실패해도 계속 */ }
+
+  // GAS에 텍스트 데이터만 저장
+  const gasData = {...localData};
+  Object.keys(gasData).forEach(k => { if(k.startsWith('photoUrl_')) delete gasData[k]; });
   fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: {'Content-Type':'text/plain'},
+    method: 'POST', headers: {'Content-Type':'text/plain'},
     body: JSON.stringify({
       action: 'update_driver_info',
       driverName: currentDriver?.name,
@@ -4326,10 +4383,77 @@ function saveMyInfo() {
     })
   }).catch(()=>{});
 
-  // 뷰 업데이트
-  updateMyInfoView(data);
+  updateMyInfoView(localData);
   toggleMyInfoEdit();
   showToast('✅ 정보가 저장됐어요!');
+}
+
+/** Google Drive에서 사진 URL 로드 */
+async function loadDriverPhotosFromDrive() {
+  try {
+    const driverName = currentDriver?.name;
+    if (!driverName) return;
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'get_driver_photos', driverName: driverName })
+    });
+    const json = await res.json();
+    if (!json.ok || !json.photos) return;
+
+    window._driverPhotoUrls = json.photos;
+    const key = 'myinfo_' + driverName;
+    const saved = JSON.parse(localStorage.getItem(key) || '{}');
+    let updated = false;
+    Object.entries(json.photos).forEach(([pk, info]) => {
+      if (info.url && saved['photoUrl_'+pk] !== info.url) {
+        saved['photoUrl_'+pk] = info.url;
+        updated = true;
+      }
+    });
+    if (updated) {
+      try { localStorage.setItem(key, JSON.stringify(saved)); } catch(e) {}
+    }
+
+    // 뷰 모드 사진 표시
+    showPhotosInView(json.photos);
+    // 편집 모드 사진 표시
+    showPhotosInEdit(json.photos);
+  } catch(e) { console.warn('loadDriverPhotosFromDrive failed:', e); }
+}
+
+function showPhotosInView(photos) {
+  const mapping = {
+    licFront:  'me-view-licFront',
+    licBack:   'me-view-licBack',
+    authFront: 'me-view-authFront',
+    authBack:  'me-view-authBack'
+  };
+  Object.entries(mapping).forEach(([key, elId]) => {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    if (photos[key]?.url) {
+      el.innerHTML = '<img src="'+photos[key].url+'" style="width:100%;height:100%;object-fit:cover;border-radius:10px;cursor:pointer;" onclick="window.open(this.src,\'_blank\')">';
+    } else {
+      el.innerHTML = '<div style="font-size:11px;color:var(--muted);text-align:center;">미등록</div>';
+    }
+  });
+}
+
+function showPhotosInEdit(photos) {
+  const mapping = {
+    licFront:  { img: 'mi-lic-front-img',  ph: 'mi-lic-front-placeholder' },
+    licBack:   { img: 'mi-lic-back-img',   ph: 'mi-lic-back-placeholder' },
+    authFront: { img: 'mi-auth-front-img',  ph: 'mi-auth-front-placeholder' },
+    authBack:  { img: 'mi-auth-back-img',   ph: 'mi-auth-back-placeholder' }
+  };
+  Object.entries(mapping).forEach(([key, ids]) => {
+    if (photos[key]?.url && !_pendingPhotos[key]) {
+      const img = document.getElementById(ids.img);
+      const ph  = document.getElementById(ids.ph);
+      if (img && !img.src) { img.src = photos[key].url; img.style.display = 'block'; }
+      if (ph && img?.src)  { ph.style.display = 'none'; }
+    }
+  });
 }
 
 function updateMyInfoView(data) {
@@ -4420,6 +4544,8 @@ function isExpiringSoon(dateStr) {
 
 function initMyInfoPage() {
   updateMyInfoView(null);
+  // Google Drive에서 사진 로드
+  loadDriverPhotosFromDrive();
   // 관리자(최동철/Dong Cheol Choi)만 관리자앱 전환 버튼 표시
   const adminWrap = document.getElementById('admin-switch-wrap');
   if (adminWrap) {

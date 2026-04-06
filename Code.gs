@@ -17,6 +17,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const SHEET_ID = '1kUU-_-IFJkKd97O-Im-A6xojsafYG-0njVyRKmSLKeE';
+const DRIVE_ROOT_FOLDER = 'DongChoi_DriverDocs';
 
 // ── Report Sheet Headers ──
 const REPORT_HEADERS = {
@@ -462,6 +463,13 @@ function doPost(e) {
 
       case 'delete_hvis_booking':
         return cors(deleteHvisBooking(payload.id));
+
+      // ── Driver Photo Upload ──
+      case 'upload_driver_photo':
+        return cors(uploadDriverPhoto(payload.driverName, payload.photoKey, payload.dataUrl, payload.mimeType));
+
+      case 'get_driver_photos':
+        return cors(getDriverPhotos(payload.driverName));
 
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
@@ -2346,4 +2354,50 @@ function deleteHvisBooking(id) {
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Driver Photo Upload — Google Drive
+// ═══════════════════════════════════════════════════════════════════════════
+
+function uploadDriverPhoto(driverName, photoKey, dataUrl, mimeType) {
+  try {
+    if (!driverName || !photoKey || !dataUrl) return { ok: false, error: 'Missing required fields' };
+    const base64 = dataUrl.replace(/^data:[^;]+;base64,/, '');
+    const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType || 'image/jpeg', photoKey + '.jpg');
+    const rootFolder = getOrCreateFolder_(null, DRIVE_ROOT_FOLDER);
+    const driverFolder = getOrCreateFolder_(rootFolder, driverName);
+    const existing = driverFolder.getFilesByName(photoKey + '.jpg');
+    while (existing.hasNext()) { existing.next().setTrashed(true); }
+    const file = driverFolder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    return { ok: true, fileId: file.getId(), url: 'https://drive.google.com/uc?id=' + file.getId(), photoKey: photoKey };
+  } catch (err) { return { ok: false, error: err.toString() }; }
+}
+
+function getDriverPhotos(driverName) {
+  try {
+    if (!driverName) return { ok: false, error: 'Missing driverName' };
+    const rootFolders = DriveApp.getFoldersByName(DRIVE_ROOT_FOLDER);
+    if (!rootFolders.hasNext()) return { ok: true, photos: {} };
+    const driverFolders = rootFolders.next().getFoldersByName(driverName);
+    if (!driverFolders.hasNext()) return { ok: true, photos: {} };
+    const driverFolder = driverFolders.next();
+    const photos = {};
+    ['licFront', 'licBack', 'authFront', 'authBack'].forEach(function(key) {
+      const files = driverFolder.getFilesByName(key + '.jpg');
+      if (files.hasNext()) {
+        const f = files.next();
+        photos[key] = { fileId: f.getId(), url: 'https://drive.google.com/uc?id=' + f.getId(),
+          updated: Utilities.formatDate(f.getLastUpdated(), 'Australia/Sydney', 'dd/MM/yyyy HH:mm') };
+      }
+    });
+    return { ok: true, photos: photos };
+  } catch (err) { return { ok: false, error: err.toString() }; }
+}
+
+function getOrCreateFolder_(parent, name) {
+  var folders = parent ? parent.getFoldersByName(name) : DriveApp.getFoldersByName(name);
+  if (folders.hasNext()) return folders.next();
+  return parent ? parent.createFolder(name) : DriveApp.createFolder(name);
 }

@@ -8403,6 +8403,44 @@ function calcDuration(start, end) {
   const h = Math.floor(diff/60), m = diff%60;
   return h > 0 ? (m > 0 ? h+'h '+m+'m' : h+'h') : m+'m';
 }
+/** 관리자 앱 — 드라이버 사진 로드 (Google Drive) */
+async function loadAdminDriverPhotos(driverName) {
+  const box = document.getElementById('admin-driver-photos');
+  if (!box) return;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'get_driver_photos', driverName: driverName })
+    });
+    const json = await res.json();
+    if (!json.ok || !json.photos || Object.keys(json.photos).length === 0) {
+      box.innerHTML = '<div style="font-size:12px;color:var(--t3);padding:4px 0;">📷 등록된 사진 없음</div>';
+      return;
+    }
+    const labels = { licFront:'면허 앞면', licBack:'면허 뒷면', authFront:'Authority 앞면', authBack:'Authority 뒷면' };
+    let h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
+    ['licFront','licBack','authFront','authBack'].forEach(key => {
+      const p = json.photos[key];
+      h += '<div>';
+      h += '<div style="font-size:10px;color:var(--t3);margin-bottom:4px;">' + labels[key] + '</div>';
+      if (p?.url) {
+        h += '<div style="height:100px;border-radius:10px;overflow:hidden;background:var(--sf2);cursor:pointer;" onclick="window.open(\'' + p.url + '\',\'_blank\')">';
+        h += '<img src="' + p.url + '" style="width:100%;height:100%;object-fit:cover;">';
+        h += '</div>';
+        if (p.updated) h += '<div style="font-size:9px;color:var(--t3);margin-top:2px;">업로드: ' + p.updated + '</div>';
+      } else {
+        h += '<div style="height:100px;border-radius:10px;background:var(--sf2);display:flex;align-items:center;justify-content:center;">';
+        h += '<span style="font-size:11px;color:var(--t3);">미등록</span></div>';
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+    box.innerHTML = h;
+  } catch(e) {
+    box.innerHTML = '<div style="font-size:12px;color:var(--rd);">사진 로드 실패</div>';
+  }
+}
+
 function openView(type, idx) {
   const d = DB[type]?.[idx] || {};
   const tmap = { V:'차량', D:'드라이버', C:'여행사', G:'가이드' };
@@ -8459,6 +8497,11 @@ function openView(type, idx) {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🏦 계좌 정보</div>`;
     html += row2A([['은행', d.Bank_Name], ['BSB', d.BSB]]);
     html += rowA('계좌번호', d.Account_Number);
+    // ★ 사진 영역 (Drive에서 로드)
+    html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">📷 면허 / Authority 카드</div>`;
+    html += `<div id="admin-driver-photos" style="font-size:12px;color:var(--t3);padding:8px 0;">⏳ 사진 로딩 중...</div>`;
+    // 비동기 사진 로드
+    loadAdminDriverPhotos(d.Name_EN || d.Name_KR);
 
   } else if(type === 'V') {
     // 빈 값도 모두 표시 (수정 폼과 동일한 필드 구성)
