@@ -3970,11 +3970,14 @@ function submitDailyReport(){
   try {
   const agency = document.getElementById('dr-agency').value;
   const att = document.getElementById('dr-attraction').value;
-  if(!agency){ showToast('⚠️ 여행사를 입력하세요','error'); return; }
-  if(!att){ showToast('⚠️ 관광지를 선택하세요','error'); return; }
+  const _nightType = document.getElementById('f-night-type')?.value || 'none';
+  const _isPrivateNight = _nightType.startsWith('private_');
+  // 개인 야경(Private Night Tour)은 여행사/관광지/인승 필수 아님
+  if(!_isPrivateNight && !agency){ showToast('⚠️ 여행사를 입력하세요','error'); return; }
+  if(!_isPrivateNight && !att){ showToast('⚠️ 관광지를 선택하세요','error'); return; }
   /* ── 개선: 인승 미선택 경고 ── */
   const _seatsVal = document.getElementById('dr-seats')?.value;
-  if(!_seatsVal){ showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
+  if(!_isPrivateNight && !_seatsVal){ showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
   const _drBtn = document.querySelector('button[onclick="submitDailyReport()"]');
   if(_drBtn){ _drBtn.disabled=true; _drBtn.textContent='⏳ 저장 중...'; }
   const shift = activeShifts.find(s=>s.id===editingShiftId);
