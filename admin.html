@@ -4803,40 +4803,62 @@ function calcInvRow(r) {
                    : _pkOv === '0' ? 0
                    : autoParking;
 
+  // ── 행별 서차지 override 공통 키 접두사 ──
+  const _rowPrefix = (r._iso||String(r.Date||'')).slice(0,10) + '_' + (r.Rego||'') + '_' + (r.Attraction||'').replace(/\s+/g,'').slice(0,8);
+  function _ovKey(type){ return 'dcinv_'+type+'_'+_rowPrefix; }
+  function _ovGet(type){ return localStorage.getItem(_ovKey(type)); }
+
   // ── Trailer Surcharge (DR→TA 역산) ──
-  // 트레일러는 21/25S 전용: DR $30 → TA $80
   const trailerDR = parseFloat(r.Trailer) || 0;
   function trailerDRtoTA(dr, sn) {
     if(dr===0) return 0;
-    if(sn>=40) return 0;  // 40/50S 트레일러 없음
-    return dr===30?80:Math.round(dr*2.67);  // 21/25S: DR $30→TA $80
+    if(sn>=40) return 0;
+    return dr===30?80:Math.round(dr*2.67);
   }
-  const trailerVal = trailerDRtoTA(trailerDR, seatNum);
+  const _trailerAuto = trailerDRtoTA(trailerDR, seatNum);
+  const trailerVal = _ovGet('trailer') === '0' ? 0 : _trailerAuto;
 
   // ── Night Tour TA ──
   const nightType = String(r.Night_Type || '').trim();
   const isLarge   = seatNum >= 40;
   const nightCat  = isLarge ? 'large' : 'small';
-  const nightTA   = (nightType && nightType !== 'none' && NIGHT_RATES[nightType]?.[nightCat])
+  const _nightAuto = (nightType && nightType !== 'none' && NIGHT_RATES[nightType]?.[nightCat])
                    ? (NIGHT_RATES[nightType][nightCat].ta || 0) : 0;
+  const nightTA = _ovGet('night') === '0' ? 0 : _nightAuto;
 
-  // ── Tip (보고 시 동일 금액 청구) ──
-  const tipVal = parseFloat(r.Tip) || 0;
+  // ── Tip ──
+  const _tipAuto = parseFloat(r.Tip) || 0;
+  const tipVal = _ovGet('tip') === '0' ? 0 : _tipAuto;
 
-  // ── Meal (보고 시 동일 금액 청구) ──
-  const mealVal = parseFloat(r.Meal) || 0;
+  // ── Meal ──
+  const _mealAuto = parseFloat(r.Meal) || 0;
+  const mealVal = _ovGet('meal') === '0' ? 0 : _mealAuto;
 
-  // ── Toll (40/50인승만 TA에 포함) ──
-  const tollVal = isLarge ? (parseFloat(r.Toll) || 0) : 0;
+  // ── Toll (40/50인승만 TA) ──
+  const _tollAuto = isLarge ? (parseFloat(r.Toll) || 0) : 0;
+  const tollVal = _ovGet('toll') === '0' ? 0 : _tollAuto;
 
-  // ── Etc (관리자가 인보이스에서 포함/제외 선택) ──
+  // ── Hotel / Dist / Early / OT override ──
+  const _hotelAuto = hotel;
+  if(_ovGet('hotel') === '0') hotel = 0;
+  const _distAuto = dist;
+  if(_ovGet('dist') === '0') dist = 0;
+  const _earlyAuto = earlyTA;
+  if(_ovGet('early') === '0') earlyTA = 0;
+  const _otAuto = ot;
+  if(_ovGet('ot') === '0') ot = 0;
+
+  // ── Etc (기본=미포함, 관리자가 '1' 설정 시 포함) ──
   const etcVal = parseFloat(r.Etc) || 0;
-  const _etcKey = 'dcetc_' + (r._iso||String(r.Date||'')).slice(0,10) + '_' + (r.Rego||'') + '_' + (r.Attraction||'').replace(/\s+/g,'').slice(0,8);
+  const _etcKey = 'dcetc_' + _rowPrefix;
   const _etcOv  = localStorage.getItem(_etcKey);
-  const etcTA   = _etcOv === '1' ? etcVal : _etcOv === '0' ? 0 : 0;  // 기본=미포함, 관리자가 '1'로 설정 시 포함
+  const etcTA   = _etcOv === '1' ? etcVal : 0;
 
   const total = baseRate + ot + hotel + dist + earlyTA + parkingFee + trailerVal + nightTA + tipVal + mealVal + tollVal + etcTA;
-  return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking, _pkKey, trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal, etcTA, _etcKey, total, rateSource };
+  return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking, _pkKey,
+    trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal, etcTA, _etcKey, total, rateSource,
+    _rowPrefix,
+    _hotelAuto, _distAuto, _earlyAuto, _otAuto, _trailerAuto, _nightAuto, _tipAuto, _mealAuto, _tollAuto };
 }
 async function initInvoice() {
   _invReports = null; // 항상 최신 리포트 재로드
@@ -5227,27 +5249,48 @@ function renderInvPreview(rows, agency, from, to) {
         <td style="padding:4px 2px;text-align:right;vertical-align:top;"><input type="number" value="${oExtra}" step="1" style="width:50px;text-align:right;font-size:11px;padding:3px 4px;border:1px solid var(--bd);border-radius:8px;background:var(--sf);" onchange="_setInvOverride('${escH(rowKey)}','extra',this.value,'${escH(agency)}','${from}','${to}')"></td>
         ` : `
         <td style="padding:6px;text-align:right;white-space:nowrap;">$${oBase.toLocaleString()}</td>
-        <td style="padding:6px;text-align:right;white-space:nowrap;">$${oOT.toLocaleString()}</td>
+        <td style="padding:6px;text-align:right;white-space:nowrap;vertical-align:top;">
+          <div>$${oOT.toLocaleString()}</div>
+          ${c._otAuto > 0 && c.ot === 0 ? '<div style="font-size:9px;color:#d4d4d8;"><s>$'+c._otAuto+'</s></div>' : ''}
+          ${c._otAuto > 0 ? '<div style="margin-top:1px;"><button onclick="toggleSurchargeOv(\'ot\',\''+escH(c._rowPrefix)+'\',\'\','+c._otAuto+',\''+escH(agency)+'\',\''+from+'\',\''+to+'\')" style="font-size:9px;padding:1px 5px;border-radius:4px;border:1px solid '+(c.ot>0?'#86efac':'#fecaca')+';background:'+(c.ot>0?'#f0fdf4':'#fef2f2')+';color:'+(c.ot>0?'#166534':'#b91c1c')+';cursor:pointer;">'+(c.ot>0?'✓':'✗')+' OT</button></div>' : ''}
+        </td>
         <td style="padding:6px;text-align:right;white-space:nowrap;vertical-align:top;">
           <div>$${oExtra.toLocaleString()}</div>
           ${(()=>{
             const parts = [];
-            if(c.hotel>0) parts.push('호텔 $'+c.hotel);
-            if(c.dist>0) parts.push('거리 $'+c.dist);
-            if(c.earlyTA>0) parts.push('Early $'+c.earlyTA);
-            if((c.parkingFee||0)>0) parts.push('주차 $'+c.parkingFee);
-            if((c.trailerVal||0)>0) parts.push('트레일러 $'+c.trailerVal);
-            if((c.nightTA||0)>0) parts.push('야간 $'+c.nightTA);
-            if((c.tipVal||0)>0) parts.push('팁 $'+c.tipVal);
-            if((c.mealVal||0)>0) parts.push('식비 $'+c.mealVal);
-            if((c.tollVal||0)>0) parts.push('톨비 $'+c.tollVal);
+            // 각 서차지 항목: [라벨, 현재값, 자동값, override키타입]
+            const items = [
+              ['호텔', c.hotel, c._hotelAuto, 'hotel'],
+              ['거리', c.dist, c._distAuto, 'dist'],
+              ['Early', c.earlyTA, c._earlyAuto, 'early'],
+              ['주차', c.parkingFee, c.autoParking, '_pk'],
+              ['트레일러', c.trailerVal, c._trailerAuto, 'trailer'],
+              ['야간', c.nightTA, c._nightAuto, 'night'],
+              ['팁', c.tipVal, c._tipAuto, 'tip'],
+              ['식비', c.mealVal, c._mealAuto, 'meal'],
+              ['톨비', c.tollVal, c._tollAuto, 'toll'],
+            ];
+            items.forEach(([label, cur, auto])=>{
+              if(cur>0) parts.push(label+' $'+cur);
+              else if(auto>0) parts.push('<s style="color:#d4d4d8;">'+label+' $'+auto+'</s>');
+            });
             if((c.etcTA||0)>0) parts.push('기타 $'+c.etcTA);
-            let etcToggle = '';
+            else if((c.etcVal||0)>0) parts.push('<s style="color:#d4d4d8;">기타 $'+c.etcVal+'</s>');
+
+            // 토글 버튼 — 자동값이 0보다 큰 항목에만 표시
+            let toggles = '';
+            items.forEach(([label, cur, auto, keyType])=>{
+              if(auto <= 0) return;
+              const isOn = cur > 0;
+              toggles += '<button onclick="toggleSurchargeOv(\''+keyType+'\',\''+escH(c._rowPrefix)+'\',\''+escH(c._pkKey||'')+'\','+auto+',\''+escH(agency)+'\',\''+from+'\',\''+to+'\')" style="font-size:9px;padding:1px 5px;border-radius:4px;border:1px solid '+(isOn?'#86efac':'#fecaca')+';background:'+(isOn?'#f0fdf4':'#fef2f2')+';color:'+(isOn?'#166534':'#b91c1c')+';cursor:pointer;margin:1px;">'+(isOn?'✓':'✗')+' '+label+' $'+auto+'</button>';
+            });
+            // Etc 토글 (기본 미포함)
             if((c.etcVal||0)>0) {
               const isIncl = (c.etcTA||0) > 0;
-              etcToggle = '<div style="margin-top:2px;"><button onclick="toggleEtcOverride(\''+c._etcKey+'\',\''+escH(agency)+'\',\''+from+'\',\''+to+'\')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid '+(isIncl?'#86efac':'#fecaca')+';background:'+(isIncl?'#f0fdf4':'#fef2f2')+';color:'+(isIncl?'#166534':'#b91c1c')+';cursor:pointer;">'+(isIncl?'✓ 기타 $'+c.etcVal+' 포함':'✗ 기타 $'+c.etcVal+' 미포함')+'</button></div>';
+              toggles += '<button onclick="toggleEtcOverride(\''+c._etcKey+'\',\''+escH(agency)+'\',\''+from+'\',\''+to+'\')" style="font-size:9px;padding:1px 5px;border-radius:4px;border:1px solid '+(isIncl?'#86efac':'#fecaca')+';background:'+(isIncl?'#f0fdf4':'#fef2f2')+';color:'+(isIncl?'#166534':'#b91c1c')+';cursor:pointer;margin:1px;">'+(isIncl?'✓':'✗')+' 기타 $'+c.etcVal+'</button>';
             }
-            return (parts.length ? '<div style="font-size:9px;color:var(--t3);margin-top:1px;">'+parts.join(' · ')+'</div>' : '') + etcToggle;
+            return (parts.length ? '<div style="font-size:9px;color:var(--t3);margin-top:1px;">'+parts.join(' · ')+'</div>' : '')
+              + (toggles ? '<div style="margin-top:2px;display:flex;flex-wrap:wrap;gap:1px;">'+toggles+'</div>' : '');
           })()}
         </td>
         `}
@@ -5280,19 +5323,32 @@ function renderInvPreview(rows, agency, from, to) {
 }
 
 // ─────────────────────────────────────────
-// 행별 주차비 override 토글
+// 행별 서차지 override 토글 (통합)
+// type: 'ot','hotel','dist','early','trailer','night','tip','meal','toll','_pk'
 // ─────────────────────────────────────────
-function toggleParkingOverride(pkKey, autoParking, agency, from, to) {
-  const cur = localStorage.getItem(pkKey);
-  if      (cur === '1') localStorage.setItem(pkKey, '0');  // 강제 추가 → 강제 제외
-  else if (cur === '0') localStorage.removeItem(pkKey);    // 강제 제외 → 자동
-  else if (autoParking > 0) localStorage.setItem(pkKey, '0'); // 자동 있음 → 강제 제외
-  else                  localStorage.setItem(pkKey, '1');  // 자동 없음 → 강제 추가
-  // 미리보기 갱신
+function toggleSurchargeOv(type, rowPrefix, pkKey, autoVal, agency, from, to) {
+  if(type === '_pk'){
+    // 주차비: 기존 3-상태 토글 유지
+    const cur = localStorage.getItem(pkKey);
+    if      (cur === '1') localStorage.setItem(pkKey, '0');
+    else if (cur === '0') localStorage.removeItem(pkKey);
+    else if (autoVal > 0) localStorage.setItem(pkKey, '0');
+    else                  localStorage.setItem(pkKey, '1');
+  } else {
+    // 일반 서차지: ON/OFF 토글
+    const key = 'dcinv_'+type+'_'+rowPrefix;
+    const cur = localStorage.getItem(key);
+    if(cur === '0') localStorage.removeItem(key); // 제외 → 자동(포함)
+    else            localStorage.setItem(key, '0'); // 포함 → 제외
+  }
   if (agency && from && to) {
     const rows = _buildInvRows(agency, from, to);
     renderInvPreview(rows, agency, from, to);
   }
+}
+// 하위 호환: 기존 toggleParkingOverride 호출 유지
+function toggleParkingOverride(pkKey, autoParking, agency, from, to) {
+  toggleSurchargeOv('_pk', '', pkKey, autoParking, agency, from, to);
 }
 
 // ─────────────────────────────────────────
@@ -5300,8 +5356,8 @@ function toggleParkingOverride(pkKey, autoParking, agency, from, to) {
 // ─────────────────────────────────────────
 function toggleEtcOverride(etcKey, agency, from, to) {
   const cur = localStorage.getItem(etcKey);
-  if (cur === '1') localStorage.setItem(etcKey, '0');  // 포함 → 미포함
-  else             localStorage.setItem(etcKey, '1');  // 미포함/null → 포함
+  if (cur === '1') localStorage.setItem(etcKey, '0');
+  else             localStorage.setItem(etcKey, '1');
   if (agency && from && to) {
     const rows = _buildInvRows(agency, from, to);
     renderInvPreview(rows, agency, from, to);
