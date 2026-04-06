@@ -3643,6 +3643,7 @@ function goStep(n){
 
 // step2 폼 전체에 input/change 이벤트 위임 — 자동 draft 저장
 let _draftListenerAttached = false;
+var _draftRestoring = false; // draft 복원 중에는 자동저장 차단
 function _attachDraftListeners(){
   if(_draftListenerAttached) return;
   const step2 = document.getElementById('step-2');
@@ -3853,21 +3854,26 @@ function addDailyReport(shiftId){
   if(drSeats && shift?.seats) {
     drSeats.value = shift.seats;
   }
-  // 인승 유무와 관계없이 항상 서차지 옵션 초기화 (OT 버튼 렌더링 포함)
-  updateSurchargeOptions();
+  // draft가 있으면 복원 후에 힌트/서차지 재계산하므로 여기서는 건너뜀
+  const _hasDraft = !!localStorage.getItem(_draftKey());
+  if(!_hasDraft){
+    // 인승 유무와 관계없이 항상 서차지 옵션 초기화 (OT 버튼 렌더링 포함)
+    updateSurchargeOptions();
+  }
   updateStep2UI();
-  // draft 복원 후 힌트/OT 재계산 (draft 값이 반영된 후 실행)
-  setTimeout(()=>{
-    updateManualHint();
-    updateSvcHint();
-    updateDistHint();
-    updateEarlyHint();
-    checkHotelSurchargeHint();
-    updateHotelHint();
-    autoFillDRSurcharges(true);
-    // OT는 마지막에 (시간값 복원 후)
-    updateOTHint(true);
-  }, 100);
+  // draft가 없을 때만 autoFill — draft 있으면 restoreDailyDraft()가 처리
+  if(!_hasDraft){
+    setTimeout(()=>{
+      updateManualHint();
+      updateSvcHint();
+      updateDistHint();
+      updateEarlyHint();
+      checkHotelSurchargeHint();
+      updateHotelHint();
+      autoFillDRSurcharges(true);
+      updateOTHint(true);
+    }, 100);
+  }
 }
 
 function startEndShift(shiftId){
@@ -4502,6 +4508,7 @@ function _draftKey(){
 }
 
 function saveDailyDraft(){
+  if(_draftRestoring) return; // 복원 중에는 저장하지 않음
   try {
     const draft = {
       agency:      document.getElementById('dr-agency')?.value || '',
@@ -4689,16 +4696,17 @@ function _restoreDailyDraftWhenReady(){
 
 function restoreDailyDraft(){
   try {
+    _draftRestoring = true; // 복원 중 자동저장 차단
     const raw = localStorage.getItem(_draftKey());
-    if(!raw) return false;
+    if(!raw){ _draftRestoring = false; return false; }
     const d = JSON.parse(raw);
-    // 24시간 이상 지난 draft는 무시
-    if(Date.now() - (d._ts || 0) > 48*60*60*1000){ clearDailyDraft(); return false; }
+    // 48시간 이상 지난 draft는 무시
+    if(Date.now() - (d._ts || 0) > 48*60*60*1000){ clearDailyDraft(); _draftRestoring = false; return false; }
     // shiftId가 다르면 editingShiftId를 맞춰줌 (같은 드라이버의 이어쓰기)
     if(d._shiftId && d._shiftId !== editingShiftId){
       const matchShift = activeShifts.find(s=>s.id===d._shiftId);
       if(matchShift) editingShiftId = d._shiftId;
-      else { clearDailyDraft(); return false; } // 해당 shift가 없으면 draft 무효
+      else { clearDailyDraft(); _draftRestoring = false; return false; } // 해당 shift가 없으면 draft 무효
     }
 
     // 1) 텍스트 / 숫자 필드
@@ -4754,8 +4762,16 @@ function restoreDailyDraft(){
     calcTotal();
     updateOTHint();
     updateSvcHint();
+    // 복원 완료 후 힌트 전체 갱신
+    updateManualHint();
+    updateDistHint();
+    updateEarlyHint();
+    checkHotelSurchargeHint();
+    updateHotelHint();
+    // 복원 완료 후 자동저장 재활성화 (약간의 딜레이로 이벤트 버블링 방지)
+    setTimeout(()=>{ _draftRestoring = false; }, 300);
     return true;
-  } catch(e) { return false; }
+  } catch(e) { _draftRestoring = false; return false; }
 }
 
 function renderStep2SavedReports(){
