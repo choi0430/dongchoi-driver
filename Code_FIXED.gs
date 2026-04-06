@@ -79,7 +79,17 @@ const MASTER_HEADERS = {
   // ── 차량 데미지 마커 ──
   'Bus_Damage': ['Rego','Markers','UpdatedAt','UpdatedBy'],
   // ── HVIS 부킹 관리 ──
-  'HVIS_Bookings': ['ID','Rego','InspDate','InspTime','Location','CustomerNo','BookingNo','VehicleType','OwnerName','BookingDate','Status']
+  'HVIS_Bookings': ['ID','Rego','InspDate','InspTime','Location','CustomerNo','BookingNo','VehicleType','OwnerName','BookingDate','Status'],
+  // ── 정비 기록 ──
+  'Maint_Records': ['ID','Rego','Date','KM','Type','Description','Workshop','Cost','NextServiceKM'],
+  // ── 인보이스 서차지 오버라이드 ──
+  'Invoice_Overrides': ['RowKey','Value'],
+  // ── 회사 정보 (single-row config) ──
+  'Company_Profile': ['Key','Value'],
+  // ── 인보이스 공제 항목 ──
+  'Invoice_Deductions': ['ID','Agency','Period','Type','Amount','Note'],
+  // ── 인보이스 수동 항목 ──
+  'Invoice_Manual_Items': ['ID','Agency','Period','Date','Rego','Tour','Seats','TourCode','Note','Amount','OT','Hotel','Dist','Trailer','Toll','Start','End','Driver','Guide','Pickup','Dropoff']
 };
 
 // ── Tab Colors ──
@@ -92,7 +102,9 @@ const TAB_COLORS = {
   'Invoices':'#6d28d9',
   'M_SvcOptions':'#6366f1','M_HotelOptions':'#ec4899','M_DistOptions':'#f59e0b',
   'M_NightRates':'#8b5cf6','M_Attractions':'#14b8a6',
-  'Defect_Reports':'#dc2626','Bus_Damage':'#ea580c'
+  'Defect_Reports':'#dc2626','Bus_Damage':'#ea580c',
+  'Maint_Records':'#059669','Invoice_Overrides':'#7c3aed','Company_Profile':'#0284c7',
+  'Invoice_Deductions':'#db2777','Invoice_Manual_Items':'#9333ea'
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -480,6 +492,47 @@ function doPost(e) {
       case 'get_driver_photos':
         return cors(getDriverPhotos(payload.driverName));
 
+      // ── Maint Records (POST) ──
+      case 'save_maint_record':
+        return cors(saveMaintRecord(payload.data));
+
+      case 'delete_maint_record':
+        return cors(deleteSheetRowById('Maint_Records', 'ID', payload.id));
+
+      // ── Invoice Overrides (POST) ──
+      case 'save_invoice_override':
+        return cors(saveInvoiceOverride(payload.rowKey, payload.value));
+
+      case 'delete_invoice_override':
+        return cors(deleteSheetRowById('Invoice_Overrides', 'RowKey', payload.rowKey));
+
+      case 'bulk_save_invoice_overrides':
+        return cors(bulkSaveInvoiceOverrides(payload.items));
+
+      // ── Company Profile (POST) ──
+      case 'save_company_profile':
+        return cors(saveCompanyProfile(payload.data));
+
+      // ── Invoice Deductions (POST) ──
+      case 'save_invoice_deduction':
+        return cors(saveInvoiceDeduction(payload.data));
+
+      case 'delete_invoice_deduction':
+        return cors(deleteSheetRowById('Invoice_Deductions', 'ID', payload.id));
+
+      case 'save_invoice_deductions_bulk':
+        return cors(saveInvoiceDeductionsBulk(payload.agency, payload.period, payload.items));
+
+      // ── Invoice Manual Items (POST) ──
+      case 'save_invoice_manual_item':
+        return cors(saveInvoiceManualItem(payload.data));
+
+      case 'delete_invoice_manual_item':
+        return cors(deleteSheetRowById('Invoice_Manual_Items', 'ID', payload.id));
+
+      case 'save_invoice_manual_items_bulk':
+        return cors(saveInvoiceManualItemsBulk(payload.agency, payload.period, payload.items));
+
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
     }
@@ -590,7 +643,9 @@ function getAllMasters() {
     const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
                     'M_PriceClient', 'M_PriceDriver', 'M_PriceSub',
                     'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions',
-                    'Sub_Rates', 'Ledger', 'MOT_Report', 'HVIS_Bookings'];
+                    'Sub_Rates', 'Ledger', 'MOT_Report', 'HVIS_Bookings',
+                    'Maint_Records', 'Invoice_Overrides', 'Company_Profile',
+                    'Invoice_Deductions', 'Invoice_Manual_Items'];
     const result = {};
 
     sheets.forEach(name => {
@@ -2446,4 +2501,297 @@ function getOrCreateFolder_(parent, name) {
   var folders = parent ? parent.getFoldersByName(name) : DriveApp.getFoldersByName(name);
   if (folders.hasNext()) return folders.next();
   return parent ? parent.createFolder(name) : DriveApp.createFolder(name);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Maint Records (정비 기록)
+// ═══════════════════════════════════════════════════════════════════════════
+function saveMaintRecord(data) {
+  try {
+    if (!data || !data.ID) return { ok: false, error: 'Missing ID' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Maint_Records');
+    const headers = MASTER_HEADERS['Maint_Records'];
+
+    // 기존 행 업데이트 또는 새 행 추가
+    const lastRow = sheet.getLastRow();
+    let found = false;
+    if (lastRow > 1) {
+      const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (let i = 0; i < ids.length; i++) {
+        if (String(ids[i][0]) === String(data.ID)) {
+          const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+          sheet.getRange(i + 2, 1, 1, headers.length).setValues([row]);
+          found = true;
+          break;
+        }
+      }
+    }
+    if (!found) {
+      const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+      sheet.appendRow(row);
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Generic: Delete row by ID column
+// ═══════════════════════════════════════════════════════════════════════════
+function deleteSheetRowById(sheetName, idCol, idValue) {
+  try {
+    if (!idValue) return { ok: false, error: 'Missing ID value' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, sheetName);
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'No data' };
+
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const colIdx = headers.indexOf(idCol);
+    if (colIdx < 0) return { ok: false, error: 'Column not found: ' + idCol };
+
+    const vals = sheet.getRange(2, colIdx + 1, lastRow - 1, 1).getValues();
+    for (let i = vals.length - 1; i >= 0; i--) {
+      if (String(vals[i][0]) === String(idValue)) {
+        sheet.deleteRow(i + 2);
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'ID not found: ' + idValue };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Invoice Overrides (서차지 오버라이드)
+// ═══════════════════════════════════════════════════════════════════════════
+function saveInvoiceOverride(rowKey, value) {
+  try {
+    if (!rowKey) return { ok: false, error: 'Missing rowKey' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Invoice_Overrides');
+
+    const lastRow = sheet.getLastRow();
+    let found = false;
+    if (lastRow > 1) {
+      const keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (let i = 0; i < keys.length; i++) {
+        if (String(keys[i][0]) === String(rowKey)) {
+          if (value === null || value === undefined || value === '') {
+            sheet.deleteRow(i + 2);
+          } else {
+            sheet.getRange(i + 2, 2).setValue(value);
+          }
+          found = true;
+          break;
+        }
+      }
+    }
+    if (!found && value !== null && value !== undefined && value !== '') {
+      sheet.appendRow([rowKey, value]);
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function bulkSaveInvoiceOverrides(items) {
+  try {
+    if (!items || !items.length) return { ok: true };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Invoice_Overrides');
+
+    // 기존 데이터 로드
+    const lastRow = sheet.getLastRow();
+    const existing = {};
+    if (lastRow > 1) {
+      const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+      data.forEach((row, i) => { existing[String(row[0])] = i + 2; });
+    }
+
+    items.forEach(item => {
+      const rk = String(item.rowKey);
+      if (existing[rk]) {
+        if (item.value === null || item.value === '') {
+          // 삭제는 나중에 처리 (행 번호 이동 문제)
+          sheet.getRange(existing[rk], 2).setValue('__DELETE__');
+        } else {
+          sheet.getRange(existing[rk], 2).setValue(item.value);
+        }
+      } else if (item.value !== null && item.value !== '') {
+        sheet.appendRow([rk, item.value]);
+      }
+    });
+
+    // __DELETE__ 마킹된 행 제거 (역순)
+    const lr2 = sheet.getLastRow();
+    if (lr2 > 1) {
+      const vals = sheet.getRange(2, 2, lr2 - 1, 1).getValues();
+      for (let i = vals.length - 1; i >= 0; i--) {
+        if (vals[i][0] === '__DELETE__') sheet.deleteRow(i + 2);
+      }
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Company Profile (회사 정보)
+// ═══════════════════════════════════════════════════════════════════════════
+function saveCompanyProfile(data) {
+  try {
+    if (!data) return { ok: false, error: 'Missing data' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Company_Profile');
+
+    // 기존 키-값 쌍 로드
+    const lastRow = sheet.getLastRow();
+    const existing = {};
+    if (lastRow > 1) {
+      const rows = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+      rows.forEach((row, i) => { existing[String(row[0])] = i + 2; });
+    }
+
+    // 각 키-값 업데이트 또는 추가
+    Object.keys(data).forEach(key => {
+      const val = data[key] || '';
+      if (existing[key]) {
+        sheet.getRange(existing[key], 2).setValue(val);
+      } else {
+        sheet.appendRow([key, val]);
+      }
+    });
+
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Invoice Deductions (인보이스 공제)
+// ═══════════════════════════════════════════════════════════════════════════
+function saveInvoiceDeduction(data) {
+  try {
+    if (!data || !data.ID) return { ok: false, error: 'Missing ID' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Invoice_Deductions');
+    const headers = MASTER_HEADERS['Invoice_Deductions'];
+    const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+    sheet.appendRow(row);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function saveInvoiceDeductionsBulk(agency, period, items) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Invoice_Deductions');
+    const headers = MASTER_HEADERS['Invoice_Deductions'];
+
+    // 해당 agency+period 기존 행 삭제 (역순)
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      const hdr = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const agIdx = hdr.indexOf('Agency');
+      const prIdx = hdr.indexOf('Period');
+      const data = sheet.getRange(2, 1, lastRow - 1, hdr.length).getValues();
+      for (let i = data.length - 1; i >= 0; i--) {
+        if (String(data[i][agIdx]) === String(agency) && String(data[i][prIdx]) === String(period)) {
+          sheet.deleteRow(i + 2);
+        }
+      }
+    }
+
+    // 새 항목 추가
+    if (items && items.length) {
+      items.forEach(item => {
+        item.Agency = agency;
+        item.Period = period;
+        if (!item.ID) item.ID = Date.now().toString() + Math.random().toString(36).slice(2, 6);
+        const row = headers.map(h => item[h] !== undefined ? item[h] : '');
+        sheet.appendRow(row);
+      });
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Invoice Manual Items (인보이스 수동 항목)
+// ═══════════════════════════════════════════════════════════════════════════
+function saveInvoiceManualItem(data) {
+  try {
+    if (!data || !data.ID) return { ok: false, error: 'Missing ID' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Invoice_Manual_Items');
+    const headers = MASTER_HEADERS['Invoice_Manual_Items'];
+
+    const lastRow = sheet.getLastRow();
+    let found = false;
+    if (lastRow > 1) {
+      const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (let i = 0; i < ids.length; i++) {
+        if (String(ids[i][0]) === String(data.ID)) {
+          const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+          sheet.getRange(i + 2, 1, 1, headers.length).setValues([row]);
+          found = true;
+          break;
+        }
+      }
+    }
+    if (!found) {
+      const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+      sheet.appendRow(row);
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function saveInvoiceManualItemsBulk(agency, period, items) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Invoice_Manual_Items');
+    const headers = MASTER_HEADERS['Invoice_Manual_Items'];
+
+    // 해당 agency+period 기존 행 삭제 (역순)
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      const hdr = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const agIdx = hdr.indexOf('Agency');
+      const prIdx = hdr.indexOf('Period');
+      const data = sheet.getRange(2, 1, lastRow - 1, hdr.length).getValues();
+      for (let i = data.length - 1; i >= 0; i--) {
+        if (String(data[i][agIdx]) === String(agency) && String(data[i][prIdx]) === String(period)) {
+          sheet.deleteRow(i + 2);
+        }
+      }
+    }
+
+    // 새 항목 추가
+    if (items && items.length) {
+      items.forEach(item => {
+        item.Agency = agency;
+        item.Period = period;
+        if (!item.ID) item.ID = Date.now().toString() + Math.random().toString(36).slice(2, 6);
+        const row = headers.map(h => item[h] !== undefined ? item[h] : '');
+        sheet.appendRow(row);
+      });
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
 }

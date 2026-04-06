@@ -1950,8 +1950,8 @@ function rDash(){
 // ===== VEHICLE MANAGEMENT =====
 function getHvisBookings(){return window._hvisBookings||[];}
 function setHvisBookingsCache(d){window._hvisBookings=d||[];}
-function getMaintRecords(){try{return safeGetLocal('maint_records', []);}catch(e){return[];}}
-function saveMaintRecords(d){safeSetLocal('maint_records', d);}
+function getMaintRecords(){return window._maintRecords||[];}
+function setMaintRecordsCache(d){window._maintRecords=d||[];}
 function getDefectReports(){try{return safeGetLocal('defect_reports', []);}catch(e){return[];}}
 function saveDefectReports(d){safeSetLocal('defect_reports', d);}
 
@@ -2262,24 +2262,38 @@ function openMaintEntry(id){
     +'<button class="btn bac" style="width:100%;" onclick="saveMaintEntry(\''+id+'\')">&#x1F4BE; Save</button>';
   overlay.appendChild(modal);document.body.appendChild(overlay);
 }
-function saveMaintEntry(id){
+async function saveMaintEntry(id){
   var entry={id:id||Date.now().toString(),rego:gv('mt-rego'),date:gv('mt-date'),
     km:parseInt(gv('mt-km'))||null,type:gv('mt-type'),description:gv('mt-desc'),
     workshop:gv('mt-shop'),cost: roundMoney(gv('mt-cost'))||0,nextServiceKM:parseInt(gv('mt-nextkm'))||null};
   if(!entry.rego){toast('Select a vehicle','er');return;}
   if(!entry.date){toast('Enter date','er');return;}
+  // 로컬 캐시 업데이트
   var recs=getMaintRecords();
   if(id){var ix=recs.findIndex(function(r){return r.id===id;});if(ix>=0)recs[ix]=entry;else recs.push(entry);}
   else recs.push(entry);
-  saveMaintRecords(recs);
+  setMaintRecordsCache(recs);
   if(entry.km){var vi=DB.V.findIndex(function(v){return v.Rego===entry.rego;});if(vi>=0){if(entry.nextServiceKM)DB.V[vi].Next_Service_KM=entry.nextServiceKM;}}
   document.getElementById('maint-modal-overlay').remove();
   renderMaint();toast('Maintenance record saved','ok');
+  // 서버 저장
+  try {
+    await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'save_maint_record', data:{
+        ID:entry.id, Rego:entry.rego, Date:entry.date, KM:entry.km||'',
+        Type:entry.type, Description:entry.description, Workshop:entry.workshop,
+        Cost:entry.cost, NextServiceKM:entry.nextServiceKM||''
+      }})});
+  } catch(e){ console.warn('Maint save to server failed:', e); }
 }
-function deleteMaint(id){
+async function deleteMaint(id){
   if(!confirm('Delete this maintenance record?'))return;
-  saveMaintRecords(getMaintRecords().filter(function(r){return r.id!==id;}));
+  setMaintRecordsCache(getMaintRecords().filter(function(r){return r.id!==id;}));
   renderMaint();toast('Deleted','ok');
+  try {
+    await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'delete_maint_record', id:id})});
+  } catch(e){ console.warn('Maint delete from server failed:', e); }
 }
 
 function populateDefectFilter(){
@@ -4223,7 +4237,14 @@ let _invItemEditId = null; // null = 추가, id = 편집
 function _invManualKey() {
   const agency = document.getElementById('inv-agency')?.value || '_manual';
   const from   = document.getElementById('inv-from')?.value   || '';
-  return 'dc_inv_manual_' + agency + '_' + from.slice(0,7); // 월별
+  return agency + '_' + from.slice(0,7); // 월별
+}
+function _getInvManualItems(key) {
+  return (window._invoiceManualServer && window._invoiceManualServer[key]) ? window._invoiceManualServer[key] : [];
+}
+function _setInvManualItems(key, items) {
+  if(!window._invoiceManualServer) window._invoiceManualServer = {};
+  window._invoiceManualServer[key] = items;
 }
 
 function openInvItemModal(id) {
@@ -4242,7 +4263,7 @@ function openInvItemModal(id) {
 
   if (id) {
     const key   = _invManualKey();
-    const items = JSON.parse(localStorage.getItem(key)||'[]');
+    const items = _getInvManualItems(key);
     const item  = items.find(x => x.id === id);
     if (item) {
       document.getElementById('iim-date').value     = parseToISO(item.date || '');
@@ -4388,7 +4409,7 @@ function saveInvItem() {
   };
 
   const key   = _invManualKey();
-  const items = JSON.parse(localStorage.getItem(key)||'[]');
+  const items = _getInvManualItems(key).slice(); // shallow copy
 
   if (_invItemEditId) {
     const idx = items.findIndex(x => x.id === _invItemEditId);
@@ -4398,8 +4419,22 @@ function saveInvItem() {
   }
 
   // 날짜순 정렬
-  items.sort((a,b)=>a.date.localeCompare(b.date));
-  localStorage.setItem(key, JSON.stringify(items));
+  items.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  _setInvManualItems(key, items);
+
+  // 서버 저장 (비동기)
+  const _ag = document.getElementById('inv-agency')?.value||'';
+  const _fr = document.getElementById('inv-from')?.value||'';
+  if(_ag && _fr) {
+    fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'save_invoice_manual_item', data:{
+        ID:item.id, Agency:_ag, Period:_fr.slice(0,7), Date:item.date, Rego:item.rego||'',
+        Tour:item.tour, Seats:item.seats||'', TourCode:item.tourcode||'', Note:item.note||'',
+        Amount:item.amount, OT:item.ot||0, Hotel:item.hotel||0, Dist:item.dist||0,
+        Trailer:item.trailer||0, Toll:item.toll||0, Start:item.start||'', End:item.end||'',
+        Driver:item.driver||'', Guide:item.guide||'', Pickup:item.pickup||'', Dropoff:item.dropoff||''
+      }})}).catch(e => console.warn('Manual item save failed:', e));
+  }
 
   closeInvItemModal();
   renderInvManualList();
@@ -4411,8 +4446,12 @@ function saveInvItem() {
 function deleteInvItem(id) {
   if (!confirm('이 항목을 삭제하시겠습니까?')) return;
   const key   = _invManualKey();
-  const items = JSON.parse(localStorage.getItem(key)||'[]').filter(x=>x.id!==id);
-  localStorage.setItem(key, JSON.stringify(items));
+  const items = _getInvManualItems(key).filter(x=>x.id!==id);
+  _setInvManualItems(key, items);
+  // 서버 삭제 (비동기)
+  fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({action:'delete_invoice_manual_item', id:id})
+  }).catch(e => console.warn('Manual item delete failed:', e));
   renderInvManualList();
   _refreshInvPreview();
   toast('항목 삭제됨', 'ok');
@@ -4422,7 +4461,7 @@ function renderInvManualList() {
   const el  = document.getElementById('inv-manual-list');
   const inlineEl = document.getElementById('inv-manual-inline');
   const key   = _invManualKey();
-  const items = JSON.parse(localStorage.getItem(key)||'[]');
+  const items = _getInvManualItems(key);
 
   // 기존 위치 (있으면 숨김 처리 — 인라인으로 이동)
   if (el) el.style.display = 'none';
@@ -4470,10 +4509,15 @@ function _onDeductionChange(idx, field, val) {
   else if (field === 'type') _invDeductions[idx].type = val;
   else if (field === 'note') _invDeductions[idx].note = val||'';
   _updateInvDeductionDisplay();
-  // localStorage 백업
+  // 서버 저장 (비동기)
   const ag = document.getElementById('inv-agency')?.value||'';
   const fr = document.getElementById('inv-from')?.value||'';
-  if (ag && fr) localStorage.setItem(`dc_inv_deductions_${ag}_${fr.slice(0,7)}`, JSON.stringify(_invDeductions));
+  if (ag && fr) {
+    fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'save_invoice_deductions_bulk', agency:ag, period:fr.slice(0,7),
+        items: _invDeductions.map(d=>({ID:d.id||Date.now().toString()+Math.random().toString(36).slice(2,6), Type:d.type||'prepaid', Amount:d.amount||0, Note:d.note||''}))
+      })}).catch(e => console.warn('Deduction save failed:', e));
+  }
 }
 
 function _renderInvDeductionInputs() {
@@ -4541,10 +4585,12 @@ function _refreshInvPreview() {
   const rows = _buildInvRows(agency, from, to);
   renderInvPreview(rows, agency, from, to);
 
-  // localStorage에서 크레딧/선수금 복원 (비어있을 때만)
-  if (_invDeductions.length === 0) {
-    const savedDed = localStorage.getItem(`dc_inv_deductions_${agency}_${from.slice(0,7)}`);
-    if (savedDed) { try { _invDeductions = JSON.parse(savedDed); } catch(e) {} }
+  // 서버에서 크레딧/선수금 복원 (비어있을 때만)
+  if (_invDeductions.length === 0 && window._invoiceDeductionsServer) {
+    const dedKey = agency + '_' + from.slice(0,7);
+    if (window._invoiceDeductionsServer[dedKey]) {
+      _invDeductions = window._invoiceDeductionsServer[dedKey].map(d=>({...d}));
+    }
   }
 
   // 재렌더 후 차감 입력 복원
@@ -4556,8 +4602,8 @@ function _refreshInvPreview() {
 
 // 수동 항목을 report rows 형식으로 변환
 function _manualItemsToRows(agency, from) {
-  const key   = 'dc_inv_manual_' + agency + '_' + (from||'').slice(0,7);
-  const items = JSON.parse(localStorage.getItem(key)||'[]');
+  const _mkey = agency + '_' + (from||'').slice(0,7);
+  const items = (window._invoiceManualServer && window._invoiceManualServer[_mkey]) ? window._invoiceManualServer[_mkey] : [];
   return items.map(item => ({
     _iso:           parseToISO(item.date) || item.date,
     Date:           item.date,
@@ -4589,21 +4635,24 @@ function _manualItemsToRows(agency, from) {
 
 // Dong Choi Pty Ltd 발행자 정보
 const DC_COMPANY = {
-  name:    localStorage.getItem('dc_company_name')    || 'DONG CHOI PTY LTD',
-  abn:     localStorage.getItem('dc_abn')             || '',
-  address: localStorage.getItem('dc_address')         || 'Sydney, NSW, Australia',
-  phone:   localStorage.getItem('dc_phone')           || '0430 175 195',
-  email:   localStorage.getItem('dc_email')           || 'dongchoicoach@gmail.com',
-  bank:    localStorage.getItem('dc_bank')            || '',
-  bsb:     localStorage.getItem('dc_bsb')             || '',
-  acc:     localStorage.getItem('dc_acc')             || '',
-  accname: localStorage.getItem('dc_accname')         || '',
+  name:    'DONG CHOI PTY LTD',
+  abn:     '',
+  address: 'Sydney, NSW, Australia',
+  phone:   '0430 175 195',
+  email:   'dongchoicoach@gmail.com',
+  bank:    '',
+  bsb:     '',
+  acc:     '',
+  accname: '',
 };
 
 function saveCompanyInfo() {
   const abn = document.getElementById('inv-abn')?.value || '';
-  localStorage.setItem('dc_abn', abn);
   DC_COMPANY.abn = abn;
+  // 서버 저장 (비동기)
+  fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({action:'save_company_profile', data:{abn:abn}})
+  }).catch(e => console.warn('Company info save failed:', e));
 }
 
 // ── 날짜 유틸 ──
@@ -4647,16 +4696,16 @@ function toggleInvSettings() {
   const showing = el.style.display !== 'none';
   el.style.display = showing ? 'none' : 'block';
   if (!showing) {
-    // 저장된 값 로드
-    document.getElementById('inv-company-name').value = localStorage.getItem('dc_company_name') || 'DONG CHOI PTY LTD';
-    document.getElementById('inv-abn').value           = localStorage.getItem('dc_abn')          || '';
-    document.getElementById('inv-phone').value         = localStorage.getItem('dc_phone')        || '0430 175 195';
-    document.getElementById('inv-email').value         = localStorage.getItem('dc_email')        || 'dongchoicoach@gmail.com';
-    document.getElementById('inv-address').value       = localStorage.getItem('dc_address')      || 'Sydney, NSW, Australia';
-    document.getElementById('inv-bank').value          = localStorage.getItem('dc_bank')         || '';
-    document.getElementById('inv-bsb').value           = localStorage.getItem('dc_bsb')          || '';
-    document.getElementById('inv-acc').value           = localStorage.getItem('dc_acc')          || '';
-    document.getElementById('inv-accname').value       = localStorage.getItem('dc_accname')      || '';
+    // DC_COMPANY 객체에서 값 로드 (서버에서 로드된 값)
+    document.getElementById('inv-company-name').value = DC_COMPANY.name    || 'DONG CHOI PTY LTD';
+    document.getElementById('inv-abn').value           = DC_COMPANY.abn     || '';
+    document.getElementById('inv-phone').value         = DC_COMPANY.phone   || '0430 175 195';
+    document.getElementById('inv-email').value         = DC_COMPANY.email   || 'dongchoicoach@gmail.com';
+    document.getElementById('inv-address').value       = DC_COMPANY.address || 'Sydney, NSW, Australia';
+    document.getElementById('inv-bank').value          = DC_COMPANY.bank    || '';
+    document.getElementById('inv-bsb').value           = DC_COMPANY.bsb     || '';
+    document.getElementById('inv-acc').value           = DC_COMPANY.acc     || '';
+    document.getElementById('inv-accname').value       = DC_COMPANY.accname || '';
   }
 }
 
@@ -4671,16 +4720,6 @@ function saveInvSettings() {
   const acc     = document.getElementById('inv-acc')?.value          || '';
   const accname = document.getElementById('inv-accname')?.value      || '';
 
-  if (name)    localStorage.setItem('dc_company_name', name);
-  if (abn)     localStorage.setItem('dc_abn',     abn);
-  if (phone)   localStorage.setItem('dc_phone',   phone);
-  if (email)   localStorage.setItem('dc_email',   email);
-  if (address) localStorage.setItem('dc_address', address);
-  if (bank)    localStorage.setItem('dc_bank',    bank);
-  if (bsb)     localStorage.setItem('dc_bsb',     bsb);
-  if (acc)     localStorage.setItem('dc_acc',     acc);
-  if (accname) localStorage.setItem('dc_accname', accname);
-
   DC_COMPANY.name    = name    || DC_COMPANY.name;
   DC_COMPANY.abn     = abn     || DC_COMPANY.abn;
   DC_COMPANY.phone   = phone   || DC_COMPANY.phone;
@@ -4690,6 +4729,15 @@ function saveInvSettings() {
   DC_COMPANY.bsb     = bsb     || DC_COMPANY.bsb;
   DC_COMPANY.acc     = acc     || DC_COMPANY.acc;
   DC_COMPANY.accname = accname || DC_COMPANY.accname;
+  // 서버 저장 (비동기)
+  fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({action:'save_company_profile', data:{
+      name: DC_COMPANY.name, abn: DC_COMPANY.abn, phone: DC_COMPANY.phone,
+      email: DC_COMPANY.email, address: DC_COMPANY.address, bank: DC_COMPANY.bank,
+      bsb: DC_COMPANY.bsb, acc: DC_COMPANY.acc, accname: DC_COMPANY.accname
+    }})
+  }).catch(e => console.warn('Company profile save failed:', e));
+  toast('회사 정보 저장 완료','ok');
 }
 
 
@@ -4821,7 +4869,7 @@ function calcInvRow(r) {
 
   // 행별 주차비 수동 override (localStorage: '1'=강제추가, '0'=강제제외, null=자동)
   const _pkKey = 'dcpk_' + (r._iso||String(r.Date||'')).slice(0,10) + '_' + (r.Rego||'') + '_' + (r.Attraction||'').replace(/\s+/g,'').slice(0,8);
-  const _pkOv  = localStorage.getItem(_pkKey);
+  const _pkOv  = (window._invoiceOverrides && window._invoiceOverrides[_pkKey] !== undefined) ? window._invoiceOverrides[_pkKey] : null;
   const parkingFee = _pkOv === '1' ? (seatNum >= 40 ? 40 : 30)
                    : _pkOv === '0' ? 0
                    : autoParking;
@@ -4829,7 +4877,7 @@ function calcInvRow(r) {
   // ── 행별 서차지 override 공통 키 접두사 ──
   const _rowPrefix = (r._iso||String(r.Date||'')).slice(0,10) + '_' + (r.Rego||'') + '_' + (r.Attraction||'').replace(/\s+/g,'').slice(0,8);
   function _ovKey(type){ return 'dcinv_'+type+'_'+_rowPrefix; }
-  function _ovGet(type){ return localStorage.getItem(_ovKey(type)); }
+  function _ovGet(type){ const k=_ovKey(type); return (window._invoiceOverrides && window._invoiceOverrides[k] !== undefined) ? window._invoiceOverrides[k] : null; }
 
   // ── Trailer Surcharge (DR→TA 역산) ──
   const trailerDR = parseFloat(r.Trailer) || 0;
@@ -4874,7 +4922,7 @@ function calcInvRow(r) {
   // ── Etc (기본=미포함, 관리자가 '1' 설정 시 포함) ──
   const etcVal = parseFloat(r.Etc) || 0;
   const _etcKey = 'dcetc_' + _rowPrefix;
-  const _etcOv  = localStorage.getItem(_etcKey);
+  const _etcOv  = (window._invoiceOverrides && window._invoiceOverrides[_etcKey] !== undefined) ? window._invoiceOverrides[_etcKey] : null;
   const etcTA   = _etcOv === '1' ? etcVal : 0;
 
   const total = baseRate + ot + hotel + dist + earlyTA + parkingFee + trailerVal + nightTA + tipVal + mealVal + tollVal + etcTA;
@@ -4887,16 +4935,7 @@ async function initInvoice() {
   _invReports = null; // 항상 최신 리포트 재로드
   // M_Clients 로드 확보
   if (!DB.C || !DB.C.length) await syncClients();
-  // 저장된 회사 설정 로드
-  DC_COMPANY.name    = localStorage.getItem('dc_company_name') || DC_COMPANY.name;
-  DC_COMPANY.abn     = localStorage.getItem('dc_abn')          || DC_COMPANY.abn;
-  DC_COMPANY.phone   = localStorage.getItem('dc_phone')        || DC_COMPANY.phone;
-  DC_COMPANY.email   = localStorage.getItem('dc_email')        || DC_COMPANY.email;
-  DC_COMPANY.address = localStorage.getItem('dc_address')      || DC_COMPANY.address;
-  DC_COMPANY.bank    = localStorage.getItem('dc_bank')         || '';
-  DC_COMPANY.bsb     = localStorage.getItem('dc_bsb')          || '';
-  DC_COMPANY.acc     = localStorage.getItem('dc_acc')          || '';
-  DC_COMPANY.accname = localStorage.getItem('dc_accname')      || '';
+  // DC_COMPANY는 loadAllFromSheets()에서 Company_Profile 시트로부터 이미 로드됨
 
   // 기본 기간: 이번 달
   if (!document.getElementById('inv-from').value) setInvPeriod('thismonth');
@@ -5350,20 +5389,24 @@ function renderInvPreview(rows, agency, from, to) {
 // type: 'ot','hotel','dist','early','trailer','night','tip','meal','toll','_pk'
 // ─────────────────────────────────────────
 function toggleSurchargeOv(type, rowPrefix, pkKey, autoVal, agency, from, to) {
+  if(!window._invoiceOverrides) window._invoiceOverrides = {};
+  let saveKey, saveVal;
   if(type === '_pk'){
-    // 주차비: 기존 3-상태 토글 유지
-    const cur = localStorage.getItem(pkKey);
-    if      (cur === '1') localStorage.setItem(pkKey, '0');
-    else if (cur === '0') localStorage.removeItem(pkKey);
-    else if (autoVal > 0) localStorage.setItem(pkKey, '0');
-    else                  localStorage.setItem(pkKey, '1');
+    const cur = window._invoiceOverrides[pkKey];
+    if      (cur === '1') { window._invoiceOverrides[pkKey] = '0'; saveKey=pkKey; saveVal='0'; }
+    else if (cur === '0') { delete window._invoiceOverrides[pkKey]; saveKey=pkKey; saveVal=null; }
+    else if (autoVal > 0) { window._invoiceOverrides[pkKey] = '0'; saveKey=pkKey; saveVal='0'; }
+    else                  { window._invoiceOverrides[pkKey] = '1'; saveKey=pkKey; saveVal='1'; }
   } else {
-    // 일반 서차지: ON/OFF 토글
     const key = 'dcinv_'+type+'_'+rowPrefix;
-    const cur = localStorage.getItem(key);
-    if(cur === '0') localStorage.removeItem(key); // 제외 → 자동(포함)
-    else            localStorage.setItem(key, '0'); // 포함 → 제외
+    const cur = window._invoiceOverrides[key];
+    if(cur === '0') { delete window._invoiceOverrides[key]; saveKey=key; saveVal=null; }
+    else            { window._invoiceOverrides[key] = '0'; saveKey=key; saveVal='0'; }
   }
+  // 서버 저장 (비동기)
+  fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify(saveVal !== null ? {action:'save_invoice_override', rowKey:saveKey, value:saveVal} : {action:'delete_invoice_override', rowKey:saveKey})
+  }).catch(e => console.warn('Override save failed:', e));
   if (agency && from && to) {
     const rows = _buildInvRows(agency, from, to);
     renderInvPreview(rows, agency, from, to);
@@ -5378,9 +5421,15 @@ function toggleParkingOverride(pkKey, autoParking, agency, from, to) {
 // 행별 기타(Etc) override 토글
 // ─────────────────────────────────────────
 function toggleEtcOverride(etcKey, agency, from, to) {
-  const cur = localStorage.getItem(etcKey);
-  if (cur === '1') localStorage.setItem(etcKey, '0');
-  else             localStorage.setItem(etcKey, '1');
+  if(!window._invoiceOverrides) window._invoiceOverrides = {};
+  const cur = window._invoiceOverrides[etcKey];
+  let saveVal;
+  if (cur === '1') { window._invoiceOverrides[etcKey] = '0'; saveVal='0'; }
+  else             { window._invoiceOverrides[etcKey] = '1'; saveVal='1'; }
+  // 서버 저장 (비동기)
+  fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({action:'save_invoice_override', rowKey:etcKey, value:saveVal})
+  }).catch(e => console.warn('Etc override save failed:', e));
   if (agency && from && to) {
     const rows = _buildInvRows(agency, from, to);
     renderInvPreview(rows, agency, from, to);
@@ -5508,8 +5557,8 @@ async function saveInvoiceToSheet() {
   });
 
   // 수동 항목 JSON
-  const manualKey = 'dc_inv_manual_' + agency + '_' + from.slice(0,7);
-  const manualItems = JSON.parse(localStorage.getItem(manualKey)||'[]');
+  const _manKey = agency + '_' + from.slice(0,7);
+  const manualItems = _getInvManualItems(_manKey);
 
   const data = {
     InvNumber:   invNum,
@@ -5586,13 +5635,12 @@ async function saveInvoiceToSheet() {
     _invHistoryCache = null; // 캐시 무효화
     _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; // 다음 인보이스를 위해 번호 초기화
 
-    // ★ 저장 완료 후 크레딧/선수금 & 수동항목 localStorage 초기화 (다음 인보이스에 잔류 방지)
-    const dedKey = `dc_inv_deductions_${agency}_${from.slice(0,7)}`;
-    const manKey = `dc_inv_manual_${agency}_${from.slice(0,7)}`;
-    localStorage.removeItem(dedKey);
-    localStorage.removeItem(manKey);
+    // ★ 저장 완료 후 크레딧/선수금 & 수동항목 캐시 초기화 (다음 인보이스에 잔류 방지)
+    const _resetKey = agency + '_' + from.slice(0,7);
+    if(window._invoiceDeductionsServer) delete window._invoiceDeductionsServer[_resetKey];
+    if(window._invoiceManualServer) delete window._invoiceManualServer[_resetKey];
     _invDeductions = [];
-    console.log('[Invoice] 저장 완료 → 크레딧/수동항목 localStorage 초기화:', dedKey, manKey);
+    console.log('[Invoice] 저장 완료 → 크레딧/수동항목 캐시 초기화:', _resetKey);
 
     _refreshInvPreview();
   } catch(e) {
@@ -5852,17 +5900,15 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
 
   // ⑤-2b fallback: Daily_Report에서 다시 빌드 (저장된 Items가 없는 경우)
   console.warn('[InvPreview] FALLBACK: No saved Items found, building from Daily_Report');
-  const _manualKey = 'dc_inv_manual_' + agency + '_' + periodFrom.slice(0,7);
-  const _origManualJSON = localStorage.getItem(_manualKey);
+  const _manualCacheKey = agency + '_' + periodFrom.slice(0,7);
+  const _origManualItems = _getInvManualItems(_manualCacheKey);
   if (_previewSavedInv && _previewSavedInv.ManualItems) {
-    try { localStorage.setItem(_manualKey, _previewSavedInv.ManualItems); } catch(e) {}
+    try { _setInvManualItems(_manualCacheKey, JSON.parse(_previewSavedInv.ManualItems)); } catch(e) {}
   }
   let rows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
-  try {
-    if (_origManualJSON !== null) localStorage.setItem(_manualKey, _origManualJSON);
-    else localStorage.removeItem(_manualKey);
-  } catch(e) {}
+  // 원래 수동 항목 복원
+  _setInvManualItems(_manualCacheKey, _origManualItems);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
   const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false, invNumOverride:invNumber});
   _showDocModal(html, {invNumber, agency, from:periodFrom, to:periodTo});
@@ -6149,7 +6195,7 @@ function _isoToSunday(iso) {
 function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverride=null, grandTotalOverride=undefined}={}) {
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
   const client  = DB.C.find(c => c.Name === agency) || {};
-  const abn     = DC_COMPANY.abn || localStorage.getItem('dc_abn') || '';
+  const abn     = DC_COMPANY.abn || '';
   let grandTotal = grandTotalOverride !== undefined ? grandTotalOverride : _calcInvGrandTotal(_buildInvRows(agency, from, to));
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
@@ -6389,13 +6435,13 @@ ${(() => {
     <span>$${amountDue.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
   </div>
 </div>
-${(DC_COMPANY.bank || localStorage.getItem('dc_bank')) ? `
+${DC_COMPANY.bank ? `
 <div class="inv-payment">
   <div class="inv-payment-title">Payment Details</div>
-  <div class="inv-payment-row"><span class="inv-payment-label">Bank:</span><span class="inv-payment-val">${escH(DC_COMPANY.bank||localStorage.getItem('dc_bank')||'')}</span></div>
-  <div class="inv-payment-row"><span class="inv-payment-label">BSB:</span><span class="inv-payment-val">${escH(DC_COMPANY.bsb||localStorage.getItem('dc_bsb')||'')}</span></div>
-  <div class="inv-payment-row"><span class="inv-payment-label">Account:</span><span class="inv-payment-val">${escH(DC_COMPANY.acc||localStorage.getItem('dc_acc')||'')}</span></div>
-  ${DC_COMPANY.accname||localStorage.getItem('dc_accname') ? `<div class="inv-payment-row"><span class="inv-payment-label">Account Name:</span><span class="inv-payment-val">${escH(DC_COMPANY.accname||localStorage.getItem('dc_accname')||'')}</span></div>` : ''}
+  <div class="inv-payment-row"><span class="inv-payment-label">Bank:</span><span class="inv-payment-val">${escH(DC_COMPANY.bank||'')}</span></div>
+  <div class="inv-payment-row"><span class="inv-payment-label">BSB:</span><span class="inv-payment-val">${escH(DC_COMPANY.bsb||'')}</span></div>
+  <div class="inv-payment-row"><span class="inv-payment-label">Account:</span><span class="inv-payment-val">${escH(DC_COMPANY.acc||'')}</span></div>
+  ${DC_COMPANY.accname ? `<div class="inv-payment-row"><span class="inv-payment-label">Account Name:</span><span class="inv-payment-val">${escH(DC_COMPANY.accname||'')}</span></div>` : ''}
   <div class="inv-payment-row"><span class="inv-payment-label">Reference:</span><span class="inv-payment-val">${invNum}</span></div>
 </div>` : ''}
 <div class="inv-footer">
@@ -6449,7 +6495,7 @@ async function generateInvoice() {
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
 
   /* ── ABN 필수 검증 ── */
-  const _abnVal = (document.getElementById('inv-abn')?.value || localStorage.getItem('dc_abn') || '').replace(/\s/g,'');
+  const _abnVal = (document.getElementById('inv-abn')?.value || DC_COMPANY.abn || '').replace(/\s/g,'');
   if (!_abnVal || _abnVal.length !== 11 || !/^\d{11}$/.test(_abnVal)) {
     toast('⚠️ ABN을 정확히 입력하세요 (11자리 숫자)', 'er');
     const settingsBtn = document.getElementById('inv-settings-toggle');
@@ -8973,15 +9019,15 @@ function saveAdminPin(){
 // COMPANY INFO MODAL
 // ═══════════════════════════════════════
 function openCompanyInfoModal(){
-  document.getElementById('ci-name').value    = localStorage.getItem('dc_company_name') || 'DONG CHOI PTY LTD';
-  document.getElementById('ci-abn').value     = localStorage.getItem('dc_abn')          || '';
-  document.getElementById('ci-phone').value   = localStorage.getItem('dc_phone')        || '0430 175 195';
-  document.getElementById('ci-email').value   = localStorage.getItem('dc_email')        || 'dongchoicoach@gmail.com';
-  document.getElementById('ci-address').value = localStorage.getItem('dc_address')      || 'Sydney, NSW, Australia';
-  document.getElementById('ci-bank').value    = localStorage.getItem('dc_bank')         || '';
-  document.getElementById('ci-bsb').value     = localStorage.getItem('dc_bsb')          || '';
-  document.getElementById('ci-acc').value     = localStorage.getItem('dc_acc')          || '';
-  document.getElementById('ci-accname').value = localStorage.getItem('dc_accname')      || '';
+  document.getElementById('ci-name').value    = DC_COMPANY.name    || 'DONG CHOI PTY LTD';
+  document.getElementById('ci-abn').value     = DC_COMPANY.abn     || '';
+  document.getElementById('ci-phone').value   = DC_COMPANY.phone   || '0430 175 195';
+  document.getElementById('ci-email').value   = DC_COMPANY.email   || 'dongchoicoach@gmail.com';
+  document.getElementById('ci-address').value = DC_COMPANY.address || 'Sydney, NSW, Australia';
+  document.getElementById('ci-bank').value    = DC_COMPANY.bank    || '';
+  document.getElementById('ci-bsb').value     = DC_COMPANY.bsb     || '';
+  document.getElementById('ci-acc').value     = DC_COMPANY.acc     || '';
+  document.getElementById('ci-accname').value = DC_COMPANY.accname || '';
   document.getElementById('company-modal').style.display='flex';
 }
 function closeCompanyModal(){
@@ -8998,17 +9044,7 @@ function saveCompanyModal(){
   const acc     = document.getElementById('ci-acc').value.trim();
   const accname = document.getElementById('ci-accname').value.trim();
 
-  if(name)    localStorage.setItem('dc_company_name', name);
-  if(abn)     localStorage.setItem('dc_abn', abn);
-  if(phone)   localStorage.setItem('dc_phone', phone);
-  if(email)   localStorage.setItem('dc_email', email);
-  if(address) localStorage.setItem('dc_address', address);
-  localStorage.setItem('dc_bank', bank);
-  localStorage.setItem('dc_bsb', bsb);
-  localStorage.setItem('dc_acc', acc);
-  localStorage.setItem('dc_accname', accname);
-
-  // DC_COMPANY 객체도 업데이트
+  // DC_COMPANY 객체 업데이트
   DC_COMPANY.name    = name    || DC_COMPANY.name;
   DC_COMPANY.abn     = abn     || DC_COMPANY.abn;
   DC_COMPANY.phone   = phone   || DC_COMPANY.phone;
@@ -9022,6 +9058,15 @@ function saveCompanyModal(){
   // 인보이스 설정 패널 입력값도 동기화
   const ids = [['inv-company-name',name],['inv-abn',abn],['inv-phone',phone],['inv-email',email],['inv-address',address],['inv-bank',bank],['inv-bsb',bsb],['inv-acc',acc],['inv-accname',accname]];
   ids.forEach(([id,v])=>{ const el=document.getElementById(id); if(el) el.value=v; });
+
+  // 서버 저장 (비동기)
+  fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({action:'save_company_profile', data:{
+      name: DC_COMPANY.name, abn: DC_COMPANY.abn, phone: DC_COMPANY.phone,
+      email: DC_COMPANY.email, address: DC_COMPANY.address, bank: DC_COMPANY.bank,
+      bsb: DC_COMPANY.bsb, acc: DC_COMPANY.acc, accname: DC_COMPANY.accname
+    }})
+  }).catch(e => console.warn('Company profile save failed:', e));
 
   closeCompanyModal();
   toast('✅ 회사 정보가 저장되었습니다','ok');
@@ -9414,6 +9459,110 @@ async function loadAllFromSheets(){
     } else {
       setHvisBookingsCache([]);
     }
+    // Maint_Records → window._maintRecords (서버 동기화)
+    if(d.Maint_Records?.length) {
+      setMaintRecordsCache(d.Maint_Records.map(r=>({
+        id: r.ID||'', rego: r.Rego||'', date: r.Date||'', km: Number(r.KM)||null,
+        type: r.Type||'', description: r.Description||'', workshop: r.Workshop||'',
+        cost: Number(r.Cost)||0, nextServiceKM: Number(r.NextServiceKM)||null
+      })));
+    } else {
+      setMaintRecordsCache([]);
+    }
+
+    // Invoice_Overrides → window._invoiceOverrides (서버 동기화)
+    window._invoiceOverrides = {};
+    if(d.Invoice_Overrides?.length) {
+      d.Invoice_Overrides.forEach(r => {
+        if(r.RowKey) window._invoiceOverrides[r.RowKey] = r.Value;
+      });
+    }
+
+    // Company_Profile → DC_COMPANY 업데이트 (서버 동기화)
+    if(d.Company_Profile?.length) {
+      const _cpMap = {};
+      d.Company_Profile.forEach(r => { if(r.Key) _cpMap[r.Key] = r.Value||''; });
+      if(_cpMap.name)    DC_COMPANY.name    = _cpMap.name;
+      if(_cpMap.abn)     DC_COMPANY.abn     = _cpMap.abn;
+      if(_cpMap.phone)   DC_COMPANY.phone   = _cpMap.phone;
+      if(_cpMap.email)   DC_COMPANY.email   = _cpMap.email;
+      if(_cpMap.address) DC_COMPANY.address = _cpMap.address;
+      if(_cpMap.bank !== undefined)    DC_COMPANY.bank    = _cpMap.bank;
+      if(_cpMap.bsb !== undefined)     DC_COMPANY.bsb     = _cpMap.bsb;
+      if(_cpMap.acc !== undefined)     DC_COMPANY.acc     = _cpMap.acc;
+      if(_cpMap.accname !== undefined) DC_COMPANY.accname = _cpMap.accname;
+    }
+
+    // Invoice_Deductions → window._invoiceDeductionsServer (서버 동기화)
+    window._invoiceDeductionsServer = {};
+    if(d.Invoice_Deductions?.length) {
+      d.Invoice_Deductions.forEach(r => {
+        const key = (r.Agency||'') + '_' + (r.Period||'');
+        if(!window._invoiceDeductionsServer[key]) window._invoiceDeductionsServer[key] = [];
+        window._invoiceDeductionsServer[key].push({
+          id: r.ID||'', type: r.Type||'prepaid', amount: Number(r.Amount)||0, note: r.Note||''
+        });
+      });
+    }
+
+    // Invoice_Manual_Items → window._invoiceManualServer (서버 동기화)
+    window._invoiceManualServer = {};
+    if(d.Invoice_Manual_Items?.length) {
+      d.Invoice_Manual_Items.forEach(r => {
+        const key = (r.Agency||'') + '_' + (r.Period||'');
+        if(!window._invoiceManualServer[key]) window._invoiceManualServer[key] = [];
+        window._invoiceManualServer[key].push({
+          id: r.ID||'', date: r.Date||'', rego: r.Rego||'', tour: r.Tour||'',
+          seats: r.Seats||'', tourcode: r.TourCode||'', note: r.Note||'',
+          amount: Number(r.Amount)||0, ot: Number(r.OT)||0, hotel: Number(r.Hotel)||0,
+          dist: Number(r.Dist)||0, trailer: Number(r.Trailer)||0, toll: Number(r.Toll)||0,
+          start: r.Start||'', end: r.End||'', driver: r.Driver||'',
+          guide: r.Guide||'', pickup: r.Pickup||'', dropoff: r.Dropoff||''
+        });
+      });
+    }
+
+    // ★ localStorage → Sheets 마이그레이션 (1회성) — maint_records
+    try {
+      const _lsMaint = safeGetLocal('maint_records', []);
+      if(_lsMaint.length > 0 && getMaintRecords().length === 0) {
+        for(const m of _lsMaint) {
+          await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+            body:JSON.stringify({action:'save_maint_record', data:{
+              ID: m.id||Date.now().toString(), Rego: m.rego||'', Date: m.date||'',
+              KM: m.km||'', Type: m.type||'', Description: m.description||'',
+              Workshop: m.workshop||'', Cost: m.cost||0, NextServiceKM: m.nextServiceKM||''
+            }})});
+        }
+        setMaintRecordsCache(_lsMaint);
+        localStorage.removeItem('maint_records');
+        toast('정비 기록 서버 마이그레이션 완료','ok');
+      } else if(_lsMaint.length > 0) {
+        localStorage.removeItem('maint_records');
+      }
+    } catch(e) { console.warn('Maint migration failed:', e); }
+
+    // ★ localStorage → Sheets 마이그레이션 (1회성) — company info
+    try {
+      const _lsCompanyName = localStorage.getItem('dc_company_name');
+      const _lsAbn = localStorage.getItem('dc_abn');
+      if(_lsCompanyName || _lsAbn) {
+        const cpData = {};
+        ['dc_company_name','dc_abn','dc_phone','dc_email','dc_address','dc_bank','dc_bsb','dc_acc','dc_accname'].forEach(k => {
+          const v = localStorage.getItem(k);
+          if(v) cpData[k.replace('dc_company_','').replace('dc_','')] = v;
+        });
+        if(Object.keys(cpData).length > 0 && (!d.Company_Profile || d.Company_Profile.length === 0)) {
+          // 서버에 없을 때만 마이그레이션
+          await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+            body:JSON.stringify({action:'save_company_profile', data: cpData})});
+          toast('회사 정보 서버 마이그레이션 완료','ok');
+        }
+        // localStorage 정리 (서버에 데이터 있으면 로컬 제거)
+        ['dc_company_name','dc_abn','dc_phone','dc_email','dc_address','dc_bank','dc_bsb','dc_acc','dc_accname'].forEach(k => localStorage.removeItem(k));
+      }
+    } catch(e) { console.warn('Company info migration failed:', e); }
+
     // ★ localStorage → Sheets 마이그레이션 (1회성)
     try {
       const _lsHvis = safeGetLocal('hvis_bookings', []);
@@ -11159,7 +11308,7 @@ function _buildQuotationHTML({isDraft=false}={}) {
   const validDate = document.getElementById('quo-valid')?.value||'';
   const memo = document.getElementById('quo-memo')?.value?.trim()||'';
   const client = (DB.C||[]).find(c=>c.Name===agency)||{};
-  const abn = DC_COMPANY.abn||localStorage.getItem('dc_abn')||'';
+  const abn = DC_COMPANY.abn||'';
   const fd = ds => ds ? fmtDate(ds)||ds : '—';
   const quoNum = _quoNum();
 
@@ -11282,10 +11431,10 @@ async function convertQuoToInvoice() {
   const firstDate = dates[0] || new Date().toISOString().slice(0,10);
   const lastDate  = dates[dates.length-1] || firstDate;
   const monthKey = firstDate.slice(0,7);
-  const invKey = 'dc_inv_manual_' + agency + '_' + monthKey;
+  const _quoManualKey = agency + '_' + monthKey;
 
   // 기존 수동 항목에 병합
-  const existing = JSON.parse(localStorage.getItem(invKey) || '[]');
+  const existing = _getInvManualItems(_quoManualKey);
   const newItems = _quoItems.map(item => {
     const unitTotal = (item.price||0) + (item.ot||0) + (item.extra||0);
     return {
@@ -11304,7 +11453,16 @@ async function convertQuoToInvoice() {
     };
   });
   const merged = [...existing, ...newItems].sort((a,b) => (a.date||'').localeCompare(b.date||''));
-  localStorage.setItem(invKey, JSON.stringify(merged));
+  _setInvManualItems(_quoManualKey, merged);
+  // 서버 저장 (비동기)
+  fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({action:'save_invoice_manual_items_bulk', agency:agency, period:monthKey,
+      items: merged.map(m=>({ID:m.id||Date.now().toString(), Date:m.date||'', Rego:m.rego||'', Tour:m.tour||'',
+        Seats:m.seats||'', TourCode:m.tourcode||'', Note:m.note||'', Amount:m.amount||0,
+        OT:m.ot||0, Hotel:m.hotel||0, Dist:m.dist||0, Trailer:m.trailer||0, Toll:m.toll||0,
+        Start:m.start||'', End:m.end||'', Driver:m.driver||'', Guide:m.guide||'',
+        Pickup:m.pickup||'', Dropoff:m.dropoff||''}))
+    })}).catch(e => console.warn('Manual items save failed:', e));
 
   // 인보이스 페이지로 이동 & 초기화 대기
   nv('pinv','ninv');
