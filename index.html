@@ -505,6 +505,13 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
     </div>
   </div>
   <div id="salary-body">
+    <div id="salary-week-nav" style="padding:6px 12px 0;">
+      <div style="display:flex;align-items:center;justify-content:space-between;background:white;border-radius:10px;padding:8px 12px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+        <button onclick="_salaryWeekNav(1)" style="font-size:16px;background:none;border:none;cursor:pointer;padding:4px 8px;">◀</button>
+        <span id="salary-week-label" style="font-size:13px;font-weight:700;color:#1a1a1a;"></span>
+        <button onclick="_salaryWeekNav(-1)" style="font-size:16px;background:none;border:none;cursor:pointer;padding:4px 8px;">▶</button>
+      </div>
+    </div>
     <div id="salary-list"></div>
   </div>
 
@@ -8112,7 +8119,11 @@ async function renderSalary(){
       + wageRowsHTML
       + '</div>';
   }
-  if(el) el.innerHTML = weeks.slice(0,4).map(salaryCard).join('');
+  // 주간 페이지네이션 데이터 저장
+  window._salaryWeeks = weeks;
+  window._salaryWeekIdx = 0;
+  window._salaryCardFn = salaryCard;
+  _renderSalaryWeek();
 
   // 배지 업데이트
   const totalUnpaid = weeks.reduce((s,w)=>s+Math.max(0,Math.round(w.total-w.paid)),0);
@@ -8122,6 +8133,31 @@ async function renderSalary(){
   if(badge2) badge2.textContent = totalUnpaid>0?'Unpaid (미지급) $'+totalUnpaid:'지급완료';
 
   if(meEl) meEl.innerHTML = weeks.map(s=>`<div style="margin:0 12px 8px;">${salaryCard(s)}</div>`).join('');
+}
+
+// ── Salary 주간 페이지네이션 ──
+function _salaryWeekNav(dir) {
+  const weeks = window._salaryWeeks || [];
+  if(!weeks.length) return;
+  window._salaryWeekIdx = Math.max(0, Math.min(weeks.length - 1, (window._salaryWeekIdx||0) + dir));
+  _renderSalaryWeek();
+}
+function _renderSalaryWeek() {
+  const weeks = window._salaryWeeks || [];
+  const idx = window._salaryWeekIdx || 0;
+  const el = document.getElementById('salary-list');
+  const labelEl = document.getElementById('salary-week-label');
+  const navEl = document.getElementById('salary-week-nav');
+  if(!el) return;
+  if(!weeks.length){
+    if(navEl) navEl.style.display='none';
+    el.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px;">급여 데이터 없음</div>';
+    return;
+  }
+  if(navEl) navEl.style.display='';
+  const wk = weeks[idx];
+  if(labelEl) labelEl.textContent = wk.label + ' (' + (idx+1) + '/' + weeks.length + ')';
+  el.innerHTML = window._salaryCardFn ? window._salaryCardFn(wk) : '';
 }
 
 // ═══════════════════════════════════════
