@@ -659,7 +659,11 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           </div>
           <div class="form-group">
             <label class="form-label">Tour Code (투어 코드)</label>
-            <input type="text" class="form-input" id="dr-tourcode" placeholder="BM-001">
+            <div class="sdd-wrap" id="sdd-tourcode-wrap">
+              <input class="sdd-input" id="dr-tourcode" placeholder="BM-001" autocomplete="off"
+                oninput="tcFilter()" onfocus="tcOpen()" onblur="tcBlur()">
+              <div class="sdd-dropdown" id="tc-dropdown"></div>
+            </div>
           </div>
         </div>
         <!-- OT / 1박2일 힌트 -->
@@ -2564,6 +2568,54 @@ function sddAddNew(key, value) {
 }
 
 // ═══════════════════════════════════════
+// TOUR CODE 자동완성 (최근 사용 코드)
+// ═══════════════════════════════════════
+const TC_STORAGE_KEY = 'dc_recent_tourcodes';
+const TC_MAX = 20;
+function _getTcRecent() {
+  try { return JSON.parse(localStorage.getItem(TC_STORAGE_KEY)||'[]'); } catch(e){ return []; }
+}
+function tcSaveCode(code) {
+  if(!code || !code.trim()) return;
+  const c = code.trim().toUpperCase();
+  let list = _getTcRecent().filter(x=>x!==c);
+  list.unshift(c);
+  if(list.length > TC_MAX) list = list.slice(0, TC_MAX);
+  localStorage.setItem(TC_STORAGE_KEY, JSON.stringify(list));
+}
+function tcOpen() {
+  const input = document.getElementById('dr-tourcode');
+  const drop = document.getElementById('tc-dropdown');
+  if(!input||!drop) return;
+  tcFilter();
+  drop.classList.add('open');
+}
+function tcBlur() {
+  setTimeout(()=>{
+    const el = document.getElementById('tc-dropdown');
+    if(el) { el.classList.remove('open'); el.style.display=''; }
+  }, 200);
+}
+function tcFilter() {
+  const input = document.getElementById('dr-tourcode');
+  const drop = document.getElementById('tc-dropdown');
+  if(!input||!drop) return;
+  const q = input.value.trim().toUpperCase();
+  let codes = _getTcRecent();
+  if(q) codes = codes.filter(c=>c.includes(q));
+  if(codes.length===0){ drop.innerHTML='<div class="sdd-empty" style="padding:10px 14px;font-size:12px;color:var(--muted);">최근 사용 코드 없음</div>'; drop.classList.add('open'); return; }
+  drop.innerHTML = codes.map(c =>
+    `<div class="sdd-item" onmousedown="event.preventDefault();tcSelect('${c}')">${c}</div>`
+  ).join('');
+  drop.classList.add('open');
+}
+function tcSelect(val) {
+  document.getElementById('dr-tourcode').value = val;
+  const drop = document.getElementById('tc-dropdown');
+  if(drop){ drop.classList.remove('open'); drop.style.display=''; }
+}
+
+// ═══════════════════════════════════════
 // DATA
 // ═══════════════════════════════════════
 const CHECKS = [
@@ -4132,6 +4184,8 @@ function submitDailyReport(){
   if(report.seats) shift.seats = report.seats; // 마지막 인승 저장 (다음 리포트 초기값)
   shift.dailyReports.push(report);
   todayReports.push({...report, rego: shift.rego, driver: currentDriver?.name||''});
+  // 투어 코드 최근 목록에 저장
+  if(report.tourcode) tcSaveCode(report.tourcode);
   showToast(`✅ Daily Report 저장됨 ($${total})`,'success');
   // 드라이버별 localStorage 저장
   if(currentDriver?.name) {
@@ -6226,10 +6280,19 @@ const DIST_OPTIONS = {
 // ═══════════════════════════════════════════════════
 function cselPosition(btn, drop) {
   const rect = btn.getBoundingClientRect();
-  const dropH = Math.min(drop.scrollHeight || 240, 240);
+  // 정확한 높이 측정을 위해 일시적으로 보이게 함
+  drop.style.display = 'block';
+  drop.style.visibility = 'hidden';
+  const dropH = Math.min(drop.scrollHeight, 240);
+  drop.style.visibility = '';
   drop.style.left  = rect.left + 'px';
   drop.style.width = rect.width + 'px';
-  drop.style.top   = (rect.top - dropH - 4) + 'px';
+  // 버튼 위에 공간이 충분하면 위로, 아니면 아래로
+  if(rect.top > dropH + 4) {
+    drop.style.top = (rect.top - dropH - 4) + 'px';
+  } else {
+    drop.style.top = (rect.bottom + 4) + 'px';
+  }
   drop.style.bottom = 'auto';
 }
 function cselOpen(id) {
