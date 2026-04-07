@@ -5798,10 +5798,20 @@ async function loadInvHistory(forceReload) {
   if (!_invHistoryCache || forceReload) {
     listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);">⏳ 이력 불러오는 중...</div>';
     try {
-      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
-      const json = await res.json();
-      if (json.ok) _invHistoryCache = (json.rows||[]).reverse(); // 최신순
-      else throw new Error(json.error);
+      // ★ 인보이스 + Agency_Txn 동시 로드 (수금 진행률 표시에 필요)
+      const fetches = [fetch(APPS_SCRIPT_URL + '?action=get_invoices')];
+      if (!_balAgencyTxns || _balAgencyTxns.length === 0) {
+        fetches.push(fetch(APPS_SCRIPT_URL + '?action=get_agency_txn'));
+      }
+      const [invRes, agRes] = await Promise.all(fetches);
+      const invJson = await invRes.json();
+      if (invJson.ok) _invHistoryCache = (invJson.rows||[]).reverse();
+      else throw new Error(invJson.error);
+      // Agency_Txn 로드 (수금 진행률 계산용)
+      if (agRes) {
+        const agJson = await agRes.json();
+        if (agJson.ok && agJson.rows) _balAgencyTxns = agJson.rows;
+      }
     } catch(e) {
       listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--rd);">이력 로드 실패</div>';
       return;
