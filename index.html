@@ -8058,7 +8058,12 @@ async function renderSalary(){
     }
   });
 
-  const weeks = Object.values(weekMap).sort((a,b)=>b.key.localeCompare(a.key));
+  // 주간 키(dd/mm/yyyy~dd/mm/yyyy)를 Date로 파싱하여 최신순 정렬
+  const _weekKeyToDate = k => {
+    const p = k.split('~')[0].split('/');
+    return new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0]));
+  };
+  const weeks = Object.values(weekMap).sort((a,b)=> _weekKeyToDate(b.key) - _weekKeyToDate(a.key));
 
   function salaryCard(s){
     const balance = Math.max(0, Math.round(s.total - s.paid));
