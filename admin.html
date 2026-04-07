@@ -3810,11 +3810,12 @@ function renderBalance(){
 function _agencyBalances(){
   const map = {};
   _balAgencyTxns.forEach(t=>{
-    // ★ 인보이스 연결 + Agency 이름 있는 건만 잔액에 포함
+    // ★ 인보이스 연결 건 + 선수금/크레딧 입금 건 포함
     const invId = String(t.InvoiceID||'').trim();
-    if(!invId) return;
+    const txnType = String(t.Type||'').trim();
+    if(!invId && !['prepaid_in','credit_in'].includes(txnType)) return;
     const name = String(t.Agency||'').trim();
-    if(!name) return; // Agency 없는 레코드 제외 (Unknown 방지)
+    if(!name) return;
     if(!map[name]) map[name]={name, dr:0, cr:0};
     map[name].dr += Number(t.DR)||0;
     map[name].cr += Number(t.CR)||0;
@@ -3999,19 +4000,45 @@ function renderBalDetail(){
   let html = '';
 
   if(type==='agency'){
-    // ★ 인보이스 발행 건만 표시
-    rows = _balAgencyTxns.filter(t=>(t.Agency||'')=== name && String(t.InvoiceID||'').trim()).sort((a,b)=>parseToISO(a.Date||'').localeCompare(parseToISO(b.Date||'')));
+    // ★ 해당 거래처의 모든 거래 표시 (인보이스 연결 건 + 선수금/크레딧 입금 건)
+    rows = _balAgencyTxns.filter(t=>(t.Agency||'')=== name && (String(t.InvoiceID||'').trim() || ['prepaid_in','credit_in'].includes(String(t.Type||'')))).sort((a,b)=>parseToISO(a.Date||'').localeCompare(parseToISO(b.Date||'')));
     const dr = rows.reduce((s,r)=>s+(Number(r.DR)||0),0);
     const cr = rows.reduce((s,r)=>s+(Number(r.CR)||0),0);
+    // 선수금/크레딧 잔액 계산
+    const prepIn = rows.filter(r=>r.Type==='prepaid_in').reduce((s,r)=>s+(Number(r.CR)||0),0);
+    const prepUsed = rows.filter(r=>r.Type==='prepaid_use').reduce((s,r)=>s+(Number(r.CR)||0),0);
+    const credIn = rows.filter(r=>r.Type==='credit_in').reduce((s,r)=>s+(Number(r.CR)||0),0);
+    const credUsed = rows.filter(r=>r.Type==='credit_use').reduce((s,r)=>s+(Number(r.CR)||0),0);
+    const prepBal = roundMoney(prepIn - prepUsed);
+    const credBal = roundMoney(credIn - credUsed);
     document.getElementById('bal-detail-summary').innerHTML = `
-      <div style="display:flex;gap:10px;font-size:12px;font-family:var(--fn);">
+      <div style="display:flex;gap:10px;font-size:12px;font-family:var(--fn);flex-wrap:wrap;">
         <span style="color:var(--ac);">DR $${dr.toLocaleString('en',{minimumFractionDigits:2})}</span>
         <span style="color:var(--gn);">CR $${cr.toLocaleString('en',{minimumFractionDigits:2})}</span>
-        <span style="color:${(dr-cr)>0?'var(--or)':'var(--gn)'};">잔액 $${(dr-cr).toLocaleString('en',{minimumFractionDigits:2})}</span>
-      </div>`;
+        <span style="color:${(dr-cr)>0?'var(--or)':'var(--gn)'};">미수금 $${(dr-cr).toLocaleString('en',{minimumFractionDigits:2})}</span>
+      </div>
+      ${(prepBal > 0 || credBal > 0) ? `<div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;">
+        ${prepBal > 0 ? `<span style="font-size:10px;background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:6px;font-weight:600;">선수금 잔액: $${prepBal.toLocaleString('en',{minimumFractionDigits:2})}</span>` : ''}
+        ${credBal > 0 ? `<span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:6px;font-weight:600;">크레딧 잔액: $${credBal.toLocaleString('en',{minimumFractionDigits:2})}</span>` : ''}
+      </div>` : ''}`;
+    // ★ Type별 배지 매핑
+    const _typeBadge = (type) => {
+      const map = {
+        'invoice':     {label:'청구', bg:'#dbeafe', color:'#1e40af'},
+        'payment':     {label:'수금', bg:'#dcfce7', color:'#166534'},
+        'prepaid_in':  {label:'선수금 입금', bg:'#fef3c7', color:'#92400e'},
+        'prepaid_use': {label:'선수금 차감', bg:'#fce7f3', color:'#9d174d'},
+        'credit_in':   {label:'크레딧 부여', bg:'#e0f2fe', color:'#0369a1'},
+        'credit_use':  {label:'크레딧 차감', bg:'#f3e8ff', color:'#7c3aed'},
+      };
+      const m = map[type] || {label:type||'—', bg:'var(--sf2)', color:'var(--t3)'};
+      return `<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:${m.bg};color:${m.color};font-weight:600;">${m.label}</span>`;
+    };
+
     html = `<table style="width:100%;font-size:11px;border-collapse:collapse;">
       <thead><tr style="border-bottom:1px solid var(--b2);color:var(--t3);font-size:10px;">
         <th style="text-align:left;padding:6px 4px;">Date (날짜)</th>
+        <th style="text-align:left;padding:6px 4px;">Type (구분)</th>
         <th style="text-align:left;padding:6px 4px;">Invoice (인보이스)</th>
         <th style="text-align:left;padding:6px 4px;">Remarks (비고)</th>
         <th style="text-align:right;padding:6px 4px;">DR</th>
@@ -4033,6 +4060,7 @@ function renderBalDetail(){
       const remark = r.Remark || r.TourCode || '—';
       html += `<tr style="border-bottom:1px solid var(--b1);">
         <td style="padding:6px 4px;white-space:nowrap;">${fmtDate(r.Date)||'—'}</td>
+        <td style="padding:6px 4px;">${_typeBadge(r.Type)}</td>
         <td style="padding:6px 4px;">${r.InvoiceID||'—'}</td>
         <td style="padding:6px 4px;font-size:10px;color:var(--t3);">${remark}</td>
         <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
@@ -4113,9 +4141,18 @@ function renderBalDetail(){
     // Hide add button for wage (uses existing Wage entry system)
     document.getElementById('bal-detail-add-btn').style.display='none';
   }
-  // ★ Agency: 인보이스 발행 건만이므로 수동 추가 불가, Sub: 수동 추가 가능
-  if(type==='sub') document.getElementById('bal-detail-add-btn').style.display='';
-  else document.getElementById('bal-detail-add-btn').style.display='none';
+  // ★ Agency: 선수금/크레딧 입금 등록 가능, Sub: 수동 추가 가능
+  if(type==='agency') {
+    document.getElementById('bal-detail-add-btn').style.display='';
+    document.getElementById('bal-detail-add-btn').textContent='+ 선수금/크레딧 입금';
+    document.getElementById('bal-detail-add-btn').onclick = () => openPrepaidCreditInModal(name);
+  } else if(type==='sub') {
+    document.getElementById('bal-detail-add-btn').style.display='';
+    document.getElementById('bal-detail-add-btn').textContent='+ 거래 추가';
+    document.getElementById('bal-detail-add-btn').onclick = () => openBalTxnModal('sub', null);
+  } else {
+    document.getElementById('bal-detail-add-btn').style.display='none';
+  }
   document.getElementById('bal-detail-body').innerHTML = html;
 }
 
@@ -4188,7 +4225,19 @@ function openBalTxnModal(type, idx){
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">Date (날짜)</div><input type="date" id="btx-date" class="profit-finp" style="width:100%;" value="${_eDate}"></div>
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">인보이스 ID</div><input id="btx-invid" class="profit-finp" style="width:100%;" value="${existing?.InvoiceID||''}" placeholder="INV-001"></div>
         </div>
-        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">투어 코드</div><input id="btx-tour" class="profit-finp" style="width:100%;" value="${existing?.TourCode||''}" placeholder="예: BLUE MT"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">투어 코드</div><input id="btx-tour" class="profit-finp" style="width:100%;" value="${existing?.TourCode||''}" placeholder="예: BLUE MT"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">구분 (Type)</div>
+            <select id="btx-type" class="profit-sel" style="width:100%;">
+              <option value="invoice" ${existing?.Type==='invoice'?'selected':''}>청구 (Invoice)</option>
+              <option value="payment" ${existing?.Type==='payment'?'selected':''}>수금 (Payment)</option>
+              <option value="prepaid_in" ${existing?.Type==='prepaid_in'?'selected':''}>선수금 입금</option>
+              <option value="prepaid_use" ${existing?.Type==='prepaid_use'?'selected':''}>선수금 차감</option>
+              <option value="credit_in" ${existing?.Type==='credit_in'?'selected':''}>크레딧 부여</option>
+              <option value="credit_use" ${existing?.Type==='credit_use'?'selected':''}>크레딧 차감</option>
+            </select>
+          </div>
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">청구 (DR)</div><input type="number" id="btx-dr" class="profit-finp" style="width:100%;" value="${existing?.DR||''}" placeholder="0.00" step="0.01"></div>
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">수금 (CR)</div><input type="number" id="btx-cr" class="profit-finp" style="width:100%;" value="${existing?.CR||''}" placeholder="0.00" step="0.01"></div>
@@ -4280,6 +4329,7 @@ async function saveBalTxn(){
       Date: document.getElementById('btx-date').value||'',
       InvoiceID: document.getElementById('btx-invid').value.trim()||'',
       TourCode: document.getElementById('btx-tour').value.trim()||'',
+      Type: document.getElementById('btx-type')?.value||'',
       DR: dr, CR: cr,
       Remark: document.getElementById('btx-remark').value.trim()||'',
       StartDate: document.getElementById('btx-start').value||'',
@@ -4621,6 +4671,75 @@ function renderInvManualList() {
 // ★ 선수금/크레딧 다건 관리
 // 각 항목: { type:'prepaid'|'credit', amount:number, note:string }
 let _invDeductions = [];
+let _agencyBalanceCache = {}; // { agency: { prepaid: {in,used,balance}, credit: {in,used,balance} } }
+
+// ★ 거래처 선수금/크레딧 잔액 조회 + UI 표시
+async function _loadAgencyBalance(agency) {
+  const el = document.getElementById('inv-agency-balance-info');
+  if (!el) return;
+  if (!agency) { el.innerHTML = ''; return; }
+
+  // 캐시 확인
+  if (_agencyBalanceCache[agency]) {
+    _renderAgencyBalanceInfo(agency);
+    return;
+  }
+
+  el.innerHTML = '<div style="font-size:10px;color:var(--t3);padding:4px 0;">잔액 조회 중...</div>';
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_agency_balances&agency=' + encodeURIComponent(agency));
+    const json = await res.json();
+    if (json.ok && json.balances) {
+      Object.assign(_agencyBalanceCache, json.balances);
+    }
+    _renderAgencyBalanceInfo(agency);
+  } catch(e) {
+    el.innerHTML = '';
+    console.warn('[Balance] 잔액 조회 실패:', e);
+  }
+}
+
+function _renderAgencyBalanceInfo(agency) {
+  const el = document.getElementById('inv-agency-balance-info');
+  if (!el) return;
+  const bal = _agencyBalanceCache[agency];
+  if (!bal || (bal.prepaid.balance <= 0 && bal.credit.balance <= 0)) {
+    el.innerHTML = '';
+    return;
+  }
+
+  let html = '<div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;">';
+  if (bal.prepaid.balance > 0) {
+    html += `<div onclick="_autoAddDeduction('prepaid',${bal.prepaid.balance})" style="cursor:pointer;background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:5px 10px;display:flex;align-items:center;gap:4px;">
+      <span style="font-size:10px;color:#92400e;font-weight:600;">선수금 잔액</span>
+      <span style="font-size:12px;font-weight:800;color:#b45309;">$${bal.prepaid.balance.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
+      <span style="font-size:9px;color:#92400e;background:#fde68a;padding:1px 4px;border-radius:3px;">클릭하여 적용</span>
+    </div>`;
+  }
+  if (bal.credit.balance > 0) {
+    html += `<div onclick="_autoAddDeduction('credit',${bal.credit.balance})" style="cursor:pointer;background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:5px 10px;display:flex;align-items:center;gap:4px;">
+      <span style="font-size:10px;color:#0369a1;font-weight:600;">크레딧 잔액</span>
+      <span style="font-size:12px;font-weight:800;color:#0284c7;">$${bal.credit.balance.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
+      <span style="font-size:9px;color:#0369a1;background:#bae6fd;padding:1px 4px;border-radius:3px;">클릭하여 적용</span>
+    </div>`;
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function _autoAddDeduction(type, maxBalance) {
+  // 이미 동일 타입 항목이 있으면 금액만 업데이트
+  const existing = _invDeductions.findIndex(d => d.type === type);
+  if (existing >= 0) {
+    _invDeductions[existing].amount = maxBalance;
+    _invDeductions[existing].note = '잔액 자동적용';
+  } else {
+    _invDeductions.push({ type, amount: maxBalance, note: '잔액 자동적용' });
+  }
+  _renderInvDeductionInputs();
+  _updateInvDeductionDisplay();
+  toast(`✅ ${type === 'prepaid' ? '선수금' : '크레딧'} $${maxBalance.toLocaleString('en-AU',{minimumFractionDigits:2})} 적용`, 'ok');
+}
 
 function _addInvDeduction() {
   _invDeductions.push({ type:'prepaid', amount:0, note:'' });
@@ -4724,6 +4843,8 @@ function _refreshInvPreview() {
   // 재렌더 후 차감 입력 복원
   _renderInvDeductionInputs();
   _updateInvDeductionDisplay();
+  // ★ 거래처 선수금/크레딧 잔액 조회 (자동 적용 추천)
+  _loadAgencyBalance(agency);
   // ★ 수동 항목 목록도 갱신 (inv-manual-inline이 renderInvPreview에서 재생성되므로)
   renderInvManualList();
 }
@@ -5338,12 +5459,13 @@ function renderInvPreview(rows, agency, from, to) {
           <button id="inv-grp-tour" class="btn bgh sm" style="flex:1;font-size:11px;" onclick="setInvGroupMode('tour')">🗺 투어코드</button>
         </div>
       </div>
-      <!-- ★ 선수금 / 크레딧 입력 (다건) -->
+      <!-- ★ 선수금 / 크레딧 입력 (다건) + 잔액 표시 -->
       <div style="margin-bottom:8px;padding-top:6px;border-top:1px dashed var(--bd);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
           <div style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.5px;">💳 선수금 / 크레딧</div>
           <button onclick="_addInvDeduction()" style="padding:2px 8px;border:1px solid var(--ac);background:var(--sf);border-radius:6px;font-size:10px;font-weight:700;color:var(--ac);cursor:pointer;">+ Add (추가)</button>
         </div>
+        <div id="inv-agency-balance-info"></div>
         <div id="inv-deduction-inputs"></div>
       </div>
       <!-- ★ 수동 항목 (선수금/크레딧 바로 아래) -->
@@ -5719,44 +5841,48 @@ async function saveInvoiceToSheet() {
     localStorage.setItem(`dc_inv_issued_${invNum}`, new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}));
     toast(`✅ 인보이스 ${invNum} 저장 완료`,'ok');
 
-    // ★ 거래처 잔액에 DR 거래 자동 등록 (Agency_Txn)
+    // ★ 거래처 잔액에 Agency_Txn 자동 등록 (행 분리 방식)
+    // Type별 개별 행: invoice(DR), prepaid_use(CR), credit_use(CR)
     try {
-      const { prepaid, credit, total: totalDeduct } = _getInvDeductionTotals();
-      // ★ DueDate = 종료일(to) + 14일
       const dueBaseDate = new Date(to + 'T00:00:00');
       if(isNaN(dueBaseDate.getTime())) dueBaseDate.setTime(Date.now());
       dueBaseDate.setDate(dueBaseDate.getDate() + 14);
       const dueDateStr = toLocalISO(dueBaseDate);
       const todayStr = toLocalISO(new Date());
-      // ★ 투어코드: items에서 Tour_Code 추출 (tourcode 필드, Attraction 아닌 실제 투어코드)
       const _allTxnItems = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)]);
       const _txnCodes = [...new Set(_allTxnItems.map(r=>String(r.Tour_Code||'').trim()).filter(Boolean))];
       const txnTourCode = _txnCodes.join(', ');
-      // ★ DR = 총 청구 (GrandTotal incl GST), CR = 선수금+크레딧 차감 → Balance = DR - CR
       const drAmount = roundMoney(grandTotal);
-      const crAmount = roundMoney(totalDeduct);
+
       // 중복 체크: 동일 InvoiceID가 이미 있는지 확인
-      const existingTxn = _balAgencyTxns.find(t => String(t.InvoiceID||'').trim() === invNum);
+      const existingTxn = (_balAgencyTxns||[]).find(t => String(t.InvoiceID||'').trim() === invNum);
       if (!existingTxn) {
-        const txnData = {
-          Agency:     agency,
-          Date:       todayStr,
-          InvoiceID:  invNum,
-          TourCode:   txnTourCode,
-          DR:         drAmount,
-          CR:         crAmount,
-          Remark:     crAmount > 0 ? `인보이스 발행 (${rows.length}건, ${fmtDate(from)}~${fmtDate(to)}) 선수금/크레딧 $${crAmount}` : `인보이스 발행 (${rows.length}건, ${fmtDate(from)}~${fmtDate(to)})`,
-          StartDate:  from,
-          FinishDate: to,
-          DueDate:    dueDateStr
-        };
-        fetch(APPS_SCRIPT_URL, {
-          method:'POST', headers:{'Content-Type':'text/plain'},
-          body: JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
+        const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, StartDate: from, FinishDate: to, DueDate: dueDateStr };
+
+        // ① DR 행: 인보이스 총 청구액
+        const drTxn = { ...baseTxn, Type: 'invoice', DR: drAmount, CR: 0,
+          Remark: `인보이스 발행 (${_allTxnItems.length}건, ${fmtDate(from)}~${fmtDate(to)})` };
+        fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+          body: JSON.stringify({action:'add_agency_txn', data:drTxn, _user:getAdminUser()})
         }).then(r=>r.json()).then(j=>{
-          if(j.ok) { console.log('[Invoice→Balance] Agency_Txn DR 등록 완료:', invNum); _balLoaded=false; }
-          else console.warn('[Invoice→Balance] Agency_Txn 등록 실패:', j.error);
-        }).catch(e=>console.warn('[Invoice→Balance] Agency_Txn error:', e));
+          if(j.ok) console.log('[Invoice→Balance] DR(invoice) 등록:', invNum, drAmount);
+        }).catch(e=>console.warn('[Invoice→Balance] DR error:', e));
+
+        // ② 선수금/크레딧 개별 CR 행
+        _invDeductions.filter(d => d.amount > 0).forEach(d => {
+          const txnType = d.type === 'prepaid' ? 'prepaid_use' : 'credit_use';
+          const label = d.type === 'prepaid' ? '선수금' : '크레딧';
+          const note = d.note ? ` (${d.note})` : '';
+          const crTxn = { ...baseTxn, Type: txnType, DR: 0, CR: roundMoney(d.amount),
+            Remark: `${label} 차감${note} (${invNum})` };
+          fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+            body: JSON.stringify({action:'add_agency_txn', data:crTxn, _user:getAdminUser()})
+          }).then(r=>r.json()).then(j=>{
+            if(j.ok) console.log(`[Invoice→Balance] CR(${txnType}) 등록:`, invNum, d.amount);
+          }).catch(e=>console.warn(`[Invoice→Balance] CR(${txnType}) error:`, e));
+        });
+
+        _balLoaded = false;
       }
     } catch(e) { console.warn('[Invoice→Balance] 거래 등록 오류:', e); }
 
@@ -5798,20 +5924,11 @@ async function loadInvHistory(forceReload) {
   if (!_invHistoryCache || forceReload) {
     listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);">⏳ 이력 불러오는 중...</div>';
     try {
-      // ★ 인보이스 + Agency_Txn 동시 로드 (수금 진행률 표시에 필요)
-      const fetches = [fetch(APPS_SCRIPT_URL + '?action=get_invoices')];
-      if (!_balAgencyTxns || _balAgencyTxns.length === 0) {
-        fetches.push(fetch(APPS_SCRIPT_URL + '?action=get_agency_txn'));
-      }
-      const [invRes, agRes] = await Promise.all(fetches);
-      const invJson = await invRes.json();
-      if (invJson.ok) _invHistoryCache = (invJson.rows||[]).reverse();
-      else throw new Error(invJson.error);
-      // Agency_Txn 로드 (수금 진행률 계산용)
-      if (agRes) {
-        const agJson = await agRes.json();
-        if (agJson.ok && agJson.rows) _balAgencyTxns = agJson.rows;
-      }
+      // ★ 백엔드에서 PaidCR 포함된 인보이스 데이터 단일 로드
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+      const json = await res.json();
+      if (json.ok) _invHistoryCache = (json.rows||[]).reverse();
+      else throw new Error(json.error);
     } catch(e) {
       listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--rd);">이력 로드 실패</div>';
       return;
@@ -5876,9 +5993,9 @@ function _renderInvHistPage() {
   listEl.innerHTML = items.map(inv => {
     const st  = statusMap[inv.Status] || statusMap['issued'];
     const amt = parseFloat(inv.GrandTotal)||0;
-    // 수금 현황 계산 (Agency_Txn에서 해당 인보이스의 CR 합산)
+    // 수금 현황 계산 (백엔드에서 계산된 PaidCR 사용)
     const invNum = String(inv.InvNumber||'').trim();
-    const paidCR = (_balAgencyTxns||[]).filter(t => String(t.InvoiceID||'').trim()===invNum && Number(t.CR)>0).reduce((s,t)=>s+Number(t.CR),0);
+    const paidCR = parseFloat(inv.PaidCR) || 0;
     const remaining = Math.max(0, roundMoney(amt - paidCR));
     const isPaidFull = remaining <= 0 && amt > 0;
     const isPartial = paidCR > 0 && !isPaidFull;
@@ -6288,18 +6405,13 @@ async function updateInvStatus(invNumber, status, field) {
     toast(`✅ ${invNumber} → ${status}`,'ok');
 
     // ★ 결제 시 Agency_Txn에 CR(수금) 자동 등록 → 잔액 탭 연동
-    // 부분수금이 이미 있으면 잔액만 CR로 등록 (이중 등록 방지)
+    // PaidCR(백엔드 계산) 활용, 잔액만 payment 타입으로 등록
     if (status === 'paid') {
       try {
         const inv = (_invHistoryCache||[]).find(i => String(i.InvNumber) === invNumber);
         if (inv) {
           const grandTotal = parseFloat(inv.GrandTotal) || 0;
-          // 기존 부분수금 CR 합산
-          const alreadyPaidCR = (_balAgencyTxns||[]).filter(t =>
-            String(t.InvoiceID||'').trim() === invNumber && Number(t.CR) > 0
-          ).reduce((s,t) => s + Number(t.CR), 0);
-
-          // 잔액 = GrandTotal - 이미 수금된 금액
+          const alreadyPaidCR = parseFloat(inv.PaidCR) || 0;
           const remainingCR = roundMoney(grandTotal - alreadyPaidCR);
           if (remainingCR > 0) {
             const txnData = {
@@ -6307,6 +6419,7 @@ async function updateInvStatus(invNumber, status, field) {
               Date:      toLocalISO(new Date()),
               InvoiceID: invNumber,
               TourCode:  '',
+              Type:      'payment',
               DR:        0,
               CR:        remainingCR,
               Remark:    `전액결제 완료 (${invNumber})${alreadyPaidCR > 0 ? ' — 잔액분' : ''}`,
@@ -6318,10 +6431,10 @@ async function updateInvStatus(invNumber, status, field) {
               method:'POST', headers:{'Content-Type':'text/plain'},
               body: JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
             }).then(r=>r.json()).then(j=>{
-              if(j.ok) { console.log('[Payment→Balance] CR 등록 완료:', invNumber, remainingCR, alreadyPaidCR > 0 ? '(부분수금 차감 후)' : ''); _balLoaded=false; }
+              if(j.ok) { console.log('[Payment→Balance] CR(payment) 등록:', invNumber, remainingCR); _balLoaded=false; }
             }).catch(e=>console.warn('[Payment→Balance] error:', e));
           } else {
-            console.log('[Payment→Balance] 이미 전액 수금 완료됨, 추가 CR 없음:', invNumber);
+            console.log('[Payment→Balance] 이미 전액 수금 완료됨:', invNumber);
           }
         }
       } catch(e) { console.warn('[Payment→Balance] 결제 CR 등록 오류:', e); }
@@ -6352,10 +6465,10 @@ function openPartialPayment(invNumber, agency, grandTotal, alreadyPaid) {
   const remaining = roundMoney(Math.max(0, grandTotal - alreadyPaid));
   if (remaining <= 0) { toast('이미 전액 수금 완료된 인보이스입니다.','ok'); return; }
 
-  // 몇 차 수금인지 계산
+  // 몇 차 수금인지 계산 (payment 타입 기준)
   const prevCount = (_balAgencyTxns||[]).filter(t =>
-    String(t.InvoiceID||'').trim() === invNumber && Number(t.CR) > 0 &&
-    String(t.Remark||'').includes('수금')
+    String(t.InvoiceID||'').trim() === invNumber &&
+    (String(t.Type||'') === 'payment' || String(t.Remark||'').includes('수금'))
   ).length;
   const nextNum = prevCount + 1;
 
@@ -6425,6 +6538,7 @@ function openPartialPayment(invNumber, agency, grandTotal, alreadyPaid) {
         Date:      payDate,
         InvoiceID: invNumber,
         TourCode:  '',
+        Type:      'payment',
         DR:        0,
         CR:        payAmt,
         Remark:    remark,
@@ -6473,6 +6587,85 @@ function openPartialPayment(invNumber, agency, grandTotal, alreadyPaid) {
       toast('❌ 수금 등록 실패: '+e.message,'er');
       document.getElementById('pp-save-btn').disabled = false;
       document.getElementById('pp-save-btn').textContent = '💰 수금 등록';
+    }
+  };
+}
+
+// ─────────────────────────────────────────
+// 선수금/크레딧 입금 등록 모달 (잔액탭에서 사용)
+// ─────────────────────────────────────────
+function openPrepaidCreditInModal(agency) {
+  const overlay = document.createElement('div');
+  overlay.id = 'pci-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = `
+    <div style="background:var(--sf);border-radius:16px;padding:20px;width:92%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,.25);">
+      <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:12px;">💳 선수금/크레딧 입금 등록</div>
+      <div style="font-size:12px;color:var(--t2);margin-bottom:10px;font-weight:600;">${escH(agency)}</div>
+
+      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">구분</label>
+      <select id="pci-type" style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
+        <option value="prepaid_in">선수금 입금</option>
+        <option value="credit_in">크레딧 부여</option>
+      </select>
+
+      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">금액 ($)</label>
+      <input id="pci-amount" type="number" step="0.01" min="0.01" placeholder="금액 입력"
+        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:14px;font-weight:700;box-sizing:border-box;margin-bottom:10px;">
+
+      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">날짜</label>
+      <input id="pci-date" type="date" value="${toLocalISO(new Date())}"
+        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
+
+      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">메모</label>
+      <input id="pci-note" type="text" placeholder="메모 (선택)"
+        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:14px;">
+
+      <div style="display:flex;gap:8px;">
+        <button id="pci-cancel-btn" style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--b2);background:var(--sf2);color:var(--t2);font-size:13px;font-weight:700;cursor:pointer;">취소</button>
+        <button id="pci-save-btn" style="flex:1;padding:10px;border-radius:10px;border:none;background:var(--ac);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">💳 등록</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('pci-cancel-btn').onclick = () => overlay.remove();
+
+  document.getElementById('pci-save-btn').onclick = async () => {
+    const amt = parseFloat(document.getElementById('pci-amount').value);
+    if (!amt || amt <= 0) { toast('⚠️ 금액을 입력하세요','warn'); return; }
+    const txnType = document.getElementById('pci-type').value;
+    const dateVal = document.getElementById('pci-date').value || toLocalISO(new Date());
+    const note = document.getElementById('pci-note').value.trim();
+    const label = txnType === 'prepaid_in' ? '선수금 입금' : '크레딧 부여';
+
+    document.getElementById('pci-save-btn').disabled = true;
+    document.getElementById('pci-save-btn').textContent = '저장 중...';
+
+    try {
+      const txnData = {
+        Agency: agency, Date: dateVal, InvoiceID: '', TourCode: '',
+        Type: txnType, DR: 0, CR: roundMoney(amt),
+        Remark: `${label}${note ? ' - '+note : ''}`,
+        StartDate: '', FinishDate: '', DueDate: ''
+      };
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error||'등록 실패');
+
+      _balLoaded = false;
+      _balAgencyTxns.push(txnData);
+      toast(`✅ ${label} $${amt.toLocaleString('en-AU',{minimumFractionDigits:2})} 등록 완료`,'ok');
+      overlay.remove();
+      await syncBalanceData(false);
+      renderBalDetail();
+    } catch(e) {
+      toast('❌ 등록 실패: '+e.message,'er');
+      document.getElementById('pci-save-btn').disabled = false;
+      document.getElementById('pci-save-btn').textContent = '💳 등록';
     }
   };
 }

@@ -62,7 +62,7 @@ const MASTER_HEADERS = {
   'Invoices':   ['InvNumber','Agency','PeriodFrom','PeriodTo','GrandTotal','GST','ExGST',
                  'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Notes','CreatedBy'],
   // ── 거래처 잔액 관리 ──
-  'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','DR','CR','Remark','StartDate','FinishDate','DueDate'],
+  'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','Type','DR','CR','Remark','StartDate','FinishDate','DueDate'],
   'SUB_Txn':    ['RowID','SubCompany','Category','Date','InvoiceNo','Description','DR','CR','Remark'],
   // ── 서비스 요금 옵션 (차량 좌석별) ──
   'M_SvcOptions': ['VehicleSize','Label','Amount'],
@@ -215,6 +215,11 @@ function doGet(e) {
 
       case 'get_agency_txn':
         return cors(getSheetRows('Agency_Txn'));
+
+      case 'get_agency_balances': {
+        const agencyParam = params.agency ? params.agency[0] : '';
+        return cors(getAgencyBalances(agencyParam));
+      }
 
       case 'get_sub_txn':
         return cors(getSheetRows('SUB_Txn'));
@@ -1607,7 +1612,88 @@ function getInvoices() {
       obj._rowIndex = i + 1;
       rows.push(obj);
     }
+
+    // ★ Agency_Txn에서 인보이스별 CR 합계 계산 → PaidCR 필드 추가
+    try {
+      const txnSheet = ss.getSheetByName('Agency_Txn');
+      if (txnSheet && txnSheet.getLastRow() > 1) {
+        const txnData = txnSheet.getDataRange().getValues();
+        const txnHeaders = txnData[0];
+        const invIdCol = txnHeaders.indexOf('InvoiceID');
+        const crCol = txnHeaders.indexOf('CR');
+        if (invIdCol >= 0 && crCol >= 0) {
+          const crMap = {};
+          for (let i = 1; i < txnData.length; i++) {
+            const invId = String(txnData[i][invIdCol] || '').trim();
+            const cr = Number(txnData[i][crCol]) || 0;
+            if (invId && cr > 0) {
+              crMap[invId] = (crMap[invId] || 0) + cr;
+            }
+          }
+          rows.forEach(inv => {
+            const invNum = String(inv.InvNumber || '').trim();
+            inv.PaidCR = Math.round((crMap[invNum] || 0) * 100) / 100;
+          });
+        }
+      }
+    } catch (e) {
+      // PaidCR 계산 실패해도 인보이스 데이터는 정상 반환
+      Logger.log('PaidCR calculation error: ' + e.toString());
+    }
+
     return { ok: true, rows };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * 거래처별 선수금/크레딧 잔액 조회
+ * Agency_Txn의 Type 필드 기반:
+ *   prepaid_in / prepaid_use → 선수금 잔액
+ *   credit_in / credit_use → 크레딧 잔액
+ * agency 파라미터가 있으면 해당 거래처만, 없으면 전체
+ */
+function getAgencyBalances(agency) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Agency_Txn');
+    if (!sheet || sheet.getLastRow() <= 1) return { ok: true, balances: {} };
+
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const agCol = headers.indexOf('Agency');
+    const typeCol = headers.indexOf('Type');
+    const crCol = headers.indexOf('CR');
+    const drCol = headers.indexOf('DR');
+
+    if (agCol < 0 || typeCol < 0) return { ok: true, balances: {} };
+
+    // { agency: { prepaid: {in, used, balance}, credit: {in, used, balance} } }
+    const map = {};
+    for (let i = 1; i < data.length; i++) {
+      const ag = String(data[i][agCol] || '').trim();
+      if (!ag) continue;
+      if (agency && ag !== agency) continue;
+      const type = String(data[i][typeCol] || '').trim();
+      const cr = Number(data[i][crCol]) || 0;
+      const dr = Number(data[i][drCol]) || 0;
+
+      if (!map[ag]) map[ag] = { prepaid: { in: 0, used: 0 }, credit: { in: 0, used: 0 } };
+
+      if (type === 'prepaid_in')  map[ag].prepaid.in += cr;
+      if (type === 'prepaid_use') map[ag].prepaid.used += cr;
+      if (type === 'credit_in')   map[ag].credit.in += cr;
+      if (type === 'credit_use')  map[ag].credit.used += cr;
+    }
+
+    // 잔액 계산
+    Object.values(map).forEach(v => {
+      v.prepaid.balance = Math.round((v.prepaid.in - v.prepaid.used) * 100) / 100;
+      v.credit.balance  = Math.round((v.credit.in - v.credit.used) * 100) / 100;
+    });
+
+    return { ok: true, balances: map };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
