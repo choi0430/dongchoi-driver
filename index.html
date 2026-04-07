@@ -4291,6 +4291,8 @@ function submitDailyReport(){
   renderTodayReports();
   renderStep2SavedReports();
   clearDailyDraft();  // 제출 완료 → draft 삭제
+  // ★ 폼 리셋 중 auto-save 차단 (빈 값으로 draft 재생성 방지)
+  _draftRestoring = true;
   // reset form
   ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   ['f-ot','f-night','f-tip','f-toll','f-fuel','f-etc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
@@ -4313,6 +4315,8 @@ function submitDailyReport(){
   document.getElementById('t-ta').textContent='$0';
   document.getElementById('t-dr').textContent='$0';
   {const b=document.getElementById('autofill-info-banner'); if(b){b.style.display='none';b.innerHTML='';}}
+  // ★ 리셋 완료 후 auto-save 재활성화 (이벤트 버블링 완료 대기)
+  setTimeout(()=>{ _draftRestoring = false; }, 300);
   } catch(err) {
     console.error('submitDailyReport error:', err);
     showToast('❌ 저장 오류: ' + err.message, 'error');
@@ -4834,24 +4838,31 @@ function _draftKey(){
 function saveDailyDraft(){
   if(_draftRestoring) return; // 복원 중에는 저장하지 않음
   try {
+    const agency    = document.getElementById('dr-agency')?.value || '';
+    const attraction= document.getElementById('dr-attraction')?.value || '';
+    const pickup    = document.getElementById('dr-pickup')?.value || '';
+    const dropoff   = document.getElementById('dr-dropoff')?.value || '';
+    const kmStart   = document.getElementById('dr-km-start')?.value || '';
+    const kmEnd     = document.getElementById('dr-km-end')?.value || '';
+    const timeStart = document.getElementById('dr-start')?.value || '';
+    const timeEnd   = document.getElementById('dr-end')?.value || '';
+    const tourcode  = document.getElementById('dr-tourcode')?.value || '';
+    const toll      = document.getElementById('f-toll')?.value || '';
+    const fuel      = document.getElementById('f-fuel')?.value || '';
+    const tip       = document.getElementById('f-tip')?.value || '';
+
+    // ★ 내용이 전혀 없으면 저장하지 않음 (빈 draft 방지)
+    const _hasContent = !!(agency || attraction || pickup || dropoff || tourcode || kmStart || kmEnd || timeStart || timeEnd || (toll && toll!=='0') || (fuel && fuel!=='0') || (tip && tip!=='0'));
+    if(!_hasContent){ clearDailyDraft(); return; }
+
     const draft = {
-      agency:      document.getElementById('dr-agency')?.value || '',
-      attraction:  document.getElementById('dr-attraction')?.value || '',
-      pickup:      document.getElementById('dr-pickup')?.value || '',
-      dropoff:     document.getElementById('dr-dropoff')?.value || '',
-      kmStart:     document.getElementById('dr-km-start')?.value || '',
-      kmEnd:       document.getElementById('dr-km-end')?.value || '',
-      timeStart:   document.getElementById('dr-start')?.value || '',
-      timeEnd:     document.getElementById('dr-end')?.value || '',
+      agency, attraction, pickup, dropoff, kmStart, kmEnd, timeStart, timeEnd, tourcode,
       guide:       document.getElementById('dr-guide')?.value || '',
-      tourcode:    document.getElementById('dr-tourcode')?.value || '',
       remarks:     document.getElementById('dr-remarks')?.value || '',
       seats:       document.getElementById('dr-seats')?.value || '',
       ot:          document.getElementById('f-ot')?.value || '',
-      toll:        document.getElementById('f-toll')?.value || '',
-      tollDetail:  document.getElementById('f-toll-detail')?.value || '',
-      fuel:        document.getElementById('f-fuel')?.value || '',
-      tip:         document.getElementById('f-tip')?.value || '',
+      toll, tollDetail: document.getElementById('f-toll-detail')?.value || '',
+      fuel, tip,
       etc:         document.getElementById('f-etc')?.value || '',
       tollPersonal: document.getElementById('toll-personal')?.checked || false,
       fuelPersonal: document.getElementById('fuel-personal')?.checked || false,
@@ -4997,6 +5008,9 @@ function restoreDailyDraft(){
     const d = JSON.parse(raw);
     // 48시간 이상 지난 draft는 무시
     if(Date.now() - (d._ts || 0) > 48*60*60*1000){ clearDailyDraft(); _draftRestoring = false; return false; }
+    // ★ 빈 draft는 복원하지 않음 (제출 후 빈 값으로 저장된 잔여 draft 방지)
+    const _hasContent = !!(d.agency || d.attraction || d.pickup || d.dropoff || d.tourcode || d.kmStart || d.kmEnd || d.timeStart || d.timeEnd || (d.toll && d.toll!=='0') || (d.fuel && d.fuel!=='0') || (d.tip && d.tip!=='0'));
+    if(!_hasContent){ clearDailyDraft(); _draftRestoring = false; return false; }
     // shiftId가 다르면 editingShiftId를 맞춰줌 (같은 드라이버의 이어쓰기)
     if(d._shiftId && d._shiftId !== editingShiftId){
       const matchShift = activeShifts.find(s=>s.id===d._shiftId);
