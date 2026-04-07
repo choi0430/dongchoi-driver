@@ -1731,7 +1731,7 @@ function nv(pg,ni){
   document.querySelector('.cont').scrollTo(0,0);
   // 탭 진입 시 캐시 TTL 기반 스마트 재로드
   // TAB_TTL: 탭별 캐시 유효시간 (밀리초). 이 시간 내 재진입은 GAS 호출 없이 렌더만 실행
-  const TAB_TTL = 5 * 60 * 1000; // 5분
+  const TAB_TTL = 10 * 60 * 1000; // ★ 10분 (5분→10분 완화)
   if(!window._tabLastSync) window._tabLastSync = {};
 
   const now = Date.now();
@@ -1770,7 +1770,7 @@ function nv(pg,ni){
     pmot:  ()=>{ _motLastSync=0; return rMot(true); },
     pwage: ()=>{ _wagesLastSync=0; return loadWagesFromSheet(true).then(()=>rWage(ST.curWageDriver)); },
     pbal:  ()=>syncBalanceData(true).then(renderBalance),
-    pinv:  ()=>initInvoice(),
+    pinv:  ()=>{ _invHistoryCache=null; initInvoice(); },
     pquo:  ()=>initQuotation(),
     pnotice: ()=>loadNoticesFromGAS(),
     pleave: ()=>loadAdminLeaves(),
@@ -5181,17 +5181,17 @@ function calcInvRow(r) {
     _hotelAuto, _distAuto, _earlyAuto, _otAuto, _trailerAuto, _nightAuto, _tipAuto, _mealAuto, _tollAuto };
 }
 async function initInvoice() {
-  _invReports = null; // 항상 최신 리포트 재로드
+  _invReports = null; // 리포트 재로드
   // M_Clients 로드 확보
   if (!DB.C || !DB.C.length) await syncClients();
-  // DC_COMPANY는 loadAllFromSheets()에서 Company_Profile 시트로부터 이미 로드됨
 
   // 기본 기간: 이번 달
   if (!document.getElementById('inv-from').value) setInvPeriod('thismonth');
   else loadInvReports();
 
-  // 이력 로드 (탭 진입 시 자동 로드)
-  loadInvHistory(true);
+  // ★ 이력 로드: 캐시가 있으면 렌더만, 없을 때만 서버 호출
+  // (forceReload는 수금/삭제 등 데이터 변경 시에만 true)
+  loadInvHistory(false);
 }
 
 async function populateInvAgency() {
@@ -11478,9 +11478,10 @@ async function reviewLeave(status){
 // ═══════════════════════════════════════════════════
 // ADMIN AUTO SYNC ENGINE
 // ═══════════════════════════════════════════════════
-const ADMIN_SYNC_INTERVAL = 3 * 60 * 1000; // 3분
+const ADMIN_SYNC_INTERVAL = 10 * 60 * 1000; // ★ 10분 (3분→10분 완화)
 let _adminSyncTimer = null;
 let _adminLastSync = 0;
+let _adminSyncRunning = false; // 중복 실행 방지 플래그
 
 function setAdminSyncBadge(state){
   const el = document.getElementById('admin-sync-badge');
@@ -11495,6 +11496,9 @@ function setAdminSyncBadge(state){
 }
 
 async function runAdminSync(silent=true){
+  // ★ 중복 실행 방지: 이미 동기화 진행 중이면 스킵
+  if(_adminSyncRunning) { console.log('[AdminSync] 이미 실행 중 — 스킵'); return; }
+  _adminSyncRunning = true;
   if(!silent) setAdminSyncBadge('syncing');
   try{
     // 현재 활성 페이지 ID (.pg.on)
@@ -11549,10 +11553,12 @@ async function runAdminSync(silent=true){
       await loadDR();
     }
 
-    // ── 8. 인보이스 (캐시 무효화 → 다음 열람 시 자동 재로드) ──
+    // ── 8. 인보이스 (캐시만 무효화 → 사용자가 이력 탭 열 때 자동 재로드) ──
     if(pg==='pinv' || !silent){
       _invReports = null;
-      if(pg==='pinv') initInvoice();
+      _invHistoryCache = null;
+      // ★ silent 모드에서는 initInvoice() 호출 안 함 (편집 중 방해 방지)
+      if(!silent && pg==='pinv') initInvoice();
     }
 
     // ── 9. 급여 ──
@@ -11577,14 +11583,20 @@ async function runAdminSync(silent=true){
     _adminLastSync = Date.now();
     setAdminSyncBadge('ok');
   }catch(e){ setAdminSyncBadge('error'); }
+  finally { _adminSyncRunning = false; }
 }
 
 function startAdminAutoSync(){
   if(_adminSyncTimer) clearInterval(_adminSyncTimer);
   _adminSyncTimer = setInterval(()=>runAdminSync(true), ADMIN_SYNC_INTERVAL);
-  document.addEventListener('visibilitychange',()=>{
-    if(document.visibilityState==='visible' && Date.now()-_adminLastSync>60000) runAdminSync(true);
-  });
+  // ★ visibilitychange 리스너 중복 등록 방지
+  if(!window._adminVisListenerAdded){
+    window._adminVisListenerAdded = true;
+    document.addEventListener('visibilitychange',()=>{
+      // ★ 3분 이상 떠나있었을 때만 동기화 (60초→180초)
+      if(document.visibilityState==='visible' && Date.now()-_adminLastSync > 180000) runAdminSync(true);
+    });
+  }
 }
 
 // ═══════════════════════════════════════
