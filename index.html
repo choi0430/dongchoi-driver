@@ -1080,8 +1080,15 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   </div>
   <div class="card" style="margin:0 12px 80px;">
     <div class="card-head"><span class="card-title">📋 My Reports (내 리포트 기록)</span></div>
-    <div class="card-body" id="defect-my-reports">
-      <div style="text-align:center;color:var(--muted);font-size:13px;padding:20px;">No Reports Submitted (제출한 리포트가 없습니다)</div>
+    <div class="card-body">
+      <div id="defect-nav" style="display:none;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:10px;padding:6px 10px;">
+          <button onclick="_defectPageNav(1)" style="font-size:15px;background:none;border:none;cursor:pointer;padding:2px 8px;">◀</button>
+          <span id="defect-nav-label" style="font-size:12px;font-weight:700;color:var(--text);"></span>
+          <button onclick="_defectPageNav(-1)" style="font-size:15px;background:none;border:none;cursor:pointer;padding:2px 8px;">▶</button>
+        </div>
+      </div>
+      <div id="defect-my-reports"></div>
     </div>
   </div>
 </div>
@@ -1219,8 +1226,15 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   <!-- 내 검사 기록 -->
   <div class="card" style="margin:0 12px 80px;">
     <div class="card-head"><span class="card-title">📁 내 검사 기록</span></div>
-    <div class="card-body" id="mot-history">
-      <div style="text-align:center;color:var(--muted);font-size:13px;padding:20px;">No Inspection Records (검사 기록이 없습니다)</div>
+    <div class="card-body">
+      <div id="mot-history-nav" style="display:none;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:10px;padding:6px 10px;">
+          <button onclick="_motPageNav(1)" style="font-size:15px;background:none;border:none;cursor:pointer;padding:2px 8px;">◀</button>
+          <span id="mot-history-label" style="font-size:12px;font-weight:700;color:var(--text);"></span>
+          <button onclick="_motPageNav(-1)" style="font-size:15px;background:none;border:none;cursor:pointer;padding:2px 8px;">▶</button>
+        </div>
+      </div>
+      <div id="mot-history"></div>
     </div>
   </div>
 </div>
@@ -3507,12 +3521,47 @@ function renderMotHistory() {
   const key     = `dc_mot_${driver}`;
   const records = JSON.parse(localStorage.getItem(key)||'[]');
   const el = document.getElementById('mot-history');
+  const navEl = document.getElementById('mot-history-nav');
   if (!el) return;
 
   if (records.length === 0) {
+    if(navEl) navEl.style.display='none';
     el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:20px;">No Inspection Records (검사 기록이 없습니다)</div>';
     return;
   }
+
+  // 월별 그룹핑
+  const monthMap = {};
+  records.forEach(r => {
+    const iso = parseToISO(r.date);
+    const mk = iso ? iso.slice(0,7) : '0000-00';
+    if(!monthMap[mk]) monthMap[mk]=[];
+    monthMap[mk].push(r);
+  });
+  const months = Object.keys(monthMap).sort().reverse();
+  window._motPages = months;
+  window._motData = monthMap;
+  if(window._motPageIdx===undefined || window._motPageIdx >= months.length) window._motPageIdx = 0;
+  _renderMotPage();
+}
+function _motPageNav(dir) {
+  const pages = window._motPages||[];
+  if(!pages.length) return;
+  window._motPageIdx = Math.max(0, Math.min(pages.length-1, (window._motPageIdx||0)+dir));
+  _renderMotPage();
+}
+function _renderMotPage() {
+  const el = document.getElementById('mot-history');
+  const navEl = document.getElementById('mot-history-nav');
+  const labelEl = document.getElementById('mot-history-label');
+  const pages = window._motPages||[];
+  const idx = window._motPageIdx||0;
+  if(!el||!pages.length){ if(navEl) navEl.style.display='none'; return; }
+  if(navEl) navEl.style.display='';
+  const mk = pages[idx];
+  const records = (window._motData||{})[mk]||[];
+  const [y,m] = mk.split('-');
+  if(labelEl) labelEl.textContent = y+'년 '+m+'월 ('+records.length+'건) — '+(idx+1)+'/'+pages.length;
 
   const typeLabel = {
     roadside_vehicle:'🚌 차량 노상 검사', roadside_driver:'👤 드라이버 검사',
@@ -3527,7 +3576,7 @@ function renderMotHistory() {
     infringement:{ bg:'#fdf4ff', border:'#e9d5ff', color:'#9333ea', label:'💳 인프링먼트' },
   };
 
-  el.innerHTML = records.slice(0,10).map(r => {
+  el.innerHTML = records.map(r => {
     const rs = resultStyle[r.result] || { bg:'#f8fafc', border:'#e2e8f0', color:'var(--muted)', label:r.result||'—' };
     const noCount = r.failedItems?.length || 0;
     return `
@@ -7301,18 +7350,52 @@ function submitDefectReport(){
 
 function renderMyDefects(){
   const el = document.getElementById('defect-my-reports');
+  const navEl = document.getElementById('defect-nav');
   if(!el) return;
   const shift = JSON.parse(localStorage.getItem('currentShift')||'{}');
   const driver = shift.driverName || localStorage.getItem('driverName') || '';
-  // 내 드라이버 이름으로 필터 (없으면 전체)
   let reports = getDefectReports();
   if(driver) reports = reports.filter(r=>r.driver===driver||!r.driver);
-  reports = reports.slice(0,20);
 
   if(!reports.length){
+    if(navEl) navEl.style.display='none';
     el.innerHTML='<div style="text-align:center;color:var(--muted);font-size:13px;padding:20px;">No Reports Submitted (제출한 리포트가 없습니다)</div>';
     return;
   }
+
+  // 월별 그룹핑
+  const monthMap = {};
+  reports.forEach(r => {
+    const ds = r.submittedAt || r.date || '';
+    const iso = parseToISO(ds) || ds.slice(0,10);
+    const mk = iso.length>=7 ? iso.slice(0,7) : '0000-00';
+    if(!monthMap[mk]) monthMap[mk]=[];
+    monthMap[mk].push(r);
+  });
+  const months = Object.keys(monthMap).sort().reverse();
+  window._defectPages = months;
+  window._defectData = monthMap;
+  if(window._defectPageIdx===undefined || window._defectPageIdx >= months.length) window._defectPageIdx = 0;
+  _renderDefectPage();
+}
+function _defectPageNav(dir) {
+  const pages = window._defectPages||[];
+  if(!pages.length) return;
+  window._defectPageIdx = Math.max(0, Math.min(pages.length-1, (window._defectPageIdx||0)+dir));
+  _renderDefectPage();
+}
+function _renderDefectPage() {
+  const el = document.getElementById('defect-my-reports');
+  const navEl = document.getElementById('defect-nav');
+  const labelEl = document.getElementById('defect-nav-label');
+  const pages = window._defectPages||[];
+  const idx = window._defectPageIdx||0;
+  if(!el||!pages.length){ if(navEl) navEl.style.display='none'; return; }
+  if(navEl) navEl.style.display='';
+  const mk = pages[idx];
+  const reports = (window._defectData||{})[mk]||[];
+  const [y,m] = mk.split('-');
+  if(labelEl) labelEl.textContent = y+'년 '+m+'월 ('+reports.length+'건) — '+(idx+1)+'/'+pages.length;
 
   const sevStyle={low:'color:#16a34a',medium:'color:#d97706',high:'color:#dc2626;font-weight:700'};
   const sevLabel={low:'🟢 낮음',medium:'🟡 중간',high:'🔴 높음'};

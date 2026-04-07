@@ -458,6 +458,14 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <div class="stl">🛠 Maintenance (정비 내역)</div>
       <button class="btn bac sm" onclick="openMaintEntry(null)">+ Add Maintenance (정비 추가)</button>
     </div>
+    <div id="maint-summary"></div>
+    <div id="maint-nav" style="display:none;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--sf2);border-radius:10px;padding:6px 10px;">
+        <button onclick="_maintPageNav(1)" style="font-size:15px;background:none;border:none;cursor:pointer;padding:2px 8px;">◀</button>
+        <span id="maint-nav-label" style="font-size:12px;font-weight:700;color:var(--t1);"></span>
+        <button onclick="_maintPageNav(-1)" style="font-size:15px;background:none;border:none;cursor:pointer;padding:2px 8px;">▶</button>
+      </div>
+    </div>
     <div id="maint-list"></div>
   </div>
   <div id="vsec-defect" style="display:none;">
@@ -781,6 +789,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
       <div style="font-size:12px;font-weight:800;color:var(--t1);letter-spacing:.3px;">📜 발행 이력</div>
       <button class="btn-refresh" onclick="withRefreshSpin(this,()=>loadInvHistory(true))"><span class="refresh-icon">🔄</span> Refresh (새로고침)</button>
+    </div>
+    <div id="inv-history-nav" style="display:none;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--sf2);border-radius:10px;padding:6px 10px;">
+        <button onclick="_invHistPageNav(1)" style="font-size:15px;background:none;border:none;cursor:pointer;padding:2px 8px;">◀</button>
+        <span id="inv-history-nav-label" style="font-size:12px;font-weight:700;color:var(--t1);"></span>
+        <button onclick="_invHistPageNav(-1)" style="font-size:15px;background:none;border:none;cursor:pointer;padding:2px 8px;">▶</button>
+      </div>
     </div>
     <div id="inv-history-list" style="max-height:400px;overflow-y:auto;">
       <div style="text-align:center;padding:16px;color:var(--t3);font-size:12px;">⏳ 발행 이력 불러오는 중...</div>
@@ -1320,9 +1335,18 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <select id="shift-filter-rego" class="profit-sel" style="flex:1;min-width:90px;" onchange="renderShiftTab()">
       <option value="">All Vehicles (전체 차량)</option>
     </select>
-    <select id="shift-filter-week" class="profit-sel" style="flex:1;min-width:120px;" onchange="renderShiftTab()">
+    <select id="shift-filter-week" class="profit-sel" style="display:none;" onchange="renderShiftTab()">
       <option value="">전체 기간</option>
     </select>
+  </div>
+
+  <!-- 주간 네비게이션 -->
+  <div id="shift-week-nav" style="padding:8px 14px 0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--sf2);border-radius:10px;padding:6px 10px;">
+      <button onclick="_shiftWeekNav(1)" style="font-size:15px;background:none;border:none;cursor:pointer;padding:2px 8px;">◀</button>
+      <span id="shift-week-label" style="font-size:12px;font-weight:700;color:var(--t1);"></span>
+      <button onclick="_shiftWeekNav(-1)" style="font-size:15px;background:none;border:none;cursor:pointer;padding:2px 8px;">▶</button>
+    </div>
   </div>
 
   <!-- 요약 배지 -->
@@ -2245,6 +2269,7 @@ async function deleteHvisBooking(id){
 
 function renderMaint(){
   var list=document.getElementById('maint-list');
+  var summaryEl=document.getElementById('maint-summary');
   if(!list)return;
 
   // ── 차량별 정비 상태 요약 카드 ──
@@ -2267,10 +2292,45 @@ function renderMaint(){
     summaryHtml+='</div>';
   });
   summaryHtml+='</div></div>';
+  if(summaryEl) summaryEl.innerHTML=summaryHtml;
 
   var records=getMaintRecords().sort(function(a,b){return(b.date||'').localeCompare(a.date||'');});
-  if(!records.length){list.innerHTML=summaryHtml+'<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">No maintenance records</div>';return;}
-  list.innerHTML=summaryHtml+'<div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:8px;">📋 정비 이력</div>'+records.map(function(r){
+  if(!records.length){list.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">No maintenance records</div>';document.getElementById('maint-nav').style.display='none';return;}
+
+  // 월별 그룹핑
+  var monthMap = {};
+  records.forEach(function(r){
+    var iso = parseToISO(r.date||'');
+    var mk = iso && iso.length>=7 ? iso.slice(0,7) : '0000-00';
+    if(!monthMap[mk]) monthMap[mk]=[];
+    monthMap[mk].push(r);
+  });
+  var months = Object.keys(monthMap).sort().reverse();
+  window._maintPages = months;
+  window._maintData = monthMap;
+  if(window._maintPageIdx===undefined || window._maintPageIdx >= months.length) window._maintPageIdx = 0;
+  _renderMaintPage();
+}
+function _maintPageNav(dir) {
+  var pages = window._maintPages||[];
+  if(!pages.length) return;
+  window._maintPageIdx = Math.max(0, Math.min(pages.length-1, (window._maintPageIdx||0)+dir));
+  _renderMaintPage();
+}
+function _renderMaintPage() {
+  var list=document.getElementById('maint-list');
+  var navEl=document.getElementById('maint-nav');
+  var labelEl=document.getElementById('maint-nav-label');
+  var pages = window._maintPages||[];
+  var idx = window._maintPageIdx||0;
+  if(!list||!pages.length){ if(navEl) navEl.style.display='none'; return; }
+  if(navEl) navEl.style.display='';
+  var mk = pages[idx];
+  var records = (window._maintData||{})[mk]||[];
+  var parts = mk.split('-');
+  if(labelEl) labelEl.textContent = parts[0]+'년 '+parts[1]+'월 ('+records.length+'건) — '+(idx+1)+'/'+pages.length;
+
+  list.innerHTML='<div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:8px;">📋 정비 이력</div>'+records.map(function(r){
     var v=DB.V.find(function(vv){return vv.Rego===r.rego;});
     var curKM=v?DB.regoMaxKM?.[v.Rego]||0:0;
     var remainInfo='';
@@ -5753,12 +5813,47 @@ async function loadInvHistory(forceReload) {
 
 function renderInvHistory() {
   const listEl = document.getElementById('inv-history-list');
+  const navEl = document.getElementById('inv-history-nav');
   if (!listEl || !_invHistoryCache) return;
 
   if (_invHistoryCache.length === 0) {
+    if(navEl) navEl.style.display='none';
     listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3);font-size:12px;">발행된 인보이스가 없습니다</div>';
     return;
   }
+
+  // 월별 그룹핑
+  const monthMap = {};
+  _invHistoryCache.forEach(inv => {
+    const iso = parseToISO(inv.IssuedDate||inv.PeriodFrom||'');
+    const mk = iso && iso.length>=7 ? iso.slice(0,7) : '0000-00';
+    if(!monthMap[mk]) monthMap[mk]=[];
+    monthMap[mk].push(inv);
+  });
+  const months = Object.keys(monthMap).sort().reverse();
+  window._invHistPages = months;
+  window._invHistData = monthMap;
+  if(window._invHistPageIdx===undefined || window._invHistPageIdx >= months.length) window._invHistPageIdx = 0;
+  _renderInvHistPage();
+}
+function _invHistPageNav(dir) {
+  const pages = window._invHistPages||[];
+  if(!pages.length) return;
+  window._invHistPageIdx = Math.max(0, Math.min(pages.length-1, (window._invHistPageIdx||0)+dir));
+  _renderInvHistPage();
+}
+function _renderInvHistPage() {
+  const listEl = document.getElementById('inv-history-list');
+  const navEl = document.getElementById('inv-history-nav');
+  const labelEl = document.getElementById('inv-history-nav-label');
+  const pages = window._invHistPages||[];
+  const idx = window._invHistPageIdx||0;
+  if(!listEl||!pages.length){ if(navEl) navEl.style.display='none'; return; }
+  if(navEl) navEl.style.display='';
+  const mk = pages[idx];
+  const items = (window._invHistData||{})[mk]||[];
+  const [y,m] = mk.split('-');
+  if(labelEl) labelEl.textContent = y+'년 '+m+'월 ('+items.length+'건) — '+(idx+1)+'/'+pages.length;
 
   const statusMap = {
     'issued':  {label:'발행', bg:'#dbeafe', color:'#1e40af', icon:'📄'},
@@ -5767,7 +5862,7 @@ function renderInvHistory() {
     'cancelled':{label:'취소', bg:'#fee2e2', color:'#991b1b', icon:'❌'}
   };
 
-  listEl.innerHTML = _invHistoryCache.map(inv => {
+  listEl.innerHTML = items.map(inv => {
     const st  = statusMap[inv.Status] || statusMap['issued'];
     const amt = parseFloat(inv.GrandTotal)||0;
     return `
@@ -9915,23 +10010,24 @@ function _finishShiftLoad() {
     rSel.innerHTML = '<option value="">All Vehicles (전체 차량)</option>' +
       regos.map(r=>`<option value="${escH(r)}"${r===curR?' selected':''}>${escH(r)}</option>`).join('');
   }
-  // 주간 필터 채우기
+  // 주간 리스트 구축 (◀ ▶ 네비게이션용)
+  const weeks = [...new Set(allRows.map(r=>{
+    const iso=parseToISO(r.Date||''); if(!iso) return '';
+    const d=new Date(iso+'T00:00:00'); const diff=(d.getDay()+6)%7;
+    const mon=new Date(d); mon.setDate(d.getDate()-diff);
+    return mon.toISOString().slice(0,10);
+  }).filter(Boolean))].sort().reverse();
+  window._shiftWeeks = weeks;
+  if(window._shiftWeekIdx===undefined || window._shiftWeekIdx >= weeks.length) window._shiftWeekIdx = 0;
+
+  // hidden dropdown도 동기화 (renderShiftTab 필터 호환)
   const wSel = document.getElementById('shift-filter-week');
-  if (wSel) {
-    const weeks = [...new Set(allRows.map(r=>{
-      const iso=parseToISO(r.Date||''); if(!iso) return '';
-      const d=new Date(iso+'T00:00:00'); const diff=(d.getDay()+6)%7;
-      const mon=new Date(d); mon.setDate(d.getDate()-diff);
-      return mon.toISOString().slice(0,10);
-    }).filter(Boolean))].sort().reverse();
-    const curW = wSel.value;
+  if(wSel) {
     wSel.innerHTML = '<option value="">전체 기간</option>' +
-      weeks.map(w=>{
-        const d=new Date(w+'T00:00:00'); const sun=new Date(d); sun.setDate(d.getDate()+6);
-        const fmt=x=>String(x.getDate()).padStart(2,'0')+'/'+(x.getMonth()+1+'').padStart(2,'0')+'/'+x.getFullYear();
-        return `<option value="${w}"${w===curW?' selected':''}>${fmt(d)}~${fmt(sun)}</option>`;
-      }).join('');
+      weeks.map(w=>`<option value="${w}">${w}</option>`).join('');
+    wSel.value = weeks[window._shiftWeekIdx] || '';
   }
+  _updateShiftWeekLabel();
 
   // 데이터가 비었어도 렌더링 실행 (로딩 표시 제거)
   renderShiftTab();
@@ -9941,6 +10037,27 @@ function _finishShiftLoad() {
   if (!allRows.length && listEl) {
     listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">📋 No Records (기록이 없습니다) — Check network and press <span class="refresh-icon">🔄</span> Refresh (네트워크 확인 후 새로고침)</div>';
   }
+}
+
+function _shiftWeekNav(dir) {
+  const weeks = window._shiftWeeks||[];
+  if(!weeks.length) return;
+  window._shiftWeekIdx = Math.max(0, Math.min(weeks.length-1, (window._shiftWeekIdx||0)+dir));
+  const wSel = document.getElementById('shift-filter-week');
+  if(wSel) wSel.value = weeks[window._shiftWeekIdx] || '';
+  _updateShiftWeekLabel();
+  renderShiftTab();
+}
+function _updateShiftWeekLabel() {
+  const weeks = window._shiftWeeks||[];
+  const idx = window._shiftWeekIdx||0;
+  const labelEl = document.getElementById('shift-week-label');
+  if(!labelEl) return;
+  if(!weeks.length){ labelEl.textContent='데이터 없음'; return; }
+  const w = weeks[idx];
+  const d=new Date(w+'T00:00:00'); const sun=new Date(d); sun.setDate(d.getDate()+6);
+  const fmt=x=>String(x.getDate()).padStart(2,'0')+'/'+(x.getMonth()+1+'').padStart(2,'0')+'/'+x.getFullYear();
+  labelEl.textContent = fmt(d)+' ~ '+fmt(sun)+' ('+(idx+1)+'/'+weeks.length+')';
 }
 
 function setShiftTab(tab) {
