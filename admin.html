@@ -5858,6 +5858,7 @@ function _renderInvHistPage() {
   const statusMap = {
     'issued':  {label:'발행', bg:'#dbeafe', color:'#1e40af', icon:'📄'},
     'emailed': {label:'발송', bg:'#e0f2fe', color:'#0369a1', icon:'✉️'},
+    'partial': {label:'부분결제', bg:'#fef3c7', color:'#92400e', icon:'💰'},
     'paid':    {label:'결제완료', bg:'#dcfce7', color:'#166534', icon:'✅'},
     'cancelled':{label:'취소', bg:'#fee2e2', color:'#991b1b', icon:'❌'}
   };
@@ -5865,25 +5866,45 @@ function _renderInvHistPage() {
   listEl.innerHTML = items.map(inv => {
     const st  = statusMap[inv.Status] || statusMap['issued'];
     const amt = parseFloat(inv.GrandTotal)||0;
+    // 수금 현황 계산 (Agency_Txn에서 해당 인보이스의 CR 합산)
+    const invNum = String(inv.InvNumber||'').trim();
+    const paidCR = (_balAgencyTxns||[]).filter(t => String(t.InvoiceID||'').trim()===invNum && Number(t.CR)>0).reduce((s,t)=>s+Number(t.CR),0);
+    const remaining = Math.max(0, roundMoney(amt - paidCR));
+    const isPaidFull = remaining <= 0 && amt > 0;
+    const isPartial = paidCR > 0 && !isPaidFull;
+    // 수금 진행률 바
+    const pctPaid = amt > 0 ? Math.min(100, Math.round(paidCR / amt * 100)) : 0;
+    const progressHTML = amt > 0 && inv.Status!=='cancelled' ? `
+      <div style="margin-top:5px;">
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--t3);margin-bottom:2px;">
+          <span>수금 $${roundMoney(paidCR).toLocaleString('en-AU',{minimumFractionDigits:2})} / $${amt.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
+          <span style="font-weight:700;color:${isPaidFull?'var(--gn)':isPartial?'var(--or)':'var(--rd)'};">${isPaidFull?'완료':remaining>0?'잔액 $'+remaining.toLocaleString('en-AU',{minimumFractionDigits:2}):''}</span>
+        </div>
+        <div style="height:4px;background:var(--b1);border-radius:2px;overflow:hidden;">
+          <div style="height:100%;width:${pctPaid}%;background:${isPaidFull?'var(--gn)':isPartial?'var(--or)':'var(--ac)'};border-radius:2px;transition:width .3s;"></div>
+        </div>
+      </div>` : '';
     return `
     <div style="background:var(--sf2);border-radius:10px;padding:11px 12px;margin-bottom:6px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap;">
             <span style="font-size:12px;font-weight:800;color:var(--t1);">${escH(inv.InvNumber||'—')}</span>
-            <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${st.bg};color:${st.color};font-weight:700;">${st.icon} ${st.label}</span>
+            <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${isPartial?'#fef3c7':st.bg};color:${isPartial?'#92400e':st.color};font-weight:700;">${isPartial?'💰 부분결제':st.icon+' '+st.label}</span>
             ${inv.EmailSentDate ? '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:#dcfce7;color:#166534;font-weight:700;">✉️ 발송완료</span>' : '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:#fef3c7;color:#92400e;font-weight:700;">📭 미발송</span>'}
-            ${inv.PaidDate ? '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:#d1fae5;color:#065f46;font-weight:700;">💰 결제완료</span>' : ''}
+            ${isPaidFull ? '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:#d1fae5;color:#065f46;font-weight:700;">💰 결제완료</span>' : ''}
           </div>
           <div style="font-size:11px;color:var(--t2);">${escH(inv.Agency||'—')}</div>
           <div style="font-size:10px;color:var(--t3);">${fmtDate(inv.PeriodFrom)||inv.PeriodFrom||''} ~ ${fmtDate(inv.PeriodTo)||inv.PeriodTo||''}</div>
           <div style="font-size:10px;color:var(--t3);margin-top:2px;">발행: ${fmtDateTime(inv.IssuedDate)}${inv.EmailSentDate?' · 발송: '+fmtDateTime(inv.EmailSentDate):''}${inv.PaidDate?' · 결제: '+fmtDateTime(inv.PaidDate):''}</div>
+          ${progressHTML}
         </div>
         <div style="text-align:right;flex-shrink:0;margin-left:8px;">
           <div style="font-size:15px;font-weight:800;color:var(--gn);">$${amt.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
           <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap;">
             <button onclick="previewIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">👁미리보기</button>
-            ${inv.Status!=='paid'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','paid','PaidDate')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #86efac;background:#f0fdf4;color:#166534;cursor:pointer;font-weight:600;">✅결제</button>`:''}
+            ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="openPartialPayment('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}',${amt},${paidCR})" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fbbf24;background:#fffbeb;color:#92400e;cursor:pointer;font-weight:600;">💰수금</button>`:''}
+            ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','paid','PaidDate')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #86efac;background:#f0fdf4;color:#166534;cursor:pointer;font-weight:600;">✅전액결제</button>`:''}
             ${inv.Status!=='cancelled'?`<button onclick="resendInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;cursor:pointer;font-weight:600;">✉️발송</button>`:''}
             ${inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','cancelled','')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:600;">❌취소</button>`:''}
             <button onclick="deleteInvoiceRecord('${escH(inv.InvNumber)}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:600;">🗑삭제</button>
@@ -6257,49 +6278,40 @@ async function updateInvStatus(invNumber, status, field) {
     toast(`✅ ${invNumber} → ${status}`,'ok');
 
     // ★ 결제 시 Agency_Txn에 CR(수금) 자동 등록 → 잔액 탭 연동
+    // 부분수금이 이미 있으면 잔액만 CR로 등록 (이중 등록 방지)
     if (status === 'paid') {
       try {
         const inv = (_invHistoryCache||[]).find(i => String(i.InvNumber) === invNumber);
         if (inv) {
           const grandTotal = parseFloat(inv.GrandTotal) || 0;
-          // 기존 선수금/크레딧 차감액 계산
-          let existingCR = 0;
-          let _dedJSON = '';
-          Object.keys(inv).forEach(k => { const v = String(inv[k]||'').trim(); if (v.startsWith('[') && v.indexOf('"type"') >= 0) _dedJSON = v; });
-          if (_dedJSON) {
-            try {
-              const deds = JSON.parse(_dedJSON);
-              existingCR = deds.filter(d=>d.amount>0).reduce((s,d)=>s+d.amount, 0);
-            } catch(e) {}
-          }
-          // 결제 금액 = GrandTotal - 이미 차감된 선수금/크레딧
-          const paymentAmount = roundMoney(grandTotal - existingCR);
-          if (paymentAmount > 0) {
-            // 중복 방지: 이미 결제 CR이 있는지 확인
-            const existingPayTxn = _balAgencyTxns.find(t =>
-              String(t.InvoiceID||'').trim() === invNumber &&
-              String(t.Remark||'').includes('결제')
-            );
-            if (!existingPayTxn) {
-              const txnData = {
-                Agency:    inv.Agency || '',
-                Date:      toLocalISO(new Date()),
-                InvoiceID: invNumber,
-                TourCode:  '',
-                DR:        0,
-                CR:        paymentAmount,
-                Remark:    `결제 완료 (${invNumber})`,
-                StartDate: inv.PeriodFrom || '',
-                FinishDate:inv.PeriodTo || '',
-                DueDate:   ''
-              };
-              fetch(APPS_SCRIPT_URL, {
-                method:'POST', headers:{'Content-Type':'text/plain'},
-                body: JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
-              }).then(r=>r.json()).then(j=>{
-                if(j.ok) { console.log('[Payment→Balance] CR 등록 완료:', invNumber, paymentAmount); _balLoaded=false; }
-              }).catch(e=>console.warn('[Payment→Balance] error:', e));
-            }
+          // 기존 부분수금 CR 합산
+          const alreadyPaidCR = (_balAgencyTxns||[]).filter(t =>
+            String(t.InvoiceID||'').trim() === invNumber && Number(t.CR) > 0
+          ).reduce((s,t) => s + Number(t.CR), 0);
+
+          // 잔액 = GrandTotal - 이미 수금된 금액
+          const remainingCR = roundMoney(grandTotal - alreadyPaidCR);
+          if (remainingCR > 0) {
+            const txnData = {
+              Agency:    inv.Agency || '',
+              Date:      toLocalISO(new Date()),
+              InvoiceID: invNumber,
+              TourCode:  '',
+              DR:        0,
+              CR:        remainingCR,
+              Remark:    `전액결제 완료 (${invNumber})${alreadyPaidCR > 0 ? ' — 잔액분' : ''}`,
+              StartDate: inv.PeriodFrom || '',
+              FinishDate:inv.PeriodTo || '',
+              DueDate:   ''
+            };
+            fetch(APPS_SCRIPT_URL, {
+              method:'POST', headers:{'Content-Type':'text/plain'},
+              body: JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
+            }).then(r=>r.json()).then(j=>{
+              if(j.ok) { console.log('[Payment→Balance] CR 등록 완료:', invNumber, remainingCR, alreadyPaidCR > 0 ? '(부분수금 차감 후)' : ''); _balLoaded=false; }
+            }).catch(e=>console.warn('[Payment→Balance] error:', e));
+          } else {
+            console.log('[Payment→Balance] 이미 전액 수금 완료됨, 추가 CR 없음:', invNumber);
           }
         }
       } catch(e) { console.warn('[Payment→Balance] 결제 CR 등록 오류:', e); }
@@ -6321,6 +6333,138 @@ async function deleteInvoiceRecord(invNumber) {
     toast(`🗑️ ${invNumber} 삭제 완료`,'ok');
     await loadInvHistory(true);
   } catch(e) { toast('❌ '+e.message,'er'); }
+}
+
+// ─────────────────────────────────────────
+// 부분수금 (Partial Payment)
+// ─────────────────────────────────────────
+function openPartialPayment(invNumber, agency, grandTotal, alreadyPaid) {
+  const remaining = roundMoney(Math.max(0, grandTotal - alreadyPaid));
+  if (remaining <= 0) { toast('이미 전액 수금 완료된 인보이스입니다.','ok'); return; }
+
+  // 몇 차 수금인지 계산
+  const prevCount = (_balAgencyTxns||[]).filter(t =>
+    String(t.InvoiceID||'').trim() === invNumber && Number(t.CR) > 0 &&
+    String(t.Remark||'').includes('수금')
+  ).length;
+  const nextNum = prevCount + 1;
+
+  // 모달 오버레이
+  const overlay = document.createElement('div');
+  overlay.id = 'pp-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = `
+    <div style="background:var(--sf);border-radius:16px;padding:20px;width:92%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,.25);">
+      <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:12px;">💰 부분수금 등록</div>
+      <div style="font-size:12px;color:var(--t2);margin-bottom:10px;">
+        <b>${invNumber}</b> · ${agency}<br>
+        총액 <b>$${grandTotal.toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
+        &nbsp;|&nbsp; 기수금 <b>$${roundMoney(alreadyPaid).toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
+        &nbsp;|&nbsp; <span style="color:var(--or);font-weight:700;">잔액 $${remaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
+      </div>
+
+      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">수금 금액 ($)</label>
+      <input id="pp-amount" type="number" step="0.01" min="0.01" max="${remaining}" value="${remaining}"
+        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:14px;font-weight:700;box-sizing:border-box;margin-bottom:10px;">
+
+      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">수금일</label>
+      <input id="pp-date" type="date" value="${toLocalISO(new Date())}"
+        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
+
+      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">수금 방법</label>
+      <select id="pp-method" style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
+        <option value="이체">이체 (Bank Transfer)</option>
+        <option value="현금">현금 (Cash)</option>
+        <option value="수표">수표 (Cheque)</option>
+        <option value="기타">기타 (Other)</option>
+      </select>
+
+      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">메모 (선택)</label>
+      <input id="pp-note" type="text" placeholder="메모 입력 (선택)"
+        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:14px;">
+
+      <div style="display:flex;gap:8px;">
+        <button id="pp-cancel-btn" style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--b2);background:var(--sf2);color:var(--t2);font-size:13px;font-weight:700;cursor:pointer;">취소</button>
+        <button id="pp-save-btn" style="flex:1;padding:10px;border-radius:10px;border:none;background:var(--or);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">💰 수금 등록</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  // 바깥 클릭 닫기
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('pp-cancel-btn').onclick = () => overlay.remove();
+
+  // 저장
+  document.getElementById('pp-save-btn').onclick = async () => {
+    const amtInput = parseFloat(document.getElementById('pp-amount').value);
+    if (!amtInput || amtInput <= 0) { toast('⚠️ 금액을 입력하세요','warn'); return; }
+    if (amtInput > remaining + 0.01) { toast('⚠️ 잔액보다 큰 금액입니다','warn'); return; }
+    const payAmt = roundMoney(amtInput);
+    const payDate = document.getElementById('pp-date').value || toLocalISO(new Date());
+    const method = document.getElementById('pp-method').value;
+    const note = document.getElementById('pp-note').value.trim();
+
+    const remark = `부분수금 ${nextNum}차 (${invNumber}) [${method}]${note ? ' - '+note : ''}`;
+
+    document.getElementById('pp-save-btn').disabled = true;
+    document.getElementById('pp-save-btn').textContent = '저장 중...';
+
+    try {
+      const txnData = {
+        Agency:    agency,
+        Date:      payDate,
+        InvoiceID: invNumber,
+        TourCode:  '',
+        DR:        0,
+        CR:        payAmt,
+        Remark:    remark,
+        StartDate: '',
+        FinishDate:'',
+        DueDate:   ''
+      };
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error||'등록 실패');
+
+      // 잔액 캐시 업데이트
+      _balLoaded = false;
+      _balAgencyTxns.push(txnData);
+
+      // 전액 수금 여부 확인
+      const totalPaid = roundMoney(alreadyPaid + payAmt);
+      if (totalPaid >= grandTotal - 0.01) {
+        // 전액 완료 → paid 상태로 전환 (confirm 없이 자동)
+        try {
+          await fetch(APPS_SCRIPT_URL, {
+            method:'POST', headers:{'Content-Type':'text/plain'},
+            body: JSON.stringify({action:'update_invoice_status', invNumber, status:'paid', field:'PaidDate', _user:getAdminUser()})
+          });
+          toast(`✅ ${invNumber} 전액 수금 완료 — 결제완료 처리됨`,'ok');
+        } catch(e2) { console.warn('[PP] auto-paid error:', e2); }
+      } else {
+        // 부분수금 → partial 상태
+        try {
+          await fetch(APPS_SCRIPT_URL, {
+            method:'POST', headers:{'Content-Type':'text/plain'},
+            body: JSON.stringify({action:'update_invoice_status', invNumber, status:'partial', field:'', _user:getAdminUser()})
+          });
+        } catch(e2) { console.warn('[PP] partial status error:', e2); }
+        toast(`💰 ${invNumber} 수금 $${payAmt.toLocaleString('en-AU',{minimumFractionDigits:2})} 등록 완료 (잔액 $${roundMoney(grandTotal-totalPaid).toLocaleString('en-AU',{minimumFractionDigits:2})})`,'ok');
+      }
+
+      overlay.remove();
+      _invHistoryCache = null;
+      await loadInvHistory(true);
+
+    } catch(e) {
+      toast('❌ 수금 등록 실패: '+e.message,'er');
+      document.getElementById('pp-save-btn').disabled = false;
+      document.getElementById('pp-save-btn').textContent = '💰 수금 등록';
+    }
+  };
 }
 
 // ─────────────────────────────────────────
