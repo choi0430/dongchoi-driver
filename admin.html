@@ -228,7 +228,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </div>
   <div class="lcrd">
     <div class="fr"><label class="fl">관리자 계정</label>
-      <div class="lsw"><select class="fs" id="la"><option value="">-- 계정 선택 --</option><option value="Branden">Branden Choi (오너)</option></select></div>
+      <div class="lsw"><select class="fs" id="la"><option value="">-- 로딩 중... --</option></select></div>
+      <div id="login-status" style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:4px;text-align:center;"></div>
     </div>
     <div class="fr"><label class="fl">PIN 번호</label>
       <div class="pind"><div class="pdot" id="p0"></div><div class="pdot" id="p1"></div><div class="pdot" id="p2"></div><div class="pdot" id="p3"></div></div>
@@ -240,14 +241,83 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 </div>
 <script>
 (function(){
+  // ── 로그인 드라이버 목록 (서버에서 로드) ──
+  window._loginDrivers = [];
+
+  // 서버에서 M_Drivers 로드하여 로그인 셀렉트 구성
+  function _loadLoginDrivers(){
+    var sel = document.getElementById('la');
+    var status = document.getElementById('login-status');
+    if(status) status.textContent = '📡 드라이버 목록 로딩 중...';
+    fetch(APPS_SCRIPT_URL + '?action=get_master&sheet=M_Drivers')
+      .then(function(r){ return r.json(); })
+      .then(function(json){
+        if(!json.ok || !json.rows) throw new Error('로드 실패');
+        window._loginDrivers = json.rows.filter(function(d){
+          return !d.Active || String(d.Active).toUpperCase() === 'Y';
+        });
+        _buildLoginSelect();
+        if(status) status.textContent = '';
+      })
+      .catch(function(e){
+        console.warn('Login driver load failed:', e);
+        // localStorage 캐시 폴백
+        try {
+          var cached = JSON.parse(localStorage.getItem('dc_admin_drivers') || '[]');
+          if(cached.length > 0) { window._loginDrivers = cached; _buildLoginSelect(); }
+          else { sel.innerHTML = '<option value="">-- 계정 선택 --</option><option value="Branden|BC|Branden Choi">Branden Choi (오너)</option>'; }
+        } catch(ex) { sel.innerHTML = '<option value="">-- 계정 선택 --</option>'; }
+        if(status) status.textContent = '⚠️ 오프라인 모드';
+      });
+  }
+
+  // 관리자 이름 목록 (현재 Branden만 관리자)
+  var ADMIN_NAMES = ['Branden Choi', 'Branden'];
+
+  function _buildLoginSelect(){
+    var sel = document.getElementById('la');
+    sel.innerHTML = '<option value="">-- 계정 선택 --</option>';
+    // 관리자 계정만 필터링
+    window._loginDrivers.forEach(function(d){
+      var nameKr = d.Name_KR || d.Name_EN || '';
+      var nameEn = d.Name_EN || '';
+      var isAdmin = ADMIN_NAMES.some(function(an){ return nameKr.indexOf(an)>=0 || nameEn.indexOf(an)>=0; });
+      if(!isAdmin) return;
+      var initials = d.Initials || (nameEn.trim().split(' ').filter(Boolean).map(function(w){return w[0];}).join('').toUpperCase().slice(0,2)) || '??';
+      var display = nameKr + (nameEn ? ' (' + nameEn + ')' : '');
+      var val = nameKr + '|' + initials + '|' + nameEn;
+      var opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = display;
+      sel.appendChild(opt);
+    });
+    // 관리자가 1명이면 자동 선택
+    if(sel.options.length === 2) sel.selectedIndex = 1;
+    // localStorage에 캐시 (다음 오프라인 접속용)
+    try { localStorage.setItem('dc_admin_drivers', JSON.stringify(window._loginDrivers)); } catch(e){}
+    // 마지막 계정 자동 선택
+    var last = localStorage.getItem('dc_admin_session');
+    if(last){
+      var found = Array.prototype.find.call(sel.options, function(o){ return o.value.split('|')[0] === last; });
+      if(found) sel.value = found.value;
+    }
+  }
+
+  // ── PIN 관리 ──
+  function _getDriverPin(name){
+    var d = window._loginDrivers.find(function(dr){ return dr.Name_KR === name || dr.Name_EN === name; });
+    return (d && d.PIN && String(d.PIN).trim()) ? String(d.PIN).trim() : '1234';
+  }
+
   var _pin = '';
   function _upDots(){for(var i=0;i<4;i++)document.getElementById('p'+i).classList.toggle('on',i<_pin.length);}
   function _doLogin(){
-    var acct = document.getElementById('la').value;
-    if(!acct){alert('계정을 선택해주세요');return;}
-    var saved = sessionStorage.getItem('admin_pin')||localStorage.getItem('admin_pin')||'0000';
-    if(!localStorage.getItem('admin_pin'))localStorage.setItem('admin_pin','0000');
-    if(_pin!==saved){_pin='';_upDots();alert('PIN이 틀렸습니다. 기본 PIN은 0000 입니다.');return;}
+    var selVal = document.getElementById('la').value;
+    if(!selVal){alert('계정을 선택해주세요');return;}
+    var parts = selVal.split('|');
+    var acctName = parts[0]; // Name_KR
+    var correctPin = _getDriverPin(acctName);
+    if(_pin!==correctPin){_pin='';_upDots();alert('PIN이 틀렸습니다.');return;}
     document.getElementById('sl').classList.remove('on');
     document.getElementById('sm').classList.add('on');
     var n=new Date();var dd=String(n.getDate()).padStart(2,'0');var mm=String(n.getMonth()+1).padStart(2,'0');
@@ -255,7 +325,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     var ddate=document.getElementById('ddate');
     if(ddate)ddate.textContent=dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')';
     sessionStorage.setItem('adminAuthenticated','true');
-    localStorage.setItem('dc_admin_session',acct);
+    localStorage.setItem('dc_admin_session', acctName);
     if(typeof toast==='function')toast('데이터 로딩 중...','ok');
     if(typeof loadAllFromSheets==='function')loadAllFromSheets();
   }
@@ -263,6 +333,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   function _ppd(){_pin=_pin.slice(0,-1);_upDots();}
   // 전역 노출
   window.PP=_pp; window.PPD=_ppd; window.doLogin=_doLogin;
+  window._getAdminDriverPin = _getDriverPin;
   // 버튼 생성
   var pad=document.getElementById('pinpad');
   var keys=['1','2','3','4','5','6','7','8','9','','0','⌫'];
@@ -276,6 +347,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     pad.appendChild(b);
   });
   document.getElementById('login-btn').addEventListener('click',_doLogin);
+  // 페이지 로드 시 드라이버 목록 로드
+  _loadLoginDrivers();
 })();
 </script>
 
@@ -1616,12 +1689,7 @@ function doAdminLogout(){
 function autoRestoreAdminSession(){
   const acct = localStorage.getItem('dc_admin_session');
   if(!acct) return;
-  const laEl = document.getElementById('la');
-  if(laEl){
-    const found = [...laEl.options].find(o=>o.value===acct);
-    if(found) laEl.value = acct;
-  }
-  // PIN 없이 바로 복원
+  // 세션이 있으면 PIN 없이 바로 복원 (같은 브라우저에서 이미 인증됨)
   document.getElementById('sl').classList.remove('on');
   document.getElementById('sm').classList.add('on');
   document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
@@ -8999,19 +9067,38 @@ function openChangePinModal(){
 function closePinModal(){
   document.getElementById('pin-modal').style.display='none';
 }
-function saveAdminPin(){
+async function saveAdminPin(){
   const cur  = document.getElementById('pin-current').value.trim();
   const nw   = document.getElementById('pin-new').value.trim();
   const conf = document.getElementById('pin-confirm').value.trim();
-  const saved = sessionStorage.getItem('admin_pin') || localStorage.getItem('admin_pin');
-  if (!saved) { toast('PIN이 설정되지 않았습니다. 초기 PIN을 설정하세요','er'); return; }
-  if(cur!==saved){toast('현재 PIN이 올바르지 않습니다','er');return}
+  // 현재 로그인된 관리자 이름으로 서버 PIN 검증
+  const adminName = localStorage.getItem('dc_admin_session') || '';
+  if(!adminName){ toast('로그인 상태가 아닙니다','er'); return; }
+  const correctPin = window._getAdminDriverPin ? window._getAdminDriverPin(adminName) : '1234';
+  if(cur!==correctPin){toast('현재 PIN이 올바르지 않습니다','er');return}
   if(nw.length < 4 || !/^\d{4,}$/.test(nw)){toast('새 PIN은 최소 4자리 이상의 숫자여야 합니다','er');return}
   if(nw!==conf){toast('새 PIN이 일치하지 않습니다','er');return}
-  sessionStorage.setItem('admin_pin', nw);
-  safeSetLocal('admin_pin', nw);
-  closePinModal();
-  toast('✅ 관리자 PIN이 변경되었습니다','ok');
+  // M_Drivers 시트에 PIN 업데이트 (서버)
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'update_driver_pin', driverName:adminName, pin:nw})});
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error||'저장 실패');
+    // 로컬 캐시도 업데이트
+    if(window._loginDrivers){
+      const d = window._loginDrivers.find(dr => dr.Name_KR===adminName || dr.Name_EN===adminName);
+      if(d) d.PIN = nw;
+    }
+    // DB.D 캐시도 업데이트
+    if(DB && DB.D){
+      const dd = DB.D.find(dr => dr.Name_KR===adminName || dr.Name_EN===adminName);
+      if(dd) dd.PIN = nw;
+    }
+    closePinModal();
+    toast('✅ PIN이 변경되었습니다 (서버 저장 완료)','ok');
+  } catch(e){
+    toast('❌ PIN 변경 실패: '+e.message,'er');
+  }
 }
 
 
@@ -10918,12 +11005,6 @@ async function reviewLeave(status){
 <script>
 // 세션 자동 복원
 (function(){
-  // 기존 계정 선택 복원
-  const last = localStorage.getItem('admin_last_account') || localStorage.getItem('dc_admin_session');
-  if(last){
-    const sel = document.getElementById('la');
-    if(sel){ const found=[...sel.options].find(o=>o.value===last); if(found) sel.value=last; }
-  }
   // 로그인 세션이 있으면 자동 복원
   window.addEventListener('DOMContentLoaded', () => {
     if(localStorage.getItem('dc_admin_session')) autoRestoreAdminSession();
