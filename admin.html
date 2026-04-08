@@ -5019,7 +5019,7 @@ function calcInvRow(r) {
     const etcTA = parseFloat(r.Etc) || 0;
     const total = baseRate + ot + hotel + dist + trailerVal + tollVal + earlyTA + parkingFee + nightTA + tipVal + mealVal + etcTA;
     const savedRS = r._rateSource || 'manual';
-    return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking:0, _pkKey:'', trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal:0, etcTA, _etcKey:'', total, rateSource: savedRS };
+    return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking:0, _pkKey:'', trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal:0, etcTA, _etcKey:'', etcDesc: String(r.Etc_Desc||'').trim(), total, rateSource: savedRS };
   }
 
   // ── OT DR → TA 역산 ──
@@ -5166,13 +5166,14 @@ function calcInvRow(r) {
 
   // ── Etc (기본=미포함, 관리자가 '1' 설정 시 포함) ──
   const etcVal = parseFloat(r.Etc) || 0;
+  const etcDesc = String(r.Etc_Desc||'').trim();
   const _etcKey = 'dcetc_' + _rowPrefix;
   const _etcOv  = (window._invoiceOverrides && window._invoiceOverrides[_etcKey] !== undefined) ? window._invoiceOverrides[_etcKey] : null;
   const etcTA   = _etcOv === '1' ? etcVal : 0;
 
   const total = baseRate + ot + hotel + dist + earlyTA + parkingFee + trailerVal + nightTA + tipVal + mealVal + tollVal + etcTA;
   return { baseRate, ot, hotel, dist, earlyTA, parkingFee, autoParking, _pkKey,
-    trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal, etcTA, _etcKey, total, rateSource,
+    trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal, etcTA, _etcKey, etcDesc, total, rateSource,
     _rowPrefix,
     _hotelAuto, _distAuto, _earlyAuto, _otAuto, _trailerAuto, _nightAuto, _tipAuto, _mealAuto, _tollAuto };
 }
@@ -5582,8 +5583,8 @@ function renderInvPreview(rows, agency, from, to) {
               if(cur>0) parts.push(label+' $'+cur);
               else if(auto>0) parts.push('<s style="color:#d4d4d8;">'+label+' $'+auto+'</s>');
             });
-            if((c.etcTA||0)>0) parts.push('기타 $'+c.etcTA);
-            else if((c.etcVal||0)>0) parts.push('<s style="color:#d4d4d8;">기타 $'+c.etcVal+'</s>');
+            if((c.etcTA||0)>0) parts.push('기타 $'+c.etcTA+(c.etcDesc?' ('+escH(c.etcDesc)+')':''));
+            else if((c.etcVal||0)>0) parts.push('<s style="color:#d4d4d8;">기타 $'+c.etcVal+(c.etcDesc?' ('+escH(c.etcDesc)+')':'')+'</s>');
 
             // 토글 버튼 — 자동값이 0보다 큰 항목에만 표시
             let toggles = '';
@@ -5595,7 +5596,7 @@ function renderInvPreview(rows, agency, from, to) {
             // Etc 토글 (기본 미포함)
             if((c.etcVal||0)>0) {
               const isIncl = (c.etcTA||0) > 0;
-              toggles += '<button onclick="toggleEtcOverride(\''+c._etcKey+'\',\''+escH(agency)+'\',\''+from+'\',\''+to+'\')" style="font-size:9px;padding:1px 5px;border-radius:4px;border:1px solid '+(isIncl?'#86efac':'#fecaca')+';background:'+(isIncl?'#f0fdf4':'#fef2f2')+';color:'+(isIncl?'#166534':'#b91c1c')+';cursor:pointer;margin:1px;">'+(isIncl?'✓':'✗')+' 기타 $'+c.etcVal+'</button>';
+              toggles += '<button onclick="toggleEtcOverride(\''+c._etcKey+'\',\''+escH(agency)+'\',\''+from+'\',\''+to+'\')" style="font-size:9px;padding:1px 5px;border-radius:4px;border:1px solid '+(isIncl?'#86efac':'#fecaca')+';background:'+(isIncl?'#f0fdf4':'#fef2f2')+';color:'+(isIncl?'#166534':'#b91c1c')+';cursor:pointer;margin:1px;">'+(isIncl?'✓':'✗')+' 기타 $'+c.etcVal+(c.etcDesc?' ('+escH(c.etcDesc)+')':'')+'</button>';
             }
             return (parts.length ? '<div style="font-size:9px;color:var(--t3);margin-top:1px;">'+parts.join(' · ')+'</div>' : '')
               + (toggles ? '<div style="margin-top:2px;display:flex;flex-wrap:wrap;gap:1px;">'+toggles+'</div>' : '');
@@ -7966,6 +7967,7 @@ function renderDR(){
     const trl  = parseFloat(r.Trailer||0);
     const tip  = parseFloat(r.Tip||0);
     const etc  = parseFloat(r.Etc||0);
+    const etcDesc = String(r.Etc_Desc||'').trim();
     const nightType = String(r.Night_Type||'').trim();
     const nightOwner = parseFloat(r.Night_Owner||0);
     const total = dr;
@@ -7994,8 +7996,8 @@ function renderDR(){
       toll ? `TOL $${toll}`: '',
       trl  ? `TRL $${trl}` : '',
       tip  ? `TIP $${tip}` : '',
-      etc  ? `ETC $${etc}` : '',
     ].filter(Boolean).map(b=>`<span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;background:var(--sf2);color:var(--t2);margin:1px;">${b}</span>`).join('')
+    + (etc ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;font-size:10px;background:#fef3c7;color:#92400e;margin:1px;">ETC $${etc}${etcDesc?' ('+escH(etcDesc)+')':''}<button onclick="clearDREtc(${rowIdx})" style="background:none;border:none;color:#ef4444;font-size:11px;cursor:pointer;padding:0 1px;line-height:1;" title="ETC 삭제">✕</button></span>` : '')
     + (nightOwner ? `<span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;margin:1px;">야경납입 -$${nightOwner}</span>` : '');
 
     return `<div style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;margin-bottom:8px;">
@@ -8100,6 +8102,23 @@ function openDREdit(rowIndex){
   const errEl = document.getElementById('dr-modal-err');
   if(errEl){ errEl.style.display='none'; errEl.textContent=''; }
   document.getElementById('dr-modal').style.display='flex';
+}
+
+async function clearDREtc(rowIdx){
+  if(!confirm('이 리포트의 ETC 항목을 삭제하시겠습니까?')) return;
+  const orig = (_drCache||[]).find(x=>x._rowIndex===rowIdx);
+  if(!orig){ toast('원본 데이터 없음','er'); return; }
+  const updated = {...orig, Etc:'0', Etc_Desc:''};
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'update_report', sheet:'Daily_Report', rowIndex:rowIdx, data:updated})
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error||'서버 오류');
+    toast('ETC 삭제 완료','ok');
+    _drCache = null; renderDailyReports();
+  } catch(e){ toast('ETC 삭제 실패: '+e.message,'er'); }
 }
 
 function closeDRModal(){
