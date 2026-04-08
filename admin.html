@@ -245,11 +245,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   window._loginDrivers = [];
 
   // 서버에서 M_Drivers 로드하여 로그인 셀렉트 구성
+  var _LOGIN_GAS_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
   function _loadLoginDrivers(){
     var sel = document.getElementById('la');
     var status = document.getElementById('login-status');
     if(status) status.textContent = '📡 드라이버 목록 로딩 중...';
-    fetch(APPS_SCRIPT_URL + '?action=get_master&sheet=M_Drivers')
+    fetch(_LOGIN_GAS_URL + '?action=get_master&sheet=M_Drivers')
       .then(function(r){ return r.json(); })
       .then(function(json){
         if(!json.ok || !json.rows) throw new Error('로드 실패');
@@ -6702,7 +6703,7 @@ function _isoToSunday(iso) {
 function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverride=null, grandTotalOverride=undefined}={}) {
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
   const client  = DB.C.find(c => c.Name === agency) || {};
-  const abn     = DC_COMPANY.abn || '';
+  const abn     = String(DC_COMPANY.abn || '');
   let grandTotal = grandTotalOverride !== undefined ? grandTotalOverride : _calcInvGrandTotal(_buildInvRows(agency, from, to));
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
@@ -7002,7 +7003,7 @@ async function generateInvoice() {
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
 
   /* ── ABN 필수 검증 ── */
-  const _abnVal = (document.getElementById('inv-abn')?.value || DC_COMPANY.abn || '').replace(/\s/g,'');
+  const _abnVal = String(document.getElementById('inv-abn')?.value || DC_COMPANY.abn || '').replace(/\s/g,'');
   if (!_abnVal || _abnVal.length !== 11 || !/^\d{11}$/.test(_abnVal)) {
     toast('⚠️ ABN을 정확히 입력하세요 (11자리 숫자)', 'er');
     const settingsBtn = document.getElementById('inv-settings-toggle');
@@ -10027,13 +10028,13 @@ async function loadAllFromSheets(){
       const _cpMap = {};
       d.Company_Profile.forEach(r => { if(r.Key) _cpMap[r.Key] = r.Value||''; });
       if(_cpMap.name)    DC_COMPANY.name    = _cpMap.name;
-      if(_cpMap.abn)     DC_COMPANY.abn     = _cpMap.abn;
-      if(_cpMap.phone)   DC_COMPANY.phone   = _cpMap.phone;
+      if(_cpMap.abn)     DC_COMPANY.abn     = String(_cpMap.abn);
+      if(_cpMap.phone)   DC_COMPANY.phone   = String(_cpMap.phone);
       if(_cpMap.email)   DC_COMPANY.email   = _cpMap.email;
       if(_cpMap.address) DC_COMPANY.address = _cpMap.address;
       if(_cpMap.bank !== undefined)    DC_COMPANY.bank    = _cpMap.bank;
-      if(_cpMap.bsb !== undefined)     DC_COMPANY.bsb     = _cpMap.bsb;
-      if(_cpMap.acc !== undefined)     DC_COMPANY.acc     = _cpMap.acc;
+      if(_cpMap.bsb !== undefined)     DC_COMPANY.bsb     = String(_cpMap.bsb);
+      if(_cpMap.acc !== undefined)     DC_COMPANY.acc     = String(_cpMap.acc);
       if(_cpMap.accname !== undefined) DC_COMPANY.accname = _cpMap.accname;
     }
 
@@ -11968,7 +11969,7 @@ function _buildQuotationHTML({isDraft=false}={}) {
   const validDate = document.getElementById('quo-valid')?.value||'';
   const memo = document.getElementById('quo-memo')?.value?.trim()||'';
   const client = (DB.C||[]).find(c=>c.Name===agency)||{};
-  const abn = DC_COMPANY.abn||'';
+  const abn = String(DC_COMPANY.abn||'');
   const fd = ds => ds ? fmtDate(ds)||ds : '—';
   const quoNum = _quoNum();
 
