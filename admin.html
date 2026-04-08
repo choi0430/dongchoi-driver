@@ -6771,25 +6771,25 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     if((c.tollVal||0)>0) surParts.push('Toll $'+c.tollVal);
     if((c.etcTA||0)>0) surParts.push('Etc $'+c.etcTA);
     const extras = [
-      oOT ? `OT $${oOT.toLocaleString()}` : '',
+      oOT ? `Overtime $${oOT.toLocaleString()}` : '',
       ...surParts,
     ].filter(Boolean).join(' · ');
     const timeStr = r._timeStart || r._timeEnd ? (r._timeStart||'') + (r._timeEnd ? ' - '+r._timeEnd : '') : '-';
     const routeStr = (r.Pickup||r.Dropoff) ? escH(r.Pickup||'—')+' → '+escH(r.Dropoff||'—') : '';
     const baseLabel = c.rateSource === 'price_table'
-      ? '<div style="font-size:10px;color:#166534;margin-top:2px;">Rate Table $'+oBase.toLocaleString()+'</div>'
-      : '<div style="font-size:10px;color:#92400e;margin-top:2px;">SVC $'+oBase.toLocaleString()+'</div>';
+      ? '<div style="font-size:9px;color:#166534;margin-top:1px;">Rate Table $'+oBase.toLocaleString()+'</div>'
+      : '<div style="font-size:9px;color:#92400e;margin-top:1px;">SVC $'+oBase.toLocaleString()+'</div>';
     const seatsStr = r.Seats ? ' ('+escH(r.Seats)+')' : '';
     // ★ Tour_Code 비어있으면 Attraction 이름으로 대체
     const displayTourCode = r.Tour_Code || r.Attraction || '-';
-    const routeRow = routeStr ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#0369a1;font-size:10px;padding:0 6px 4px;">📍 '+routeStr+'</td></tr>' : '';
-    const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">'+extras+'</td></tr>' : '';
+    const routeRow = routeStr ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#0369a1;font-size:9px;padding:0 8px 2px;">📍 '+routeStr+'</td></tr>' : '';
+    const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:10px;">'+extras+'</td></tr>' : '';
     return '<tr>' +
       '<td style="white-space:nowrap">'+fd(r._iso||r.Date)+'</td>' +
       '<td>'+escH(r.Attraction||'-')+seatsStr+baseLabel+'</td>' +
       '<td>'+escH(r.Rego||'-')+'</td>' +
       '<td style="color:#64748b;white-space:nowrap;font-size:11px;">'+timeStr+'</td>' +
-      '<td style="color:#64748b">'+escH(displayTourCode)+(r.Guide ? '<div style="font-size:10px;color:#059669;margin-top:2px;">👤 '+escH(r.Guide)+'</div>' : '')+'</td>' +
+      '<td style="color:#64748b;white-space:nowrap">'+escH(displayTourCode)+(r.Guide ? '<div style="font-size:9px;color:#059669;margin-top:1px;">👤 '+escH(r.Guide)+'</div>' : '')+'</td>' +
       '<td style="font-weight:700">$'+oTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})+'</td>' +
       '</tr>' + routeRow + extrasRow;
   }
@@ -6824,45 +6824,45 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
 <title>${isDraft?'[DRAFT] ':''}${invNum}_${escH(agency)}</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color: #1e293b; background: #fff; padding: 40px; max-width: 800px; margin: 0 auto; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #1e293b; background: #fff; padding: 30px; max-width: 800px; margin: 0 auto; }
   @media print {
-    body { padding: 20px; }
+    body { padding: 10px; font-size: 11px; }
     .no-print { display: none !important; }
-    @page { margin: 15mm; }
+    @page { margin: 10mm; }
   }
   .inv-header { overflow: hidden; margin-bottom: 0; }
   .inv-company { float: left; width: 58%; }
-  .inv-company-name { font-size: 22px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; }
-  .inv-company-sub  { font-size: 11px; color: #64748b; margin-top: 4px; line-height: 1.6; }
+  .inv-company-name { font-size: 20px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; }
+  .inv-company-sub  { font-size: 10px; color: #64748b; margin-top: 3px; line-height: 1.5; }
   .inv-title-box { float: right; width: 40%; text-align: right; }
-  .inv-title { font-size: 28px; font-weight: 900; color: ${isDraft?'#f59e0b':'#1d4ed8'}; letter-spacing: 1px; }
-  .inv-num   { font-size: 13px; color: #64748b; margin-top: 4px; }
-  .inv-date  { font-size: 12px; color: #94a3b8; margin-top: 2px; }
-  .inv-line { border: none; border-top: 2px solid #e2e8f0; margin: 20px 0; clear: both; }
+  .inv-title { font-size: 26px; font-weight: 900; color: ${isDraft?'#f59e0b':'#1d4ed8'}; letter-spacing: 1px; }
+  .inv-num   { font-size: 12px; color: #64748b; margin-top: 3px; }
+  .inv-date  { font-size: 11px; color: #94a3b8; margin-top: 1px; }
+  .inv-line { border: none; border-top: 2px solid #e2e8f0; margin: 14px 0; clear: both; }
   .inv-line-bold { border-top: 3px solid ${isDraft?'#f59e0b':'#1d4ed8'}; }
-  .inv-billto { margin-bottom: 28px; }
-  .inv-party-label { font-size: 10px; font-weight: 800; color: #94a3b8; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
-  .inv-party-name  { font-size: 14px; font-weight: 800; color: #0f172a; }
-  .inv-party-sub   { font-size: 11px; color: #64748b; margin-top: 3px; line-height: 1.6; }
-  .inv-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-  .inv-table th { background: #1e293b; color: #fff; font-size: 11px; font-weight: 700; padding: 10px 12px; text-align: left; letter-spacing: 0.3px; }
+  .inv-billto { margin-bottom: 16px; }
+  .inv-party-label { font-size: 9px; font-weight: 800; color: #94a3b8; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+  .inv-party-name  { font-size: 13px; font-weight: 800; color: #0f172a; }
+  .inv-party-sub   { font-size: 10px; color: #64748b; margin-top: 2px; line-height: 1.5; }
+  .inv-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  .inv-table th { background: #1e293b; color: #fff; font-size: 10px; font-weight: 700; padding: 6px 8px; text-align: left; letter-spacing: 0.3px; }
   .inv-table th:last-child { text-align: right; }
-  .inv-table td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; vertical-align: top; }
+  .inv-table td { padding: 5px 8px; border-bottom: 1px solid #f1f5f9; font-size: 11px; vertical-align: top; }
   .inv-table td:last-child { text-align: right; font-weight: 700; }
   .inv-table tr:hover td { background: #f8fafc; }
-  .inv-table .sub-row td { font-size: 11px; color: #64748b; padding: 3px 12px 8px; border-bottom: none; }
-  .inv-totals { margin-left: auto; width: 260px; }
-  .inv-total-row { overflow: hidden; padding: 5px 0; font-size: 13px; }
+  .inv-table .sub-row td { font-size: 10px; color: #64748b; padding: 1px 8px 4px; border-bottom: none; }
+  .inv-totals { margin-left: auto; width: 250px; }
+  .inv-total-row { overflow: hidden; padding: 3px 0; font-size: 12px; }
   .inv-total-row span:first-child { float: left; }
   .inv-total-row span:last-child { float: right; }
-  .inv-total-row.grand { font-weight: 900; font-size: 18px; color: ${isDraft?'#f59e0b':'#1d4ed8'}; border-top: 3px solid ${isDraft?'#f59e0b':'#1d4ed8'}; margin-top: 8px; padding-top: 10px; }
-  .inv-payment { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; margin-top: 28px; }
-  .inv-payment-title { font-size: 11px; font-weight: 800; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; }
-  .inv-payment-row { overflow: hidden; font-size: 12px; margin-bottom: 4px; }
+  .inv-total-row.grand { font-weight: 900; font-size: 16px; color: ${isDraft?'#f59e0b':'#1d4ed8'}; border-top: 3px solid ${isDraft?'#f59e0b':'#1d4ed8'}; margin-top: 6px; padding-top: 8px; }
+  .inv-payment { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-top: 18px; }
+  .inv-payment-title { font-size: 10px; font-weight: 800; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+  .inv-payment-row { overflow: hidden; font-size: 11px; margin-bottom: 2px; }
   .inv-payment-label { float: left; color: #94a3b8; width: 110px; }
   .inv-payment-val { overflow: hidden; color: #0f172a; font-weight: 600; }
-  .inv-footer { margin-top: 32px; text-align: center; font-size: 11px; color: #94a3b8; }
-  .print-btn { display: block; margin: 0 auto 24px; padding: 12px 32px; background: ${isDraft?'#f59e0b':'#1d4ed8'}; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  .inv-footer { margin-top: 18px; text-align: center; font-size: 10px; color: #94a3b8; }
+  .print-btn { display: block; margin: 0 auto 16px; padding: 10px 28px; background: ${isDraft?'#f59e0b':'#1d4ed8'}; color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -6900,7 +6900,7 @@ ${(() => {
   const isoDates = rows.map(r => r._iso).filter(Boolean).sort();
   const actualFrom = isoDates.length > 0 ? fd(isoDates[0]) : fd(from);
   const actualTo   = isoDates.length > 0 ? fd(isoDates[isoDates.length - 1]) : fd(to);
-  return `<div style="font-size:11px;color:#64748b;margin-bottom:16px;">Service Period: ${actualFrom} — ${actualTo}</div>`;
+  return `<div style="font-size:10px;color:#64748b;margin-bottom:10px;">Service Period: ${actualFrom} — ${actualTo}</div>`;
 })()}
 <table class="inv-table">
   <thead>
@@ -6973,7 +6973,7 @@ function previewInvoiceDoc() {
   const invNum = getExistingOrNewInvNum(agency, from);
   _lastGeneratedInvNum = invNum;  _lastGenInvAgency = agency;  _lastGenInvFrom = from;
   const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:true, invNumOverride:invNum});
-  _showDocModal(html, null, invNum);
+  _showDocModal(html, null, invNum + '_' + agency.replace(/[^a-zA-Z0-9가-힣 ]/g,'_').replace(/\s+/g,'_'));
 }
 
 // ─── 인보이스 PDF 다운로드 ───
@@ -12253,7 +12253,7 @@ function _showDocModal(htmlContent, sendAction, pdfName) {
   // sendAction: null이면 기본 emailInvoice(), {invNumber,agency,from,to}이면 resendInvoice()
   _docModalSendAction = sendAction || null;
   _docModalPreviewHtml = htmlContent || ''; // ★ HTML 저장
-  _docModalPdfName = pdfName || (sendAction && sendAction.invNumber ? sendAction.invNumber : '') || ''; // ★ PDF 파일명
+  _docModalPdfName = pdfName || (sendAction && sendAction.invNumber ? sendAction.invNumber + '_' + (sendAction.agency||'').replace(/[^a-zA-Z0-9가-힣 ]/g,'_').replace(/\s+/g,'_') : '') || ''; // ★ PDF 파일명 (인보이스번호_여행사)
 
   let overlay = document.getElementById('doc-preview-overlay');
   if (!overlay) {
