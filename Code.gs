@@ -961,10 +961,15 @@ function addPriceClientAgency(agencyName, rows) {
     const lastRow = sheet.getLastRow();
     const existing = new Set();
     if (lastRow > 1) {
-      const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
-      data.forEach(r => {
-        if (r[0] && r[1]) existing.add(r[0] + '||' + r[1]);
-      });
+      const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const agencyCol = sheetHeaders.indexOf('Agency');
+      const courseCol = sheetHeaders.indexOf('Course');
+      if (agencyCol >= 0 && courseCol >= 0) {
+        const data = sheet.getRange(2, 1, lastRow - 1, sheetHeaders.length).getValues();
+        data.forEach(r => {
+          if (r[agencyCol] && r[courseCol]) existing.add(r[agencyCol] + '||' + r[courseCol]);
+        });
+      }
     }
 
     const newRows = (rows || []).filter(r => !existing.has(r.Agency + '||' + r.Course));
@@ -1160,17 +1165,20 @@ function updateWage(rowIndex, data) {
     const lastRow = sheet.getLastRow();
     if (ri > lastRow) return {ok: false, msg: 'Row does not exist'};
 
+    const headers = MASTER_HEADERS['Wages'];
     const amount = parseFloat(data.Amount) || 0;
+    const rowData = headers.map(h => {
+      if (h === 'RowID') return data.RowID || Date.now().toString();
+      if (h === 'Driver') return data.Driver || '';
+      if (h === 'WeekStart') return data.WeekStart || '';
+      if (h === 'Date') return data.Date || '';
+      if (h === 'Amount') return amount;
+      if (h === 'PayMethod') return data.PayMethod || 'Cash';
+      if (h === 'Notes') return data.Notes || '';
+      return data[h] !== undefined ? data[h] : '';
+    });
 
-    sheet.getRange(ri, 1, 1, 7).setValues([[
-      data.RowID || Date.now().toString(),
-      data.Driver || '',
-      data.WeekStart || '',
-      data.Date || '',
-      amount,
-      data.PayMethod || 'Cash',
-      data.Notes || ''
-    ]]);
+    sheet.getRange(ri, 1, 1, headers.length).setValues([rowData]);
 
     return {ok: true};
   } catch (err) {
@@ -1203,16 +1211,18 @@ function replaceWages(rows) {
     if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
 
     if (rows && rows.length > 0) {
-      const newData = rows.map(r => [
-        r.RowID || Date.now().toString(),
-        r.Driver || '',
-        r.WeekStart || '',
-        r.Date || '',
-        parseFloat(r.Amount) || 0,
-        r.PayMethod || 'Cash',
-        r.Notes || ''
-      ]);
-      sheet.getRange(2, 1, newData.length, 7).setValues(newData);
+      const headers = MASTER_HEADERS['Wages'];
+      const newData = rows.map(r => headers.map(h => {
+        if (h === 'RowID') return r.RowID || Date.now().toString();
+        if (h === 'Driver') return r.Driver || '';
+        if (h === 'WeekStart') return r.WeekStart || '';
+        if (h === 'Date') return r.Date || '';
+        if (h === 'Amount') return parseFloat(r.Amount) || 0;
+        if (h === 'PayMethod') return r.PayMethod || 'Cash';
+        if (h === 'Notes') return r.Notes || '';
+        return r[h] !== undefined ? r[h] : '';
+      }));
+      sheet.getRange(2, 1, newData.length, headers.length).setValues(newData);
     }
 
     return {ok: true, count: rows ? rows.length : 0};
@@ -1378,15 +1388,17 @@ function replaceNotices(rows) {
     if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
 
     if (rows && rows.length > 0) {
-      const newData = rows.map(r => [
-        r.id || r.ID || String(Date.now()),
-        r.title || r.Title || '',
-        r.content || r.Content || '',
-        r.type || r.Type || 'info',
-        r.date || r.Date || '',
-        r.active === false || r.Active === 'false' ? 'false' : 'true'
-      ]);
-      sheet.getRange(2, 1, newData.length, 6).setValues(newData);
+      const headers = MASTER_HEADERS['Notices'];
+      const newData = rows.map(r => headers.map(h => {
+        if (h === 'ID') return r.id || r.ID || String(Date.now());
+        if (h === 'Title') return r.title || r.Title || '';
+        if (h === 'Content') return r.content || r.Content || '';
+        if (h === 'Type') return r.type || r.Type || 'info';
+        if (h === 'Date') return r.date || r.Date || '';
+        if (h === 'Active') return (r.active === false || r.Active === 'false') ? 'false' : 'true';
+        return r[h] !== undefined ? r[h] : '';
+      }));
+      sheet.getRange(2, 1, newData.length, headers.length).setValues(newData);
     }
 
     return {ok: true, count: rows ? rows.length : 0};
@@ -1626,11 +1638,13 @@ function saveInvoice(data) {
     const invNum  = data.InvNumber || data.invNumber || '';
     if (!invNum) return { ok: false, error: 'InvNumber required' };
 
-    // 기존 행 찾기 (InvNumber 기준)
+    // 기존 행 찾기 (InvNumber 기준 — 헤더명으로 컬럼 위치 조회)
     const allData = sheet.getDataRange().getValues();
+    const sheetHeaders = allData[0];
+    const invNumCol = sheetHeaders.indexOf('InvNumber');
     let existingRow = -1;
     for (let i = 1; i < allData.length; i++) {
-      if (String(allData[i][0]).trim() === invNum) { existingRow = i + 1; break; }
+      if (String(allData[i][invNumCol >= 0 ? invNumCol : 0]).trim() === invNum) { existingRow = i + 1; break; }
     }
 
     const now = new Date();
@@ -1775,21 +1789,23 @@ function updateInvoiceStatus(invNumber, status, field) {
 
     const headers = MASTER_HEADERS['Invoices'];
     const data = sheet.getDataRange().getValues();
+    const sheetHeaders = data[0];
+    const invNumCol = sheetHeaders.indexOf('InvNumber');
     let targetRow = -1;
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][0]).trim() === invNumber) { targetRow = i + 1; break; }
+      if (String(data[i][invNumCol >= 0 ? invNumCol : 0]).trim() === invNumber) { targetRow = i + 1; break; }
     }
     if (targetRow < 0) return { ok: false, error: 'Invoice not found: ' + invNumber };
 
     const now = Utilities.formatDate(new Date(), 'Australia/Sydney', 'dd/MM/yyyy HH:mm:ss');
 
-    // Status 열 업데이트
-    const statusCol = headers.indexOf('Status') + 1;
+    // Status 열 업데이트 (시트 헤더 기준)
+    const statusCol = sheetHeaders.indexOf('Status') + 1;
     if (statusCol > 0) sheet.getRange(targetRow, statusCol).setValue(status);
 
     // 날짜 필드 업데이트
     if (field) {
-      const fieldCol = headers.indexOf(field) + 1;
+      const fieldCol = sheetHeaders.indexOf(field) + 1;
       if (fieldCol > 0) sheet.getRange(targetRow, fieldCol).setValue(now);
     }
 
@@ -1809,8 +1825,12 @@ function deleteInvoice(invNumber) {
     if (!sheet) return { ok: false, error: 'Invoices sheet not found' };
 
     const data = sheet.getDataRange().getValues();
+    const sheetHeaders = data[0];
+    const invNumCol = sheetHeaders.indexOf('InvNumber');
+    if (invNumCol < 0) return { ok: false, error: 'InvNumber column not found' };
+
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][0]).trim() === invNumber) {
+      if (String(data[i][invNumCol]).trim() === invNumber) {
         sheet.deleteRow(i + 1);
         return { ok: true, invNumber };
       }
@@ -2216,12 +2236,18 @@ function syncLeaveToRoster_(rowData, headers) {
     while (current <= to) {
       const dateStr = Utilities.formatDate(current, 'Australia/Sydney', 'dd/MM/yyyy');
       const existing = rosterSheet.getDataRange().getValues();
+      const rosterH = existing[0];
+      const rDriverCol = rosterH.indexOf('Driver');
+      const rDateCol = rosterH.indexOf('Date');
+      const rStatusCol = rosterH.indexOf('Status');
+      const rUpdatedCol = rosterH.indexOf('Updated_At');
+      const rSourceCol = rosterH.indexOf('Source');
       let found = false;
       for (let i = 1; i < existing.length; i++) {
-        if (existing[i][0] === driver && existing[i][1] === dateStr) {
-          rosterSheet.getRange(i + 1, 3).setValue('LEAVE');
-          rosterSheet.getRange(i + 1, 4).setValue(syd);
-          rosterSheet.getRange(i + 1, 5).setValue('Auto - Leave Approved');
+        if (existing[i][rDriverCol >= 0 ? rDriverCol : 0] === driver && existing[i][rDateCol >= 0 ? rDateCol : 1] === dateStr) {
+          if (rStatusCol >= 0) rosterSheet.getRange(i + 1, rStatusCol + 1).setValue('LEAVE');
+          if (rUpdatedCol >= 0) rosterSheet.getRange(i + 1, rUpdatedCol + 1).setValue(syd);
+          if (rSourceCol >= 0) rosterSheet.getRange(i + 1, rSourceCol + 1).setValue('Auto - Leave Approved');
           found = true; break;
         }
       }
@@ -2299,14 +2325,19 @@ function getFatigueComplianceCheck() {
     const driverLeaveDates = {}; // { driverName: Set of 'yyyy-MM-dd' }
     if (rosterSheet && rosterSheet.getLastRow() > 1) {
       const rData = rosterSheet.getDataRange().getValues();
+      const rH = rData[0];
+      const rDriverIdx = rH.indexOf('Driver');
+      const rDateIdx = rH.indexOf('Date');
+      const rStatusIdx = rH.indexOf('Status');
       rData.slice(1).forEach(row => {
-        const drv = String(row[0] || '').trim();
-        const status = String(row[2] || '').trim();
+        const drv = String(row[rDriverIdx >= 0 ? rDriverIdx : 0] || '').trim();
+        const status = String(row[rStatusIdx >= 0 ? rStatusIdx : 2] || '').trim();
         if (drv && status === 'LEAVE') {
           if (!driverLeaveDates[drv]) driverLeaveDates[drv] = new Set();
-          const d = row[1] instanceof Date
-            ? Utilities.formatDate(row[1], tz, 'yyyy-MM-dd')
-            : parseDateToISO_(row[1]);
+          const dateVal = row[rDateIdx >= 0 ? rDateIdx : 1];
+          const d = dateVal instanceof Date
+            ? Utilities.formatDate(dateVal, tz, 'yyyy-MM-dd')
+            : parseDateToISO_(dateVal);
           if (d) driverLeaveDates[drv].add(d);
         }
       });
@@ -2661,11 +2692,14 @@ function saveMaintRecord(data) {
     const sheet = ensureSheet(ss, 'Maint_Records');
     const headers = MASTER_HEADERS['Maint_Records'];
 
-    // 기존 행 업데이트 또는 새 행 추가
+    // 시트 헤더에서 ID 컬럼 위치 동적 조회
     const lastRow = sheet.getLastRow();
     let found = false;
     if (lastRow > 1) {
-      const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const idCol = sheetHeaders.indexOf('ID');
+      if (idCol < 0) return { ok: false, error: 'ID column not found in Maint_Records' };
+      const ids = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
       for (let i = 0; i < ids.length; i++) {
         if (String(ids[i][0]) === String(data.ID)) {
           const row = headers.map(h => data[h] !== undefined ? data[h] : '');
@@ -2723,15 +2757,20 @@ function saveInvoiceOverride(rowKey, value) {
     const sheet = ensureSheet(ss, 'Invoice_Overrides');
 
     const lastRow = sheet.getLastRow();
+    const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const rkCol = sheetHeaders.indexOf('RowKey');
+    const valCol = sheetHeaders.indexOf('Value');
+    if (rkCol < 0) return { ok: false, error: 'RowKey column not found' };
+
     let found = false;
     if (lastRow > 1) {
-      const keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      const keys = sheet.getRange(2, rkCol + 1, lastRow - 1, 1).getValues();
       for (let i = 0; i < keys.length; i++) {
         if (String(keys[i][0]) === String(rowKey)) {
           if (value === null || value === undefined || value === '') {
             sheet.deleteRow(i + 2);
           } else {
-            sheet.getRange(i + 2, 2).setValue(value);
+            sheet.getRange(i + 2, (valCol >= 0 ? valCol : 1) + 1).setValue(value);
           }
           found = true;
           break;
@@ -2753,22 +2792,27 @@ function bulkSaveInvoiceOverrides(items) {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, 'Invoice_Overrides');
 
+    const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const rkCol = sheetHeaders.indexOf('RowKey');
+    const valCol = sheetHeaders.indexOf('Value');
+    if (rkCol < 0) return { ok: false, error: 'RowKey column not found' };
+
     // 기존 데이터 로드
     const lastRow = sheet.getLastRow();
     const existing = {};
     if (lastRow > 1) {
-      const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+      const data = sheet.getRange(2, rkCol + 1, lastRow - 1, 1).getValues();
       data.forEach((row, i) => { existing[String(row[0])] = i + 2; });
     }
 
+    const valColNum = (valCol >= 0 ? valCol : 1) + 1;
     items.forEach(item => {
       const rk = String(item.rowKey);
       if (existing[rk]) {
         if (item.value === null || item.value === '') {
-          // 삭제는 나중에 처리 (행 번호 이동 문제)
-          sheet.getRange(existing[rk], 2).setValue('__DELETE__');
+          sheet.getRange(existing[rk], valColNum).setValue('__DELETE__');
         } else {
-          sheet.getRange(existing[rk], 2).setValue(item.value);
+          sheet.getRange(existing[rk], valColNum).setValue(item.value);
         }
       } else if (item.value !== null && item.value !== '') {
         sheet.appendRow([rk, item.value]);
@@ -2778,7 +2822,7 @@ function bulkSaveInvoiceOverrides(items) {
     // __DELETE__ 마킹된 행 제거 (역순)
     const lr2 = sheet.getLastRow();
     if (lr2 > 1) {
-      const vals = sheet.getRange(2, 2, lr2 - 1, 1).getValues();
+      const vals = sheet.getRange(2, valColNum, lr2 - 1, 1).getValues();
       for (let i = vals.length - 1; i >= 0; i--) {
         if (vals[i][0] === '__DELETE__') sheet.deleteRow(i + 2);
       }
@@ -2798,19 +2842,25 @@ function saveCompanyProfile(data) {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, 'Company_Profile');
 
+    const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const keyCol = sheetHeaders.indexOf('Key');
+    const valueCol = sheetHeaders.indexOf('Value');
+    if (keyCol < 0) return { ok: false, error: 'Key column not found in Company_Profile' };
+
     // 기존 키-값 쌍 로드
     const lastRow = sheet.getLastRow();
     const existing = {};
     if (lastRow > 1) {
-      const rows = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+      const rows = sheet.getRange(2, keyCol + 1, lastRow - 1, 1).getValues();
       rows.forEach((row, i) => { existing[String(row[0])] = i + 2; });
     }
 
     // 각 키-값 업데이트 또는 추가
+    const valColNum = (valueCol >= 0 ? valueCol : 1) + 1;
     Object.keys(data).forEach(key => {
       const val = data[key] || '';
       if (existing[key]) {
-        sheet.getRange(existing[key], 2).setValue(val);
+        sheet.getRange(existing[key], valColNum).setValue(val);
       } else {
         sheet.appendRow([key, val]);
       }
@@ -2888,7 +2938,10 @@ function saveInvoiceManualItem(data) {
     const lastRow = sheet.getLastRow();
     let found = false;
     if (lastRow > 1) {
-      const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const idCol = sheetHeaders.indexOf('ID');
+      if (idCol < 0) return { ok: false, error: 'ID column not found in Invoice_Manual_Items' };
+      const ids = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
       for (let i = 0; i < ids.length; i++) {
         if (String(ids[i][0]) === String(data.ID)) {
           const row = headers.map(h => data[h] !== undefined ? data[h] : '');
