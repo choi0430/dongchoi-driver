@@ -5842,9 +5842,27 @@ async function saveInvoiceToSheet() {
     // ★ 거래처 잔액에 Agency_Txn 자동 등록 (행 분리 방식)
     // Type별 개별 행: invoice(DR), prepaid_use(CR), credit_use(CR)
     try {
-      const dueBaseDate = new Date(to + 'T00:00:00');
-      if(isNaN(dueBaseDate.getTime())) dueBaseDate.setTime(Date.now());
-      dueBaseDate.setDate(dueBaseDate.getDate() + 14);
+      // Due date 계산 — 여행사별 규칙 적용
+      const _txAgUpper = agency.toUpperCase().trim();
+      let dueBaseDate;
+      if (_txAgUpper.includes('HOJURO') || _txAgUpper.includes('호주로') || _txAgUpper.includes('PLUS TOUR') || _txAgUpper.includes('플러스투어')) {
+        // 마지막 투어 날짜 + 14일
+        dueBaseDate = new Date(to + 'T00:00:00');
+        if(isNaN(dueBaseDate.getTime())) dueBaseDate.setTime(Date.now());
+        rows.forEach(r => {
+          const iso = r._iso || parseToISO(r.Date || '');
+          if (iso) { const d = new Date(iso + 'T00:00:00'); if (!isNaN(d.getTime()) && d > dueBaseDate) dueBaseDate = d; }
+        });
+        dueBaseDate = new Date(dueBaseDate);
+        dueBaseDate.setDate(dueBaseDate.getDate() + 14);
+      } else {
+        // 기본: 서비스 종료일 기준 다음 주 금요일
+        dueBaseDate = new Date(to + 'T00:00:00');
+        if(isNaN(dueBaseDate.getTime())) dueBaseDate.setTime(Date.now());
+        const day = dueBaseDate.getDay();
+        const diffToMon = day === 0 ? -6 : 1 - day;
+        dueBaseDate.setDate(dueBaseDate.getDate() + diffToMon + 11);
+      }
       const dueDateStr = toLocalISO(dueBaseDate);
       const todayStr = toLocalISO(new Date());
       const _allTxnItems = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)]);
@@ -6716,7 +6734,7 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
   const _todayD = new Date();
   const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
   // Due date — 거래처별 다른 규칙:
-  // TOUR HOJURO: 오늘 + 14일
+  // TOUR HOJURO, PLUS TOUR: 마지막 투어 날짜 + 14일
   // 그 외 (GENTRA LINK 등): 서비스 기간 종료일(to) 기준 다음 주 금요일
   const _agUpper = agency.toUpperCase().trim();
   const _dueD = (function(){
@@ -6733,8 +6751,17 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     }
     if (isNaN(baseDate.getTime())) baseDate = new Date();
 
-    if (_agUpper.includes('HOJURO') || _agUpper.includes('호주로')) {
-      const d = new Date(baseDate); d.setDate(d.getDate() + 14); return d;
+    if (_agUpper.includes('HOJURO') || _agUpper.includes('호주로') || _agUpper.includes('PLUS TOUR') || _agUpper.includes('플러스투어')) {
+      // 실제 마지막 투어 날짜 계산 (rows에서 가장 늦은 날짜)
+      let lastTourDate = baseDate;
+      rows.forEach(r => {
+        const iso = r._iso || parseToISO(r.Date || '');
+        if (iso) {
+          const d = new Date(iso + 'T00:00:00');
+          if (!isNaN(d.getTime()) && d > lastTourDate) lastTourDate = d;
+        }
+      });
+      const d = new Date(lastTourDate); d.setDate(d.getDate() + 14); return d;
     }
     // 다음 주 금요일 계산
     const d = new Date(baseDate);
