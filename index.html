@@ -1457,7 +1457,11 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           </div>
           <div>
             <div class="form-label">License Expiry (면허 만료일)</div>
-            <input class="form-input" id="mi-lic-exp" placeholder="4-Jun-2026">
+            <div style="display:flex;gap:6px;align-items:center;position:relative;">
+              <input class="form-input" id="mi-lic-exp" placeholder="dd/mm/yyyy" style="flex:1;" inputmode="numeric">
+              <button type="button" onclick="openDatePicker('mi-lic-exp')" title="날짜 선택" style="padding:0 11px;height:44px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:17px;cursor:pointer;flex-shrink:0;">📅</button>
+              <input type="date" id="mi-lic-exp-native" style="position:absolute;right:0;top:0;width:44px;height:44px;opacity:0;pointer-events:none;" onchange="setDateFromPicker('mi-lic-exp-native','mi-lic-exp')">
+            </div>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
@@ -1467,7 +1471,11 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           </div>
           <div>
             <div class="form-label">Authority Expiry (자격증 만료일)</div>
-            <input class="form-input" id="mi-auth-exp" placeholder="20-Dec-2028">
+            <div style="display:flex;gap:6px;align-items:center;position:relative;">
+              <input class="form-input" id="mi-auth-exp" placeholder="dd/mm/yyyy" style="flex:1;" inputmode="numeric">
+              <button type="button" onclick="openDatePicker('mi-auth-exp')" title="날짜 선택" style="padding:0 11px;height:44px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:17px;cursor:pointer;flex-shrink:0;">📅</button>
+              <input type="date" id="mi-auth-exp-native" style="position:absolute;right:0;top:0;width:44px;height:44px;opacity:0;pointer-events:none;" onchange="setDateFromPicker('mi-auth-exp-native','mi-auth-exp')">
+            </div>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -1477,7 +1485,11 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           </div>
           <div>
             <div class="form-label">WWC Expiry (WWC 만료일)</div>
-            <input class="form-input" id="mi-wwc-exp" placeholder="29/10/2029">
+            <div style="display:flex;gap:6px;align-items:center;position:relative;">
+              <input class="form-input" id="mi-wwc-exp" placeholder="dd/mm/yyyy" style="flex:1;" inputmode="numeric">
+              <button type="button" onclick="openDatePicker('mi-wwc-exp')" title="날짜 선택" style="padding:0 11px;height:44px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:17px;cursor:pointer;flex-shrink:0;">📅</button>
+              <input type="date" id="mi-wwc-exp-native" style="position:absolute;right:0;top:0;width:44px;height:44px;opacity:0;pointer-events:none;" onchange="setDateFromPicker('mi-wwc-exp-native','mi-wwc-exp')">
+            </div>
           </div>
         </div>
       </div>
@@ -1853,6 +1865,14 @@ function fmtDate(val) {
   const s = String(val).trim();
   // 이미 dd/mm/yyyy 형식
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  // 깨진 형식 (예: -13012027) 또는 8자리 숫자만 → 정규화 시도
+  if (/^-?\d{8}$/.test(s)) {
+    const digits = s.replace(/[^0-9]/g, '');
+    const d = +digits.slice(0,2), m = +digits.slice(2,4), y = +digits.slice(4,8);
+    if (d>=1 && d<=31 && m>=1 && m<=12 && y>=1900 && y<=2100) {
+      return String(d).padStart(2,'0') + '/' + String(m).padStart(2,'0') + '/' + y;
+    }
+  }
   // ISO timestamp (구글 시트 날짜값: 2026-03-11T00:00:00.000Z)
   // → UTC+10/11(AEST/AEDT) 기준 로컬 날짜로 변환
   if (s.includes('T') || (s.includes('-') && s.length > 10)) {
@@ -1887,6 +1907,65 @@ function todayDisplay() {
   const n = new Date();
   return String(n.getDate()).padStart(2,'0') + '/' +
     String(n.getMonth()+1).padStart(2,'0') + '/' + n.getFullYear();
+}
+
+// ── 사용자 입력 날짜 정규화 → 'dd/mm/yyyy' 또는 '' (실패 시) ─────────
+// 다양한 입력을 받아들임: 13/01/2027, 13-01-2027, 13.01.2027, 13012027,
+// -13012027, 13 Jan 2027, 4-Jun-2026, 2027-01-13, 2027/01/13 등
+function normalizeDateInput(raw) {
+  if (raw === null || raw === undefined) return '';
+  let s = String(raw).trim();
+  if (!s) return '';
+  // 이미 정상이면 그대로
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+    const [d,m,y] = s.split('/').map(Number);
+    if (_isValidDMY(d,m,y)) return s;
+    return '';
+  }
+  // ISO yyyy-mm-dd 또는 yyyy/mm/dd
+  let mIso = s.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})$/);
+  if (mIso) {
+    const y = +mIso[1], m = +mIso[2], d = +mIso[3];
+    if (_isValidDMY(d,m,y)) return _padDMY(d,m,y);
+    return '';
+  }
+  // dd-mm-yyyy / dd.mm.yyyy / dd mm yyyy
+  let mDmy = s.match(/^(\d{1,2})[-\/\.\s](\d{1,2})[-\/\.\s](\d{4})$/);
+  if (mDmy) {
+    const d = +mDmy[1], m = +mDmy[2], y = +mDmy[3];
+    if (_isValidDMY(d,m,y)) return _padDMY(d,m,y);
+    return '';
+  }
+  // 숫자만 (앞 - 또는 공백 허용): 13012027 또는 -13012027 → ddmmyyyy로 해석
+  let digits = s.replace(/[^0-9]/g, '');
+  if (digits.length === 8) {
+    const d = +digits.slice(0,2), m = +digits.slice(2,4), y = +digits.slice(4,8);
+    if (_isValidDMY(d,m,y)) return _padDMY(d,m,y);
+  }
+  // "4-Jun-2026", "13 Jan 2027", "20-Dec-2028" 등
+  const months = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  let mTxt = s.toLowerCase().match(/^(\d{1,2})[-\s\/](jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-\s\/](\d{4})$/);
+  if (mTxt) {
+    const d = +mTxt[1], m = months[mTxt[2]], y = +mTxt[3];
+    if (_isValidDMY(d,m,y)) return _padDMY(d,m,y);
+  }
+  // 마지막 시도: Date 파서
+  const jsd = new Date(s);
+  if (!isNaN(jsd) && jsd.getFullYear() > 1900 && jsd.getFullYear() < 2100) {
+    return _padDMY(jsd.getDate(), jsd.getMonth()+1, jsd.getFullYear());
+  }
+  return '';
+}
+function _isValidDMY(d,m,y) {
+  if (!d || !m || !y) return false;
+  if (y < 1900 || y > 2100) return false;
+  if (m < 1 || m > 12) return false;
+  if (d < 1 || d > 31) return false;
+  const dt = new Date(y, m-1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m-1 && dt.getDate() === d;
+}
+function _padDMY(d,m,y) {
+  return String(d).padStart(2,'0') + '/' + String(m).padStart(2,'0') + '/' + y;
 }
 
 // ── 날짜 피커 헬퍼 (과거 날짜 포함 선택 가능) ─────────────────────────
@@ -4428,6 +4507,26 @@ async function saveMyInfo() {
   const key = 'myinfo_' + (currentDriver?.name || '');
   const existing = JSON.parse(localStorage.getItem(key) || '{}');
 
+  // ── 날짜 입력 정규화 + 검증 ──
+  const _rawLicExp  = document.getElementById('mi-lic-exp').value.trim();
+  const _rawAuthExp = document.getElementById('mi-auth-exp').value.trim();
+  const _rawWwcExp  = document.getElementById('mi-wwc-exp').value.trim();
+  const _normLicExp  = _rawLicExp  ? normalizeDateInput(_rawLicExp)  : '';
+  const _normAuthExp = _rawAuthExp ? normalizeDateInput(_rawAuthExp) : '';
+  const _normWwcExp  = _rawWwcExp  ? normalizeDateInput(_rawWwcExp)  : '';
+  const _badDates = [];
+  if (_rawLicExp  && !_normLicExp)  _badDates.push('License Expiry (면허 만료일)');
+  if (_rawAuthExp && !_normAuthExp) _badDates.push('Authority Expiry (자격증 만료일)');
+  if (_rawWwcExp  && !_normWwcExp)  _badDates.push('WWC Expiry (WWC 만료일)');
+  if (_badDates.length) {
+    showToast('⚠️ 날짜 형식 오류: ' + _badDates.join(', ') + '\ndd/mm/yyyy 형식으로 입력해주세요 (예: 13/01/2027)');
+    return;
+  }
+  // 정규화된 값을 입력 필드에도 반영 (사용자 피드백)
+  if (_normLicExp)  document.getElementById('mi-lic-exp').value  = _normLicExp;
+  if (_normAuthExp) document.getElementById('mi-auth-exp').value = _normAuthExp;
+  if (_normWwcExp)  document.getElementById('mi-wwc-exp').value  = _normWwcExp;
+
   const data = {
     ...existing,
     nameEN:   document.getElementById('mi-name-en').value.trim(),
@@ -4440,11 +4539,11 @@ async function saveMyInfo() {
     nokName:  document.getElementById('mi-nok-name').value.trim(),
     nokPhone: document.getElementById('mi-nok-phone').value.trim(),
     licNo:    document.getElementById('mi-lic-no').value.trim(),
-    licExp:   document.getElementById('mi-lic-exp').value.trim(),
+    licExp:   _normLicExp,
     authNo:   document.getElementById('mi-auth-no').value.trim(),
-    authExp:  document.getElementById('mi-auth-exp').value.trim(),
+    authExp:  _normAuthExp,
     wwcNo:    document.getElementById('mi-wwc-no').value.trim(),
-    wwcExp:   document.getElementById('mi-wwc-exp').value.trim(),
+    wwcExp:   _normWwcExp,
     bsb:      document.getElementById('mi-bsb').value.trim(),
     account:  document.getElementById('mi-account').value.trim(),
     savedAt:  new Date().toISOString(),
