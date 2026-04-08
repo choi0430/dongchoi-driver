@@ -1767,7 +1767,7 @@ function nv(pg,ni){
     pmot:  ()=>{ _motLastSync=0; return rMot(true); },
     pwage: ()=>{ _wagesLastSync=0; return loadWagesFromSheet(true).then(()=>rWage(ST.curWageDriver)); },
     pbal:  ()=>syncBalanceData(true).then(renderBalance),
-    pinv:  ()=>{ _invHistoryCache=null; initInvoice(); },
+    pinv:  ()=>{ _invHistoryCache=null; initInvoice(true); },
     pquo:  ()=>initQuotation(),
     pnotice: ()=>loadNoticesFromGAS(),
     pleave: ()=>loadAdminLeaves(),
@@ -5178,8 +5178,8 @@ function calcInvRow(r) {
     _rowPrefix,
     _hotelAuto, _distAuto, _earlyAuto, _otAuto, _trailerAuto, _nightAuto, _tipAuto, _mealAuto, _tollAuto };
 }
-async function initInvoice() {
-  _invReports = null; // 리포트 재로드
+async function initInvoice(forceReload) {
+  if (forceReload) _invReports = null; // 명시적 새로고침 시에만 리포트 재로드
   // M_Clients 로드 확보
   if (!DB.C || !DB.C.length) await syncClients();
 
@@ -12127,7 +12127,7 @@ async function convertQuoToInvoice() {
 
   // 인보이스 페이지로 이동 & 초기화 대기
   nv('pinv','ninv');
-  await initInvoice();
+  await initInvoice(true);
 
   // 여행사 선택
   const agSel = document.getElementById('inv-agency');
