@@ -6776,6 +6776,7 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
   const dueDateStr = String(_dueD.getDate()).padStart(2,'0')+'/'+String(_dueD.getMonth()+1).padStart(2,'0')+'/'+_dueD.getFullYear();
   const groupLabel = {date:'날짜순',week:'주별',tour:'투어코드별'}[_invGroupMode];
 
+  let _prevRowDate = null; // 날짜 구분선용
   function _makeTableRow(r) {
     const c   = calcInvRow(r);
     const ri  = rows.indexOf(r);
@@ -6811,7 +6812,11 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     const displayTourCode = r.Tour_Code || r.Attraction || '-';
     const routeRow = routeStr ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#0369a1;font-size:10px;padding:0 10px 4px;">📍 '+routeStr+'</td></tr>' : '';
     const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">'+extras+'</td></tr>' : '';
-    return '<tr>' +
+    // ★ 날짜 변경 시 구분선 추가
+    const curDate = r._iso || r.Date || '';
+    const dateSep = (_prevRowDate && _prevRowDate !== curDate) ? ' style="border-top:2px solid #cbd5e1;"' : '';
+    _prevRowDate = curDate;
+    return '<tr'+dateSep+'>' +
       '<td style="white-space:nowrap">'+fd(r._iso||r.Date)+'</td>' +
       '<td>'+escH(r.Attraction||'-')+seatsStr+baseLabel+'</td>' +
       '<td>'+escH(r.Rego||'-')+'</td>' +
@@ -6822,6 +6827,7 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
   }
 
   function buildTableRows() {
+    _prevRowDate = null; // 날짜 구분선 리셋
     if (_invGroupMode === 'week') {
       const weeks = {};
       rows.forEach(r => { const mon = _isoToMonday(r._iso); if (!weeks[mon]) weeks[mon] = []; weeks[mon].push(r); });
