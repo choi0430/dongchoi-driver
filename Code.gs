@@ -1252,6 +1252,63 @@ function updateDriverPin(driverName, pin) {
   }
 }
 
+// ── 날짜 입력 정규화 (서버 측 방어선) → 'dd/mm/yyyy' 또는 '' ─────────
+function _normalizeDateForSheet(raw) {
+  if (raw === null || raw === undefined) return '';
+  var s = String(raw).trim();
+  if (!s) return '';
+  // 이미 dd/mm/yyyy
+  var m1 = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (m1) {
+    var d1 = +m1[1], mo1 = +m1[2], y1 = +m1[3];
+    if (_validDMY_(d1, mo1, y1)) return s;
+    return '';
+  }
+  // ISO yyyy-mm-dd / yyyy/mm/dd
+  var m2 = s.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})/);
+  if (m2) {
+    var y2 = +m2[1], mo2 = +m2[2], d2 = +m2[3];
+    if (_validDMY_(d2, mo2, y2)) return _padDMY_(d2, mo2, y2);
+    return '';
+  }
+  // dd-mm-yyyy / dd.mm.yyyy / dd mm yyyy
+  var m3 = s.match(/^(\d{1,2})[-\/\.\s](\d{1,2})[-\/\.\s](\d{4})$/);
+  if (m3) {
+    var d3 = +m3[1], mo3 = +m3[2], y3 = +m3[3];
+    if (_validDMY_(d3, mo3, y3)) return _padDMY_(d3, mo3, y3);
+    return '';
+  }
+  // 숫자만 8자리 (ddmmyyyy)
+  var digits = s.replace(/[^0-9]/g, '');
+  if (digits.length === 8) {
+    var d4 = +digits.slice(0,2), mo4 = +digits.slice(2,4), y4 = +digits.slice(4,8);
+    if (_validDMY_(d4, mo4, y4)) return _padDMY_(d4, mo4, y4);
+  }
+  // 텍스트 월: "13 Jan 2027", "4-Jun-2026"
+  var months = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  var m5 = s.toLowerCase().match(/^(\d{1,2})[-\s\/](jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-\s\/](\d{4})$/);
+  if (m5) {
+    var d5 = +m5[1], mo5 = months[m5[2]], y5 = +m5[3];
+    if (_validDMY_(d5, mo5, y5)) return _padDMY_(d5, mo5, y5);
+  }
+  // Date 객체 (시트가 raw Date를 보낸 경우)
+  if (Object.prototype.toString.call(raw) === '[object Date]' && !isNaN(raw)) {
+    return _padDMY_(raw.getDate(), raw.getMonth()+1, raw.getFullYear());
+  }
+  return '';
+}
+function _validDMY_(d, m, y) {
+  if (!d || !m || !y) return false;
+  if (y < 1900 || y > 2100) return false;
+  if (m < 1 || m > 12) return false;
+  if (d < 1 || d > 31) return false;
+  var dt = new Date(y, m-1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m-1 && dt.getDate() === d;
+}
+function _padDMY_(d, m, y) {
+  return ('0'+d).slice(-2) + '/' + ('0'+m).slice(-2) + '/' + y;
+}
+
 function updateDriverInfo(driverName, data) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -1276,6 +1333,7 @@ function updateDriverInfo(driverName, data) {
     for (let r = 1; r < sheetData.length; r++) {
       if (sheetData[r][nameENIdx] === driverName || sheetData[r][nameKRIdx] === driverName) {
         const PHONE_SAVE_FIELDS = ['Mobile_1', 'Moblie_2', 'Phone', 'Mobile'];
+        const DATE_SAVE_FIELDS = ['License_Expiry', 'Authority_Expiry', 'WWC_Expiry'];
         Object.entries(data).forEach(([key, val]) => {
           const col = fieldMap[key];
           if (col) {
@@ -1287,6 +1345,10 @@ function updateDriverInfo(driverName, data) {
                 let s = String(val||'').replace(/[^0-9]/g, '');
                 if (s.length === 9) s = '0' + s;
                 cell.setNumberFormat('@').setValue(s);
+              } else if (DATE_SAVE_FIELDS.includes(col)) {
+                // ★ 날짜 필드: 정규화 후 저장 (잘못된 형식이면 빈 값)
+                const norm = _normalizeDateForSheet(val);
+                cell.setNumberFormat('@').setValue(norm);
               } else {
                 cell.setValue(val);
               }
