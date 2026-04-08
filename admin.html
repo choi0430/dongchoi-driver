@@ -5847,13 +5847,13 @@ async function saveInvoiceToSheet() {
       let dueBaseDate;
       if (_txAgUpper.includes('HOJURO') || _txAgUpper.includes('호주로') || _txAgUpper.includes('PLUS TOUR') || _txAgUpper.includes('플러스투어')) {
         // 마지막 투어 날짜 + 14일
-        dueBaseDate = new Date(to + 'T00:00:00');
-        if(isNaN(dueBaseDate.getTime())) dueBaseDate.setTime(Date.now());
+        let lastDate = null;
         rows.forEach(r => {
           const iso = r._iso || parseToISO(r.Date || '');
-          if (iso) { const d = new Date(iso + 'T00:00:00'); if (!isNaN(d.getTime()) && d > dueBaseDate) dueBaseDate = d; }
+          if (iso) { const d = new Date(iso + 'T00:00:00'); if (!isNaN(d.getTime()) && (!lastDate || d > lastDate)) lastDate = d; }
         });
-        dueBaseDate = new Date(dueBaseDate);
+        if (!lastDate) { lastDate = new Date(to + 'T00:00:00'); if(isNaN(lastDate.getTime())) lastDate = new Date(); }
+        dueBaseDate = new Date(lastDate);
         dueBaseDate.setDate(dueBaseDate.getDate() + 14);
       } else {
         // 기본: 서비스 종료일 기준 다음 주 금요일
@@ -6753,14 +6753,15 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
 
     if (_agUpper.includes('HOJURO') || _agUpper.includes('호주로') || _agUpper.includes('PLUS TOUR') || _agUpper.includes('플러스투어')) {
       // 실제 마지막 투어 날짜 계산 (rows에서 가장 늦은 날짜)
-      let lastTourDate = baseDate;
+      let lastTourDate = null;
       rows.forEach(r => {
         const iso = r._iso || parseToISO(r.Date || '');
         if (iso) {
           const d = new Date(iso + 'T00:00:00');
-          if (!isNaN(d.getTime()) && d > lastTourDate) lastTourDate = d;
+          if (!isNaN(d.getTime()) && (!lastTourDate || d > lastTourDate)) lastTourDate = d;
         }
       });
+      if (!lastTourDate) lastTourDate = baseDate; // fallback
       const d = new Date(lastTourDate); d.setDate(d.getDate() + 14); return d;
     }
     // 다음 주 금요일 계산
