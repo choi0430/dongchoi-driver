@@ -1456,10 +1456,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       </div>
     </div>
     <div id="leave-avail-grid" style="overflow-x:auto;"></div>
-    <div style="display:flex;gap:12px;margin-top:6px;font-size:11px;color:var(--t3);">
-      <span>✅ Available (가용)</span>
-      <span style="color:#dc2626;">🚫 LEAVE (휴무)</span>
-      <span style="color:#ca8a04;">⏳ Pending (대기)</span>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:11px;color:var(--t3);">
+      <span>✅ 가용</span>
+      <span style="color:#dc2626;">🚫 휴무</span>
+      <span style="color:#2563eb;">🚌 근무</span>
+      <span style="color:#7c3aed;">😴 OFF</span>
+      <span style="color:#ca8a04;">⏳ 대기</span>
+      <span style="margin-left:auto;font-style:italic;">셀을 클릭하여 상태 변경</span>
     </div>
   </div>
 
@@ -1754,7 +1757,7 @@ function nv(pg,ni){
     pinv:  ()=>initInvoice(),
     pquo:  ()=>initQuotation(),
     pnotice: ()=>loadNoticesFromGAS(),
-    pleave: ()=>{ renderAdminLeaveList(); renderLeaveAvailGrid(); },
+    pleave: ()=>{ renderAdminLeaveList(); if(_rosterData.length) renderLeaveAvailGrid(); else loadRosterAndRender(); },
   };
 
   // GAS에서 새로 로드하는 맵 (캐시 만료 시에만 실행)
@@ -11158,9 +11161,40 @@ async function loadFatigueAlerts(){
 var _adminLeaves = [];
 var _leaveFilter = 'Pending';
 var _leaveWeekOffset = 0;
+var _rosterData = []; // [{Driver, Date(iso), Status}]
+var _rosterLoading = false;
+
+// 상태 순환 순서 (클릭 시 토글)
+const ROSTER_STATUSES = ['Available','LEAVE','WORKED','OFF'];
+const ROSTER_STYLE = {
+  'Available': {bg:'#ecfdf5', tx:'#059669', label:'✅ 가용'},
+  'LEAVE':     {bg:'#fef2f2', tx:'#dc2626', label:'🚫 휴무'},
+  'WORKED':    {bg:'#eff6ff', tx:'#2563eb', label:'🚌 근무'},
+  'OFF':       {bg:'#f5f3ff', tx:'#7c3aed', label:'😴 OFF'},
+  'Pending':   {bg:'#fefce8', tx:'#ca8a04', label:'⏳ 대기'}
+};
 
 function shiftLeaveWeek(dir){
   _leaveWeekOffset += dir;
+  loadRosterAndRender();
+}
+
+async function loadRosterAndRender(){
+  if(_rosterLoading) return;
+  _rosterLoading = true;
+  try{
+    const today = new Date();
+    const dayOfWeek = (today.getDay()+6)%7;
+    const mon = new Date(today); mon.setDate(today.getDate() - dayOfWeek + (_leaveWeekOffset*7));
+    const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+    const fromISO = mon.getFullYear()+'-'+String(mon.getMonth()+1).padStart(2,'0')+'-'+String(mon.getDate()).padStart(2,'0');
+    const toISO = sun.getFullYear()+'-'+String(sun.getMonth()+1).padStart(2,'0')+'-'+String(sun.getDate()).padStart(2,'0');
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_roster&from='+fromISO+'&to='+toISO);
+    const json = await res.json();
+    if(json?.ok) _rosterData = json.roster || [];
+    else _rosterData = [];
+  }catch(e){ console.warn('loadRoster error:', e); _rosterData = []; }
+  _rosterLoading = false;
   renderLeaveAvailGrid();
 }
 
@@ -11172,7 +11206,8 @@ function renderLeaveAvailGrid(){
 
   // Calculate week Mon~Sun
   const today = new Date();
-  const dayOfWeek = (today.getDay()+6)%7; // Mon=0
+  const todayISO = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+  const dayOfWeek = (today.getDay()+6)%7;
   const mon = new Date(today); mon.setDate(today.getDate() - dayOfWeek + (_leaveWeekOffset*7));
   const dates = [];
   const dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -11182,15 +11217,21 @@ function renderLeaveAvailGrid(){
     dates.push({iso:yy+'-'+mm+'-'+dd, display:dd+'/'+mm, ddmmyyyy:dd+'/'+mm+'/'+yy, day:dayNames[i]});
   }
 
-  // Week label
   document.getElementById('leave-week-label').textContent = dates[0].ddmmyyyy+' ~ '+dates[6].ddmmyyyy;
 
-  // Build leave lookup: {driver: {isoDate: status}}
-  const leaveLookup = {};
+  // Build roster lookup: {driver: {isoDate: status}}
+  const rosterLookup = {};
+  (_rosterData||[]).forEach(r=>{
+    if(!rosterLookup[r.Driver]) rosterLookup[r.Driver]={};
+    rosterLookup[r.Driver][r.Date] = r.Status;
+  });
+
+  // Leave lookup (Pending 상태 표시용)
+  const leavePending = {};
   (_adminLeaves||[]).forEach(l=>{
-    if(l.Status!=='Approved' && l.Status!=='Pending') return;
+    if(l.Status!=='Pending') return;
     const driver = l.Driver;
-    if(!leaveLookup[driver]) leaveLookup[driver]={};
+    if(!leavePending[driver]) leavePending[driver]={};
     const from = parseToISO(fmtDate(l.Date_From)||l.Date_From);
     const to = parseToISO(fmtDate(l.Date_To)||l.Date_To);
     if(!from) return;
@@ -11198,7 +11239,7 @@ function renderLeaveAvailGrid(){
     const end = new Date((to||from)+'T00:00:00');
     while(cur<=end){
       const iso = cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0')+'-'+String(cur.getDate()).padStart(2,'0');
-      leaveLookup[driver][iso] = l.Status; // Approved or Pending
+      leavePending[driver][iso] = true;
       cur.setDate(cur.getDate()+1);
     }
   });
@@ -11206,24 +11247,74 @@ function renderLeaveAvailGrid(){
   let html = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
   html += '<tr><th style="background:var(--s3);padding:8px 6px;text-align:left;border:1px solid var(--bd);font-weight:700;min-width:80px;">Driver (드라이버)</th>';
   dates.forEach(d=>{
-    const isToday = d.iso === (today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0'));
-    html += `<th style="background:${isToday?'var(--acd)':'var(--s3)'};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;min-width:55px;"><div>${d.day}</div><div style="font-size:10px;font-weight:400;">${d.display}</div></th>`;
+    const isToday = d.iso === todayISO;
+    html += `<th style="background:${isToday?'var(--acd)':'var(--s3)'};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;min-width:70px;"><div>${d.day}</div><div style="font-size:10px;font-weight:400;">${d.display}</div></th>`;
   });
+  // 주간 합계 열
+  html += '<th style="background:var(--s3);padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;min-width:50px;">근무<br><span style="font-size:10px;font-weight:400;">일수</span></th>';
   html += '</tr>';
 
   drivers.forEach(drv=>{
+    let workedCount = 0;
     html += `<tr><td style="padding:8px 6px;border:1px solid var(--bd);font-weight:700;color:var(--t1);">${drv}</td>`;
     dates.forEach(d=>{
-      const status = leaveLookup[drv]?.[d.iso];
-      let bg='#ecfdf5', tx='#059669', label='✅';
-      if(status==='Approved'){ bg='#fef2f2'; tx='#dc2626'; label='🚫 LEAVE'; }
-      else if(status==='Pending'){ bg='#fefce8'; tx='#ca8a04'; label='⏳'; }
-      html += `<td style="background:${bg};color:${tx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;font-size:11px;">${label}</td>`;
+      // 상태 결정: roster > leave pending > default
+      let status = rosterLookup[drv]?.[d.iso] || '';
+      let isPending = false;
+      if(!status && leavePending[drv]?.[d.iso]){
+        status = 'Pending';
+        isPending = true;
+      }
+      if(!status) status = 'Available';
+
+      if(status === 'WORKED') workedCount++;
+
+      const st = ROSTER_STYLE[status] || ROSTER_STYLE['Available'];
+      const cursor = isPending ? 'default' : 'pointer';
+      const title = isPending ? '휴무 요청 대기중 (Leave Request Pending)' : '클릭하여 상태 변경 (Click to change)';
+      const onclick = isPending ? '' : `onclick="toggleRosterCell('${drv}','${d.iso}','${status}')"`;
+      html += `<td style="background:${st.bg};color:${st.tx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;font-size:11px;cursor:${cursor};user-select:none;transition:opacity 0.15s;" title="${title}" ${onclick}>${st.label}</td>`;
     });
+    // 주간 근무일수 합계
+    const countBg = workedCount >= 6 ? '#fef2f2' : workedCount >= 1 ? '#eff6ff' : '#f9fafb';
+    const countTx = workedCount >= 6 ? '#dc2626' : workedCount >= 1 ? '#2563eb' : '#9ca3af';
+    html += `<td style="background:${countBg};color:${countTx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:800;font-size:14px;">${workedCount}</td>`;
     html += '</tr>';
   });
   html += '</table>';
+
+  // 범례
+  html += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--t3);">';
+  html += '<span>✅ Available (가용)</span>';
+  html += '<span style="color:#dc2626;">🚫 LEAVE (휴무)</span>';
+  html += '<span style="color:#2563eb;">🚌 Worked (근무)</span>';
+  html += '<span style="color:#7c3aed;">😴 Off (정기휴일)</span>';
+  html += '<span style="color:#ca8a04;">⏳ Pending (대기)</span>';
+  html += '</div>';
   el.innerHTML = html;
+}
+
+async function toggleRosterCell(driver, dateISO, currentStatus){
+  // 다음 상태로 순환
+  const idx = ROSTER_STATUSES.indexOf(currentStatus);
+  const nextStatus = ROSTER_STATUSES[(idx + 1) % ROSTER_STATUSES.length];
+
+  // 즉시 UI 업데이트 (낙관적)
+  const existingIdx = _rosterData.findIndex(r=>r.Driver===driver && r.Date===dateISO);
+  if(existingIdx >= 0) _rosterData[existingIdx].Status = nextStatus;
+  else _rosterData.push({Driver:driver, Date:dateISO, Status:nextStatus});
+  renderLeaveAvailGrid();
+
+  // 서버에 저장
+  try{
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'update_roster_cell', driver, date:dateISO, status:nextStatus, _user:_currentUser||'admin'})
+    });
+    const json = await res.json();
+    if(!json?.ok) console.warn('updateRosterCell failed:', json?.error);
+  }catch(e){ console.warn('toggleRosterCell error:', e); }
 }
 
 function setLeaveFilter(f){
@@ -11244,7 +11335,7 @@ async function loadAdminLeaves(){
     if(json?.ok){ _adminLeaves = json.requests || []; }
     else { _adminLeaves = []; }
   }catch(e){ console.warn('loadAdminLeaves error:', e); _adminLeaves = []; }
-  if(el){ renderAdminLeaveList(); renderLeaveAvailGrid(); }
+  if(el){ renderAdminLeaveList(); loadRosterAndRender(); }
 }
 
 function renderAdminLeaveList(){
