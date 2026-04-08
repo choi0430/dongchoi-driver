@@ -1642,9 +1642,10 @@ function saveInvoice(data) {
     const allData = sheet.getDataRange().getValues();
     const sheetHeaders = allData[0];
     const invNumCol = sheetHeaders.indexOf('InvNumber');
+    if (invNumCol < 0) return { ok: false, error: 'InvNumber column not found in Invoices sheet' };
     let existingRow = -1;
     for (let i = 1; i < allData.length; i++) {
-      if (String(allData[i][invNumCol >= 0 ? invNumCol : 0]).trim() === invNum) { existingRow = i + 1; break; }
+      if (String(allData[i][invNumCol]).trim() === invNum) { existingRow = i + 1; break; }
     }
 
     const now = new Date();
@@ -1791,9 +1792,10 @@ function updateInvoiceStatus(invNumber, status, field) {
     const data = sheet.getDataRange().getValues();
     const sheetHeaders = data[0];
     const invNumCol = sheetHeaders.indexOf('InvNumber');
+    if (invNumCol < 0) return { ok: false, error: 'InvNumber column not found in Invoices sheet' };
     let targetRow = -1;
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][invNumCol >= 0 ? invNumCol : 0]).trim() === invNumber) { targetRow = i + 1; break; }
+      if (String(data[i][invNumCol]).trim() === invNumber) { targetRow = i + 1; break; }
     }
     if (targetRow < 0) return { ok: false, error: 'Invoice not found: ' + invNumber };
 
@@ -2242,9 +2244,10 @@ function syncLeaveToRoster_(rowData, headers) {
       const rStatusCol = rosterH.indexOf('Status');
       const rUpdatedCol = rosterH.indexOf('Updated_At');
       const rSourceCol = rosterH.indexOf('Source');
+      if (rDriverCol < 0 || rDateCol < 0) { Logger.log('Driver/Date column not found in Driver_Roster'); return; }
       let found = false;
       for (let i = 1; i < existing.length; i++) {
-        if (existing[i][rDriverCol >= 0 ? rDriverCol : 0] === driver && existing[i][rDateCol >= 0 ? rDateCol : 1] === dateStr) {
+        if (existing[i][rDriverCol] === driver && existing[i][rDateCol] === dateStr) {
           if (rStatusCol >= 0) rosterSheet.getRange(i + 1, rStatusCol + 1).setValue('LEAVE');
           if (rUpdatedCol >= 0) rosterSheet.getRange(i + 1, rUpdatedCol + 1).setValue(syd);
           if (rSourceCol >= 0) rosterSheet.getRange(i + 1, rSourceCol + 1).setValue('Auto - Leave Approved');
@@ -2329,18 +2332,22 @@ function getFatigueComplianceCheck() {
       const rDriverIdx = rH.indexOf('Driver');
       const rDateIdx = rH.indexOf('Date');
       const rStatusIdx = rH.indexOf('Status');
+      if (rDriverIdx < 0 || rDateIdx < 0 || rStatusIdx < 0) {
+        Logger.log('Driver_Roster missing required columns (Driver/Date/Status)');
+      } else {
       rData.slice(1).forEach(row => {
-        const drv = String(row[rDriverIdx >= 0 ? rDriverIdx : 0] || '').trim();
-        const status = String(row[rStatusIdx >= 0 ? rStatusIdx : 2] || '').trim();
+        const drv = String(row[rDriverIdx] || '').trim();
+        const status = String(row[rStatusIdx] || '').trim();
         if (drv && status === 'LEAVE') {
           if (!driverLeaveDates[drv]) driverLeaveDates[drv] = new Set();
-          const dateVal = row[rDateIdx >= 0 ? rDateIdx : 1];
+          const dateVal = row[rDateIdx];
           const d = dateVal instanceof Date
             ? Utilities.formatDate(dateVal, tz, 'yyyy-MM-dd')
             : parseDateToISO_(dateVal);
           if (d) driverLeaveDates[drv].add(d);
         }
       });
+      } // else (columns found)
     }
 
     // ── Collect last End_of_Shift time per driver ──
