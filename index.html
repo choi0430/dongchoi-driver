@@ -1678,6 +1678,27 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
       </div>
     </div>
 
+    <!-- ═══ 주간 근무 스케줄 그리드 ═══ -->
+    <div style="margin-top:20px;background:var(--surface);border-radius:var(--radius);padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1.5px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div style="font-weight:800;font-size:15px;color:var(--text);">📊 My Schedule (나의 일정)</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button onclick="shiftDriverRosterWeek(-1)" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;">◀ 이전</button>
+          <span id="driver-roster-week-label" style="font-size:12px;font-weight:600;color:var(--muted);min-width:140px;text-align:center;"></span>
+          <button onclick="shiftDriverRosterWeek(1)" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;">다음 ▶</button>
+        </div>
+      </div>
+      <div id="driver-roster-grid" style="overflow-x:auto;"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--muted);">
+        <span>✅ 가용</span>
+        <span style="color:#dc2626;">🚫 휴무</span>
+        <span style="color:#2563eb;">🚌 근무</span>
+        <span style="color:#7c3aed;">😴 OFF</span>
+        <span style="color:#ca8a04;">⏳ 대기</span>
+      </div>
+    </div>
+
+    <div style="margin-top:16px;font-weight:800;font-size:15px;color:var(--text);padding:0 2px;">📋 My Leave Requests (나의 휴무 요청)</div>
     <div id="my-leave-list" style="margin-top:8px;">
       <div style="padding:40px 20px;text-align:center;color:var(--muted);"><div style="font-size:40px;margin-bottom:12px;">📋</div>No leave requests (휴무 요청 내역이 없습니다)</div>
     </div>
@@ -9755,6 +9776,8 @@ var _myLeaveData = [];
 async function loadMyLeaves(){
   const el=document.getElementById('my-leave-list');
   const dn=currentDriver?.name||'';
+  // 로스터 데이터도 함께 로드
+  loadDriverRoster();
   try{
     const res=await fetch(APPS_SCRIPT_URL+'?action=get_my_leave_requests&driver='+encodeURIComponent(dn));
     const json=await res.json();
@@ -9788,6 +9811,121 @@ async function loadMyLeaves(){
   }catch(e){
     if(el) el.innerHTML=`<div style="padding:20px;text-align:center;color:var(--red);">⚠️ Loading Failed (데이터 로딩 실패)</div>`;
   }
+}
+
+// ═══════════════════════════════════════
+// DRIVER ROSTER GRID (드라이버 주간 일정)
+// ═══════════════════════════════════════
+var _driverRosterData = [];
+var _driverRosterWeekOffset = 0;
+var _driverRosterLoading = false;
+
+function shiftDriverRosterWeek(dir){
+  _driverRosterWeekOffset += dir;
+  loadDriverRoster();
+}
+
+async function loadDriverRoster(){
+  if(_driverRosterLoading) return;
+  _driverRosterLoading = true;
+  const el = document.getElementById('driver-roster-grid');
+  if(el) el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px;">⏳ Loading...</div>';
+  try{
+    const today = new Date();
+    const dayOfWeek = (today.getDay()+6)%7;
+    const mon = new Date(today); mon.setDate(today.getDate() - dayOfWeek + (_driverRosterWeekOffset*7));
+    const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+    const pad2 = n => String(n).padStart(2,'0');
+    const fromISO = mon.getFullYear()+'-'+pad2(mon.getMonth()+1)+'-'+pad2(mon.getDate());
+    const toISO = sun.getFullYear()+'-'+pad2(sun.getMonth()+1)+'-'+pad2(sun.getDate());
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_roster&from='+fromISO+'&to='+toISO);
+    const json = await res.json();
+    if(json?.ok) _driverRosterData = json.roster || [];
+    else _driverRosterData = [];
+  }catch(e){ console.warn('loadDriverRoster error:', e); _driverRosterData = []; }
+  _driverRosterLoading = false;
+  renderDriverRoster();
+}
+
+function renderDriverRoster(){
+  const el = document.getElementById('driver-roster-grid');
+  if(!el) return;
+  const driverName = currentDriver?.name || '';
+  if(!driverName){ el.innerHTML='<div style="text-align:center;padding:16px;color:var(--muted);font-size:12px;">Driver not set (드라이버 미설정)</div>'; return; }
+
+  const today = new Date();
+  const pad2 = n => String(n).padStart(2,'0');
+  const todayISO = today.getFullYear()+'-'+pad2(today.getMonth()+1)+'-'+pad2(today.getDate());
+  const dayOfWeek = (today.getDay()+6)%7;
+  const mon = new Date(today); mon.setDate(today.getDate() - dayOfWeek + (_driverRosterWeekOffset*7));
+  const dates = [];
+  const dayNames = ['월','화','수','목','금','토','일'];
+  for(let i=0;i<7;i++){
+    const d = new Date(mon); d.setDate(mon.getDate()+i);
+    const dd=pad2(d.getDate()), mm=pad2(d.getMonth()+1), yy=d.getFullYear();
+    dates.push({iso:yy+'-'+mm+'-'+dd, display:dd+'/'+mm, ddmmyyyy:dd+'/'+mm+'/'+yy, day:dayNames[i]});
+  }
+
+  // Week label
+  const lbl = document.getElementById('driver-roster-week-label');
+  if(lbl) lbl.textContent = dates[0].display+' ~ '+dates[6].display;
+
+  // Build lookup for this driver
+  const lookup = {};
+  (_driverRosterData||[]).forEach(r=>{
+    if(r.Driver === driverName) lookup[r.Date] = r.Status;
+  });
+
+  // Leave pending lookup
+  const pendingLookup = {};
+  (_myLeaveData||[]).forEach(l=>{
+    if(l.Status!=='Pending') return;
+    const toISO = (ds) => { if(!ds)return''; const s=String(ds).trim(); if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){const p=s.split('/');return p[2]+'-'+p[1]+'-'+p[0];} return s; };
+    const from = toISO(l.Date_From);
+    const to = toISO(l.Date_To);
+    if(!from) return;
+    const cur = new Date(from+'T00:00:00');
+    const end = new Date((to||from)+'T00:00:00');
+    while(cur<=end){
+      const iso = cur.getFullYear()+'-'+pad2(cur.getMonth()+1)+'-'+pad2(cur.getDate());
+      pendingLookup[iso] = true;
+      cur.setDate(cur.getDate()+1);
+    }
+  });
+
+  const STYLE = {
+    'Available': {bg:'#ecfdf5', tx:'#059669', label:'✅', sub:'가용'},
+    'LEAVE':     {bg:'#fef2f2', tx:'#dc2626', label:'🚫', sub:'휴무'},
+    'WORKED':    {bg:'#eff6ff', tx:'#2563eb', label:'🚌', sub:'근무'},
+    'OFF':       {bg:'#f5f3ff', tx:'#7c3aed', label:'😴', sub:'OFF'},
+    'Pending':   {bg:'#fefce8', tx:'#ca8a04', label:'⏳', sub:'대기'}
+  };
+
+  let workedCount = 0;
+  let html = '<div style="display:flex;gap:4px;">';
+  dates.forEach(d=>{
+    let status = lookup[d.iso] || '';
+    if(!status && pendingLookup[d.iso]) status = 'Pending';
+    if(!status) status = 'Available';
+    if(status === 'WORKED') workedCount++;
+    const isToday = d.iso === todayISO;
+    const st = STYLE[status] || STYLE['Available'];
+    html += `<div style="flex:1;min-width:42px;text-align:center;padding:8px 2px;border-radius:10px;background:${st.bg};border:${isToday?'2px solid var(--accent)':'1.5px solid '+st.tx+'22'};">
+      <div style="font-size:11px;font-weight:700;color:${isToday?'var(--accent)':'var(--muted)'};">${d.day}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:1px;">${d.display}</div>
+      <div style="font-size:20px;margin-top:6px;">${st.label}</div>
+      <div style="font-size:10px;font-weight:700;color:${st.tx};margin-top:2px;">${st.sub}</div>
+    </div>`;
+  });
+  html += '</div>';
+
+  // 주간 요약
+  html += `<div style="margin-top:10px;text-align:center;font-size:12px;color:var(--muted);">
+    이번 주 근무: <strong style="color:${workedCount>=6?'#dc2626':'#2563eb'};font-size:14px;">${workedCount}일</strong>
+    ${workedCount>=6?'<span style="color:#dc2626;font-weight:700;"> ⚠️ 피로 주의</span>':''}
+  </div>`;
+
+  el.innerHTML = html;
 }
 
 function renderHomeLeaveStatus(){
