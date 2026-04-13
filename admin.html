@@ -6174,9 +6174,9 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     }
     console.log('[InvPreview] _itemsJSON found:', !!_itemsJSON, '| _manualJSON found:', !!_manualJSON, '| _savedGT:', _savedGT);
   }
-  if (_itemsJSON) {
+  if (_itemsJSON || _manualJSON) {
     try {
-      const _si = JSON.parse(_itemsJSON);
+      const _si = _itemsJSON ? JSON.parse(_itemsJSON) : [];
       const _sm = _manualJSON ? JSON.parse(_manualJSON) : [];
       console.log('[InvPreview] Using saved Items:', _si.length, 'items +', _sm.length, 'manual items');
       const _savedRows = _si.map(item => {
@@ -6227,17 +6227,31 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
 
   // ⑤-2b fallback: Daily_Report에서 다시 빌드 (저장된 Items가 없는 경우)
   console.warn('[InvPreview] FALLBACK: No saved Items found, building from Daily_Report');
+  // ★ fallback에서는 현재 세션의 excludes/overrides/투어코드필터를 무시해야 원래 인보이스와 동일
+  const _origExcl2 = _invExcludes, _origOver2 = _invOverrides;
+  _invExcludes = {}; _invOverrides = {};
   const _manualCacheKey = agency + '_' + periodFrom.slice(0,7);
   const _origManualItems = _getInvManualItems(_manualCacheKey);
   if (_previewSavedInv && _previewSavedInv.ManualItems) {
     try { _setInvManualItems(_manualCacheKey, JSON.parse(_previewSavedInv.ManualItems)); } catch(e) {}
   }
-  let rows = _buildInvRows(agency, periodFrom, periodTo).sort((a, b) => a._iso.localeCompare(b._iso));
-  rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
+  // _buildInvRows가 아닌 직접 필터링 (투어코드 필터 적용 방지)
+  const agencyLower = agency.toLowerCase();
+  const sheetRows = (_invReports || []).filter(r => {
+    const ra = (r._agency || String(r.Agency||'').trim()).toLowerCase();
+    return ra === agencyLower && r._iso >= periodFrom && r._iso <= periodTo;
+  });
+  const manualRows = _manualItemsToRows(agency, periodFrom).filter(r => r._iso >= periodFrom && r._iso <= periodTo);
+  let rows = [...sheetRows, ...manualRows].sort((a, b) => (a._iso||'').localeCompare(b._iso||''));
   // 원래 수동 항목 복원
   _setInvManualItems(_manualCacheKey, _origManualItems);
-  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
-  const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows, {isDraft:false, invNumOverride:invNumber});
+  if (rows.length === 0) {
+    _invExcludes = _origExcl2; _invOverrides = _origOver2;
+    toast('해당 기간 리포트 없음', 'er'); return;
+  }
+  const html = _buildInvoiceHTML(agency, periodFrom, periodTo, rows,
+    {isDraft:false, invNumOverride:invNumber, grandTotalOverride: _savedGT || undefined});
+  _invExcludes = _origExcl2; _invOverrides = _origOver2;
   _showDocModal(html, {invNumber, agency, from:periodFrom, to:periodTo});
 }
 
