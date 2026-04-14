@@ -5067,10 +5067,22 @@ function calcInvRow(r) {
     return entry || null;
   }
 
+  // ── 헬퍼: DB.PC에서 여행사 엔트리 찾기 (대소문자/공백 무시) ──
+  function findAgencyPC(agName) {
+    if (!agName || !DB.PC) return null;
+    let pc = DB.PC[agName];
+    if (!pc) {
+      const lower = agName.trim().toLowerCase();
+      const key = Object.keys(DB.PC).find(k => k.trim().toLowerCase() === lower);
+      if (key) pc = DB.PC[key];
+    }
+    return pc || null;
+  }
+
   // ── M_PriceClient 기본요금 조회 ──
   let baseRate = 0;
   let rateSource = 'svc'; // 'price_table' | 'svc'
-  const agPC = DB.PC[agency];
+  const agPC = findAgencyPC(agency);
   const courseEntry = agPC ? findCourse(agPC, attraction) : null;
   if (courseEntry) {
     const seatData = courseEntry[seatKey] || courseEntry['21'];
@@ -8615,9 +8627,11 @@ function _reportRow(r){
   if(r.Toll_Personal==='Y'&&(parseFloat(r.Toll)||0)>0) surItems.push({l:'톨비',v:parseFloat(r.Toll),c:'#78716c'});
   if(r.Fuel_Personal==='Y'&&(parseFloat(r.Fuel)||0)>0) surItems.push({l:'연료',v:parseFloat(r.Fuel),c:'#78716c'});
 
+  const dateStr = fd(r._iso||r.Date||'');
   return '<div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:6px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'+
       '<div style="flex:1;min-width:0;">'+
+        (dateStr?'<div style="display:inline-block;background:#1e40af;color:#fff;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;margin-bottom:4px;letter-spacing:.3px;">📅 '+escH(dateStr)+'</div>':'')+
         '<div style="font-size:12px;font-weight:700;color:var(--t1);">'+escH(r.Agency||'')+' <span style="color:var(--t3);font-weight:400;">·</span> '+escH(r.Attraction||'')+'</div>'+
         '<div style="font-size:10px;color:var(--t3);margin-top:2px;">'+escH(r.Rego||'')+(r.Seats?' · '+escH(r.Seats):'')+'</div>'+
         (timeStr?'<div style="font-size:10px;color:var(--ac);margin-top:1px;">⏱ '+timeStr+'</div>':'')+
@@ -9894,8 +9908,11 @@ async function syncPrices(){
   if(pcRows?.length){
     DB.PC={};
     pcRows.forEach(r=>{
-      if(!DB.PC[r.Agency]) DB.PC[r.Agency]={};
-      DB.PC[r.Agency][r.Course]={max_hours:r.max_hours,
+      const ag = String(r.Agency||'').trim();
+      const co = String(r.Course||'').trim();
+      if(!ag || !co) return;
+      if(!DB.PC[ag]) DB.PC[ag]={};
+      DB.PC[ag][co]={max_hours:r.max_hours,
         '21':{rate:r.seats_21_rate,ot:r.seats_21_ot},
         '25':{rate:r.seats_25_rate,ot:r.seats_25_ot},
         '40':{rate:r.seats_40_rate,ot:r.seats_40_ot},
@@ -10007,8 +10024,11 @@ async function loadAllFromSheets(){
     if(d.M_PriceClient?.length){
       DB.PC={};
       d.M_PriceClient.forEach(r=>{
-        if(!DB.PC[r.Agency])DB.PC[r.Agency]={};
-        DB.PC[r.Agency][r.Course]={
+        const ag = String(r.Agency||'').trim();
+        const co = String(r.Course||'').trim();
+        if(!ag || !co) return;
+        if(!DB.PC[ag])DB.PC[ag]={};
+        DB.PC[ag][co]={
           max_hours:r.max_hours,
           '21':{rate:r.seats_21_rate,ot:r.seats_21_ot},
           '25':{rate:r.seats_25_rate,ot:r.seats_25_ot},
