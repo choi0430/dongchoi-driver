@@ -4325,7 +4325,7 @@ function submitDailyReport(){
     timeEnd: document.getElementById('dr-end').value,
     guide: document.getElementById('dr-guide').value,
     tourcode: document.getElementById('dr-tourcode').value,
-    total, dr: parseFloat((document.getElementById('t-dr-gross')||document.getElementById('t-dr')).textContent.replace('$',''))||0,
+    total, dr: parseFloat((document.getElementById('t-dr')||document.getElementById('t-dr-gross')).textContent.replace('$',''))||0,
     svcCharge: getSvcValue(), svcLabel,
     hotelSurcharge: getHotelValue(),  // DR 드라이버 지급 기준
     distSurcharge: getDistValue(),    // DR 드라이버 지급 기준
@@ -7768,8 +7768,7 @@ function cleanupLocalDuplicates(gasRows) {
 // DR_Cost 재계산 헬퍼 (DR_Cost가 0이거나 빈 문자열인 경우 각 항목 합산)
 function calcDRCostFromRow(r) {
   const stored = parseFloat(r.DR_Cost);
-  if(stored > 0) return stored;
-  // DR_Cost 없음 → M_PriceDriver base + extras
+  const own    = parseFloat(r.Night_Owner)||0;
   const svc  = parseFloat(r.SVC_Charge)||0;
   const ot   = parseFloat(r.OT)||0;
   const htl  = parseFloat(r.Hotel_Surcharge)||0;
@@ -7789,8 +7788,15 @@ function calcDRCostFromRow(r) {
   const pdEntry = typeof MASTER!=='undefined' ? MASTER.priceDriver?.find(p=>p.Course===att) : null;
   const drBase = pdEntry ? (Number(pdEntry['seats_'+ck+'_base'])||0) : 0;
   const base = drBase > 0 ? drBase : svc;
+  const gross = base + ot + htl + dst + erl + trl + ngt + wsh + mel + tip + toll + fuel;
+  // ★ 저장된 DR_Cost가 gross(미차감)인지 net(차감완료)인지 자동 감지
+  //   → 항상 net(실 지급액) 반환. admin 화면과 동일한 금액 보장.
+  if(stored > 0){
+    if(own > 0 && Math.abs(stored - gross) < 0.5) return Math.max(0, stored - own);
+    return stored;
+  }
   if(base === 0) return 0;
-  return base + ot + htl + dst + erl + trl + ngt + wsh + mel + tip + toll + fuel;
+  return Math.max(0, gross - own);
 }
 
 async function getGASDRForWeek(driverName, monISO){
