@@ -8002,7 +8002,7 @@ function renderDR(){
     return sum+diff;
   },0);
   const totalHoursStr = totalMinutes>0 ? `· ⏱ ${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m` : '';
-  const sumDR = filtered.reduce((s,r)=>s+(parseFloat(r.DR_Cost||0)),0);
+  const sumDR = filtered.reduce((s,r)=>s+_calcDRFromReport(r),0);
   document.getElementById('dr-summary').textContent =
     `${filtered.length}건 · DR 합계 $${sumDR.toFixed(2)} ${totalHoursStr}`;
 
@@ -8031,7 +8031,19 @@ function renderDR(){
     const etcDesc = String(r.Etc_Desc||'').trim();
     const nightType = String(r.Night_Type||'').trim();
     const nightOwner = parseFloat(r.Night_Owner||0);
-    const total = dr;
+    // ★ 실 지급액 = DR_Cost − 회사 납입
+    //   DR_Cost가 gross(미차감)인지 net(차감완료)인지 감지:
+    //   components 합(gross_calc)과 dr 비교 → 거의 같으면 gross → 차감 필요
+    const fuelVal = (r.Fuel_Personal==='Y') ? (parseFloat(r.Fuel)||0) : 0;
+    const tollVal = (r.Toll_Personal==='Y') ? toll : 0;
+    const _seatsNum = parseInt(String(r.Seats||'').replace(/[^0-9]/g,''))||25;
+    const _ckDR = _seatsNum>=50?'50':_seatsNum>=40?'40':_seatsNum>=25?'25':'21';
+    const _pdE = DB.PD?.[String(r.Attraction||'').trim()];
+    const _drB = _pdE ? (Number(_pdE[_ckDR]?.base)||0) : 0;
+    const _baseDR = _drB>0 ? _drB : svc;
+    const grossCalc = _baseDR + ot + htl + dst + erl + trl + ngt + wsh + meal + tip + tollVal + fuelVal;
+    const isGross = nightOwner > 0 && Math.abs(dr - grossCalc) < 0.5;
+    const total = Math.max(0, isGross ? (dr - nightOwner) : dr);
     const rowIdx = r._rowIndex;
 
     // 시간 계산
@@ -8249,7 +8261,7 @@ async function saveDREdit(){
   const _seats = String(updated.Seats||'').replace(/[^0-9]/g,'')||'25';
   const _sn = parseInt(_seats);
 
-  // DR: M_PriceDriver base + extras
+  // DR: M_PriceDriver base + extras − 회사 납입 (net)
   const _pdEntry = DB.PD[updated.Attraction];
   const _ck = _sn>=50?'50':_sn>=40?'40':_sn>=25?'25':'21';
   const _drBase = _pdEntry ? (Number(_pdEntry[_ck]?.base)||0) : 0;
@@ -8478,7 +8490,7 @@ async function renderWage(){
 // ── DR 비용 계산 (공용) ──────────────────────────────
 function _calcDRFromReport(r){
   const stored=parseFloat(r.DR_Cost);
-  if(stored>0) return stored;
+  const own=parseFloat(r.Night_Owner)||0;
   const svc=parseFloat(r.SVC_Charge)||0;
   const ot=parseFloat(r.OT)||0;
   const htl=parseFloat(r.Hotel_Surcharge)||0;
@@ -8497,8 +8509,14 @@ function _calcDRFromReport(r){
   const pdEntry=DB.PD?.[att2];
   const drBase=pdEntry?(Number(pdEntry[ck]?.base)||0):0;
   const base=drBase>0?drBase:svc;
+  const gross=base+ot+htl+dst+erl+trl+ngt+wsh+mel+tip+toll+fuel;
+  // 저장된 DR_Cost가 gross(미차감)인지 net(차감완료)인지 감지하여 항상 net 반환
+  if(stored>0){
+    if(own>0 && Math.abs(stored-gross)<0.5) return Math.max(0, stored-own); // gross → 차감
+    return stored; // 이미 net
+  }
   if(base===0) return 0;
-  return base+ot+htl+dst+erl+trl+ngt+wsh+mel+tip+toll+fuel;
+  return Math.max(0, gross - own);
 }
 
 // ── 주간 서차지 합계 계산 ──────────────────────────────
