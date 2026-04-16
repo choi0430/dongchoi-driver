@@ -4033,11 +4033,30 @@ function renderBalDetail(){
       return `<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:${m.bg};color:${m.color};font-weight:600;">${m.label}</span>`;
     };
 
+    // ★ 인보이스 Items에서 가이드/투어코드 맵 구축
+    const _invInfoMap = {};
+    if(_invHistoryCache){
+      _invHistoryCache.forEach(inv => {
+        const invNum = String(inv.InvNumber||'').trim();
+        if(!invNum) return;
+        try {
+          const _itms = typeof inv.Items==='string' && inv.Items.trim().startsWith('[') ? JSON.parse(inv.Items) : [];
+          const _manItms = typeof inv.ManualItems==='string' && inv.ManualItems.trim().startsWith('[') ? JSON.parse(inv.ManualItems) : [];
+          const _all = [..._itms, ..._manItms];
+          _invInfoMap[invNum] = {
+            guides: [...new Set(_all.map(it=>(it.guide||'').trim()).filter(Boolean))],
+            tourcodes: [...new Set(_all.map(it=>(it.tourcode||it.tourCode||'').trim()).filter(Boolean))]
+          };
+        } catch(e){}
+      });
+    }
     html = `<table style="width:100%;font-size:11px;border-collapse:collapse;">
       <thead><tr style="border-bottom:1px solid var(--b2);color:var(--t3);font-size:10px;">
         <th style="text-align:left;padding:6px 4px;">Date (날짜)</th>
         <th style="text-align:left;padding:6px 4px;">Type (구분)</th>
         <th style="text-align:left;padding:6px 4px;">Invoice (인보이스)</th>
+        <th style="text-align:left;padding:6px 4px;">Tour Code (투어코드)</th>
+        <th style="text-align:left;padding:6px 4px;">Guide (가이드)</th>
         <th style="text-align:left;padding:6px 4px;">Remarks (비고)</th>
         <th style="text-align:right;padding:6px 4px;">DR</th>
         <th style="text-align:right;padding:6px 4px;">CR</th>
@@ -4055,11 +4074,17 @@ function renderBalDetail(){
     rows.forEach((r,i)=>{
       const realIdx = _balAgencyTxns.indexOf(r);
       const bal = balMap.get(r)||0;
-      const remark = r.Remark || r.TourCode || '—';
+      const remark = r.Remark || '—';
+      const invId = String(r.InvoiceID||'').trim();
+      const _info = _invInfoMap[invId] || {};
+      const _tc = r.TourCode || (_info.tourcodes||[]).join(', ') || '—';
+      const _gd = (_info.guides||[]).join(', ') || '—';
       html += `<tr style="border-bottom:1px solid var(--b1);">
         <td style="padding:6px 4px;white-space:nowrap;">${fmtDate(r.Date)||'—'}</td>
         <td style="padding:6px 4px;">${_typeBadge(r.Type)}</td>
         <td style="padding:6px 4px;">${r.InvoiceID||'—'}</td>
+        <td style="padding:6px 4px;font-size:10px;color:var(--t2);">${escH(_tc)}</td>
+        <td style="padding:6px 4px;font-size:10px;color:var(--t2);">${escH(_gd)}</td>
         <td style="padding:6px 4px;font-size:10px;color:var(--t3);">${remark}</td>
         <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
         <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
