@@ -1893,9 +1893,10 @@ function rDash(){
     const matched=hvisBookings.filter(b=>b.rego===rego).sort((a,b)=>(b.bookingDate||'').localeCompare(a.bookingDate||''));
     return matched.length>0?matched[0]:null;
   }
-  function fmtDays(days){
-    if(days<0)return'Expired (만료됨)';
-    return days+' days ('+days+'일 남음)';
+  function fmtDays(days, dateStr){
+    const datePart = dateStr ? ' [' + fmtDate(dateStr) + ']' : '';
+    if(days<0)return'Expired (만료됨)' + datePart;
+    return days+' days ('+days+'일 남음)' + datePart;
   }
   // ── 드라이버 면허 / Authority 만료 ──
   DB.D.forEach(d=>{
@@ -1907,7 +1908,7 @@ function rDash(){
         bc:urgent?'#ef4444':warn?'#f97316':'#eab308',
         fc:urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
         icon:'🪪',
-        m:`${d.Name_KR||d.Name_EN} — License (면허) ${fmtDays(ld)}`});
+        m:`${d.Name_KR||d.Name_EN} — License (면허) ${fmtDays(ld, d.License_Expiry)}`});
     }
     if(la<90){
       const urgent=la<0,warn=la<30;
@@ -1916,7 +1917,7 @@ function rDash(){
         bc:urgent?'#ef4444':warn?'#f97316':'#eab308',
         fc:urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
         icon:'📜',
-        m:`${d.Name_KR||d.Name_EN} — Authority (자격증) ${fmtDays(la)}`});
+        m:`${d.Name_KR||d.Name_EN} — Authority (자격증) ${fmtDays(la, d.Authority_Expiry)}`});
     }
   });
   // ── 차량 Rego / HVIS / 서비스 KM ──
@@ -1936,7 +1937,7 @@ function rDash(){
         bc:urgent?'#ef4444':warn?'#f97316':'#eab308',
         fc:urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
         icon:'🚗',
-        m:`${v.Rego} — Rego (차량등록) ${fmtDays(rd)}`});
+        m:`${v.Rego} — Rego (차량등록) ${fmtDays(rd, v.Rego_Date)}`});
     }
     // ★ HVIS — 부킹 상태 반영 (12인승 이상만)
     if(_isHvis&&!isEmpty(v.HVIS_Date)&&hd<90){
@@ -1952,7 +1953,7 @@ function rDash(){
           bc:urgent?'#ef4444':warn?'#f97316':'#eab308',
           fc:urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
           icon:'🔧',
-          m:`${v.Rego} — HVIS ${fmtDays(hd)}`});
+          m:`${v.Rego} — HVIS ${fmtDays(hd, v.HVIS_Date)}`});
       }
     }
     // ★ 서비스 KM 알림
