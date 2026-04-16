@@ -6027,6 +6027,17 @@ function _renderInvHistPage() {
     const remaining = Math.max(0, roundMoney(amt - paidCR));
     const isPaidFull = remaining <= 0 && amt > 0;
     const isPartial = paidCR > 0 && !isPaidFull;
+    // ★ Items JSON에서 가이드 이름 & 투어코드 추출
+    let _guides = [], _tourcodes = [];
+    try {
+      const _itms = typeof inv.Items === 'string' && inv.Items.trim().startsWith('[') ? JSON.parse(inv.Items) : [];
+      const _manItms = typeof inv.ManualItems === 'string' && inv.ManualItems.trim().startsWith('[') ? JSON.parse(inv.ManualItems) : [];
+      const _all = [..._itms, ..._manItms];
+      _guides = [...new Set(_all.map(it => (it.guide||'').trim()).filter(Boolean))];
+      _tourcodes = [...new Set(_all.map(it => (it.tourcode||it.tourCode||'').trim()).filter(Boolean))];
+    } catch(e) {}
+    const guideHTML = _guides.length ? `<span style="font-size:10px;color:var(--t2);"><b>👤</b> ${_guides.map(g=>escH(g)).join(', ')}</span>` : '';
+    const tcHTML = _tourcodes.length ? `<span style="font-size:10px;color:var(--t2);"><b>🏷</b> ${_tourcodes.map(t=>escH(t)).join(', ')}</span>` : '';
     // 수금 진행률 바
     const pctPaid = amt > 0 ? Math.min(100, Math.round(paidCR / amt * 100)) : 0;
     const progressHTML = amt > 0 && inv.Status!=='cancelled' ? `
@@ -6050,6 +6061,7 @@ function _renderInvHistPage() {
             ${isPaidFull ? '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:#d1fae5;color:#065f46;font-weight:700;">💰 결제완료</span>' : ''}
           </div>
           <div style="font-size:11px;color:var(--t2);">${escH(inv.Agency||'—')}</div>
+          ${guideHTML||tcHTML ? `<div style="display:flex;gap:10px;margin-top:1px;flex-wrap:wrap;">${guideHTML}${tcHTML}</div>` : ''}
           <div style="font-size:10px;color:var(--t3);">${fmtDate(inv.PeriodFrom)||inv.PeriodFrom||''} ~ ${fmtDate(inv.PeriodTo)||inv.PeriodTo||''}</div>
           <div style="font-size:10px;color:var(--t3);margin-top:2px;">발행: ${fmtDateTime(inv.IssuedDate)}${inv.EmailSentDate?' · 발송: '+fmtDateTime(inv.EmailSentDate):''}${inv.PaidDate?' · 결제: '+fmtDateTime(inv.PaidDate):''}</div>
           ${progressHTML}
