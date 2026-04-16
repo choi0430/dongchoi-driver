@@ -64,7 +64,7 @@ const MASTER_HEADERS = {
   // ── 드라이버 근무/휴무 로스터 ──
   'Driver_Roster': ['Driver','Date','Status','Updated_At','Source'],
   // ── 거래처 잔액 관리 ──
-  'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','Type','DR','CR','Remark','StartDate','FinishDate','DueDate'],
+  'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','Guide','Type','DR','CR','Remark','StartDate','FinishDate','DueDate'],
   'SUB_Txn':    ['RowID','SubCompany','Category','Date','InvoiceNo','Description','DR','CR','Remark'],
   // ── 서비스 요금 옵션 (차량 좌석별) ──
   'M_SvcOptions': ['VehicleSize','Label','Amount'],

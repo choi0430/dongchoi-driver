@@ -4078,7 +4078,7 @@ function renderBalDetail(){
       const invId = String(r.InvoiceID||'').trim();
       const _info = _invInfoMap[invId] || {};
       const _tc = r.TourCode || (_info.tourcodes||[]).join(', ') || '—';
-      const _gd = (_info.guides||[]).join(', ') || '—';
+      const _gd = r.Guide || (_info.guides||[]).join(', ') || '—';
       html += `<tr style="border-bottom:1px solid var(--b1);">
         <td style="padding:6px 4px;white-space:nowrap;">${fmtDate(r.Date)||'—'}</td>
         <td style="padding:6px 4px;">${_typeBadge(r.Type)}</td>
@@ -4205,6 +4205,7 @@ function openBalTxnModal(type, idx){
         const allIt = [..._pI(linkedInv.Items), ..._pI(linkedInv.ManualItems)];
         const itDates = allIt.map(it => parseToISO(String(it.date||it.Date||''))).filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
         const itCodes = [...new Set(allIt.map(it => it.tourCode||it.Tour_Code||it.tour||it.Tour||it.Attraction||'').filter(Boolean))];
+        const itGuides = [...new Set(allIt.map(it => (it.guide||'').trim()).filter(Boolean))];
 
         if(!existing.Date && linkedInv.IssuedDate) existing.Date = String(linkedInv.IssuedDate);
         // ★ 시작일 = Items 중 가장 빠른 날, 종료일 = 가장 느린 날
@@ -4216,6 +4217,9 @@ function openBalTxnModal(type, idx){
         }
         if(!existing.TourCode && itCodes.length > 0){
           existing.TourCode = itCodes.join(', ');
+        }
+        if(!existing.Guide && itGuides.length > 0){
+          existing.Guide = itGuides.join(', ');
         }
         if(!existing.DueDate && existing.Date){
           try {
@@ -4250,6 +4254,9 @@ function openBalTxnModal(type, idx){
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">투어 코드</div><input id="btx-tour" class="profit-finp" style="width:100%;" value="${existing?.TourCode||''}" placeholder="예: BLUE MT"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">가이드</div><input id="btx-guide" class="profit-finp" style="width:100%;" value="${existing?.Guide||''}" placeholder="가이드 이름"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">구분 (Type)</div>
             <select id="btx-type" class="profit-sel" style="width:100%;">
               <option value="invoice" ${existing?.Type==='invoice'?'selected':''}>청구 (Invoice)</option>
@@ -4352,6 +4359,7 @@ async function saveBalTxn(){
       Date: document.getElementById('btx-date').value||'',
       InvoiceID: document.getElementById('btx-invid').value.trim()||'',
       TourCode: document.getElementById('btx-tour').value.trim()||'',
+      Guide: document.getElementById('btx-guide').value.trim()||'',
       Type: document.getElementById('btx-type')?.value||'',
       DR: dr, CR: cr,
       Remark: document.getElementById('btx-remark').value.trim()||'',
@@ -4367,6 +4375,44 @@ async function saveBalTxn(){
       if(!json.ok) throw new Error(json.error||'저장 실패');
       if(idx!==null) Object.assign(_balAgencyTxns[idx], row);
       else { row._rowIndex = json.rowIndex; _balAgencyTxns.push(row); }
+
+      // ★ 연결된 인보이스 Items에 가이드/투어코드 변경 동기화
+      const _syncInvId = row.InvoiceID;
+      if(_syncInvId && _invHistoryCache){
+        const linkedInv = _invHistoryCache.find(inv => String(inv.InvNumber||'').trim() === _syncInvId);
+        if(linkedInv){
+          try {
+            const _pI = (json) => { try { return (json && typeof json==='string' && json.trim().startsWith('[')) ? JSON.parse(json) : []; } catch(e){ return []; } };
+            let items = _pI(linkedInv.Items);
+            let changed = false;
+            if(row.Guide && items.length){
+              const newGuides = row.Guide.split(',').map(g=>g.trim()).filter(Boolean);
+              // 기존 가이드가 1명이면 전체 교체, 여러 명이면 유지
+              if(newGuides.length >= 1){
+                items.forEach(it => { it.guide = newGuides.length===1 ? newGuides[0] : (it.guide || newGuides[0]); });
+                changed = true;
+              }
+            }
+            if(row.TourCode && items.length){
+              const newCodes = row.TourCode.split(',').map(c=>c.trim()).filter(Boolean);
+              if(newCodes.length >= 1){
+                items.forEach(it => { it.tourcode = newCodes.length===1 ? newCodes[0] : (it.tourcode || newCodes[0]); });
+                changed = true;
+              }
+            }
+            if(changed){
+              const updatedItems = JSON.stringify(items).slice(0,49000);
+              linkedInv.Items = updatedItems;
+              fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+                body:JSON.stringify({action:'save_invoice', data:{InvNumber:_syncInvId, Items:updatedItems, Agency:linkedInv.Agency, PeriodFrom:linkedInv.PeriodFrom, PeriodTo:linkedInv.PeriodTo, GrandTotal:linkedInv.GrandTotal, GST:linkedInv.GST, ExGST:linkedInv.ExGST, Status:linkedInv.Status, IssuedDate:linkedInv.IssuedDate, EmailSentDate:linkedInv.EmailSentDate||'', PaidDate:linkedInv.PaidDate||'', ManualItems:linkedInv.ManualItems||'', Notes:linkedInv.Notes||'', CreatedBy:linkedInv.CreatedBy||''}, _user:getAdminUser()})
+              }).then(r=>r.json()).then(j=>{
+                if(j.ok) console.log('[TxnEdit→Invoice] Items 동기화 완료:', _syncInvId);
+              }).catch(e=>console.warn('[TxnEdit→Invoice] sync error:', e));
+            }
+          } catch(e){ console.warn('[TxnEdit→Invoice] parse error:', e); }
+        }
+      }
+
       toast('✅ 저장 완료','ok');
     } catch(e){ toast('저장 실패: '+e.message,'err'); return; }
 
@@ -5906,12 +5952,14 @@ async function saveInvoiceToSheet() {
       const _allTxnItems = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)]);
       const _txnCodes = [...new Set(_allTxnItems.map(r=>String(r.Tour_Code||'').trim()).filter(Boolean))];
       const txnTourCode = _txnCodes.join(', ');
+      const _txnGuides = [...new Set(_allTxnItems.map(r=>String(r.Guide||'').trim()).filter(Boolean))];
+      const txnGuide = _txnGuides.join(', ');
       const drAmount = roundMoney(grandTotal);
 
       // 중복 체크: 동일 InvoiceID가 이미 있는지 확인
       const existingTxn = (_balAgencyTxns||[]).find(t => String(t.InvoiceID||'').trim() === invNum);
       if (!existingTxn) {
-        const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, StartDate: from, FinishDate: to, DueDate: dueDateStr };
+        const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: from, FinishDate: to, DueDate: dueDateStr };
 
         // ① DR 행: 인보이스 총 청구액
         const drTxn = { ...baseTxn, Type: 'invoice', DR: drAmount, CR: 0,
