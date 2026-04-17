@@ -1702,16 +1702,16 @@ function sendInvoiceEmail(payload) {
     if (cc) options.cc = cc;
     if (replyTo) options.replyTo = replyTo;
 
-    // ★ PDF 첨부: docHtml 우선 (서버사이드 변환), base64는 폴백
+    // ★ PDF 첨부: Google Drive를 이용한 안정적 HTML→PDF 변환
     var pdfError = '';
     if (docHtml) {
       try {
-        var htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
-        var pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
+        var tempFile = DriveApp.createFile(pdfName.replace('.pdf', '.html'), docHtml, MimeType.HTML);
+        var pdfBlob  = tempFile.getAs(MimeType.PDF).setName(pdfName);
+        tempFile.setTrashed(true);
         options.attachments = [pdfBlob];
       } catch (pdfErr) {
-        pdfError = 'docHtml→PDF 실패: ' + pdfErr.toString();
-        // PDF 실패해도 이메일은 발송 (첨부 없이)
+        pdfError = 'DriveApp PDF 변환 실패: ' + pdfErr.toString();
       }
     } else if (pdfBase64) {
       try {
