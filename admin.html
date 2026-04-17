@@ -6442,8 +6442,16 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
   let resendDeductions = [];
   if (savedInv) {
     let _dedJSON = '';
-    Object.keys(savedInv).forEach(k => { const v = String(savedInv[k]||'').trim(); if (v.startsWith('[') && v.indexOf('"type"') >= 0) _dedJSON = v; });
+    // ★ 명시적 Deductions 필드 우선
+    if (savedInv.Deductions && String(savedInv.Deductions).trim().startsWith('[')) {
+      _dedJSON = String(savedInv.Deductions).trim();
+    }
+    // 폴백: 모든 필드 스캔
+    if (!_dedJSON) {
+      Object.keys(savedInv).forEach(k => { const v = String(savedInv[k]||'').trim(); if (v.startsWith('[') && v.indexOf('"type"') >= 0) _dedJSON = v; });
+    }
     if (_dedJSON) { try { resendDeductions = JSON.parse(_dedJSON); } catch(e) { resendDeductions = []; } }
+    console.log('[resendInvoice] Deductions found:', resendDeductions.length, '| grandTotal:', grandTotal);
   }
   const _rsPrepaid = resendDeductions.filter(d=>(d.type==='prepaid')&&d.amount>0).reduce((s,d)=>s+d.amount,0);
   const _rsCredit  = resendDeductions.filter(d=>(d.type==='credit')&&d.amount>0).reduce((s,d)=>s+d.amount,0);
@@ -6504,20 +6512,28 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
   const pdfName = `${invNumber}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   // ③ docHtml을 GAS에 전송 → 서버에서 PDF 변환 후 이메일 발송
+  // ★ HTML 최소화: 불필요한 공백/줄바꿈 제거하여 페이로드 크기 축소
+  const _minHtml = docHtml.replace(/\n\s*/g, '\n').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
+  console.log('[resendInvoice] docHtml:', docHtml.length, '→ minified:', _minHtml.length);
+
   try {
     toast('✉️ 인보이스 발송 중... (PDF 첨부)','ok');
 
+    const _payload = JSON.stringify({
+      action:'send_invoice_email', to:toEmail, subject, body,
+      docHtml: _minHtml, pdfName,
+      senderName: DC_COMPANY.name||'Dong Choi Pty Ltd',
+      replyTo: DC_COMPANY.email||'branden.dongchoi@gmail.com',
+      _user: getAdminUser()
+    });
+    console.log('[resendInvoice] payload size:', _payload.length, 'bytes');
+
     const res = await fetch(APPS_SCRIPT_URL, {
       method:'POST', headers:{'Content-Type':'text/plain'},
-      body: JSON.stringify({
-        action:'send_invoice_email', to:toEmail, subject, body,
-        docHtml, pdfName,
-        senderName: DC_COMPANY.name||'Dong Choi Pty Ltd',
-        replyTo: DC_COMPANY.email||'branden.dongchoi@gmail.com',
-        _user: getAdminUser()
-      })
+      body: _payload
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    console.log('[resendInvoice] HTTP status:', res.status, res.statusText);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
     const json = await res.json();
     if (!json.ok) throw new Error(json.error||'발송 실패');
 
@@ -6537,8 +6553,10 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
     } catch(e2) {}
   } catch (e) {
     console.error('[resendInvoice] Error:', e);
+    console.error('[resendInvoice] docHtml length:', docHtml.length, '| subject:', subject);
     toast(`⚠️ 발송 실패: ${e.message}`,'er');
-    _showDocModal(docHtml);
+    // ★ FIX: sendAction 전달하여 두 번째 미리보기에서도 동일 인보이스 번호 유지
+    _showDocModal(docHtml, {invNumber, agency, from:periodFrom, to:periodTo});
     const s = encodeURIComponent(subject), b = encodeURIComponent(body);
     setTimeout(() => { window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(toEmail)}&su=${s}&body=${b}`, '_blank'); }, 1000);
   }
@@ -7363,6 +7381,8 @@ async function emailInvoice() {
 
   // 인보이스 PDF용 HTML 생성 (★ invNumOverride로 동일 번호 사용)
   const docHtml = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false, invNumOverride:invNum});
+  // ★ HTML 최소화
+  const _minHtml = docHtml.replace(/\n\s*/g, '\n').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
   const pdfName = `${invNum}_${agency.replace(/[^a-zA-Z0-9가-힣]/g,'_')}.pdf`;
 
   const emailBtn = document.querySelector('button[onclick="emailInvoice()"]');
@@ -7380,7 +7400,7 @@ async function emailInvoice() {
         to:         toEmail,
         subject,
         body,
-        docHtml,
+        docHtml: _minHtml,
         pdfName,
         senderName: DC_COMPANY.name || 'Dong Choi Pty Ltd',
         replyTo:    DC_COMPANY.email || 'branden.dongchoi@gmail.com',
@@ -7404,7 +7424,7 @@ async function emailInvoice() {
     // ★ 실패 시 미리보기 열고 Gmail 열기
     try {
       toast('📥 미리보기에서 직접 PDF를 저장 후 Gmail에 첨부하세요', 'ok');
-      _showDocModal(docHtml);
+      _showDocModal(docHtml, {invNumber:invNum, agency, from, to});
     } catch(e2) {}
     const s = encodeURIComponent(subject);
     const b = encodeURIComponent(body);
