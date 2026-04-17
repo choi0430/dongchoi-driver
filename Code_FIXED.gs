@@ -60,7 +60,7 @@ const MASTER_HEADERS = {
   'Notices':    ['ID','Title','Content','Type','Date','Active'],
   'Audit_Log':  ['Timestamp','User','Action','Sheet','RowIndex','Summary'],
   'Invoices':   ['InvNumber','Agency','PeriodFrom','PeriodTo','GrandTotal','GST','ExGST',
-                 'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Notes','CreatedBy'],
+                 'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Deductions','Notes','CreatedBy'],
   // ── 거래처 잔액 관리 ──
   'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','DR','CR','Remark','StartDate','FinishDate','DueDate'],
   'SUB_Txn':    ['RowID','SubCompany','Category','Date','InvoiceNo','Description','DR','CR','Remark'],
@@ -1593,7 +1593,8 @@ function saveInvoice(data) {
 function getInvoices() {
   try {
     const ss    = SpreadsheetApp.openById(SHEET_ID);
-    const sheet = ss.getSheetByName('Invoices');
+    // ★ ensureSheet로 누락 컬럼(Deductions 등) 자동 추가
+    const sheet = ensureSheet(ss, 'Invoices');
     if (!sheet) return { ok: true, rows: [] };
 
     const data = sheet.getDataRange().getValues();
@@ -1702,20 +1703,34 @@ function sendInvoiceEmail(payload) {
     if (replyTo) options.replyTo = replyTo;
 
     // ★ PDF 첨부: docHtml 우선 (서버사이드 변환), base64는 폴백
+    var pdfError = '';
     if (docHtml) {
-      var htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
-      var pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
-      options.attachments = [pdfBlob];
+      try {
+        var htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
+        var pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
+        options.attachments = [pdfBlob];
+      } catch (pdfErr) {
+        pdfError = 'docHtml→PDF 실패: ' + pdfErr.toString();
+        // PDF 실패해도 이메일은 발송 (첨부 없이)
+      }
     } else if (pdfBase64) {
-      var pdfBytes = Utilities.base64Decode(pdfBase64);
-      var pdfBlob2 = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
-      options.attachments = [pdfBlob2];
+      try {
+        var pdfBytes = Utilities.base64Decode(pdfBase64);
+        var pdfBlob2 = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
+        options.attachments = [pdfBlob2];
+      } catch (pdfErr2) {
+        pdfError = 'base64→PDF 실패: ' + pdfErr2.toString();
+      }
+    } else {
+      pdfError = 'docHtml과 pdfBase64 모두 비어있음 (PDF 첨부 불가)';
     }
 
     // GmailApp 우선 시도, 실패 시 MailApp 폴백
+    var sentVia = 'GmailApp';
     try {
       GmailApp.sendEmail(to, subject, body, options);
     } catch (gmailErr) {
+      sentVia = 'MailApp (GmailApp 실패: ' + gmailErr.toString() + ')';
       var mailOpts = {
         to: to,
         subject: subject,
@@ -1728,11 +1743,14 @@ function sendInvoiceEmail(payload) {
       MailApp.sendEmail(mailOpts);
     }
 
-    // 감사 로그
-    appendAuditLog(payload._user, 'send_invoice_email', '—', '—',
-      `인보이스 이메일 발송 (PDF 첨부) → ${to} | ${subject}`);
+    // 감사 로그 (PDF 오류 포함)
+    var logMsg = '인보이스 이메일 발송 → ' + to + ' | ' + subject + ' | via:' + sentVia;
+    if (pdfError) logMsg += ' | PDF오류:' + pdfError;
+    if (options.attachments && options.attachments.length > 0) logMsg += ' | PDF첨부:✅';
+    else logMsg += ' | PDF첨부:❌';
+    appendAuditLog(payload._user, 'send_invoice_email', '—', '—', logMsg.slice(0, 500));
 
-    return { ok: true, to: to };
+    return { ok: true, to: to, pdfAttached: !!(options.attachments && options.attachments.length > 0), pdfError: pdfError || null };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
