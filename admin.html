@@ -7142,7 +7142,8 @@ function previewInvoiceDoc() {
   const invNum = getExistingOrNewInvNum(agency, from);
   _lastGeneratedInvNum = invNum;  _lastGenInvAgency = agency;  _lastGenInvFrom = from;
   const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:true, invNumOverride:invNum});
-  _showDocModal(html, null, invNum + '_' + agency.replace(/[^a-zA-Z0-9가-힣 ]/g,'_').replace(/\s+/g,'_'));
+  // ★ sendAction 전달: 미리보기에서 발송해도 동일 번호 사용 (emailInvoice 대신 resend 아닌 새 발송)
+  _showDocModal(html, {invNumber:invNum, agency, from, to, isNew:true}, invNum + '_' + agency.replace(/[^a-zA-Z0-9가-힣 ]/g,'_').replace(/\s+/g,'_'));
 }
 
 // ─── 인보이스 PDF 다운로드 ───
@@ -7215,7 +7216,7 @@ async function generateInvoice() {
 
   // 미리보기 모달 + PDF 인쇄 (★ invNumOverride로 동일 번호 사용)
   const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false, invNumOverride:invNum});
-  _showDocModal(html, null, invNum + '_' + agency.replace(/[^a-zA-Z0-9가-힣 ]/g,'_').replace(/\s+/g,'_'));
+  _showDocModal(html, {invNumber:invNum, agency, from, to}, invNum + '_' + agency.replace(/[^a-zA-Z0-9가-힣 ]/g,'_').replace(/\s+/g,'_'));
   setTimeout(() => { _downloadInvPdf(); }, 600);
 }
 
@@ -12475,6 +12476,19 @@ function _showDocModal(htmlContent, sendAction, pdfName) {
   }
   overlay.style.display = 'flex';
   document.body.style.overflow = 'hidden';
+
+  // ★ 발송 버튼 텍스트 업데이트: resend vs new
+  const sendBtn = document.getElementById('doc-modal-send-btn');
+  if (sendBtn) {
+    if (sendAction && sendAction.invNumber) {
+      sendBtn.textContent = `✉️ ${sendAction.invNumber} 발송`;
+      sendBtn.style.background = '#0ea5e9';
+    } else {
+      sendBtn.textContent = '✉️ 발송';
+      sendBtn.style.background = '#0ea5e9';
+    }
+  }
+
   const iframe = document.getElementById('doc-preview-iframe');
   const isMobile = window.innerWidth <= 768;
   if (isMobile) {
@@ -12508,10 +12522,23 @@ function _docModalSend() {
   const savedAction = _docModalSendAction ? {..._docModalSendAction} : null;
   // ★ FIX: 미리보기에 표시된 HTML을 그대로 이메일에 사용
   const savedHtml = _docModalPreviewHtml || '';
+
+  console.log('[_docModalSend] savedAction:', JSON.stringify(savedAction));
+  console.log('[_docModalSend] savedHtml length:', savedHtml.length);
+
   _closeDocModal();
+
   if (savedAction && savedAction.invNumber) {
-    resendInvoice(savedAction.invNumber, savedAction.agency, savedAction.from, savedAction.to, savedHtml);
+    console.log('[_docModalSend] → resendInvoice:', savedAction.invNumber);
+    // ★ isNew: 생성 미리보기에서 바로 발송 → emailInvoice 사용 (저장+발송 통합)
+    if (savedAction.isNew) {
+      console.log('[_docModalSend] → emailInvoice (새 인보이스, 번호:', savedAction.invNumber, ')');
+      emailInvoice();
+    } else {
+      resendInvoice(savedAction.invNumber, savedAction.agency, savedAction.from, savedAction.to, savedHtml);
+    }
   } else {
+    console.warn('[_docModalSend] ⚠️ savedAction 없음 → emailInvoice (새 인보이스)');
     emailInvoice();
   }
 }
