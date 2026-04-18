@@ -2857,9 +2857,14 @@ async function saveSubRates(){
 
 async function rSub(){
   await syncSub();
-  // 서브 회사 탭 렌더
-  const subs = Object.keys(DB.PS);
+  // 서브 회사 탭 렌더 — M_SUB 등록 순서 우선, 나머지 알파벳순
+  const msubNames = _subCompanies.filter(s=>s.SubName&&(s.Active||'Y').toUpperCase()!=='N').map(s=>s.SubName);
+  const psKeys = Object.keys(DB.PS);
+  const ordered = [...msubNames];
+  psKeys.forEach(k=>{ if(!ordered.includes(k)) ordered.push(k); });
+  const subs = ordered.filter(k=>DB.PS[k]!==undefined);
   if(!ST.curSub && subs.length>0) ST.curSub = subs[0];
+  if(ST.curSub && !subs.includes(ST.curSub)) ST.curSub = subs[0]||'';
   const tabs = document.getElementById('subCoTabs');
   tabs.innerHTML='';
   subs.forEach(sub=>{
@@ -3857,6 +3862,10 @@ async function saveSubCompany(idx){
       closeGenModal();
       await loadSubCompanies(true);
       renderSubCompanyList();
+      // 요금표 탭 동기화: M_SUB 변경 → DB.PS 갱신 → 탭 리렌더
+      window._psLastSync = 0; // 캐시 무효화
+      await syncSub();
+      if(ST.subTab==='rates') rSub();
     } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
   }catch(e){ showToast('❌ 네트워크 오류','error'); }
 }
@@ -3873,6 +3882,10 @@ async function deleteSubCompany(idx){
       showToast('🗑 삭제 완료','success');
       await loadSubCompanies(true);
       renderSubCompanyList();
+      // 요금표 탭 동기화: 삭제된 업체 DB.PS에서도 제거
+      window._psLastSync = 0;
+      await syncSub();
+      if(ST.subTab==='rates') rSub();
     }
   }catch(e){ showToast('❌ 삭제 실패','error'); }
 }
@@ -10830,7 +10843,23 @@ async function syncPrices(){
 
 async function syncSub(){
   await loadPSFromSheets();
+  // 1) 차량 Owner 기반 (레거시)
   getSubVehicles().forEach(v=>{ if(v.Owner&&!DB.PS[v.Owner]) DB.PS[v.Owner]={}; });
+  // 2) M_SUB 시트 기반 (단일 소스) — M_SUB에 등록된 활성 업체는 DB.PS에 반드시 슬롯 보장
+  const subs = await loadSubCompanies();
+  subs.forEach(s=>{
+    if(!s.SubName) return;
+    if((s.Active||'Y').toUpperCase()==='N') return;
+    if(!DB.PS[s.SubName]) DB.PS[s.SubName]={};
+  });
+  // 3) M_SUB에 없고 차량도 없는 유령 슬롯 제거 (M_SUB가 단일 소스)
+  const subNames = new Set(subs.filter(s=>s.SubName&&(s.Active||'Y').toUpperCase()!=='N').map(s=>s.SubName));
+  const vehOwners = new Set(getSubVehicles().map(v=>v.Owner).filter(Boolean));
+  Object.keys(DB.PS).forEach(key=>{
+    if(!subNames.has(key) && !vehOwners.has(key)){
+      delete DB.PS[key];
+    }
+  });
 }
 
 async function loadAllFromSheets(){
