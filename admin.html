@@ -2106,6 +2106,24 @@ function rDash(){
       }
     });
   }
+  // ── DONG CHOI 차량 기록 완전성 알림 ──
+  const dcSummary = getDCRecordSummary();
+  dcSummary.forEach(({vehicle:v, issues})=>{
+    const errors = issues.filter(i=>i.severity==='error');
+    const warns = issues.filter(i=>i.severity==='warn');
+    const errCount = errors.length;
+    const warnCount = warns.length;
+    const topIssues = issues.slice(0,3).map(i=>i.label).join(', ');
+    const moreCount = issues.length > 3 ? ` 외 ${issues.length-3}건` : '';
+    const isError = errCount > 0;
+    als.push({sort: isError ? -7000 : 7000, type:'dc_record',
+      bg: isError ? '#fef2f2' : '#fffbeb',
+      bc: isError ? '#ef4444' : '#f59e0b',
+      fc: isError ? '#dc2626' : '#92400e',
+      icon: '📋',
+      m: `<b>${v.Rego}</b> — DC 기록 누락 ${errCount>0?'<span style="color:#dc2626;font-weight:700;">필수 '+errCount+'건</span>':''}${errCount>0&&warnCount>0?' / ':''}${warnCount>0?'권장 '+warnCount+'건':''} (${topIssues}${moreCount}) <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="showMissingRecordAlert('${v.Rego}')">상세보기 →</span>`
+    });
+  });
   // ── 피로관리 알림 (Fatigue Compliance Alerts — NHVR Table 2) ──
   if(window._fatigueAlerts && window._fatigueAlerts.length){
     window._fatigueAlerts.forEach(a=>{
@@ -2588,7 +2606,18 @@ async function rV(q=''){
       <div class="mav" style="color:var(--ac);font-size:10px">${v.Rego}</div>
       <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}</div>
         <div class="msb">${(v.Manufacture_Date||v['Manufacture Date'])?((v.Manufacture_Date||v['Manufacture Date'])+'년 · '):''}${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
-        <div class="mtg">${etag(v.Rego_Date,'Rego')}${isHvisVehicle(v)?etag(v.HVIS_Date,'HVIS'):''}${(()=>{
+        <div class="mtg">${(()=>{
+          if(isDCAccredited(v)){
+            const _mis=checkVehicleRecords(v,{checkDrivers:false});
+            if(_mis.length>0){
+              const _errs=_mis.filter(i=>i.severity==='error').length;
+              const _col=_errs>0?'background:#dc2626':'background:#d97706';
+              return '<span class="tag" style="'+_col+';color:white;font-weight:700;cursor:pointer;font-size:10px;" onclick="event.stopPropagation();showMissingRecordAlert(\''+v.Rego+'\')">📋 DC 누락 '+_mis.length+'건</span>';
+            }
+            return '<span class="tag tg" style="font-size:10px;">✅ DC 기록완비</span>';
+          }
+          return '';
+        })()}${etag(v.Rego_Date,'Rego')}${isHvisVehicle(v)?etag(v.HVIS_Date,'HVIS'):''}${(()=>{
           if(!isHvisVehicle(v)) return '';
           const _hbk=getHvisBookings().filter(b=>b.rego===v.Rego).sort((a,b)=>(b.inspDate||'').localeCompare(a.inspDate||''));
           if(_hbk.length>0){const _b=_hbk[0];return '<span class="tag tg" title="'+fmtDate(_b.inspDate)+' '+parseSheetTime(_b.inspTime)+' @ '+(_b.location||'')+'">✅ HVIS Booked</span>';}
@@ -2797,9 +2826,152 @@ function flt(t,v){
 // SUB CONTRACT
 // ═══════════════════════════════════════
 const DC_OWNERS = ['DONG CHOI PTY LTD', null, ''];
+const DC_COMPANY = 'DONG CHOI PTY LTD';
 
 function getSubVehicles(){
   return DB.V.filter(v => !DC_OWNERS.includes(v.Owner));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ACCREDITATION RECORD COMPLETENESS CHECK
+// DONG CHOI PTY LTD 차량 필수 기록 완전성 검사
+// ═══════════════════════════════════════════════════════════════════
+function isDongChoiVehicle(v){
+  return (v.Accreditation||'').trim().toUpperCase() === DC_COMPANY ||
+         DC_OWNERS.includes((v.Owner||'').trim()) && !(v.Owner||'').trim();
+  // Accreditation이 DONG CHOI PTY LTD이거나, Owner가 비어있으면 (회사 차량)
+}
+function isDCAccredited(v){
+  return (v.Accreditation||'').trim().toUpperCase() === DC_COMPANY;
+}
+
+/**
+ * 차량 필수 기록 누락 체크
+ * @param {object} v - 차량 객체 (DB.V item)
+ * @param {object} opts - {checkDrivers:true, checkReports:true}
+ * @returns {Array<{field:string, label:string, severity:'error'|'warn', detail:string}>}
+ */
+function checkVehicleRecords(v, opts={}){
+  if(!isDCAccredited(v)) return [];
+  const missing = [];
+  const isEmpty = val => !val || String(val).trim()==='' || String(val).trim()==='-';
+
+  // ── 1) 차량 기본 정보 ──
+  if(isEmpty(v.VIN))
+    missing.push({field:'VIN', label:'VIN 번호', severity:'error', detail:'차량 식별번호(VIN) 미등록'});
+  if(isEmpty(v.Engine_Number))
+    missing.push({field:'Engine_Number', label:'엔진 번호', severity:'error', detail:'엔진 번호 미등록'});
+  if(isEmpty(v.Manufacture_Date))
+    missing.push({field:'Manufacture_Date', label:'제조연도', severity:'warn', detail:'제조연도 미등록'});
+  if(isEmpty(v.Make))
+    missing.push({field:'Make', label:'제조사', severity:'warn', detail:'제조사(Make) 미등록'});
+  if(isEmpty(v.Model))
+    missing.push({field:'Model', label:'모델', severity:'warn', detail:'모델명 미등록'});
+  if(!v.Capacity || Number(v.Capacity)<=0)
+    missing.push({field:'Capacity', label:'좌석수', severity:'warn', detail:'좌석수 미등록'});
+
+  // ── 2) 보험/등록 만료일 ──
+  if(isEmpty(v.Rego_Date))
+    missing.push({field:'Rego_Date', label:'Rego 만료일', severity:'error', detail:'차량등록(Rego) 만료일 미등록'});
+  if(isHvisVehicle(v) && isEmpty(v.HVIS_Date))
+    missing.push({field:'HVIS_Date', label:'HVIS 만료일', severity:'error', detail:'HVIS 점검 만료일 미등록 (12인승 이상 필수)'});
+
+  // ── 3) 드라이버 매핑 (운행 기록에서 확인) ──
+  if(opts.checkDrivers !== false){
+    const reports = (_drCache||_reportsCache||[]).filter(r=>(r.Rego||'').trim()===v.Rego);
+    if(reports.length > 0){
+      // 최근 운행 드라이버 확인
+      const drivers = [...new Set(reports.map(r=>(r.Driver||r.driver||'').trim()).filter(Boolean))];
+      drivers.forEach(dName=>{
+        const dRec = (DB.D||[]).find(d=>d.Name_EN===dName || d.Name_KR===dName);
+        if(!dRec){
+          missing.push({field:'Driver_'+dName, label:'드라이버 정보', severity:'warn',
+            detail:`운행 드라이버 "${dName}" 가 마스터에 미등록`});
+        } else {
+          if(isEmpty(dRec.License_No))
+            missing.push({field:'Driver_License_'+dName, label:'드라이버 면허', severity:'error',
+              detail:`${dRec.Name_KR||dRec.Name_EN} — 면허번호 미등록`});
+          if(isEmpty(dRec.License_Expiry))
+            missing.push({field:'Driver_LicExp_'+dName, label:'드라이버 면허만료', severity:'error',
+              detail:`${dRec.Name_KR||dRec.Name_EN} — 면허 만료일 미등록`});
+          if(isEmpty(dRec.Authority_No))
+            missing.push({field:'Driver_Auth_'+dName, label:'드라이버 인가', severity:'warn',
+              detail:`${dRec.Name_KR||dRec.Name_EN} — Authority 번호 미등록`});
+          if(isEmpty(dRec.Authority_Expiry))
+            missing.push({field:'Driver_AuthExp_'+dName, label:'드라이버 인가만료', severity:'warn',
+              detail:`${dRec.Name_KR||dRec.Name_EN} — Authority 만료일 미등록`});
+        }
+      });
+    } else {
+      missing.push({field:'No_Reports', label:'운행기록 없음', severity:'warn',
+        detail:'이 차량의 Daily Report가 없습니다'});
+    }
+  }
+
+  return missing;
+}
+
+/** DONG CHOI 전체 차량의 기록 미비 요약 */
+function getDCRecordSummary(){
+  const dcVehicles = DB.V.filter(v=>isDCAccredited(v));
+  const result = [];
+  dcVehicles.forEach(v=>{
+    const issues = checkVehicleRecords(v, {checkDrivers:true});
+    if(issues.length > 0){
+      result.push({vehicle:v, issues});
+    }
+  });
+  return result;
+}
+
+/** Missing 기록 경고 팝업 (차량 선택 시) */
+function showMissingRecordAlert(rego){
+  const v = (DB.V||[]).find(x=>x.Rego===rego);
+  if(!v || !isDCAccredited(v)) return true; // 회사 차량 아니면 통과
+  const issues = checkVehicleRecords(v, {checkDrivers:true});
+  if(!issues.length) return true; // 문제 없으면 통과
+
+  const errors = issues.filter(i=>i.severity==='error');
+  const warns = issues.filter(i=>i.severity==='warn');
+
+  let html = '<div style="max-height:400px;overflow-y:auto;">';
+  html += '<div style="text-align:center;margin-bottom:12px;">';
+  html += '<div style="font-size:32px;margin-bottom:4px;">⚠️</div>';
+  html += '<div style="font-size:15px;font-weight:700;color:#dc2626;">기록 누락 경고</div>';
+  html += '<div style="font-size:12px;color:var(--t3);margin-top:2px;">'+rego+' — DONG CHOI PTY LTD Accreditation</div>';
+  html += '</div>';
+
+  if(errors.length){
+    html += '<div style="font-size:11px;font-weight:700;color:#dc2626;margin:8px 0 4px;">🔴 필수 누락 ('+errors.length+'건)</div>';
+    errors.forEach(e=>{
+      html += '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;margin-bottom:4px;font-size:12px;color:#991b1b;">'+e.detail+'</div>';
+    });
+  }
+  if(warns.length){
+    html += '<div style="font-size:11px;font-weight:700;color:#d97706;margin:8px 0 4px;">🟡 권장 항목 ('+warns.length+'건)</div>';
+    warns.forEach(w=>{
+      html += '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-bottom:4px;font-size:12px;color:#92400e;">'+w.detail+'</div>';
+    });
+  }
+
+  html += '<div style="margin-top:12px;font-size:11px;color:var(--t3);text-align:center;">차량 관리에서 누락 정보를 입력해주세요</div>';
+  html += '</div>';
+
+  // 모달 표시
+  const overlay = document.createElement('div');
+  overlay.id = 'dc-missing-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:white;border-radius:16px;padding:20px;max-width:420px;width:90%;box-shadow:0 20px 40px rgba(0,0,0,.2);';
+  box.innerHTML = html +
+    '<div style="display:flex;gap:8px;margin-top:14px;">'+
+    '<button onclick="document.getElementById(\'dc-missing-overlay\').remove()" class="btn brd" style="flex:1;">닫기</button>'+
+    '<button onclick="document.getElementById(\'dc-missing-overlay\').remove();nv(\'pveh\',\'nveh\')" class="btn bac" style="flex:1;">차량 관리로 이동</button>'+
+    '</div>';
+  overlay.appendChild(box);
+  overlay.addEventListener('click',e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  return false; // 누락 있음
 }
 
 function getSubRates(){
@@ -4233,6 +4405,22 @@ async function generateSubInvoice(){
   if(!agency || !subName){ showToast('SUB 업체와 여행사를 선택하세요','error'); return; }
   const items = getSubInvItems().filter(i=>i.total>0);
   if(!items.length){ showToast('항목을 입력하세요','error'); return; }
+
+  // ── DC Accreditation 기록 완전성 체크 ──
+  const _sInvRegos = [...new Set(items.map(i=>(i.rego||'').trim()).filter(Boolean))];
+  const _sDcMissing = [];
+  _sInvRegos.forEach(rego=>{
+    const v = (DB.V||[]).find(x=>x.Rego===rego);
+    if(v && isDCAccredited(v)){
+      const iss = checkVehicleRecords(v, {checkDrivers:true});
+      if(iss.length) _sDcMissing.push({rego, issues:iss});
+    }
+  });
+  if(_sDcMissing.length > 0){
+    const _mList = _sDcMissing.map(m=>'• '+m.rego+': '+m.issues.map(i=>i.label).join(', ')).join('\n');
+    if(!confirm('⚠️ DC Accreditation 차량 기록 누락\n\n'+_mList+'\n\n누락된 정보가 있지만 인보이스를 계속 생성하시겠습니까?')) return;
+  }
+
   const exGst = items.reduce((s,i)=>s+i.total,0);
   const gst = Math.round(exGst*0.1*100)/100;
   const grandTotal = exGst + gst;
@@ -7881,6 +8069,21 @@ async function generateInvoice() {
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
   if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
 
+  // ── DC Accreditation 기록 완전성 체크 ──
+  const _invRegos = [...new Set(rows.map(r=>(r.Rego||r.rego||'').trim()).filter(Boolean))];
+  const _dcMissing = [];
+  _invRegos.forEach(rego=>{
+    const v = (DB.V||[]).find(x=>x.Rego===rego);
+    if(v && isDCAccredited(v)){
+      const issues = checkVehicleRecords(v, {checkDrivers:true});
+      if(issues.length) _dcMissing.push({rego, issues});
+    }
+  });
+  if(_dcMissing.length > 0){
+    const _mList = _dcMissing.map(m=>'• '+m.rego+': '+m.issues.map(i=>i.label).join(', ')).join('\n');
+    if(!confirm('⚠️ DC Accreditation 차량 기록 누락\n\n'+_mList+'\n\n누락된 정보가 있지만 인보이스를 계속 생성하시겠습니까?')) return;
+  }
+
   // 이력 로드 (인보이스 번호 중복 방지용)
   if (!_invHistoryCache) {
     try {
@@ -10068,6 +10271,20 @@ function openView(type, idx) {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🔢 식별 번호</div>`;
     html += row2A([['VIN', d.VIN], ['Engine No.', engNum]]);
     html += rowA('Accreditation', d.Accreditation);
+
+    // DC 기록 완전성 상태
+    if(isDCAccredited(d)){
+      const _vIssues = checkVehicleRecords(d, {checkDrivers:true});
+      if(_vIssues.length > 0){
+        const _errs = _vIssues.filter(i=>i.severity==='error');
+        const _warns = _vIssues.filter(i=>i.severity==='warn');
+        html += '<div style="font-size:11px;font-weight:700;color:#dc2626;letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">⚠️ DC 기록 누락 ('+_vIssues.length+'건)</div>';
+        _errs.forEach(e=>{ html += '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:5px 10px;margin-bottom:3px;font-size:11px;color:#991b1b;">🔴 '+e.detail+'</div>'; });
+        _warns.forEach(w=>{ html += '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:5px 10px;margin-bottom:3px;font-size:11px;color:#92400e;">🟡 '+w.detail+'</div>'; });
+      } else {
+        html += '<div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:12px;color:#065f46;font-weight:600;text-align:center;">✅ DC Accreditation — 기록 완비</div>';
+      }
+    }
 
   } else if(type === 'C') {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🏢 여행사 정보</div>`;
