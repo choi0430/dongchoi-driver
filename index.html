@@ -7637,6 +7637,13 @@ function toLocalISO(d){
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+dd;
 }
+// ── SUB 차량 판별 헬퍼 ──
+function getSubOwnerForRego(rego){
+  if(!rego) return '';
+  const v = (MASTER.vehicles||[]).find(x=>x.Rego===rego.trim());
+  return v ? (v.SubOwner||'').trim() : '';
+}
+
 function getWeekKey(dateStr){
   // dateStr: "dd/mm/yyyy"
   const parts = dateStr.split('/');
@@ -7954,12 +7961,12 @@ async function renderPay(){
   console.log('[renderPay v3] weekMap keys:', Object.keys(weekMap));
   console.log('[renderPay v3] weeks have .key?:', weeks.map(w=>w.key));
 
-  // ── 미지급 배지 계산
+  // ── 미지급 배지 계산 (회사 지급 대상 = 자사 차량 운행분만)
   let totalUnpaid=0;
   weeks.forEach(wk=>{
-    const net  = wk.reports.reduce((s,r)=>s+(r.dr||0),0);
+    const ownNet = wk.reports.filter(r=>!getSubOwnerForRego(r.rego)).reduce((s,r)=>s+(r.dr||0),0);
     const paid = (_wagesByWkKey[wk.key]||[]).reduce((s,e)=>s+(Number(e.amount)||0),0);
-    totalUnpaid += Math.max(0, net-paid);
+    totalUnpaid += Math.max(0, ownNet-paid);
   });
   const badge = document.getElementById('pay-unpaid-badge');
   if(badge){
@@ -7977,11 +7984,19 @@ async function renderPay(){
 
   el.innerHTML='';
   weeks.forEach(wk=>{
+    // ── SUB / 자사 분리 ──
+    const ownReports = wk.reports.filter(r=>!getSubOwnerForRego(r.rego));
+    const subReports = wk.reports.filter(r=>!!getSubOwnerForRego(r.rego));
+    const subGroups = {};
+    subReports.forEach(r=>{ const sn=getSubOwnerForRego(r.rego); if(!subGroups[sn]) subGroups[sn]={name:sn,total:0,count:0}; subGroups[sn].total+=(r.dr||0); subGroups[sn].count++; });
+
     const trips  = wk.reports.length;
     const days   = [...new Set(wk.reports.map(r=>r.date))].length;
     const drTotal       = wk.reports.reduce((s,r)=>s+(r.dr||0),0);
+    const ownDRTotal    = ownReports.reduce((s,r)=>s+(r.dr||0),0);
+    const subDRTotal    = subReports.reduce((s,r)=>s+(r.dr||0),0);
     const ownerTotal    = wk.reports.reduce((s,r)=>s+(r.nightOwner||0),0);
-    const netPay        = drTotal;  // DR_Cost는 이미 야경납입 차감 후 저장됨 → 이중 차감 방지
+    const netPay        = ownDRTotal;  // 회사 지급 대상 = 자사 차량 운행분만
     const otTotal       = wk.reports.reduce((s,r)=>s+(r.ot||0),0);
     const hotelTotal    = wk.reports.reduce((s,r)=>s+(r.hotelSurcharge||0),0);
     const distTotal     = wk.reports.reduce((s,r)=>s+(r.distSurcharge||0),0);
@@ -8040,6 +8055,9 @@ async function renderPay(){
 
     const card = document.createElement('div');
     card.className = 'pay-week-card';
+    const subGroupArr = Object.values(subGroups).sort((a,b)=>b.total-a.total);
+    const subBadgesHtml = subGroupArr.map(sg=>`<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">SUB·${sg.name} $${sg.total.toLocaleString()} (${sg.count}건)</span>`).join(' ');
+
     card.innerHTML = `
       <div class="pay-week-top">
         <div>
@@ -8053,10 +8071,25 @@ async function renderPay(){
           </div>
         </div>
       </div>
+      ${subDRTotal > 0 ? `<div style="background:var(--surface2);border-radius:10px;padding:10px 12px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-size:11px;font-weight:700;color:var(--text);">🏢 회사 지급 (Company Pay)</span>
+          <span style="font-size:14px;font-weight:800;color:var(--accent);">$${ownDRTotal.toLocaleString()}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:11px;font-weight:700;color:#7c3aed;">🤝 SUB 지급 (SUB Pay)</span>
+          <span style="font-size:14px;font-weight:800;color:#7c3aed;">$${subDRTotal.toLocaleString()}</span>
+        </div>
+        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${subBadgesHtml}</div>
+        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:10px;color:var(--muted);">총 수당 합계 (Total)</span>
+          <span style="font-size:13px;font-weight:800;color:var(--text);">$${drTotal.toLocaleString()}</span>
+        </div>
+      </div>` : ''}
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:${items.length?'10px':'0'};">
         <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center;">
-          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">Earned (발생 수당)</div>
-          <div style="font-size:14px;font-weight:800;color:#16a34a;">$${drTotal.toLocaleString()}</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">${subDRTotal>0?'회사분 수당':'Earned (발생 수당)'}</div>
+          <div style="font-size:14px;font-weight:800;color:#16a34a;">$${ownDRTotal.toLocaleString()}</div>
         </div>
         <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center;">
           <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">Paid (지급됨)</div>
@@ -8104,8 +8137,12 @@ function showPayDetail(wk){
 
   let html='';
   const drGrand = sorted.reduce((s,r)=>s+(r.dr||0),0);
+  const ownSorted = sorted.filter(r=>!getSubOwnerForRego(r.rego));
+  const subSorted = sorted.filter(r=>!!getSubOwnerForRego(r.rego));
+  const ownDRGrand = ownSorted.reduce((s,r)=>s+(r.dr||0),0);
+  const subDRGrand = subSorted.reduce((s,r)=>s+(r.dr||0),0);
   const ownerGrand = sorted.reduce((s,r)=>s+(r.nightOwner||0),0);
-  const netGrand = drGrand;  // DR_Cost는 이미 야경납입 차감 후 저장됨 → 이중 차감 방지
+  const netGrand = ownDRGrand;  // 회사 지급 대상 = 자사 차량분만
 
   // 항목별 합계
   const otGrand    = sorted.reduce((s,r)=>s+(r.ot||0),0);
@@ -8160,12 +8197,31 @@ function showPayDetail(wk){
     ownerGrand>0 && {label:'회사 납입 차감', val:-ownerGrand, color:'rgba(255,150,150,.9)'},
   ].filter(Boolean).filter(i=>i.val!==0);
 
+  // SUB별 그룹
+  const detailSubGrp = {};
+  subSorted.forEach(r=>{ const sn=getSubOwnerForRego(r.rego); if(!detailSubGrp[sn]) detailSubGrp[sn]={name:sn,total:0,count:0}; detailSubGrp[sn].total+=(r.dr||0); detailSubGrp[sn].count++; });
+  const detailSubArr = Object.values(detailSubGrp).sort((a,b)=>b.total-a.total);
+
   html+=`<div style="background:linear-gradient(135deg,var(--accent),#6d28d9);border-radius:16px;margin:0 12px 14px;padding:18px;">
-    <div style="color:rgba(255,255,255,.7);font-size:11px;font-weight:700;margin-bottom:4px;">Weekly Net Pay (이번 주 실수령 합계)</div>
+    <div style="color:rgba(255,255,255,.7);font-size:11px;font-weight:700;margin-bottom:4px;">${subDRGrand>0?'회사 지급분 (Company Pay)':'Weekly Net Pay (이번 주 실수령 합계)'}</div>
     <div style="color:white;font-size:32px;font-weight:800;letter-spacing:-1px;">$${netGrand.toLocaleString()}</div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
       <span style="font-size:12px;font-weight:700;color:${isAllPaid?'#86efac':'#fcd34d'};">${isAllPaid?'✅ Fully Paid (전액 지급완료)':'⏳ Unpaid (미지급) $'+Math.round(finalBalance)}</span>
     </div>
+    ${subDRGrand>0?`<div style="border-top:1px solid rgba(255,255,255,.15);margin-top:10px;padding-top:10px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span style="font-size:11px;color:rgba(255,255,255,.6);">🤝 SUB 지급분 (SUB에서 별도 수령)</span>
+        <span style="font-size:13px;font-weight:800;color:#c4b5fd;">$${subDRGrand.toLocaleString()}</span>
+      </div>
+      ${detailSubArr.map(sg=>`<div style="display:flex;justify-content:space-between;padding:2px 0;">
+        <span style="font-size:10px;color:rgba(255,255,255,.5);">　SUB·${sg.name} (${sg.count}건)</span>
+        <span style="font-size:11px;font-weight:700;color:#c4b5fd;">$${sg.total.toLocaleString()}</span>
+      </div>`).join('')}
+      <div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.1);">
+        <span style="font-size:11px;color:rgba(255,255,255,.6);">총 수당 합계</span>
+        <span style="font-size:13px;font-weight:800;color:white;">$${drGrand.toLocaleString()}</span>
+      </div>
+    </div>`:''}
     <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:12px;padding-top:10px;display:flex;flex-direction:column;gap:5px;">
       ${breakItems.map(i=>`
         <div style="display:flex;justify-content:space-between;">
@@ -8251,10 +8307,11 @@ function showPayDetail(wk){
 
       const netDr = (r.dr||0);  // DR_Cost는 이미 야경납입 차감 후 저장됨
 
-      html+=`<div class="pay-report-row">
+      const _rSub = getSubOwnerForRego(r.rego);
+      html+=`<div class="pay-report-row" ${_rSub?'style="border-left:3px solid #7c3aed;"':''}>
         <div class="pay-report-row-top">
           <div>
-            <div class="pay-report-agency">${r.agency||'—'}</div>
+            <div class="pay-report-agency">${r.agency||'—'}${_rSub?' <span style="background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;margin-left:4px;">SUB·'+_rSub+'</span>':''}</div>
             <div class="pay-report-attr">${r.attraction||''} ${r.rego?'· '+r.rego:''}${r.seats?' · <span style="background:var(--surface3,rgba(255,255,255,.1));border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;">'+r.seats+'</span>':''}</div>
             ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">⏱ '+parseSheetTime(r.timeStart)+' – '+parseSheetTime(r.timeEnd||'')+(calcDuration(r.timeStart,r.timeEnd)?'<span style="margin-left:6px;background:var(--surface3,rgba(255,255,255,.1));border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;">'+calcDuration(r.timeStart,r.timeEnd)+'</span>':'')+'</div>':''}
             ${(r.kmStart||r.kmEnd)?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">🛣 '+(r.kmStart?r.kmStart+' km':'—')+' → '+(r.kmEnd?r.kmEnd+' km':'—')+(r.kmStart&&r.kmEnd&&parseInt(r.kmEnd)-parseInt(r.kmStart)>0?' <span style="margin-left:4px;background:rgba(14,159,110,.15);border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;color:var(--green);">+'+( parseInt(r.kmEnd)-parseInt(r.kmStart) ).toLocaleString()+' km</span>':'')+'</div>':''}

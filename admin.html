@@ -9244,14 +9244,38 @@ async function renderWage(){
   const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
   const weekReports = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
 
-  // ★ DR_Cost는 이미 Night_Owner 차감 후 저장됨 → 이중 차감 방지
-  const drTotal = weekReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
-  const surcharges = _calcWeekSurcharges(weekReports);
+  // ── SUB / 자사 차량 분리 ──
+  const _vehs = DB.V||[];
+  const _subMapW = {}; _vehs.forEach(v=>{ const so=(v.SubOwner||'').trim(); if(so) _subMapW[v.Rego]=so; });
+  const ownReports = weekReports.filter(r=>!_subMapW[(r.Rego||'').trim()]);
+  const subReports = weekReports.filter(r=>!!_subMapW[(r.Rego||'').trim()]);
+  const subGroups = {};
+  subReports.forEach(r=>{ const sn=_subMapW[(r.Rego||'').trim()]; if(!subGroups[sn]) subGroups[sn]={name:sn,total:0,count:0}; subGroups[sn].total+=_calcDRFromReport(r); subGroups[sn].count++; });
+
+  // ★ 회사 지급 대상 = 자사 차량 운행분만
+  const drTotal = ownReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
+  const subDRTotal = subReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
+  const surcharges = _calcWeekSurcharges(ownReports);
   const totalPaid = entries.reduce((s,e)=>s+(e.amount||0),0);
 
   // 보라색 그라디언트 요약 카드 (드라이버 앱 스타일)
-  if(sumEl) sumEl.innerHTML =
-    _weekSummaryCard(escH(ST.wageDriver)+' — '+getWeekLabel(ST.wageWeek), drTotal, surcharges, totalPaid, weekReports.length);
+  if(sumEl){
+    let sumHtml = _weekSummaryCard(escH(ST.wageDriver)+' — '+getWeekLabel(ST.wageWeek), drTotal, surcharges, totalPaid, ownReports.length);
+    if(subDRTotal > 0){
+      const subLines = Object.values(subGroups).sort((a,b)=>b.total-a.total).map(sg=>
+        `<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="font-size:11px;color:var(--t3);">SUB·${escH(sg.name)} (${sg.count}건)</span><span style="font-size:12px;font-weight:700;color:#7c3aed;">$${sg.total.toLocaleString()}</span></div>`
+      ).join('');
+      sumHtml += `<div style="background:linear-gradient(135deg,#ede9fe,#f3e8ff);border:1.5px solid #c4b5fd;border-radius:12px;padding:12px 14px;margin-top:8px;">
+        <div style="font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:6px;">🤝 SUB 차량 운행분 (회사 지급 대상 아님 — SUB에서 별도 지급)</div>
+        ${subLines}
+        <div style="border-top:1px solid #c4b5fd;margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;">
+          <span style="font-size:11px;font-weight:700;color:#6d28d9;">SUB 합계</span>
+          <span style="font-size:14px;font-weight:800;color:#6d28d9;">$${subDRTotal.toLocaleString()}</span>
+        </div>
+      </div>`;
+    }
+    sumEl.innerHTML = sumHtml;
+  }
 
   // 리포트 상세 + 지급 내역
   const listEl = document.getElementById('wage-list');
@@ -9259,10 +9283,14 @@ async function renderWage(){
 
   let html = '';
 
-  // 리포트 내역
-  if(weekReports.length > 0){
-    html += '<div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:6px;">📋 리포트 내역</div>';
-    weekReports.forEach(r=>{ html += _reportRow(r); });
+  // 리포트 내역 (자사 / SUB 분리)
+  if(ownReports.length > 0){
+    html += '<div style="font-size:11px;font-weight:700;color:var(--t3);margin-bottom:6px;">📋 회사 차량 리포트 ('+ownReports.length+'건 · 지급 대상)</div>';
+    ownReports.forEach(r=>{ html += _reportRow(r); });
+  }
+  if(subReports.length > 0){
+    html += '<div style="font-size:11px;font-weight:700;color:#7c3aed;margin:10px 0 6px;">🤝 SUB 차량 리포트 ('+subReports.length+'건 · 회사 지급 제외)</div>';
+    subReports.forEach(r=>{ html += _reportRow(r); });
   }
 
   // 지급 내역
@@ -9447,10 +9475,11 @@ function _reportRow(r){
   if(r.Fuel_Personal==='Y'&&(parseFloat(r.Fuel)||0)>0) surItems.push({l:'연료',v:parseFloat(r.Fuel),c:'#78716c'});
 
   const dateStr = fd(r._iso||r.Date||'');
-  return '<div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:6px;">'+
+  const _rwSub = (()=>{ const v=(DB.V||[]).find(x=>x.Rego===(r.Rego||'').trim()); return v?(v.SubOwner||'').trim():''; })();
+  return '<div style="background:'+(_rwSub?'#f5f3ff':'var(--sf2)')+';border-radius:10px;padding:10px 12px;margin-bottom:6px;'+(_rwSub?'border-left:3px solid #7c3aed;':'')+'">'+
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'+
       '<div style="flex:1;min-width:0;">'+
-        (dateStr?'<div style="display:inline-block;background:#1e40af;color:#fff;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;margin-bottom:4px;letter-spacing:.3px;">📅 '+escH(dateStr)+'</div>':'')+
+        (dateStr?'<div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="background:#1e40af;color:#fff;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;letter-spacing:.3px;">📅 '+escH(dateStr)+'</span>'+(_rwSub?'<span style="background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;">SUB·'+escH(_rwSub)+'</span>':'')+'</div>':'')+
         '<div style="font-size:12px;font-weight:700;color:var(--t1);">'+escH(r.Agency||'')+' <span style="color:var(--t3);font-weight:400;">·</span> '+escH(r.Attraction||'')+'</div>'+
         '<div style="font-size:10px;color:var(--t3);margin-top:2px;">'+escH(r.Rego||'')+(r.Seats?' · '+escH(r.Seats):'')+'</div>'+
         (timeStr?'<div style="font-size:10px;color:var(--ac);margin-top:1px;">⏱ '+timeStr+'</div>':'')+
@@ -9506,28 +9535,44 @@ async function renderWageAll(){
     _normWageEntries[mon].push(...(data.entries||[]));
   });
 
+  // ── SUB 차량 매핑 ──
+  const _vehsAll = DB.V||[];
+  const _subMapAll = {}; _vehsAll.forEach(v=>{ const so=(v.SubOwner||'').trim(); if(so) _subMapAll[v.Rego]=so; });
+
   // ★ DR_Cost는 이미 Night_Owner 차감 후 저장됨 → 이중 차감 방지
-  let grandDR=0, grandPaid=0, grandReports=0;
+  let grandDR=0, grandPaid=0, grandReports=0, grandSubDR=0;
   const grandSur={ot:0,hotel:0,dist:0,early:0,wash:0,meal:0,night:0,trailer:0,tip:0,toll:0,fuel:0,etc:0,owner:0};
   const weekData = weeks.map(wk=>{
     const mon=wk;
     const sunD=new Date(wk+'T00:00:00'); sunD.setDate(sunD.getDate()+6);
     const sun=toLocalISO(sunD);
     const wReports=rows.filter(r=>matchNames.has(String(r.Driver||'').trim())&&r._isoDate>=mon&&r._isoDate<=sun);
-    const drTotal=wReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
-    const sur=_calcWeekSurcharges(wReports);
+    const wOwnReports = wReports.filter(r=>!_subMapAll[(r.Rego||'').trim()]);
+    const wSubReports = wReports.filter(r=>!!_subMapAll[(r.Rego||'').trim()]);
+    const drTotal=wOwnReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
+    const subDR=wSubReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
+    const sur=_calcWeekSurcharges(wOwnReports);
     const entries=_normWageEntries[wk]||[];
     const paid=entries.reduce((s,e)=>s+(e.amount||0),0);
-    grandDR+=drTotal; grandPaid+=paid; grandReports+=wReports.length;
+    grandDR+=drTotal; grandPaid+=paid; grandReports+=wOwnReports.length; grandSubDR+=subDR;
     Object.keys(grandSur).forEach(k=>grandSur[k]+=sur[k]);
-    return {wk,wReports,drTotal,sur,entries,paid};
+    return {wk,wReports,wOwnReports,wSubReports,drTotal,subDR,sur,entries,paid};
   });
 
   const sumEl=document.getElementById('wage-summary');
-  if(sumEl) sumEl.innerHTML = _weekSummaryCard(
-    escH(ST.wageDriver)+' — 전체 기간 ('+weeks.length+'주)',
-    grandDR, grandSur, grandPaid, grandReports
-  );
+  if(sumEl){
+    let sumH = _weekSummaryCard(
+      escH(ST.wageDriver)+' — 전체 기간 ('+weeks.length+'주)',
+      grandDR, grandSur, grandPaid, grandReports
+    );
+    if(grandSubDR > 0){
+      sumH += `<div style="background:linear-gradient(135deg,#ede9fe,#f3e8ff);border:1.5px solid #c4b5fd;border-radius:12px;padding:12px 14px;margin-top:8px;">
+        <div style="font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:4px;">🤝 SUB 차량 운행 전체 합계 (회사 지급 제외)</div>
+        <div style="font-size:18px;font-weight:800;color:#6d28d9;">$${grandSubDR.toLocaleString()}</div>
+      </div>`;
+    }
+    sumEl.innerHTML = sumH;
+  }
 
   const listEl=document.getElementById('wage-list');
   if(!listEl) return;
@@ -9543,16 +9588,23 @@ async function renderWageAll(){
     // ── 주간 요약 카드 (클릭하면 접기/펼치기) ──
     html += '<div style="cursor:pointer;" onclick="document.getElementById(\''+detailId+'\').style.display=document.getElementById(\''+detailId+'\').style.display===\'none\'?\'block\':\'none\';this.querySelector(\'.wk-arrow\').textContent=document.getElementById(\''+detailId+'\').style.display===\'none\'?\'▶\':\'▼\'">';
     html += _weekSummaryCard(
-      '<span class="wk-arrow" style="font-size:11px;margin-right:4px;">▶</span>'+getWeekLabel(wd.wk),
-      wd.drTotal, wd.sur, wd.paid, wd.wReports.length
+      '<span class="wk-arrow" style="font-size:11px;margin-right:4px;">▶</span>'+getWeekLabel(wd.wk)+(wd.subDR>0?' <span style="background:#7c3aed;color:white;font-size:9px;padding:1px 6px;border-radius:6px;">SUB $'+wd.subDR.toLocaleString()+'</span>':''),
+      wd.drTotal, wd.sur, wd.paid, wd.wOwnReports.length
     );
     html += '</div>';
 
     // ── 접히는 상세 영역 (기본 접힘) ──
     html += '<div id="'+detailId+'" style="display:none;">';
 
-    // 리포트 상세
-    wd.wReports.forEach(r=>{ html += _reportRow(r); });
+    // 리포트 상세 (자사 / SUB 분리)
+    if(wd.wOwnReports.length > 0){
+      html += '<div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:4px;">📋 회사 차량 ('+wd.wOwnReports.length+'건)</div>';
+      wd.wOwnReports.forEach(r=>{ html += _reportRow(r); });
+    }
+    if(wd.wSubReports.length > 0){
+      html += '<div style="font-size:10px;font-weight:700;color:#7c3aed;margin:8px 0 4px;">🤝 SUB 차량 ('+wd.wSubReports.length+'건 · $'+wd.subDR.toLocaleString()+' — 회사 지급 제외)</div>';
+      wd.wSubReports.forEach(r=>{ html += _reportRow(r); });
+    }
 
     // 지급 내역 + 추가 버튼
     html+='<div style="background:var(--sf2);border-radius:10px;padding:10px 12px;margin-bottom:10px;">';
