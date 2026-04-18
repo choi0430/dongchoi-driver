@@ -3965,6 +3965,7 @@ function renderSubDriverPay(){
     const drivers = _sdpData[sub];
     const driverNames = Object.keys(drivers).sort();
     const subTotal = driverNames.reduce((s,d)=>s+drivers[d].total,0);
+    const subTATotal = driverNames.reduce((s,d)=>s+drivers[d].taTotal,0);
     const subNightOwner = driverNames.reduce((s,d)=>s+drivers[d].nightOwnerTotal,0);
     const subCount = driverNames.reduce((s,d)=>s+drivers[d].count,0);
     html += `<div class="crd" style="padding:0;margin-bottom:12px;overflow:hidden;">
@@ -3975,12 +3976,14 @@ function renderSubDriverPay(){
             <div style="font-size:11px;opacity:.8;">${subCount}건 | 드라이버 ${driverNames.length}명</div>
           </div>
           <div style="text-align:right;">
-            <div style="font-size:10px;opacity:.7;">드라이버 지급 합계</div>
+            <div style="font-size:10px;opacity:.7;">여행사 청구 (TA)</div>
+            <div style="font-size:14px;font-weight:700;">$${subTATotal.toLocaleString()}</div>
+            <div style="font-size:10px;opacity:.7;margin-top:2px;">드라이버 지급 합계</div>
             <div style="font-size:18px;font-weight:800;">$${subTotal.toLocaleString()}</div>
           </div>
         </div>
         ${subNightOwner > 0 ? `<div style="border-top:1px solid rgba(255,255,255,.2);margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;align-items:center;">
-          <div style="font-size:11px;opacity:.8;">🌃 야경 차주 납입금</div>
+          <div style="font-size:11px;opacity:.8;">🌃 야경 차주 납입금 (SUB 수익)</div>
           <div style="font-size:14px;font-weight:800;color:#fcd34d;">+$${subNightOwner.toLocaleString()}</div>
         </div>` : ''}
       </div>`;
@@ -4006,6 +4009,7 @@ function renderSubDriverPay(){
               <th style="padding:4px 6px;text-align:left;">여행사</th>
               <th style="padding:4px 6px;text-align:left;">코스</th>
               <th style="padding:4px 6px;text-align:left;">투어코드</th>
+              <th style="padding:4px 6px;text-align:right;">TA</th>
               <th style="padding:4px 6px;text-align:right;">DR지급</th>
               <th style="padding:4px 6px;text-align:right;">야경납입</th>
             </tr></thead>
@@ -4015,11 +4019,13 @@ function renderSubDriverPay(){
               <td style="padding:3px 6px;">${it.agency}</td>
               <td style="padding:3px 6px;">${it.attraction}</td>
               <td style="padding:3px 6px;">${it.tourCode}</td>
+              <td style="padding:3px 6px;text-align:right;">$${it.ta}</td>
               <td style="padding:3px 6px;text-align:right;font-weight:700;color:var(--ac);">$${it.drCost}</td>
               <td style="padding:3px 6px;text-align:right;${it.nightOwner>0?'font-weight:700;color:#7c3aed;':'color:var(--t3);'}">${it.nightOwner>0?'+$'+it.nightOwner:'—'}</td>
             </tr>`).join('')}
             <tr style="background:var(--sf2,#f8f9fa);font-weight:700;">
               <td colspan="5" style="padding:4px 6px;">합계</td>
+              <td style="padding:4px 6px;text-align:right;">$${d.taTotal.toLocaleString()}</td>
               <td style="padding:4px 6px;text-align:right;color:var(--ac);">$${d.total.toLocaleString()}</td>
               <td style="padding:4px 6px;text-align:right;color:#7c3aed;">${d.nightOwnerTotal>0?'+$'+d.nightOwnerTotal.toLocaleString():'—'}</td>
             </tr></tbody>
@@ -4031,13 +4037,18 @@ function renderSubDriverPay(){
   });
   // 전체 합계
   const grandDR = subs.reduce((s,sub)=>s+Object.values(_sdpData[sub]).reduce((ss,d)=>ss+d.total,0),0);
+  const grandTA = subs.reduce((s,sub)=>s+Object.values(_sdpData[sub]).reduce((ss,d)=>ss+d.taTotal,0),0);
   const grandNO = subs.reduce((s,sub)=>s+Object.values(_sdpData[sub]).reduce((ss,d)=>ss+d.nightOwnerTotal,0),0);
   html = `<div style="background:var(--sf2);border-radius:10px;padding:10px 14px;margin-bottom:12px;">
     <div style="display:flex;justify-content:space-around;text-align:center;">
+      <div><div style="font-size:10px;color:var(--t3);">여행사 청구 합계</div><div style="font-size:16px;font-weight:800;">$${grandTA.toLocaleString()}</div></div>
       <div><div style="font-size:10px;color:var(--t3);">드라이버 지급 합계</div><div style="font-size:16px;font-weight:800;color:var(--ac);">$${grandDR.toLocaleString()}</div></div>
-      ${grandNO > 0 ? `<div><div style="font-size:10px;color:#7c3aed;font-weight:700;">🌃 야경 차주 납입</div><div style="font-size:16px;font-weight:800;color:#7c3aed;">+$${grandNO.toLocaleString()}</div></div>` : ''}
-      <div><div style="font-size:10px;color:var(--t3);">총 운행 건수</div><div style="font-size:16px;font-weight:800;">${subs.reduce((s,sub)=>s+Object.values(_sdpData[sub]).reduce((ss,d)=>ss+d.count,0),0)}건</div></div>
+      <div><div style="font-size:10px;color:var(--t3);">차액 (수익)</div><div style="font-size:16px;font-weight:800;color:var(--gn);">$${(grandTA-grandDR).toLocaleString()}</div></div>
     </div>
+    ${grandNO > 0 ? `<div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:8px;display:flex;justify-content:center;gap:20px;text-align:center;">
+      <div><div style="font-size:10px;color:#7c3aed;font-weight:700;">🌃 야경 차주 납입 합계</div><div style="font-size:16px;font-weight:800;color:#7c3aed;">+$${grandNO.toLocaleString()}</div></div>
+      <div><div style="font-size:10px;color:var(--t3);">실질 수익 (차액+납입)</div><div style="font-size:16px;font-weight:800;color:var(--gn);">$${(grandTA-grandDR+grandNO).toLocaleString()}</div></div>
+    </div>` : ''}
   </div>` + html;
   resEl.innerHTML = html;
 }
