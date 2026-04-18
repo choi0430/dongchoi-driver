@@ -6818,25 +6818,30 @@ function onNightChange(){
   } else {
     if(input) input.value = r.dr;
   }
-  // 야경 회사 납입금 힌트 표시
+  // 야경 납입금 힌트 표시 (차주/회사)
   if(hintEl && r){
     const ownerAmt = r.owner || 0;
     const drAmt    = r.dr    || 0;
     const taAmt    = r.ta    || 0;
     const drNetAmt = drAmt - ownerAmt;  // 실 지급 야경 수당
+    // 현재 차량의 SUB 정보 확인
+    const _hRego = document.getElementById('pre-rego')?.value || '';
+    const _hSub = getSubOwnerForRego(_hRego);
+    const _hPayTo = _hSub ? '차주('+_hSub+') 납입' : '회사 납입';
+    const _hPayToShort = _hSub ? _hSub+' 납입' : '회사납입';
     let hintHtml = '';
     if(isPrivate){
       // 개인 야경: 간단한 차감 안내만 표시
       hintHtml = `<div style="background:#fff5f5;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;">`;
       hintHtml += `<div style="font-weight:700;color:var(--red);margin-bottom:4px;">🌃 ${typeLabel}</div>`;
       hintHtml += `<div style="color:var(--muted);">야경비: 가이드 직접 수령 (Direct collection)</div>`;
-      hintHtml += `<div style="color:var(--red);">급여 차감 (Salary deduction): <strong>-$${ownerAmt}</strong></div>`;
+      hintHtml += `<div style="color:var(--red);">${_hPayTo} 차감: <strong>-$${ownerAmt}</strong></div>`;
       hintHtml += `</div>`;
     } else {
       hintHtml = `<div style="background:#fff5f5;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;">`;
       hintHtml += `<div style="font-weight:700;color:var(--red);margin-bottom:4px;">🌃 야경 — ${typeLabel} (${seatsLabel})</div>`;
-      if(drAmt > 0) hintHtml += `<div style="color:var(--muted);">야경 수당: <strong style="color:var(--green);">+$${drNetAmt > 0 ? drNetAmt : drAmt}</strong>${ownerAmt > 0 ? ' <span style="color:var(--red);font-size:11px;">(총 $'+drAmt+' − 회사납입 $'+ownerAmt+')</span>' : ''}</div>`;
-      if(ownerAmt > 0) hintHtml += `<div style="color:var(--red);">회사 납입 차감: <strong>-$${ownerAmt}</strong></div>`;
+      if(drAmt > 0) hintHtml += `<div style="color:var(--muted);">야경 수당: <strong style="color:var(--green);">+$${drNetAmt > 0 ? drNetAmt : drAmt}</strong>${ownerAmt > 0 ? ' <span style="color:var(--red);font-size:11px;">(총 $'+drAmt+' − '+_hPayToShort+' $'+ownerAmt+')</span>' : ''}</div>`;
+      if(ownerAmt > 0) hintHtml += `<div style="color:var(--red);">${_hPayTo} 차감: <strong>-$${ownerAmt}</strong></div>`;
       hintHtml += `</div>`;
     }
     hintEl.innerHTML = hintHtml;
@@ -7199,21 +7204,27 @@ function calcTotal(){
   const fuelPersonal = document.getElementById('fuel-personal')?.checked;
   if(tollPersonal) dr += tollVal;
   if(fuelPersonal) dr += fuelVal;
-  // 야경 회사 납입금: 드라이버 소계에서 차감
+  // 야경 납입금: 드라이버 소계에서 차감 → 차주(SUB) 또는 회사에 납입
   const nightOwner = (nightType !== 'none' && nightRate) ? (nightRate.owner || 0) : 0;
   const drNet = dr - nightOwner;
+  // 현재 차량의 SUB 정보 확인
+  const _curRego = document.getElementById('pre-rego')?.value || '';
+  const _curSubOwner = getSubOwnerForRego(_curRego);
+  const _ownerLabel = _curSubOwner ? '🌃 차주('+_curSubOwner+') 납입' : '🌃 야경 회사 납입';
   // 총액 표시
   document.getElementById('t-ta').textContent='$'+ta.toFixed(0);
   // 소계 표시
   const grossEl = document.getElementById('t-dr-gross');
   if(grossEl) grossEl.textContent='$'+dr.toFixed(0);
-  // 야경 회사 납입 행 표시/숨김
+  // 야경 납입 행 표시/숨김
   const ownerRow = document.getElementById('night-owner-row');
   const ownerEl  = document.getElementById('t-owner');
+  const ownerLabelEl = ownerRow?.querySelector('.total-label');
   if(ownerRow && ownerEl){
     if(nightOwner > 0){
       ownerRow.style.display='';
       ownerEl.textContent='-$'+nightOwner.toFixed(0);
+      if(ownerLabelEl) ownerLabelEl.textContent = _ownerLabel;
     } else {
       ownerRow.style.display='none';
       ownerEl.textContent='-$0';
@@ -8030,7 +8041,11 @@ async function renderPay(){
     ].filter(i=>i.val>0);
 
     // 야경 납입금은 차감 항목이므로 별도 빨간 배지로 표시
-    if (ownerTotal > 0) items.push({label:'야경납입', val:ownerTotal, color:'#ef4444'});
+    // 야경 납입: 자사 차량분은 '회사납입', SUB 차량분은 'SUB 납입'으로 분리
+    const ownOwnerTotal = ownReports.reduce((s,r)=>s+(r.nightOwner||0),0);
+    const subOwnerTotal = subReports.reduce((s,r)=>s+(r.nightOwner||0),0);
+    if (ownOwnerTotal > 0) items.push({label:'야경 회사납입', val:ownOwnerTotal, color:'#ef4444'});
+    if (subOwnerTotal > 0) items.push({label:'야경 차주납입', val:subOwnerTotal, color:'#7c3aed'});
 
     const itemBadges = items.map(i=>
       `<span style="display:inline-flex;align-items:center;gap:2px;background:${i.color}18;border:1px solid ${i.color}44;border-radius:5px;padding:2px 6px;font-size:10px;font-weight:700;color:${i.color};">${i.label} $${i.val}</span>`
@@ -8194,7 +8209,8 @@ function showPayDetail(wk){
     fuelGrand>0  && {label:'연료비 (개인)', val:fuelGrand, color:'#d6d3d1'},
     etcGrand>0   && {label:'기타', val:etcGrand, color:'#d6d3d1'},
     manualGrand>0 && {label:'수동변속 보너스', val:manualGrand, color:'#fbbf24'},
-    ownerGrand>0 && {label:'회사 납입 차감', val:-ownerGrand, color:'rgba(255,150,150,.9)'},
+    (()=>{ const _oo=ownSorted.reduce((s,r)=>s+(r.nightOwner||0),0); return _oo>0?{label:'회사 납입 차감', val:-_oo, color:'rgba(255,150,150,.9)'}:false; })(),
+    (()=>{ const _so=subSorted.reduce((s,r)=>s+(r.nightOwner||0),0); return _so>0?{label:'차주(SUB) 납입 차감', val:-_so, color:'rgba(196,181,253,.9)'}:false; })(),
   ].filter(Boolean).filter(i=>i.val!==0);
 
   // SUB별 그룹
@@ -8293,10 +8309,13 @@ function showPayDetail(wk){
       if(r.etc>0)     breakdown.push({label:'기타'+(r.etcDesc?' ('+r.etcDesc+')':''), val:r.etc, color:'var(--text2)'});
       if(r.manualBonus>0) breakdown.push({label:'수동변속 보너스', val:r.manualBonus, color:'#f59e0b'});
 
+      const _noSub = getSubOwnerForRego(r.rego);
+      const _noLabel = _noSub ? '차주('+_noSub+') 납입 (야간투어)' : '회사 납입 (야간투어)';
+      const _noColor = _noSub ? '#7c3aed' : 'var(--red)';
       const nightOwnerNote = (r.nightOwner||0)>0
-        ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-top:1px dashed rgba(239,68,68,0.3);margin-top:4px;">
-            <span style="font-size:11px;color:var(--red);">회사 납입 (야간투어)</span>
-            <span style="font-size:11px;font-weight:700;color:var(--red);">-$${r.nightOwner}</span>
+        ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-top:1px dashed ${_noSub?'rgba(124,58,237,0.3)':'rgba(239,68,68,0.3)'};margin-top:4px;">
+            <span style="font-size:11px;color:${_noColor};">${_noLabel}</span>
+            <span style="font-size:11px;font-weight:700;color:${_noColor};">-$${r.nightOwner}</span>
            </div>` : '';
 
       const breakdownHTML = breakdown.map(b=>`
