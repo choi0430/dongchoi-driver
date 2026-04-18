@@ -11244,6 +11244,11 @@ async function apiSaveMaster(sheetName, obj, isEdit, idx){
     const renderMap={M_Vehicles:rV,M_Drivers:rD,M_Clients:rC,M_Guides:rG,M_Hotels:rH};
     renderMap[sheetName]?.();rDash();
     toast((isEdit?'수정':'추가')+' 완료 ✓','ok');
+    // 차량 Owner 변경 시 SUB 요금표 탭 동기화
+    if(sheetName==='M_Vehicles'){
+      window._psLastSync=0;
+      syncSub().then(()=>{ if(ST.subTab==='rates') rSub(); });
+    }
 
     const action = isEdit ? 'update_master' : 'add_master';
     const body = {action, sheet:sheetName, data:obj, _user:getAdminUser()};
@@ -11270,6 +11275,11 @@ async function apiDeleteMaster(sheetName, rowIndex){
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'delete_master', sheet:sheetName, rowIndex, _user:getAdminUser()})
     });
+    // 차량 삭제 시 SUB 요금표 탭 동기화
+    if(sheetName==='M_Vehicles'){
+      window._psLastSync=0;
+      syncSub().then(()=>{ if(ST.subTab==='rates') rSub(); });
+    }
   } catch(e){ console.error('apiDeleteMaster error:', e); }
 }
 
