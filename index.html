@@ -6705,8 +6705,8 @@ function selectEarly(amt){
 // ★ NIGHT_RATES: GAS M_NightRates 시트에서 오버라이드됨 (아래는 폴백 기본값)
 const NIGHT_RATES = {
   guide_opt:   { small:{ ta:0,   dr:0,   owner:50  }, large:{ ta:0,   dr:0,   owner:100 } },
-  agency_incl: { small:{ ta:250, dr:200, owner:50  }, large:{ ta:350, dr:300, owner:50  } },
-  prepaid_opt: { small:{ ta:330, dr:250, owner:50  }, large:{ ta:450, dr:350, owner:100 } },
+  agency_incl: { small:{ ta:250, dr:250, owner:50  }, large:{ ta:350, dr:350, owner:50  } },
+  prepaid_opt: { small:{ ta:330, dr:300, owner:50  }, large:{ ta:450, dr:450, owner:100 } },
   private_captain: { small:{ ta:0, dr:0, owner:75 }, large:{ ta:0, dr:0, owner:75 } },
   private_dg:      { small:{ ta:0, dr:0, owner:100}, large:{ ta:0, dr:0, owner:100} },
 };
@@ -6779,6 +6779,7 @@ function onNightChange(){
     const ownerAmt = r.owner || 0;
     const drAmt    = r.dr    || 0;
     const taAmt    = r.ta    || 0;
+    const drNetAmt = drAmt - ownerAmt;  // 실 지급 야경 수당
     let hintHtml = '';
     if(isPrivate){
       // 개인 야경: 간단한 차감 안내만 표시
@@ -6791,7 +6792,7 @@ function onNightChange(){
       hintHtml = `<div style="background:#fff5f5;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;">`;
       hintHtml += `<div style="font-weight:700;color:var(--red);margin-bottom:4px;">🌃 야경 — ${typeLabel} (${seatsLabel})</div>`;
       if(taAmt > 0) hintHtml += `<div style="color:var(--muted);">여행사 청구: <strong>$${taAmt}</strong></div>`;
-      if(drAmt > 0) hintHtml += `<div style="color:var(--muted);">야경 수당: <strong style="color:var(--green);">+$${drAmt}</strong></div>`;
+      if(drAmt > 0) hintHtml += `<div style="color:var(--muted);">야경 수당: <strong style="color:var(--green);">+$${drNetAmt > 0 ? drNetAmt : drAmt}</strong>${ownerAmt > 0 ? ' <span style="color:var(--red);font-size:11px;">(총 $'+drAmt+' − 회사납입 $'+ownerAmt+')</span>' : ''}</div>`;
       if(ownerAmt > 0) hintHtml += `<div style="color:var(--red);">회사 납입 차감: <strong>-$${ownerAmt}</strong></div>`;
       hintHtml += `</div>`;
     }
