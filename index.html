@@ -1717,6 +1717,39 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 
 </div><!-- /screen -->
 
+<!-- ★ SUB 인보이스 페이지 (오너드라이버용) -->
+<div class="page" id="page-subinv">
+  <div style="padding:16px 14px 8px;">
+    <div style="font-size:18px;font-weight:800;">🧾 인보이스 발행</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px;">완료된 리포트를 기반으로 인보이스를 생성합니다</div>
+  </div>
+  <!-- 기간 선택 -->
+  <div style="padding:0 14px;display:flex;gap:8px;margin-bottom:10px;">
+    <div style="flex:1;"><div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px;">시작일</div><input type="date" id="si-from" class="form-control" style="font-size:13px;"></div>
+    <div style="flex:1;"><div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px;">종료일</div><input type="date" id="si-to" class="form-control" style="font-size:13px;"></div>
+    <button class="btn-accent" onclick="loadSubInvReports()" style="align-self:flex-end;padding:8px 12px;border-radius:8px;font-size:12px;">조회</button>
+  </div>
+  <!-- 리포트 목록 (체크박스로 선택) -->
+  <div style="padding:0 14px;">
+    <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px;">📋 포함할 항목 선택</div>
+    <div id="si-report-list" style="font-size:12px;color:var(--muted);">기간을 선택하고 [조회]를 누르세요</div>
+  </div>
+  <!-- 합계 & 발행 버튼 -->
+  <div style="padding:12px 14px;margin-top:10px;">
+    <div style="background:var(--surface2);border-radius:12px;padding:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div><div style="font-size:11px;color:var(--muted);">선택 항목 합계</div><div style="font-size:24px;font-weight:800;color:var(--accent);" id="si-total">$0</div></div>
+        <button class="btn-accent" onclick="generateSubInvFromDriver()" style="padding:10px 16px;border-radius:10px;font-size:13px;font-weight:700;">🧾 인보이스 생성</button>
+      </div>
+    </div>
+  </div>
+  <!-- 발행 이력 -->
+  <div style="padding:12px 14px;">
+    <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px;">📜 발행 이력</div>
+    <div id="si-history" style="font-size:12px;color:var(--muted);">로딩 중...</div>
+  </div>
+</div>
+
 <!-- BOTTOM NAV -->
 <div class="bottom-nav">
   <div class="nav-item active" onclick="showPage('home')" id="nav-home"><div class="nav-icon">🏠</div>Home (홈)</div>
@@ -1724,6 +1757,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   <div class="nav-item" onclick="showPage('contacts')" id="nav-contacts"><div class="nav-icon">📞</div>Contact (연락처)</div>
   <div class="nav-item" onclick="showPage('attractions')" id="nav-attractions"><div class="nav-icon">📍</div>Attraction (관광지)</div>
   <div class="nav-item" onclick="showPage('pay');renderPay();" id="nav-pay"><div class="nav-icon">💰</div>급여</div>
+  <div class="nav-item" onclick="showPage('subinv');initDriverSubInv();" id="nav-subinv" style="display:none;"><div class="nav-icon">🧾</div>인보이스</div>
   <div class="nav-item" onclick="showPage('defect');renderMyDefects();" id="nav-defect"><div class="nav-icon">🔧</div>결함</div>
   <div class="nav-item" onclick="showPage('mot');initMotForm();" id="nav-mot"><div class="nav-icon">🚔</div>MOT</div>
   <div class="nav-item" onclick="showPage('leave');loadMyLeaves();" id="nav-leave"><div class="nav-icon">📅</div>Leave (휴무)</div>
@@ -2111,6 +2145,7 @@ function applyMasterData(data) {
   } catch(e) {}
   MASTER.priceClient = (data.M_PriceClient || []);
   MASTER.priceDriver = (data.M_PriceDriver || []);
+  MASTER.subs        = (data.M_SUB || []);
 
   // ★ 서비스 요금 옵션 (M_SvcOptions → SVC_OPTIONS 오버라이드)
   const svcRows = data.M_SvcOptions || [];
@@ -3248,6 +3283,8 @@ function doLogin() {
   loadMyPastShifts();
   // ★ 휴무 요청 상태 로드 (홈 화면 배너 표시용)
   loadMyLeaves();
+  // ★ SUB 오너드라이버 인보이스 탭 표시 여부 확인
+  checkSubDriverAccess();
   // ── 서버에서 미완료 shift 동기화 (비동기) ──
   syncShiftsFromServer(name);
   // ── GAS 전체 동기화 + 자동 폴링 시작 (오늘 리포트, 마스터 최신화) ──
@@ -3396,6 +3433,10 @@ function doLogout() {
   document.getElementById('login-driver-select').value = '';
   [0,1,2,3].forEach(i => { document.getElementById('pin-'+i).value = ''; });
   document.getElementById('logout-menu').style.display = 'none';
+  // SUB 인보이스 탭 숨기기
+  _subDriverInfo = null;
+  const _navSub = document.getElementById('nav-subinv');
+  if(_navSub) _navSub.style.display = 'none';
   // 홈으로 리셋
   showPage('home');
   renderShiftSection();
@@ -9726,6 +9767,213 @@ function openCorrectionModal(rowIndex, type) {
     `<strong>${typeLabel}</strong> · ${fmtDate(r.Date)||r.Date||'—'} · ${r.Rego||'—'}`;
   document.getElementById('correction-desc').value = '';
   document.getElementById('correction-modal').style.display = 'flex';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SUB 오너드라이버 인보이스 MODULE
+// ═══════════════════════════════════════════════════════════════════
+let _subDriverInfo = null; // { subName, ... } from M_SUB
+
+function checkSubDriverAccess(){
+  // 로그인 드라이버가 SUB 오너드라이버인지 확인
+  const driverName = currentDriver?.name||'';
+  if(!driverName) return;
+  // MASTER에서 M_SUB 로드 (getAllMasters에 포함)
+  const subs = MASTER.subs || [];
+  const match = subs.find(s=> s.OwnerDriver === driverName && (s.Active||'Y')!=='N');
+  const navBtn = document.getElementById('nav-subinv');
+  if(match){
+    _subDriverInfo = match;
+    if(navBtn) navBtn.style.display = '';
+  } else {
+    _subDriverInfo = null;
+    if(navBtn) navBtn.style.display = 'none';
+  }
+}
+
+function initDriverSubInv(){
+  if(!_subDriverInfo) return;
+  // 기간 기본값: 이번 달
+  const now = new Date();
+  document.getElementById('si-from').value = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-01';
+  const last = new Date(now.getFullYear(), now.getMonth()+1, 0);
+  document.getElementById('si-to').value = last.getFullYear()+'-'+String(last.getMonth()+1).padStart(2,'0')+'-'+String(last.getDate()).padStart(2,'0');
+  renderSubInvDriverHistory();
+}
+
+async function loadSubInvReports(){
+  const from = document.getElementById('si-from').value;
+  const to = document.getElementById('si-to').value;
+  if(!from || !to){ showToast('기간을 선택하세요','error'); return; }
+  const listEl = document.getElementById('si-report-list');
+  listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">로딩 중...</div>';
+  // 서버에서 내 리포트 가져오기
+  try{
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report&driver='+encodeURIComponent(currentDriver?.name||''));
+    const json = await res.json();
+    const rows = json.rows || json.data || [];
+    // 기간 필터
+    const filtered = rows.filter(r=>{
+      const d = parseToISO(r.Date);
+      return d && d >= from && d <= to;
+    });
+    if(!filtered.length){
+      listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">해당 기간에 리포트가 없습니다.</div>';
+      return;
+    }
+    // 체크박스 리스트 렌더
+    listEl.innerHTML = filtered.map((r,i)=>{
+      const d = parseToISO(r.Date)||r.Date||'';
+      const ta = Number(r.SVC_Charge||r.Total_TA||0);
+      const ot = Number(r.OT||0);
+      const hotel = Number(r.Hotel_Surcharge||0);
+      const dist = Number(r.Dist_Surcharge||0);
+      const trailer = Number(r.Trailer||0);
+      const toll = Number(r.Toll||0);
+      const early = Number(r.Early||0);
+      const nightTA = Number(r.Night_DR||0); // TA는 별도 계산 필요하지만 간략히
+      const total = ta + ot + hotel + dist + trailer + toll + early;
+      return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;">
+        <input type="checkbox" class="si-chk" data-idx="${i}" data-total="${total}" data-date="${d}" data-rego="${r.Rego||''}" data-tour="${r.Attraction||''}" data-seats="${r.Seats||''}" data-tc="${r.Tour_Code||''}" data-ta="${ta}" data-ot="${ot}" data-hotel="${hotel}" data-dist="${dist}" data-trailer="${trailer}" data-toll="${toll}" data-early="${early}" checked onchange="calcSubInvDriverTotal()" style="margin-top:3px;">
+        <div style="flex:1;">
+          <div style="font-size:12px;font-weight:700;">${d} — ${r.Agency||''}</div>
+          <div style="font-size:11px;color:var(--muted);">${r.Attraction||''} | ${r.Rego||''} | ${r.Seats||''}</div>
+        </div>
+        <div style="font-size:13px;font-weight:700;color:var(--accent);">$${total}</div>
+      </label>`;
+    }).join('');
+    calcSubInvDriverTotal();
+  }catch(e){
+    listEl.innerHTML = '<div style="color:#ef4444;">로드 실패: '+e.message+'</div>';
+  }
+}
+
+function calcSubInvDriverTotal(){
+  let total = 0;
+  document.querySelectorAll('.si-chk:checked').forEach(chk=>{
+    total += Number(chk.dataset.total||0);
+  });
+  document.getElementById('si-total').textContent = '$'+total.toLocaleString();
+}
+
+async function generateSubInvFromDriver(){
+  const checked = document.querySelectorAll('.si-chk:checked');
+  if(!checked.length){ showToast('항목을 선택하세요','error'); return; }
+  const subName = _subDriverInfo?.SubName || '';
+  if(!subName){ showToast('SUB 정보가 없습니다','error'); return; }
+  // 항목 수집
+  const items = [];
+  checked.forEach(chk=>{
+    items.push({
+      date: chk.dataset.date, rego: chk.dataset.rego, tour: chk.dataset.tour,
+      seats: chk.dataset.seats, tourCode: chk.dataset.tc,
+      amount: Number(chk.dataset.ta||0), ot: Number(chk.dataset.ot||0),
+      etc: Number(chk.dataset.hotel||0)+Number(chk.dataset.dist||0)+Number(chk.dataset.trailer||0)+Number(chk.dataset.toll||0)+Number(chk.dataset.early||0),
+      total: Number(chk.dataset.total||0)
+    });
+  });
+  const exGst = items.reduce((s,i)=>s+i.total,0);
+  const gst = Math.round(exGst*0.1*100)/100;
+  const grandTotal = exGst + gst;
+  const dates = items.map(i=>i.date).filter(Boolean).sort();
+  const from = dates[0]||'';
+  const to = dates[dates.length-1]||'';
+  // 인보이스 번호: SUB-YYYYMM-NNN
+  const ym = from ? from.slice(0,7).replace('-','') : new Date().toISOString().slice(0,7).replace('-','');
+  const invNum = 'SUB-'+ym+'-'+String(Date.now()).slice(-4);
+  // 인보이스 HTML 생성 (SUB 업체 명의)
+  const subABN = _subDriverInfo?.ABN || '';
+  const subEmail = _subDriverInfo?.Email || '';
+  const html = `<div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+      <div><div style="font-size:20px;font-weight:700;">${subName}</div>
+        ${subABN?'<div style="font-size:11px;color:#666;">ABN: '+subABN+'</div>':''}
+        ${subEmail?'<div style="font-size:11px;color:#666;">'+subEmail+'</div>':''}
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:22px;font-weight:700;color:#4f46e5;">TAX INVOICE</div>
+        <div style="font-size:13px;font-weight:700;">${invNum}</div>
+        <div style="font-size:11px;color:#666;">Date: ${new Date().toLocaleDateString('en-AU')}</div>
+        <div style="font-size:11px;color:#666;">Period: ${from} — ${to}</div>
+      </div>
+    </div>
+    <div style="margin-bottom:16px;padding:10px;background:#f8f9fa;border-radius:6px;">
+      <div style="font-size:12px;font-weight:700;">Bill To: Dong Choi Pty Ltd</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
+      <thead><tr style="background:#4f46e5;color:white;">
+        <th style="padding:6px 8px;font-size:10px;">Date</th>
+        <th style="padding:6px 8px;font-size:10px;">Rego</th>
+        <th style="padding:6px 8px;font-size:10px;">Tour Code</th>
+        <th style="padding:6px 8px;font-size:10px;">Course</th>
+        <th style="padding:6px 8px;font-size:10px;">Seats</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">Amount</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">OT</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">Etc</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">Total</th>
+      </tr></thead>
+      <tbody>${items.map(i=>`<tr>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">${i.date}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">${i.rego}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">${i.tourCode}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">${i.tour}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:center;">${i.seats}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;">$${i.amount}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;">$${i.ot}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;">$${i.etc}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;font-weight:700;">$${i.total}</td>
+      </tr>`).join('')}</tbody>
+    </table>
+    <div style="text-align:right;">
+      <div style="font-size:12px;">Subtotal (Ex GST): <strong>$${exGst.toFixed(2)}</strong></div>
+      <div style="font-size:12px;">GST (10%): <strong>$${gst.toFixed(2)}</strong></div>
+      <div style="font-size:18px;font-weight:800;color:#4f46e5;margin-top:4px;">Total: $${grandTotal.toFixed(2)}</div>
+    </div>
+  </div>`;
+  // Invoices 시트에 저장 (Source=SUB_DRIVER)
+  const invData = {
+    InvNumber: invNum, Agency: 'Dong Choi Pty Ltd', PeriodFrom: from, PeriodTo: to,
+    GrandTotal: grandTotal.toFixed(2), GST: gst.toFixed(2), ExGST: exGst.toFixed(2),
+    Status: 'Submitted', IssuedDate: new Date().toLocaleDateString('en-AU'),
+    Items: JSON.stringify(items), ManualItems:'', Deductions:'',
+    Notes: 'SUB 드라이버 제출', CreatedBy: currentDriver?.name||'',
+    Source: 'SUB_DRIVER', SubCompany: subName
+  };
+  try{
+    showToast('🧾 인보이스 저장 중...','info');
+    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'save_invoice', data:invData, _user:currentDriver?.name||''})});
+    const json = await res.json();
+    if(json.ok){
+      showToast('✅ '+invNum+' 제출 완료! Admin에서 확인됩니다.','success');
+      renderSubInvDriverHistory();
+    } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
+  }catch(e){ showToast('❌ 네트워크 오류','error'); }
+}
+
+async function renderSubInvDriverHistory(){
+  const el = document.getElementById('si-history');
+  if(!el) return;
+  try{
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_invoices');
+    const json = await res.json();
+    const rows = json.rows||json.data||[];
+    const myInvs = rows.filter(r=>r.Source==='SUB_DRIVER' && r.SubCompany===(_subDriverInfo?.SubName||''));
+    if(!myInvs.length){ el.innerHTML='<div style="text-align:center;padding:10px;color:var(--muted);">제출 이력이 없습니다.</div>'; return; }
+    el.innerHTML = myInvs.sort((a,b)=>(b.InvNumber||'').localeCompare(a.InvNumber)).slice(0,10).map(inv=>{
+      const st = (inv.Status||'').toLowerCase();
+      const color = st==='paid'?'var(--green)':st==='submitted'?'#f59e0b':'var(--accent)';
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+        <div><div style="font-size:12px;font-weight:700;color:var(--accent);">${inv.InvNumber}</div>
+          <div style="font-size:10px;color:var(--muted);">${inv.PeriodFrom||''}~${inv.PeriodTo||''} | ${inv.IssuedDate||''}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:13px;font-weight:700;">$${inv.GrandTotal||0}</div>
+          <div style="font-size:10px;font-weight:700;color:${color};">${inv.Status||''}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){ el.innerHTML='<div style="color:#ef4444;">로드 실패</div>'; }
 }
 
 function closeCorrectionModal() {

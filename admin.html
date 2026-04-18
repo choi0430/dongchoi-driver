@@ -1199,15 +1199,26 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <button class="btn bgh sm" onclick="savePSToSheets()" id="btnSaveSub" style="display:none" title="Sheets에 저장">💾 저장</button>
   </div>
 
-  <!-- 탭: 서브 요금표 / 수익 계산기 / 정산 내역 -->
-  <div style="display:flex;gap:0;padding:10px 14px 0;flex-wrap:wrap;gap:0;">
-    <button id="sub-tab-rates" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;margin-bottom:0;" onclick="showSubTab('rates')">📋 서브 요금표</button>
-    <button id="sub-tab-calc" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="showSubTab('calc')">🧮 수익 계산기</button>
-    <button id="sub-tab-ledger" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="showSubTab('ledger')">🗂 정산 내역</button>
+  <!-- 탭: 업체관리 / 서브 요금표 / 수익 계산기 / 정산 내역 / 인보이스 -->
+  <div style="display:flex;gap:0;padding:10px 14px 0;flex-wrap:wrap;">
+    <button id="sub-tab-company" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;margin-bottom:0;" onclick="showSubTab('company')">🏢 업체 관리</button>
+    <button id="sub-tab-rates" class="btn bac sm" style="border-radius:0;border-right:none;margin-bottom:0;" onclick="showSubTab('rates')">📋 요금표</button>
+    <button id="sub-tab-calc" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="showSubTab('calc')">🧮 계산기</button>
+    <button id="sub-tab-ledger" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="showSubTab('ledger')">🗂 정산</button>
+    <button id="sub-tab-invoice" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="showSubTab('invoice')">🧾 인보이스</button>
+  </div>
+
+  <!-- ★ 업체 관리 뷰 -->
+  <div id="sub-view-company">
+    <div style="padding:12px 14px 0;display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:12px;color:var(--t3);">등록된 SUB 업체 목록</div>
+      <button class="btn bac sm" onclick="openSubCompanyForm(null)">+ 업체 추가</button>
+    </div>
+    <div id="sub-company-list" style="padding:10px 14px;"></div>
   </div>
 
   <!-- 서브 요금표 뷰 -->
-  <div id="sub-view-rates">
+  <div id="sub-view-rates" style="display:none">
     <!-- 서브 회사 탭 -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin:10px 14px 0 14px;">
       <div style="font-size:11px;color:var(--t3)">서브 회사 선택</div>
@@ -1303,6 +1314,68 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <button class="btn brd sm" onclick="deleteLedgerWeek()" style="white-space:nowrap;padding:0 10px;" title="선택한 주간 삭제">🗑</button>
     </div>
     <div id="ledger-body" style="padding:10px 14px 0;"></div>
+  </div>
+
+  <!-- ★ SUB 인보이스 뷰 -->
+  <div id="sub-view-invoice" style="display:none;">
+    <div style="padding:12px 14px 0;">
+      <div style="font-size:12px;color:var(--t3);margin-bottom:8px;">SUB 인보이스 → Dong Choi 명의로 여행사 재발행</div>
+      <!-- SUB 선택 -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+        <select id="sub-inv-company" class="profit-sel" style="flex:1;" onchange="onSubInvCompanyChange()">
+          <option value="">SUB 업체 선택</option>
+        </select>
+        <select id="sub-inv-agency" class="profit-sel" style="flex:1;">
+          <option value="">여행사 선택</option>
+        </select>
+      </div>
+      <!-- 기간 -->
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <div style="flex:1;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">시작일</div>
+          <input type="date" id="sub-inv-from" class="profit-finp" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">종료일</div>
+          <input type="date" id="sub-inv-to" class="profit-finp" style="width:100%;box-sizing:border-box;">
+        </div>
+      </div>
+      <!-- 항목 입력 테이블 -->
+      <div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:6px;">📋 인보이스 항목</div>
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+        <table class="ptb" style="font-size:11px;">
+          <thead><tr>
+            <th style="min-width:70px;">날짜</th>
+            <th style="min-width:60px;">차량</th>
+            <th style="min-width:80px;">투어코드</th>
+            <th style="min-width:80px;">코스</th>
+            <th style="min-width:40px;">인승</th>
+            <th style="min-width:55px;">금액</th>
+            <th style="min-width:40px;">OT</th>
+            <th style="min-width:40px;">기타</th>
+            <th style="width:30px;"></th>
+          </tr></thead>
+          <tbody id="sub-inv-items"></tbody>
+        </table>
+      </div>
+      <button class="btn bac sm" onclick="addSubInvRow()" style="margin-top:6px;">+ 항목 추가</button>
+      <!-- 합계 & 버튼 -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:10px;background:var(--sf2);border-radius:10px;">
+        <div>
+          <div style="font-size:11px;color:var(--t3);">합계 (GST 별도)</div>
+          <div style="font-size:22px;font-weight:800;color:var(--ac);" id="sub-inv-total">$0</div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn bac" onclick="previewSubInvoice()">👁 미리보기</button>
+          <button class="btn bac" onclick="generateSubInvoice()" style="background:var(--gn);color:#fff;">🧾 발행</button>
+        </div>
+      </div>
+    </div>
+    <!-- SUB 인보이스 이력 -->
+    <div style="padding:12px 14px 0;">
+      <div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:6px;">📜 SUB 인보이스 발행 이력</div>
+      <div id="sub-inv-history" style="font-size:12px;color:var(--t3);">로딩 중...</div>
+    </div>
   </div>
 </div>
 
@@ -1692,7 +1765,7 @@ function formatDateAEST(date) {
 }
 
 
-let ST = {pin:'',mt:null,mi:null,dt:null,di:null,ptype:'client',curAg:null,curSub:null,curSubVeh:null,subTab:'rates'};
+let ST = {pin:'',mt:null,mi:null,dt:null,di:null,ptype:'client',curAg:null,curSub:null,curSubVeh:null,subTab:'company'};
 let _adminReady = false; // 데이터 준비 완료 플래그
 
 // ═══════════════════════════════════════
@@ -2769,7 +2842,7 @@ async function rSub(){
   if(ST.curSub) selSub(ST.curSub);
   // 수익 계산기 초기화
   initCalcSelects();
-  if(!ST.subTab) ST.subTab='rates';
+  if(!ST.subTab) ST.subTab='company';
   showSubTab(ST.subTab);
 }
 
@@ -2828,17 +2901,19 @@ function deleteSubRate(tour){
 
 function showSubTab(tab){
   ST.subTab=tab;
-  document.getElementById('sub-view-rates').style.display  = tab==='rates'?'':'none';
-  document.getElementById('sub-view-calc').style.display   = tab==='calc'?'':'none';
-  document.getElementById('sub-view-ledger').style.display = tab==='ledger'?'':'none';
-  document.getElementById('sub-tab-rates').classList.toggle('on',  tab==='rates');
-  document.getElementById('sub-tab-calc').classList.toggle('on',   tab==='calc');
-  document.getElementById('sub-tab-ledger').classList.toggle('on', tab==='ledger');
+  ['company','rates','calc','ledger','invoice'].forEach(t=>{
+    const v=document.getElementById('sub-view-'+t);
+    const b=document.getElementById('sub-tab-'+t);
+    if(v) v.style.display = t===tab?'':'none';
+    if(b) b.classList.toggle('on', t===tab);
+  });
   // 저장 버튼: 요금표일 때만 표시
   const saveBtn = document.getElementById('btnSaveSub');
   if(saveBtn) saveBtn.style.display = (tab==='rates' && ST.curSub) ? '' : 'none';
+  if(tab==='company') renderSubCompanyList();
   if(tab==='calc') calcProfit();
   if(tab==='ledger') initLedger();
+  if(tab==='invoice') initSubInvoice();
 }
 
 function initCalcSelects(){
@@ -3613,6 +3688,385 @@ function deleteLedgerEntry(idx){
   deleteLedgerEntryFromSheet(rowIndex);
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+// Generic Modal Utility
+// ═══════════════════════════════════════════════════════════════════
+function openGenModal(html){
+  closeGenModal();
+  const overlay = document.createElement('div');
+  overlay.id='gen-modal-overlay';
+  overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  const box = document.createElement('div');
+  box.style.cssText='background:var(--bg,#fff);border-radius:14px;max-width:500px;width:90%;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);';
+  box.innerHTML=html;
+  overlay.appendChild(box);
+  overlay.addEventListener('click',e=>{ if(e.target===overlay) closeGenModal(); });
+  document.body.appendChild(overlay);
+}
+function closeGenModal(){ document.getElementById('gen-modal-overlay')?.remove(); }
+
+// ═══════════════════════════════════════════════════════════════════
+// SUB 업체 관리 MODULE
+// ═══════════════════════════════════════════════════════════════════
+let _subCompanies = []; // M_SUB rows from sheet
+
+async function loadSubCompanies(force=false){
+  if(_subCompanies.length && !force) return _subCompanies;
+  try{
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_subs');
+    const json = await res.json();
+    _subCompanies = (json.rows||json.data||json||[]).filter(r=>r.SubName);
+  }catch(e){ console.warn('M_SUB 로드 실패:',e); }
+  return _subCompanies;
+}
+
+async function renderSubCompanyList(){
+  const list = document.getElementById('sub-company-list');
+  if(!list) return;
+  list.innerHTML='<div style="text-align:center;padding:20px;color:var(--t3);">로딩 중...</div>';
+  const subs = await loadSubCompanies();
+  if(!subs.length){
+    list.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">등록된 SUB 업체가 없습니다.<br>위의 [+ 업체 추가] 버튼으로 등록하세요.</div>';
+    return;
+  }
+  // 차량 목록 (SubOwner 매칭)
+  const vehs = DB.V || [];
+  list.innerHTML = subs.map((s,i)=>{
+    const subVehs = vehs.filter(v=>(v.SubOwner||v.Owner||'').trim()===s.SubName);
+    const vehList = subVehs.map(v=>v.Rego).join(', ')||'—';
+    const isActive = (s.Active||'Y').toUpperCase()!=='N';
+    return `<div class="crd" style="padding:12px;margin-bottom:8px;${isActive?'':'opacity:.5;'}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--t1);">${s.SubName} ${isActive?'':'<span style="color:var(--rd);font-size:11px;">(비활성)</span>'}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:2px;">ABN: ${s.ABN||'—'} | ${s.Contact||''} | ${s.Phone||''}</div>
+          <div style="font-size:11px;color:var(--t3);">📧 ${s.Email||'—'}</div>
+          <div style="font-size:11px;color:var(--t3);">🚌 차량: ${vehList}</div>
+          <div style="font-size:11px;color:var(--t3);">💰 ${s.PriceType==='margin'?'마진 적용 ('+( s.MarginRate||0)+'%)':'원가 그대로'} ${s.OwnerDriver?'| 👤 오너드라이버: '+s.OwnerDriver:''}</div>
+        </div>
+        <div style="display:flex;gap:4px;">
+          <button class="btn bac sm" onclick="openSubCompanyForm(${i})">✏️</button>
+          <button class="btn brd sm" onclick="deleteSubCompany(${i})" style="color:var(--rd);">🗑</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openSubCompanyForm(idx){
+  const isNew = idx===null || idx===undefined;
+  const s = isNew ? {} : _subCompanies[idx];
+  const drivers = DB.D||[];
+  const driverOpts = drivers.map(d=>`<option value="${d.Name_EN}" ${(s.OwnerDriver||'')===d.Name_EN?'selected':''}>${d.Name_EN}${d.Name_KR?' ('+d.Name_KR+')':''}</option>`).join('');
+  const html = `<div style="padding:16px;">
+    <div style="font-size:16px;font-weight:700;margin-bottom:12px;">${isNew?'🏢 SUB 업체 추가':'✏️ SUB 업체 수정'}</div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div><div class="profit-finp-label">업체명 *</div><input id="sc-name" class="profit-finp" style="width:100%;box-sizing:border-box;" value="${s.SubName||''}"></div>
+      <div><div class="profit-finp-label">ABN</div><input id="sc-abn" class="profit-finp" style="width:100%;box-sizing:border-box;" value="${s.ABN||''}"></div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><div class="profit-finp-label">담당자</div><input id="sc-contact" class="profit-finp" style="width:100%;box-sizing:border-box;" value="${s.Contact||''}"></div>
+        <div style="flex:1;"><div class="profit-finp-label">전화</div><input id="sc-phone" class="profit-finp" style="width:100%;box-sizing:border-box;" value="${s.Phone||''}"></div>
+      </div>
+      <div><div class="profit-finp-label">이메일</div><input id="sc-email" class="profit-finp" style="width:100%;box-sizing:border-box;" value="${s.Email||''}"></div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><div class="profit-finp-label">단가 유형</div>
+          <select id="sc-pricetype" class="profit-finp" style="width:100%;box-sizing:border-box;">
+            <option value="cost" ${(s.PriceType||'cost')==='cost'?'selected':''}>원가 그대로</option>
+            <option value="margin" ${s.PriceType==='margin'?'selected':''}>마진 적용</option>
+          </select>
+        </div>
+        <div style="flex:1;"><div class="profit-finp-label">마진율 (%)</div><input id="sc-margin" class="profit-finp" type="number" style="width:100%;box-sizing:border-box;" value="${s.MarginRate||0}"></div>
+      </div>
+      <div><div class="profit-finp-label">오너 드라이버 (드라이버 앱 사용 시)</div>
+        <select id="sc-owner-driver" class="profit-finp" style="width:100%;box-sizing:border-box;">
+          <option value="">— 해당 없음 —</option>
+          ${driverOpts}
+        </select>
+      </div>
+      <div><div class="profit-finp-label">활성 상태</div>
+        <select id="sc-active" class="profit-finp" style="width:100%;box-sizing:border-box;">
+          <option value="Y" ${(s.Active||'Y')==='Y'?'selected':''}>활성 (Y)</option>
+          <option value="N" ${s.Active==='N'?'selected':''}>비활성 (N)</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn bac" style="flex:1;" onclick="saveSubCompany(${isNew?'null':idx})">💾 저장</button>
+      <button class="btn brd" style="flex:1;" onclick="closeGenModal()">취소</button>
+    </div>
+  </div>`;
+  openGenModal(html);
+}
+
+async function saveSubCompany(idx){
+  const name = document.getElementById('sc-name').value.trim();
+  if(!name){ showToast('업체명을 입력하세요','error'); return; }
+  const data = {
+    SubName: name,
+    ABN: document.getElementById('sc-abn').value.trim(),
+    Contact: document.getElementById('sc-contact').value.trim(),
+    Email: document.getElementById('sc-email').value.trim(),
+    Phone: document.getElementById('sc-phone').value.trim(),
+    PriceType: document.getElementById('sc-pricetype').value,
+    MarginRate: document.getElementById('sc-margin').value||'0',
+    OwnerDriver: document.getElementById('sc-owner-driver').value,
+    Active: document.getElementById('sc-active').value,
+  };
+  const isNew = idx===null;
+  const action = isNew ? 'add_master' : 'update_master';
+  const body = isNew ? {action, sheet:'M_SUB', data} : {action, sheet:'M_SUB', rowIndex: _subCompanies[idx]._rowIndex, data};
+  try{
+    showToast('저장 중...','info');
+    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'}, body:JSON.stringify(body)});
+    const json = await res.json();
+    if(json.ok){
+      showToast('✅ SUB 업체 저장 완료','success');
+      closeGenModal();
+      await loadSubCompanies(true);
+      renderSubCompanyList();
+    } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
+  }catch(e){ showToast('❌ 네트워크 오류','error'); }
+}
+
+async function deleteSubCompany(idx){
+  const s = _subCompanies[idx];
+  if(!s) return;
+  if(!confirm(`"${s.SubName}" 업체를 삭제하시겠습니까?`)) return;
+  try{
+    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'delete_master', sheet:'M_SUB', rowIndex: s._rowIndex})});
+    const json = await res.json();
+    if(json.ok){
+      showToast('🗑 삭제 완료','success');
+      await loadSubCompanies(true);
+      renderSubCompanyList();
+    }
+  }catch(e){ showToast('❌ 삭제 실패','error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SUB 인보이스 MODULE (재발행)
+// ═══════════════════════════════════════════════════════════════════
+let _subInvRowCount = 0;
+
+async function initSubInvoice(){
+  // SUB 업체 목록 로드
+  const subs = await loadSubCompanies();
+  const sel = document.getElementById('sub-inv-company');
+  sel.innerHTML = '<option value="">SUB 업체 선택</option>' + subs.filter(s=>(s.Active||'Y')!=='N').map(s=>`<option value="${s.SubName}">${s.SubName}</option>`).join('');
+  // 여행사 목록
+  const agSel = document.getElementById('sub-inv-agency');
+  const agencies = [...new Set((DB.C||[]).map(c=>c.Name).filter(Boolean))].sort();
+  agSel.innerHTML = '<option value="">여행사 선택</option>' + agencies.map(a=>`<option value="${a}">${a}</option>`).join('');
+  // 기간 기본값
+  const now = new Date();
+  document.getElementById('sub-inv-from').value = toLocalISO(new Date(now.getFullYear(), now.getMonth(), 1));
+  document.getElementById('sub-inv-to').value = toLocalISO(now);
+  // 항목 초기화
+  if(!document.getElementById('sub-inv-items').children.length) addSubInvRow();
+  // 이력 렌더
+  renderSubInvHistory();
+}
+
+function onSubInvCompanyChange(){
+  // SUB 선택 시 해당 SUB 차량만 필터링
+  calcSubInvTotal();
+}
+
+function addSubInvRow(){
+  const tbody = document.getElementById('sub-inv-items');
+  const n = _subInvRowCount++;
+  // SUB 소속 차량 목록
+  const subName = document.getElementById('sub-inv-company')?.value||'';
+  const vehs = (DB.V||[]).filter(v=>!subName || (v.SubOwner||v.Owner||'').trim()===subName);
+  const vehOpts = vehs.map(v=>`<option value="${v.Rego}">${v.Rego}</option>`).join('');
+  const tr = document.createElement('tr');
+  tr.id='sub-inv-row-'+n;
+  tr.innerHTML = `
+    <td><input type="date" id="sir-date-${n}" class="profit-finp" style="width:70px;font-size:10px;padding:3px;"></td>
+    <td><select id="sir-rego-${n}" class="profit-finp" style="width:60px;font-size:10px;padding:3px;"><option value="">—</option>${vehOpts}</select></td>
+    <td><input id="sir-tc-${n}" class="profit-finp" style="width:80px;font-size:10px;padding:3px;" placeholder="투어코드"></td>
+    <td><input id="sir-tour-${n}" class="profit-finp" style="width:80px;font-size:10px;padding:3px;" placeholder="코스"></td>
+    <td><select id="sir-seats-${n}" class="profit-finp" style="width:40px;font-size:10px;padding:3px;">
+      <option value="21S">21</option><option value="25S">25</option><option value="40S">40</option><option value="50S">50</option>
+    </select></td>
+    <td><input type="number" id="sir-amt-${n}" class="profit-finp" style="width:55px;font-size:10px;padding:3px;" value="0" oninput="calcSubInvTotal()"></td>
+    <td><input type="number" id="sir-ot-${n}" class="profit-finp" style="width:40px;font-size:10px;padding:3px;" value="0" oninput="calcSubInvTotal()"></td>
+    <td><input type="number" id="sir-etc-${n}" class="profit-finp" style="width:40px;font-size:10px;padding:3px;" value="0" oninput="calcSubInvTotal()"></td>
+    <td><button class="btn brd sm" style="padding:2px 5px;font-size:10px;color:var(--rd);" onclick="document.getElementById('sub-inv-row-${n}').remove();calcSubInvTotal();">✕</button></td>`;
+  tbody.appendChild(tr);
+}
+
+function getSubInvItems(){
+  const items=[];
+  document.querySelectorAll('#sub-inv-items tr').forEach(tr=>{
+    const id = tr.id.replace('sub-inv-row-','');
+    const date = document.getElementById('sir-date-'+id)?.value||'';
+    const rego = document.getElementById('sir-rego-'+id)?.value||'';
+    const tc   = document.getElementById('sir-tc-'+id)?.value||'';
+    const tour = document.getElementById('sir-tour-'+id)?.value||'';
+    const seats= document.getElementById('sir-seats-'+id)?.value||'';
+    const amt  = parseFloat(document.getElementById('sir-amt-'+id)?.value||0);
+    const ot   = parseFloat(document.getElementById('sir-ot-'+id)?.value||0);
+    const etc  = parseFloat(document.getElementById('sir-etc-'+id)?.value||0);
+    items.push({date, rego, tourCode:tc, tour, seats, amount:amt, ot, etc, total: amt+ot+etc});
+  });
+  return items;
+}
+
+function calcSubInvTotal(){
+  const items = getSubInvItems();
+  const total = items.reduce((s,i)=>s+i.total,0);
+  document.getElementById('sub-inv-total').textContent = '$'+total.toLocaleString();
+}
+
+function buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTotal, gst){
+  // 기존 인보이스 템플릿과 동일 (Dong Choi 명의)
+  const cp = window._companyProfile || {};
+  const companyName = cp.CompanyName || 'Dong Choi Pty Ltd';
+  const abn = cp.ABN || '';
+  const address = cp.Address || '';
+  const phone = cp.Phone || '';
+  const email = cp.Email || '';
+  const exGst = grandTotal - gst;
+  const rowsHtml = items.map(i=>`<tr>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.date||''}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.rego||''}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.tourCode||''}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.tour||''}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:center;">${i.seats||''}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${i.amount||0}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${i.ot||0}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${i.etc||0}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;font-weight:700;">$${i.total||0}</td>
+  </tr>`).join('');
+  return `<div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+      <div><div style="font-size:20px;font-weight:700;">${companyName}</div>
+        <div style="font-size:11px;color:#666;">${abn?'ABN: '+abn:''}</div>
+        <div style="font-size:11px;color:#666;">${address}</div>
+        <div style="font-size:11px;color:#666;">${phone} | ${email}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:22px;font-weight:700;color:#4f46e5;">TAX INVOICE</div>
+        <div style="font-size:13px;font-weight:700;">${invNum}</div>
+        <div style="font-size:11px;color:#666;">Date: ${new Date().toLocaleDateString('en-AU')}</div>
+        <div style="font-size:11px;color:#666;">Period: ${from} — ${to}</div>
+      </div>
+    </div>
+    <div style="margin-bottom:16px;padding:10px;background:#f8f9fa;border-radius:6px;">
+      <div style="font-size:12px;font-weight:700;">Bill To: ${agency}</div>
+      <div style="font-size:10px;color:#888;">Source: SUB — ${subName}</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
+      <thead><tr style="background:#4f46e5;color:white;">
+        <th style="padding:6px 8px;font-size:10px;text-align:left;">Date</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:left;">Rego</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:left;">Tour Code</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:left;">Course</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:center;">Seats</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">Amount</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">OT</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">Etc</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">Total</th>
+      </tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    <div style="text-align:right;margin-top:10px;">
+      <div style="font-size:12px;color:#666;">Subtotal (Ex GST): <strong>$${exGst.toFixed(2)}</strong></div>
+      <div style="font-size:12px;color:#666;">GST (10%): <strong>$${gst.toFixed(2)}</strong></div>
+      <div style="font-size:18px;font-weight:800;color:#4f46e5;margin-top:4px;">Total: $${grandTotal.toFixed(2)}</div>
+    </div>
+    <div style="margin-top:20px;padding:10px;background:#f0f0f0;border-radius:6px;font-size:10px;color:#888;">
+      ${cp.BankName?'Bank: '+cp.BankName+' | BSB: '+(cp.BSB||'')+' | Acc: '+(cp.AccountNumber||''):''}
+    </div>
+  </div>`;
+}
+
+function previewSubInvoice(){
+  const agency = document.getElementById('sub-inv-agency').value;
+  const subName = document.getElementById('sub-inv-company').value;
+  const from = document.getElementById('sub-inv-from').value;
+  const to = document.getElementById('sub-inv-to').value;
+  if(!agency || !subName){ showToast('SUB 업체와 여행사를 선택하세요','error'); return; }
+  const items = getSubInvItems().filter(i=>i.total>0);
+  if(!items.length){ showToast('항목을 입력하세요','error'); return; }
+  const exGst = items.reduce((s,i)=>s+i.total,0);
+  const gst = Math.round(exGst*0.1*100)/100;
+  const grandTotal = exGst + gst;
+  const invNum = 'SUB-PREVIEW';
+  const html = buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTotal, gst);
+  if(typeof _showDocModal === 'function'){
+    _showDocModal(html, null, 'SUB-Invoice-Preview.pdf');
+  } else {
+    openGenModal('<div style="padding:10px;overflow:auto;max-height:80vh;">'+html+'</div>');
+  }
+}
+
+async function generateSubInvoice(){
+  const agency = document.getElementById('sub-inv-agency').value;
+  const subName = document.getElementById('sub-inv-company').value;
+  const from = document.getElementById('sub-inv-from').value;
+  const to = document.getElementById('sub-inv-to').value;
+  if(!agency || !subName){ showToast('SUB 업체와 여행사를 선택하세요','error'); return; }
+  const items = getSubInvItems().filter(i=>i.total>0);
+  if(!items.length){ showToast('항목을 입력하세요','error'); return; }
+  const exGst = items.reduce((s,i)=>s+i.total,0);
+  const gst = Math.round(exGst*0.1*100)/100;
+  const grandTotal = exGst + gst;
+  // 인보이스 번호 생성
+  const ym = from ? from.slice(0,7).replace('-','') : new Date().toISOString().slice(0,7).replace('-','');
+  const existing = (_invHistoryCache||[]).filter(inv=>(inv.InvNumber||'').startsWith('INV-'+ym));
+  const nextNum = String(existing.length+1).padStart(3,'0');
+  const invNum = 'INV-'+ym+'-'+nextNum;
+  const html = buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTotal, gst);
+  // Invoices 시트에 저장
+  const invData = {
+    InvNumber: invNum, Agency: agency, PeriodFrom: from, PeriodTo: to,
+    GrandTotal: grandTotal.toFixed(2), GST: gst.toFixed(2), ExGST: exGst.toFixed(2),
+    Status: 'Issued', IssuedDate: new Date().toLocaleDateString('en-AU'),
+    Items: JSON.stringify(items), ManualItems:'', Deductions:'',
+    Notes: 'SUB 재발행: '+subName, CreatedBy: ST.user||'admin',
+    Source: 'SUB', SubCompany: subName
+  };
+  try{
+    showToast('🧾 인보이스 저장 중...','info');
+    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'save_invoice', data:invData, _user:ST.user||'admin'})});
+    const json = await res.json();
+    if(json.ok){
+      showToast('✅ '+invNum+' 발행 완료','success');
+      _invHistoryCache = null; // 캐시 초기화
+      const pdfName = invNum+'_'+agency+'.pdf';
+      if(typeof _showDocModal === 'function'){
+        _showDocModal(html, {invNumber:invNum, agency, from, to}, pdfName);
+      }
+      renderSubInvHistory();
+    } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
+  }catch(e){ showToast('❌ 네트워크 오류','error'); }
+}
+
+function renderSubInvHistory(){
+  const el = document.getElementById('sub-inv-history');
+  if(!el) return;
+  const invs = (_invHistoryCache||[]).filter(inv=>inv.Source==='SUB');
+  if(!invs.length){ el.innerHTML='<div style="text-align:center;padding:10px;color:var(--t3);font-size:12px;">SUB 인보이스 이력이 없습니다.</div>'; return; }
+  el.innerHTML = invs.sort((a,b)=>(b.InvNumber||'').localeCompare(a.InvNumber||'')).slice(0,20).map(inv=>{
+    const paid = (inv.Status||'').toLowerCase()==='paid';
+    return `<div class="crd" style="padding:8px 10px;margin-bottom:6px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <span style="font-size:12px;font-weight:700;color:var(--ac);">${inv.InvNumber}</span>
+          <span style="font-size:11px;color:var(--t3);margin-left:6px;">${inv.Agency||''}</span>
+          <span style="font-size:10px;color:var(--t3);margin-left:4px;">(${inv.SubCompany||''})</span>
+        </div>
+        <div style="font-size:13px;font-weight:700;color:${paid?'var(--gn)':'var(--ac)'};">$${inv.GrandTotal||0}</div>
+      </div>
+      <div style="font-size:10px;color:var(--t3);margin-top:2px;">${inv.PeriodFrom||''}~${inv.PeriodTo||''} | ${inv.IssuedDate||''} ${inv.EmailSentDate?'| ✉️ '+inv.EmailSentDate:''}</div>
+    </div>`;
+  }).join('');
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // BALANCE MODULE (거래처 잔액 관리: 여행사 / 외주 SUB / 드라이버)

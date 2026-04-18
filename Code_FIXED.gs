@@ -36,12 +36,14 @@ const REPORT_HEADERS = {
 
 // ── Master Sheet Headers ──
 const MASTER_HEADERS = {
-  'M_Vehicles': ['Rego','Make','Model','Manufacture_Date','Capacity','Owner','Rego_Date','HVIS_Date',
+  'M_Vehicles': ['Rego','Make','Model','Manufacture_Date','Capacity','Owner','SubOwner','Rego_Date','HVIS_Date',
                  'Current_KM','Last_Service_KM','Service_Interval','VIN','Engine_Number',
                  'Accreditation','Current_Status','Transmission','Active'],
   'M_Drivers':  ['Name_EN','Name_KR','Initials','DriverID','Mobile_1','NEXT_OF_KIN','Moblie_2','License_Class',
                  'License_No','License_Expiry','Authority_No','Authority_Expiry','WWC_No','WWC_Expiry',
-                 'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','Active'],
+                 'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','SubCompany','Active'],
+  // ── SUB 업체 관리 ──
+  'M_SUB':      ['SubName','ABN','Contact','Email','Phone','PriceType','MarginRate','OwnerDriver','Active'],
   'M_Clients':  ['Name','ClientID','Mobile','Email','Address','Bank_Name','BSB','Account_Number'],
   'M_Guides':   ['GuideID','Guide_Name','Mobile','Agency','Email','Remarks'],
   'M_Hotels':   ['Hotel_Name','Phone','Address','Surcharge_Area'],
@@ -60,7 +62,7 @@ const MASTER_HEADERS = {
   'Notices':    ['ID','Title','Content','Type','Date','Active'],
   'Audit_Log':  ['Timestamp','User','Action','Sheet','RowIndex','Summary'],
   'Invoices':   ['InvNumber','Agency','PeriodFrom','PeriodTo','GrandTotal','GST','ExGST',
-                 'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Deductions','Notes','CreatedBy'],
+                 'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Deductions','Notes','CreatedBy','Source','SubCompany'],
   // ── 거래처 잔액 관리 ──
   'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','DR','CR','Remark','StartDate','FinishDate','DueDate'],
   'SUB_Txn':    ['RowID','SubCompany','Category','Date','InvoiceNo','Description','DR','CR','Remark'],
@@ -99,6 +101,7 @@ const TAB_COLORS = {
   'M_PriceDriver':'#057a55','M_PriceSub':'#7c3aed','Sub_Rates':'#b45309',
   'Ledger':'#1e40af','Wages':'#065f46','MOT_Report':'#be185d','Notices':'#0369a1',
   'Agency_Txn':'#0891b2','SUB_Txn':'#a21caf',
+  'M_SUB':'#7c3aed',
   'Invoices':'#6d28d9',
   'M_SvcOptions':'#6366f1','M_HotelOptions':'#ec4899','M_DistOptions':'#f59e0b',
   'M_NightRates':'#8b5cf6','M_Attractions':'#14b8a6',
@@ -218,6 +221,9 @@ function doGet(e) {
 
       case 'get_sub_txn':
         return cors(getSheetRows('SUB_Txn'));
+
+      case 'get_subs':
+        return cors(getSheetRows('M_SUB'));
 
       case 'get_defect_reports': {
         const defDriver = params.driver ? params.driver[0] : '';
@@ -641,7 +647,7 @@ function getMaster(sheetName) {
 function getAllMasters() {
   try {
     const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
-                    'M_PriceClient', 'M_PriceDriver', 'M_PriceSub',
+                    'M_PriceClient', 'M_PriceDriver', 'M_PriceSub', 'M_SUB',
                     'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions',
                     'Sub_Rates', 'Ledger', 'MOT_Report', 'HVIS_Bookings',
                     'Maint_Records', 'Invoice_Overrides', 'Company_Profile',
