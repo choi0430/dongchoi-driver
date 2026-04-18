@@ -9358,14 +9358,12 @@ function openShiftReport(shift, type) {
     if (!drs.length) return '<div style="color:#aaa;font-size:12px;padding:4px 0;">Daily Report 없음</div>';
     const rows = drs.map((r, i) => {
       const kmRange = (r.kmStart && r.kmEnd) ? `${r.kmStart} → ${r.kmEnd}` : '—';
-      const total   = r.total != null ? `$${Number(r.total).toFixed(2)}` : '—';
       const dr      = r.dr    != null ? `$${Number(r.dr).toFixed(2)}`    : '—';
       return `<tr style="${i%2===1?'background:#f8fafc':''}">
         <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;">${i+1}</td>
         <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;">${r.agency||'—'}</td>
         <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;">${r.attraction||'—'}</td>
         <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;">${kmRange}</td>
-        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;font-weight:700;color:#1a56db;">${total}</td>
         <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;color:#059669;">${dr}</td>
       </tr>`;
     }).join('');
@@ -9377,13 +9375,11 @@ function openShiftReport(shift, type) {
         <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">Agency (여행사)</th>
         <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">Attraction (관광지)</th>
         <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">KM</th>
-        <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">TA 청구</th>
         <th style="padding:6px 8px;text-align:left;font-size:10px;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">DR 지급</th>
       </tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr style="background:#f8fafc;font-weight:700;">
         <td colspan="4" style="padding:8px;font-size:12px;border-top:2px solid #e5e7eb;">합계 Total</td>
-        <td style="padding:8px;border-top:2px solid #e5e7eb;color:#1a56db;">$${totTA.toFixed(2)}</td>
         <td style="padding:8px;border-top:2px solid #e5e7eb;color:#059669;">$${totDR.toFixed(2)}</td>
       </tr></tfoot>
     </table>`;
@@ -9899,17 +9895,12 @@ async function loadSubInvReports(){
     // 체크박스 리스트 렌더
     listEl.innerHTML = filtered.map((r,i)=>{
       const d = parseToISO(r.Date)||r.Date||'';
-      const ta = Number(r.SVC_Charge||r.Total_TA||0);
-      const ot = Number(r.OT||0);
-      const hotel = Number(r.Hotel_Surcharge||0);
-      const dist = Number(r.Dist_Surcharge||0);
-      const trailer = Number(r.Trailer||0);
-      const toll = Number(r.Toll||0);
-      const early = Number(r.Early||0);
-      const nightTA = Number(r.Night_DR||0); // TA는 별도 계산 필요하지만 간략히
-      const total = ta + ot + hotel + dist + trailer + toll + early;
+      const drCost = Number(r.DR_Cost||0);
+      const nightOwner = Number(r.Night_Owner||0);
+      // DR_Cost 기반 — SUB에게는 드라이버 지급 금액만 표시
+      const total = drCost;
       return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;">
-        <input type="checkbox" class="si-chk" data-idx="${i}" data-total="${total}" data-date="${d}" data-rego="${r.Rego||''}" data-tour="${r.Attraction||''}" data-seats="${r.Seats||''}" data-tc="${r.Tour_Code||''}" data-ta="${ta}" data-ot="${ot}" data-hotel="${hotel}" data-dist="${dist}" data-trailer="${trailer}" data-toll="${toll}" data-early="${early}" checked onchange="calcSubInvDriverTotal()" style="margin-top:3px;">
+        <input type="checkbox" class="si-chk" data-idx="${i}" data-total="${total}" data-date="${d}" data-rego="${r.Rego||''}" data-tour="${r.Attraction||''}" data-seats="${r.Seats||''}" data-tc="${r.Tour_Code||''}" data-dr="${drCost}" data-nightowner="${nightOwner}" checked onchange="calcSubInvDriverTotal()" style="margin-top:3px;">
         <div style="flex:1;">
           <div style="font-size:12px;font-weight:700;">${d} — ${r.Agency||''}</div>
           <div style="font-size:11px;color:var(--muted);">${r.Attraction||''} | ${r.Rego||''} | ${r.Seats||''}</div>
@@ -9942,8 +9933,8 @@ async function generateSubInvFromDriver(){
     items.push({
       date: chk.dataset.date, rego: chk.dataset.rego, tour: chk.dataset.tour,
       seats: chk.dataset.seats, tourCode: chk.dataset.tc,
-      amount: Number(chk.dataset.ta||0), ot: Number(chk.dataset.ot||0),
-      etc: Number(chk.dataset.hotel||0)+Number(chk.dataset.dist||0)+Number(chk.dataset.trailer||0)+Number(chk.dataset.toll||0)+Number(chk.dataset.early||0),
+      amount: Number(chk.dataset.dr||0),
+      nightOwner: Number(chk.dataset.nightowner||0),
       total: Number(chk.dataset.total||0)
     });
   });
@@ -9982,9 +9973,8 @@ async function generateSubInvFromDriver(){
         <th style="padding:6px 8px;font-size:10px;">Tour Code</th>
         <th style="padding:6px 8px;font-size:10px;">Course</th>
         <th style="padding:6px 8px;font-size:10px;">Seats</th>
-        <th style="padding:6px 8px;font-size:10px;text-align:right;">Amount</th>
-        <th style="padding:6px 8px;font-size:10px;text-align:right;">OT</th>
-        <th style="padding:6px 8px;font-size:10px;text-align:right;">Etc</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">DR Payment</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">Night Fee</th>
         <th style="padding:6px 8px;font-size:10px;text-align:right;">Total</th>
       </tr></thead>
       <tbody>${items.map(i=>`<tr>
@@ -9994,8 +9984,7 @@ async function generateSubInvFromDriver(){
         <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">${i.tour}</td>
         <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:center;">${i.seats}</td>
         <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;">$${i.amount}</td>
-        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;">$${i.ot}</td>
-        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;">$${i.etc}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;">${i.nightOwner>0?'+$'+i.nightOwner:'—'}</td>
         <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;font-weight:700;">$${i.total}</td>
       </tr>`).join('')}</tbody>
     </table>
