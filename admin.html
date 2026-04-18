@@ -983,6 +983,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <select id="dr-filter-rego" class="profit-sel" style="flex:1;min-width:90px;" onchange="renderDR()">
       <option value="">All Vehicles (전체 차량)</option>
     </select>
+    <select id="dr-filter-sub" class="profit-sel" style="flex:1;min-width:90px;" onchange="renderDR()">
+      <option value="">전체 SUB</option>
+    </select>
     <select id="dr-filter-week" class="profit-sel" style="flex:1;min-width:120px;" onchange="renderDR()">
       <option value="">전체 기간</option>
     </select>
@@ -1205,6 +1208,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <button id="sub-tab-rates" class="btn bac sm" style="border-radius:0;border-right:none;margin-bottom:0;" onclick="showSubTab('rates')">📋 요금표</button>
     <button id="sub-tab-calc" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="showSubTab('calc')">🧮 계산기</button>
     <button id="sub-tab-ledger" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="showSubTab('ledger')">🗂 정산</button>
+    <button id="sub-tab-drpay" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="showSubTab('drpay')">💸 드라이버 지급</button>
     <button id="sub-tab-invoice" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="showSubTab('invoice')">🧾 인보이스</button>
   </div>
 
@@ -1314,6 +1318,33 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <button class="btn brd sm" onclick="deleteLedgerWeek()" style="white-space:nowrap;padding:0 10px;" title="선택한 주간 삭제">🗑</button>
     </div>
     <div id="ledger-body" style="padding:10px 14px 0;"></div>
+  </div>
+
+  <!-- ★ SUB 드라이버 지급 내역 뷰 -->
+  <div id="sub-view-drpay" style="display:none;">
+    <div style="padding:12px 14px 0;">
+      <div style="font-size:12px;color:var(--t3);margin-bottom:8px;">차량(Rego) → SUB 매핑 기반 드라이버 지급 내역 자동 집계</div>
+      <!-- 기간 필터 -->
+      <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;">
+        <div style="flex:1;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">시작일</div>
+          <input type="date" id="sdp-from" class="profit-finp" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">종료일</div>
+          <input type="date" id="sdp-to" class="profit-finp" style="width:100%;box-sizing:border-box;">
+        </div>
+        <button class="btn bac sm" onclick="loadSubDriverPay()" style="white-space:nowrap;">조회</button>
+      </div>
+      <!-- SUB 필터 -->
+      <div style="margin-bottom:10px;">
+        <select id="sdp-sub-filter" class="profit-sel" style="width:100%;" onchange="renderSubDriverPay()">
+          <option value="">전체 SUB 업체</option>
+        </select>
+      </div>
+    </div>
+    <!-- 결과 -->
+    <div id="sdp-result" style="padding:0 14px 14px;"></div>
   </div>
 
   <!-- ★ SUB 인보이스 뷰 -->
@@ -2901,7 +2932,7 @@ function deleteSubRate(tour){
 
 function showSubTab(tab){
   ST.subTab=tab;
-  ['company','rates','calc','ledger','invoice'].forEach(t=>{
+  ['company','rates','calc','ledger','drpay','invoice'].forEach(t=>{
     const v=document.getElementById('sub-view-'+t);
     const b=document.getElementById('sub-tab-'+t);
     if(v) v.style.display = t===tab?'':'none';
@@ -2913,6 +2944,7 @@ function showSubTab(tab){
   if(tab==='company') renderSubCompanyList();
   if(tab==='calc') calcProfit();
   if(tab==='ledger') initLedger();
+  if(tab==='drpay') initSubDriverPay();
   if(tab==='invoice') initSubInvoice();
 }
 
@@ -3843,6 +3875,166 @@ async function deleteSubCompany(idx){
       renderSubCompanyList();
     }
   }catch(e){ showToast('❌ 삭제 실패','error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SUB 드라이버 지급 내역 MODULE
+// ═══════════════════════════════════════════════════════════════════
+let _sdpData = null; // cached sub driver pay data
+
+function initSubDriverPay(){
+  // 기간 기본값: 이번 달
+  const now = new Date();
+  const fromEl = document.getElementById('sdp-from');
+  const toEl   = document.getElementById('sdp-to');
+  if(fromEl && !fromEl.value) fromEl.value = toLocalISO(new Date(now.getFullYear(), now.getMonth(), 1));
+  if(toEl && !toEl.value) toEl.value = toLocalISO(now);
+  // SUB 필터 채우기
+  const filterSel = document.getElementById('sdp-sub-filter');
+  if(filterSel && filterSel.options.length <= 1){
+    const vehs = DB.V||[];
+    const subNames = [...new Set(vehs.map(v=>(v.SubOwner||'').trim()).filter(Boolean))].sort();
+    filterSel.innerHTML = '<option value="">전체 SUB 업체</option>' + subNames.map(s=>`<option value="${s}">${s}</option>`).join('');
+  }
+  if(!_sdpData) loadSubDriverPay();
+}
+
+async function loadSubDriverPay(){
+  const from = document.getElementById('sdp-from')?.value||'';
+  const to   = document.getElementById('sdp-to')?.value||'';
+  const resEl = document.getElementById('sdp-result');
+  if(!from||!to){ if(resEl) resEl.innerHTML='<div style="text-align:center;padding:20px;color:var(--t3);">기간을 선택하세요.</div>'; return; }
+  if(resEl) resEl.innerHTML='<div style="text-align:center;padding:20px;color:var(--t3);">⏳ 리포트 로딩 중...</div>';
+  // DR 캐시 없으면 로드
+  if(!_drCache){
+    try{
+      const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+      const json = await res.json();
+      if(json.ok && json.rows) _drCache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
+    }catch(e){}
+  }
+  if(!_drCache){ if(resEl) resEl.innerHTML='<div style="color:var(--rd);">리포트 로드 실패</div>'; return; }
+  // 차량→SUB 매핑
+  const vehs = DB.V||[];
+  const subMap = {}; // { rego: subName }
+  vehs.forEach(v=>{ const so=(v.SubOwner||'').trim(); if(so) subMap[v.Rego]=so; });
+  // 기간 필터 + SUB 차량만
+  const rows = _drCache.filter(r=>{
+    const d = parseToISO(r.Date||'');
+    if(!d || d < from || d > to) return false;
+    const rego = (r.Rego||'').trim();
+    return !!subMap[rego];
+  });
+  // SUB별 → 드라이버별 집계
+  const grouped = {}; // { subName: { driverName: { total, count, items:[] } } }
+  rows.forEach(r=>{
+    const sub = subMap[(r.Rego||'').trim()];
+    const driver = r.Driver||'—';
+    const drCost = Number(r.DR_Cost||0);
+    const nightOwner = Number(r.Night_Owner||0);
+    const ta = Number(r.SVC_Charge||r.Total_TA||0);
+    if(!grouped[sub]) grouped[sub]={};
+    if(!grouped[sub][driver]) grouped[sub][driver]={total:0, taTotal:0, count:0, items:[]};
+    grouped[sub][driver].total += drCost;
+    grouped[sub][driver].taTotal += ta;
+    grouped[sub][driver].count++;
+    grouped[sub][driver].items.push({
+      date: parseToISO(r.Date)||r.Date||'',
+      rego: r.Rego||'', agency: r.Agency||'', attraction: r.Attraction||'',
+      seats: r.Seats||'', tourCode: r.Tour_Code||'',
+      drCost, ta, nightOwner,
+      ot: Number(r.OT||0), hotel: Number(r.Hotel_Surcharge||0),
+      dist: Number(r.Dist_Surcharge||0), early: Number(r.Early||0),
+      trailer: Number(r.Trailer||0)
+    });
+  });
+  _sdpData = grouped;
+  renderSubDriverPay();
+}
+
+function renderSubDriverPay(){
+  const resEl = document.getElementById('sdp-result');
+  if(!resEl || !_sdpData) return;
+  const filter = document.getElementById('sdp-sub-filter')?.value||'';
+  const subs = Object.keys(_sdpData).sort();
+  if(!subs.length){ resEl.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">해당 기간에 SUB 차량 운행 기록이 없습니다.</div>'; return; }
+  let html = '';
+  subs.forEach(sub=>{
+    if(filter && sub!==filter) return;
+    const drivers = _sdpData[sub];
+    const driverNames = Object.keys(drivers).sort();
+    const subTotal = driverNames.reduce((s,d)=>s+drivers[d].total,0);
+    const subTATotal = driverNames.reduce((s,d)=>s+drivers[d].taTotal,0);
+    const subCount = driverNames.reduce((s,d)=>s+drivers[d].count,0);
+    html += `<div class="crd" style="padding:0;margin-bottom:12px;overflow:hidden;">
+      <div style="background:linear-gradient(135deg,#6d28d9,#4f46e5);padding:12px 14px;color:white;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-size:15px;font-weight:800;">🏢 ${sub}</div>
+            <div style="font-size:11px;opacity:.8;">${subCount}건 | 드라이버 ${driverNames.length}명</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:10px;opacity:.7;">여행사 청구 (TA)</div>
+            <div style="font-size:14px;font-weight:700;">$${subTATotal.toLocaleString()}</div>
+            <div style="font-size:10px;opacity:.7;margin-top:2px;">드라이버 지급 합계</div>
+            <div style="font-size:18px;font-weight:800;">$${subTotal.toLocaleString()}</div>
+          </div>
+        </div>
+      </div>`;
+    // 드라이버별 breakdown
+    driverNames.forEach(dName=>{
+      const d = drivers[dName];
+      html += `<div style="border-bottom:1px solid var(--bd,#eee);">
+        <div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none';">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--t1);">👤 ${dName}</div>
+            <div style="font-size:11px;color:var(--t3);">${d.count}건 운행</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:15px;font-weight:800;color:var(--ac);">$${d.total.toLocaleString()}</div>
+            <div style="font-size:10px;color:var(--t3);">지급액</div>
+          </div>
+        </div>
+        <div style="display:none;padding:0 14px 10px;">
+          <table style="width:100%;border-collapse:collapse;font-size:10px;">
+            <thead><tr style="background:var(--sf2,#f8f9fa);">
+              <th style="padding:4px 6px;text-align:left;">날짜</th>
+              <th style="padding:4px 6px;text-align:left;">차량</th>
+              <th style="padding:4px 6px;text-align:left;">여행사</th>
+              <th style="padding:4px 6px;text-align:left;">코스</th>
+              <th style="padding:4px 6px;text-align:left;">투어코드</th>
+              <th style="padding:4px 6px;text-align:right;">TA</th>
+              <th style="padding:4px 6px;text-align:right;">DR지급</th>
+            </tr></thead>
+            <tbody>${d.items.sort((a,b)=>a.date.localeCompare(b.date)).map(it=>`<tr style="border-bottom:1px solid #f0f0f0;">
+              <td style="padding:3px 6px;">${it.date}</td>
+              <td style="padding:3px 6px;">${it.rego}</td>
+              <td style="padding:3px 6px;">${it.agency}</td>
+              <td style="padding:3px 6px;">${it.attraction}</td>
+              <td style="padding:3px 6px;">${it.tourCode}</td>
+              <td style="padding:3px 6px;text-align:right;">$${it.ta}</td>
+              <td style="padding:3px 6px;text-align:right;font-weight:700;color:var(--ac);">$${it.drCost}</td>
+            </tr>`).join('')}
+            <tr style="background:var(--sf2,#f8f9fa);font-weight:700;">
+              <td colspan="5" style="padding:4px 6px;">합계</td>
+              <td style="padding:4px 6px;text-align:right;">$${d.taTotal.toLocaleString()}</td>
+              <td style="padding:4px 6px;text-align:right;color:var(--ac);">$${d.total.toLocaleString()}</td>
+            </tr></tbody>
+          </table>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  });
+  // 전체 합계
+  const grandDR = subs.reduce((s,sub)=>s+Object.values(_sdpData[sub]).reduce((ss,d)=>ss+d.total,0),0);
+  const grandTA = subs.reduce((s,sub)=>s+Object.values(_sdpData[sub]).reduce((ss,d)=>ss+d.taTotal,0),0);
+  html = `<div style="background:var(--sf2);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-around;text-align:center;">
+    <div><div style="font-size:10px;color:var(--t3);">여행사 청구 합계</div><div style="font-size:16px;font-weight:800;">$${grandTA.toLocaleString()}</div></div>
+    <div><div style="font-size:10px;color:var(--t3);">드라이버 지급 합계</div><div style="font-size:16px;font-weight:800;color:var(--ac);">$${grandDR.toLocaleString()}</div></div>
+    <div><div style="font-size:10px;color:var(--t3);">차액 (수익)</div><div style="font-size:16px;font-weight:800;color:var(--gn);">$${(grandTA-grandDR).toLocaleString()}</div></div>
+  </div>` + html;
+  resEl.innerHTML = html;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -8567,6 +8759,21 @@ function renderDR(){
     if(curRego) regoSel.value = curRego;
   }
 
+  // SUB 필터 채우기
+  const subSel = document.getElementById('dr-filter-sub');
+  if(subSel){
+    const _vehs = DB.V||[];
+    const _subMap = {}; _vehs.forEach(v=>{ const so=(v.SubOwner||'').trim(); if(so) _subMap[v.Rego]=so; });
+    const subNames = [...new Set(Object.values(_subMap))].sort();
+    const curSub = subSel.value;
+    if(subSel.options.length !== subNames.length+2){
+      subSel.innerHTML = '<option value="">전체 SUB</option><option value="__own__">자사 차량만</option>' +
+        subNames.map(s=>`<option value="${escH(s)}">${escH(s)}</option>`).join('');
+      if(curSub) subSel.value = curSub;
+    }
+    window._drSubMap = _subMap;
+  }
+
   // 필터 적용
   let filtered = rows;
   if(driverSel.value) filtered = filtered.filter(r=>r.Driver===driverSel.value);
@@ -8576,6 +8783,11 @@ function renderDR(){
     filtered = filtered.filter(r=>{ const iso=parseToISO(r.Date||''); return iso>=wMon && iso<=toLocalISO(wSun); });
   }
   if(regoSel.value) filtered = filtered.filter(r=>r.Rego===regoSel.value);
+  if(subSel && subSel.value){
+    const sm = window._drSubMap||{};
+    if(subSel.value==='__own__') filtered = filtered.filter(r=>!sm[(r.Rego||'').trim()]);
+    else filtered = filtered.filter(r=>sm[(r.Rego||'').trim()]===subSel.value);
+  }
 
   // 날짜 정렬 (기본: 오름차순)
   const sortAsc = window._drSortAsc !== false;  // 기본값 true (오름차순)
@@ -8665,9 +8877,10 @@ function renderDR(){
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
 
-          <!-- 날짜 · 드라이버 · 차량 -->
+          <!-- 날짜 · 드라이버 · 차량 + SUB 배지 -->
           <div style="font-size:12px;font-weight:800;color:var(--t1);">${escH(fmtDate(r.Date))}
             <span style="color:var(--t3);font-weight:400;">&nbsp;${escH(r.Driver||'')} · ${escH(r.Rego||'')}${r.Seats?' · <span style="background:var(--sf2);border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;">'+escH(r.Seats)+'</span>':''}</span>
+            ${(()=>{ const _sv=(DB.V||[]).find(v=>v.Rego===(r.Rego||'').trim()); const _sn=_sv&&(_sv.SubOwner||'').trim(); return _sn?'<span style="display:inline-block;background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;margin-left:4px;">SUB·'+escH(_sn)+'</span>':''; })()}
           </div>
 
           <!-- 여행사 · 관광지 -->
@@ -11183,6 +11396,7 @@ function renderShiftTab() {
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:3px;">
             <span style="font-size:13px;font-weight:700;color:var(--t1);">${escH(r.Driver||'—')}</span>
             <span style="color:var(--ac);font-size:13px;font-weight:700;">· ${escH(r.Rego||'—')}</span>
+            ${(()=>{ const _sv=(DB.V||[]).find(v=>v.Rego===(r.Rego||'').trim()); const _sn=_sv&&(_sv.SubOwner||'').trim(); return _sn?'<span style="background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;">SUB·'+escH(_sn)+'</span>':''; })()}
             ${checkBadge}
           </div>
           <div style="font-size:12px;color:var(--t2);margin-bottom:3px;">📅 ${escH(dateStr)}</div>
