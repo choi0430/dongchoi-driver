@@ -249,6 +249,9 @@ function doGet(e) {
       case 'get_all_leave_requests':
         return cors(getAllLeaveRequests(e.parameter.filter));
 
+      case 'get_roster':
+        return cors(getRosterData(e.parameter.from, e.parameter.to));
+
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
     }
@@ -483,6 +486,9 @@ function doPost(e) {
 
       case 'review_leave_request':
         return cors(reviewLeaveRequest(payload.data));
+
+      case 'update_roster_cell':
+        return cors(updateRosterCell(payload.driver, payload.date, payload.status, _user));
 
       // ── HVIS Bookings (POST) ──
       case 'save_hvis_booking':
@@ -2777,6 +2783,165 @@ function saveInvoiceManualItem(data) {
     if (!found) {
       const row = headers.map(h => data[h] !== undefined ? data[h] : '');
       sheet.appendRow(row);
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DRIVER ROSTER — 주간 가용현황 (Available / Leave / Worked / Off)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * getRosterData(fromISO, toISO)
+ * 기간 내 Driver_Roster + Pre_Departure 기록을 합쳐서 반환
+ * Pre_Departure에 기록이 있으면 Worked 상태로 자동 반영
+ */
+function getRosterData(fromISO, toISO) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const tz = 'Australia/Sydney';
+
+    // ── 1) Driver_Roster 시트에서 수동 상태 로드 ──
+    const rosterSheet = ss.getSheetByName('Driver_Roster');
+    const rosterMap = {};
+    if (rosterSheet && rosterSheet.getLastRow() > 1) {
+      const rData = rosterSheet.getDataRange().getValues();
+      const rH = rData[0];
+      const drvCol = rH.indexOf('Driver');
+      const dateCol = rH.indexOf('Date');
+      const statusCol = rH.indexOf('Status');
+      if (drvCol >= 0 && dateCol >= 0 && statusCol >= 0) {
+        rData.slice(1).forEach(row => {
+          const drv = String(row[drvCol] || '').trim();
+          const dateVal = row[dateCol];
+          let iso;
+          if (dateVal instanceof Date) {
+            iso = Utilities.formatDate(dateVal, tz, 'yyyy-MM-dd');
+          } else {
+            const s = String(dateVal || '');
+            if (s.includes('/')) {
+              const p = s.split('/');
+              iso = p.length === 3 ? p[2] + '-' + p[1].padStart(2,'0') + '-' + p[0].padStart(2,'0') : s;
+            } else { iso = s; }
+          }
+          if (drv && iso) rosterMap[drv + '|' + iso] = String(row[statusCol] || '').trim();
+        });
+      }
+    }
+
+    // ── 2) Pre_Departure에서 Worked 날짜 수집 ──
+    const preSheet = ss.getSheetByName('Pre_Departure');
+    const workedMap = {};
+    if (preSheet && preSheet.getLastRow() > 1) {
+      const preData = preSheet.getDataRange().getValues();
+      const preH = preData[0];
+      const pDrvCol = preH.indexOf('Driver');
+      const pDateCol = preH.indexOf('Date');
+      if (pDrvCol >= 0 && pDateCol >= 0) {
+        preData.slice(1).forEach(row => {
+          const drv = String(row[pDrvCol] || '').trim();
+          const dateVal = row[pDateCol];
+          let iso;
+          if (dateVal instanceof Date) {
+            iso = Utilities.formatDate(dateVal, tz, 'yyyy-MM-dd');
+          } else {
+            const s = String(dateVal || '');
+            if (s.includes('/')) {
+              const p = s.split('/');
+              iso = p.length === 3 ? p[2] + '-' + p[1].padStart(2,'0') + '-' + p[0].padStart(2,'0') : s;
+            } else { iso = s; }
+          }
+          if (drv && iso) workedMap[drv + '|' + iso] = true;
+        });
+      }
+    }
+
+    // ── 3) 병합: Worked 우선, 수동 LEAVE/OFF는 수동 상태 우선 ──
+    const result = [];
+    const allKeys = new Set([...Object.keys(rosterMap), ...Object.keys(workedMap)]);
+    allKeys.forEach(key => {
+      const [drv, iso] = key.split('|');
+      if (fromISO && iso < fromISO) return;
+      if (toISO && iso > toISO) return;
+      const manualStatus = rosterMap[key] || '';
+      const worked = workedMap[key] || false;
+      let finalStatus;
+      if (worked && (!manualStatus || manualStatus === 'Available' || manualStatus === 'WORKED')) {
+        finalStatus = 'WORKED';
+      } else if (manualStatus) {
+        finalStatus = manualStatus;
+      } else {
+        finalStatus = 'Available';
+      }
+      result.push({ Driver: drv, Date: iso, Status: finalStatus });
+    });
+
+    return { ok: true, roster: result };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * updateRosterCell(driver, dateISO, status, user)
+ * 관리자가 그리드에서 셀 클릭 시 상태 변경
+ */
+function updateRosterCell(driver, dateISO, status, user) {
+  try {
+    if (!driver || !dateISO) return { ok: false, error: 'Missing driver or date' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let sheet = ss.getSheetByName('Driver_Roster');
+    if (!sheet) {
+      sheet = ss.insertSheet('Driver_Roster');
+      const headers = ['Driver','Date','Status','Updated_At','Source'];
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1B2A4A').setFontColor('#FFFFFF');
+      sheet.setFrozenRows(1);
+    }
+
+    const tz = 'Australia/Sydney';
+    const now = Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy HH:mm:ss');
+    const dp = dateISO.split('-');
+    const dateDisplay = dp[2] + '/' + dp[1] + '/' + dp[0];
+
+    const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const drvCol = sheetHeaders.indexOf('Driver');
+    const dateCol = sheetHeaders.indexOf('Date');
+    const statusCol = sheetHeaders.indexOf('Status');
+    const updCol = sheetHeaders.indexOf('Updated_At');
+    const srcCol = sheetHeaders.indexOf('Source');
+
+    if (drvCol < 0 || dateCol < 0) return { ok: false, error: 'Required columns not found' };
+
+    const lastRow = sheet.getLastRow();
+    let found = false;
+    if (lastRow > 1) {
+      const data = sheet.getRange(2, 1, lastRow - 1, sheetHeaders.length).getValues();
+      for (let i = 0; i < data.length; i++) {
+        const rowDrv = String(data[i][drvCol] || '').trim();
+        const rowDate = String(data[i][dateCol] || '').trim();
+        if (rowDrv === driver && (rowDate === dateDisplay || rowDate === dateISO)) {
+          if (statusCol >= 0) sheet.getRange(i + 2, statusCol + 1).setValue(status);
+          if (updCol >= 0) sheet.getRange(i + 2, updCol + 1).setValue(now);
+          if (srcCol >= 0) sheet.getRange(i + 2, srcCol + 1).setValue('Manual - ' + (user || 'admin'));
+          found = true;
+          break;
+        }
+      }
+    }
+    if (!found) {
+      const newRow = sheetHeaders.map(h => {
+        if (h === 'Driver') return driver;
+        if (h === 'Date') return dateDisplay;
+        if (h === 'Status') return status;
+        if (h === 'Updated_At') return now;
+        if (h === 'Source') return 'Manual - ' + (user || 'admin');
+        return '';
+      });
+      sheet.appendRow(newRow);
     }
     return { ok: true };
   } catch (err) {
