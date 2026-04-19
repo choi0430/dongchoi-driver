@@ -91,7 +91,11 @@ const MASTER_HEADERS = {
   // ── 인보이스 공제 항목 ──
   'Invoice_Deductions': ['ID','Agency','Period','Type','Amount','Note'],
   // ── 인보이스 수동 항목 ──
-  'Invoice_Manual_Items': ['ID','Agency','Period','Date','Rego','Tour','Seats','TourCode','Note','Amount','OT','Hotel','Dist','Trailer','Toll','Start','End','Driver','Guide','Pickup','Dropoff']
+  'Invoice_Manual_Items': ['ID','Agency','Period','Date','Rego','Tour','Seats','TourCode','Note','Amount','OT','Hotel','Dist','Trailer','Toll','Start','End','Driver','Guide','Pickup','Dropoff'],
+  // ── 사고/인시던트 보고서 (BOAS SMS Element 7) ──
+  'Incident_Reports': ['ID','Submitted','Driver','Date','Time','Rego','Location','Type','Severity',
+                        'Description','Injuries','Witnesses','ImmediateAction','ReportedTo',
+                        'Status','AdminNote','InvestigatedBy','InvestigatedDate','CorrectiveAction','ReviewDate']
 };
 
 // ── Tab Colors ──
@@ -234,6 +238,10 @@ function doGet(e) {
         const dmgRego = params.rego ? params.rego[0] : '';
         return cors(getBusDamage(dmgRego));
       }
+
+      // ── Incident Reports (GET) ──
+      case 'get_incident_reports':
+        return cors(getSheetRows('Incident_Reports'));
 
       // ── Fatigue Compliance (GET) ──
       case 'get_fatigue_check':
@@ -474,6 +482,20 @@ function doPost(e) {
 
       case 'update_defect_status': {
         return cors(updateDefectStatus(payload.id, payload.status, payload.adminNote));
+      }
+
+      // ── Incident Reports (POST) ──
+      case 'save_incident_report': {
+        const r = saveIncidentReport(payload.data);
+        if (r.ok) appendAuditLog(_user, 'save_incident', 'Incident_Reports', r.id || '',
+          'Type:' + (payload.data.Type||'') + ' Driver:' + (payload.data.Driver||''));
+        return cors(r);
+      }
+      case 'update_incident_report': {
+        const r = updateIncidentReport(payload.id, payload.data);
+        if (r.ok) appendAuditLog(_user, 'update_incident', 'Incident_Reports', payload.id||'',
+          'Status:' + (payload.data.Status||''));
+        return cors(r);
       }
 
       // ── Bus Damage Markers ──
@@ -2980,6 +3002,58 @@ function saveInvoiceManualItemsBulk(agency, period, items) {
       });
     }
     return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INCIDENT REPORTS (BOAS SMS Element 7 — 사고/인시던트 보고)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function saveIncidentReport(data) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetName = 'Incident_Reports';
+    let sheet = ss.getSheetByName(sheetName);
+    const headers = MASTER_HEADERS[sheetName];
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      sheet.appendRow(headers);
+      sheet.setFrozenRows(1);
+      try { sheet.setTabColor('#dc2626'); } catch(e){}
+    }
+    const id = 'INC-' + Date.now().toString(36).toUpperCase();
+    data.ID = id;
+    if (!data.Submitted) data.Submitted = new Date().toISOString();
+    if (!data.Status) data.Status = 'Open';
+    const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+    sheet.appendRow(row);
+    return { ok: true, id: id };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function updateIncidentReport(id, data) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('Incident_Reports');
+    if (!sheet) return { ok: false, error: 'Sheet not found' };
+    const headers = MASTER_HEADERS['Incident_Reports'];
+    const allData = sheet.getDataRange().getValues();
+    const idCol = headers.indexOf('ID');
+    for (let i = 1; i < allData.length; i++) {
+      if (String(allData[i][idCol]).trim() === String(id).trim()) {
+        headers.forEach(function(h, ci) {
+          if (data[h] !== undefined) {
+            sheet.getRange(i + 1, ci + 1).setValue(data[h]);
+          }
+        });
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'Incident not found: ' + id };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }

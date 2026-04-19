@@ -431,6 +431,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pquo','nquo');initQuotation()"><div style="font-size:20px;margin-bottom:4px">📑</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Quotation (견적서)</div><div style="font-size:11px;color:var(--t3)">Quotation</div></div>
   </div>
 
+  <div class="shd" style="margin-top:6px"><div class="stl">🛡️ Safety & Compliance (안전 관리)</div></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pinc','ninc');loadAdminIncidents()"><div style="font-size:20px;margin-bottom:4px">🚨</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Incident Reports</div><div style="font-size:11px;color:var(--t3)" id="qi">사고 보고</div></div>
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('psms','nsms');renderSMSChecklist()"><div style="font-size:20px;margin-bottom:4px">📋</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">SMS Compliance</div><div style="font-size:11px;color:var(--t3)">안전관리체계</div></div>
+  </div>
+
 </div>
 
 <!-- VEHICLE -->
@@ -921,6 +927,35 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 </div>
 
 <!-- NOTICES MANAGEMENT PAGE -->
+<!-- ═══ INCIDENT REPORTS (사고 보고 관리 — BOAS SMS Element 7) ═══ -->
+<div class="pg" id="pinc">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">🚨 Incident Reports (사고 보고 관리)</div><div class="ssb">BOAS SMS Element 7 — 사고 관리 및 모니터링</div></div>
+    <div style="display:flex;gap:6px;">
+      <select id="inc-filter-status" onchange="renderAdminIncidents()" style="padding:4px 8px;border-radius:8px;border:1.5px solid var(--bd);font-size:11px;font-weight:600;">
+        <option value="">All (전체)</option>
+        <option value="Open">🔴 Open</option>
+        <option value="Investigating">🟡 Investigating</option>
+        <option value="Resolved">🟢 Resolved</option>
+        <option value="Closed">⚪ Closed</option>
+      </select>
+    </div>
+  </div>
+  <div style="padding:10px 14px 80px;" id="admin-inc-list">
+    <div style="text-align:center;color:var(--t3);padding:30px;">불러오는 중...</div>
+  </div>
+</div>
+
+<!-- ═══ SMS COMPLIANCE CHECKLIST (BOAS SMS 8개 요소 체크리스트) ═══ -->
+<div class="pg" id="psms">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">📋 SMS Compliance (안전관리체계)</div><div class="ssb">BOAS Safety Management System — 8 Elements</div></div>
+  </div>
+  <div style="padding:10px 14px 80px;" id="sms-checklist-content">
+    <div style="text-align:center;color:var(--t3);padding:30px;">불러오는 중...</div>
+  </div>
+</div>
+
 <div class="pg" id="pnotice">
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">📢 공지사항 관리</div><div class="ssb">드라이버 앱 공지 등록</div></div>
@@ -992,7 +1027,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <select id="dr-filter-week" class="profit-sel" style="flex:1;min-width:120px;" onchange="renderDR()">
       <option value="">전체 기간</option>
     </select>
-    <button id="dr-sort-btn" class="btn bgh sm" style="white-space:nowrap;font-size:11px;padding:6px 10px;" onclick="toggleDRSort()">↑ 오름차순</button>
+    <button id="dr-sort-btn" class="btn bgh sm" style="white-space:nowrap;font-size:11px;padding:6px 10px;" onclick="toggleDRSort()">↓ 내림차순</button>
   </div>
   <!-- 요약 배지 -->
   <div id="dr-summary" style="padding:6px 14px 0;font-size:11px;color:var(--t3);"></div>
@@ -1174,7 +1209,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 탭: 드라이버별 / 전체 -->
   <div style="display:flex;gap:0;padding:10px 14px 0;">
     <button id="wage-tab-single" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;" onclick="setWageTab('single')">👤 드라이버별</button>
-    <button id="wage-tab-all" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="setWageTab('all')">📊 전체 보기</button>
+    <button id="wage-tab-all" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="setWageTab('all')">📊 전체 보기</button>
+    <button id="wage-tab-weekly" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="setWageTab('weekly')">📅 주급 보기</button>
   </div>
   <!-- 드라이버별 뷰 -->
   <div id="wage-view-single">
@@ -1195,6 +1231,16 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     </div>
     <div id="wage-all-summary"></div>
     <div id="wage-all-list"></div>
+  </div>
+  <!-- 주급 보기 뷰 (금요일 지급 기준) -->
+  <div id="wage-view-weekly" style="display:none;padding:10px 14px 0;">
+    <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;">
+      <select id="wage-weekly-sel" class="profit-sel" style="flex:1;" onchange="renderWeeklyPayroll()">
+        <option value="">Loading...</option>
+      </select>
+    </div>
+    <div id="wage-weekly-summary"></div>
+    <div id="wage-weekly-list" style="padding-bottom:80px;"></div>
   </div>
 </div>
 
@@ -1619,6 +1665,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="ni" id="nquo" onclick="nv('pquo','nquo');initQuotation()"><div class="nie">📑</div><div class="nil">Quotation (견적서)</div><span class="tab-badge" id="badge-nquo"></span></div>
   </div>
   <div class="bnav-group">
+    <div class="ni" id="ninc" onclick="nv('pinc','ninc');loadAdminIncidents()"><div class="nie">🚨</div><div class="nil">사고보고</div><span class="tab-badge" id="badge-ninc"></span></div>
+    <div class="ni" id="nsms" onclick="nv('psms','nsms');renderSMSChecklist()"><div class="nie">📋</div><div class="nil">SMS</div><span class="tab-badge" id="badge-nsms"></span></div>
     <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div><span class="tab-badge" id="badge-nnotice"></span></div>
   </div>
 </div>
@@ -2173,6 +2221,34 @@ function rDash(){
           m:`${a.driver} — Rest gap only ${a.gapHours}hrs (휴식 ${a.gapHours}시간만) — EoS ${a.eosTime} → Pre ${a.preTime} — Min 7hrs required (최소 7시간 필요)`});
       }
     });
+  }
+  // ── 사고 보고 알림 (Incident Report Alerts — BOAS SMS Element 7) ──
+  if(window._incidentCache && window._incidentCache.length){
+    const openInc = window._incidentCache.filter(i=>i.Status==='Open');
+    const investigatingInc = window._incidentCache.filter(i=>i.Status==='Investigating');
+    if(openInc.length){
+      const criticals = openInc.filter(i=>i.Severity==='Critical'||i.Severity==='Serious');
+      if(criticals.length){
+        criticals.forEach(inc=>{
+          als.push({sort:-9500,type:'incident_critical',
+            bg:'#fef2f2',bc:'#ef4444',fc:'#dc2626',
+            icon:'🚨',
+            m:`<b>${inc.Type}</b> — ${inc.Driver||'Unknown'} (${inc.Date||''}) — ${inc.Severity} — ${inc.Location||''} <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinc','ninc');loadAdminIncidents()">상세보기 →</span>`});
+        });
+      }
+      if(openInc.length-criticals.length>0){
+        als.push({sort:-9000,type:'incident_open',
+          bg:'#fff7ed',bc:'#f97316',fc:'#ea580c',
+          icon:'📝',
+          m:`Open Incidents (미처리 사고): <b>${openInc.length}건</b> (Critical/Serious: ${criticals.length}건) <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinc','ninc');loadAdminIncidents()">확인하기 →</span>`});
+      }
+    }
+    if(investigatingInc.length){
+      als.push({sort:-8000,type:'incident_investigating',
+        bg:'#fefce8',bc:'#eab308',fc:'#ca8a04',
+        icon:'🔍',
+        m:`Investigating Incidents (조사 중): <b>${investigatingInc.length}건</b> <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinc','ninc');loadAdminIncidents()">확인하기 →</span>`});
+    }
   }
   als.sort((a,b)=>a.sort-b.sort);
   document.getElementById('alct').textContent=als.length+'건';
@@ -8725,9 +8801,12 @@ function setWageTab(tab) {
   _wageTab = tab;
   document.getElementById('wage-view-single').style.display = tab==='single' ? '' : 'none';
   document.getElementById('wage-view-all').style.display = tab==='all' ? '' : 'none';
+  document.getElementById('wage-view-weekly').style.display = tab==='weekly' ? '' : 'none';
   document.getElementById('wage-tab-single').classList.toggle('on', tab==='single');
   document.getElementById('wage-tab-all').classList.toggle('on', tab==='all');
+  document.getElementById('wage-tab-weekly').classList.toggle('on', tab==='weekly');
   if (tab==='all') renderWageAllDrivers();
+  if (tab==='weekly') renderWeeklyPayroll();
 }
 
 async function renderWageAllDrivers() {
@@ -8966,7 +9045,7 @@ async function loadDR(force=false){
 }
 
 // ── 정렬 토글 (기본 오름차순) ──
-window._drSortAsc = true;
+window._drSortAsc = false;
 function toggleDRSort(){
   window._drSortAsc = !window._drSortAsc;
   const btn = document.getElementById('dr-sort-btn');
@@ -9038,8 +9117,8 @@ function renderDR(){
     else filtered = filtered.filter(r=>sm[(r.Rego||'').trim()]===subSel.value);
   }
 
-  // 날짜 정렬 (기본: 오름차순)
-  const sortAsc = window._drSortAsc !== false;  // 기본값 true (오름차순)
+  // 날짜 정렬 (기본: 내림차순)
+  const sortAsc = window._drSortAsc === true;  // 기본값 false (내림차순)
   filtered = [...filtered].sort((a,b)=>{ const ai=parseToISO(a.Date||''), bi=parseToISO(b.Date||''); return sortAsc ? ai.localeCompare(bi) : bi.localeCompare(ai); });
 
   // 총 근무시간 합산 (분 단위로 계산)
@@ -12809,7 +12888,8 @@ async function reviewLeave(status){
 const _TAB_NAV_MAP = {
   ndash:'pdash', nveh:'pveh', ndrv:'pdrv', nleave:'pleave', ncli:'pcli', ngui:'pgui',
   nprc:'pprc', nhtl:'phtl', nsub:'psub', ndr:'pdr', nshift:'pshift', nmot:'pmot',
-  nbal:'pbal', nwage:'pwage', ninv:'pinv', nquo:'pquo', nnotice:'pnotice'
+  nbal:'pbal', nwage:'pwage', ninv:'pinv', nquo:'pquo', nnotice:'pnotice',
+  ninc:'pinc', nsms:'psms'
 };
 // 탭별 현재 데이터 수 가져오기
 function _getTabCounts(){
@@ -12827,6 +12907,8 @@ function _getTabCounts(){
     nmot:   (window._motCache||[]).length,
     ninv:   (_invHistoryCache||[]).length,
     nnotice:(window._adminNotices||[]).length,
+    ninc:   (window._incidentCache||[]).length,
+    nsms:   8,
   };
 }
 // 마지막 확인 시점의 카운트
@@ -13692,6 +13774,440 @@ function _blobToBase64(blob) {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+// ═══════════════════════════════════════
+// WEEKLY PAYROLL VIEW (주급 보기 — 금요일 지급 기준)
+// ═══════════════════════════════════════
+function renderWeeklyPayroll(){
+  const sumEl = document.getElementById('wage-weekly-summary');
+  const listEl = document.getElementById('wage-weekly-list');
+  const wSel = document.getElementById('wage-weekly-sel');
+  if(!sumEl || !listEl || !wSel) return;
+  if(!DB.D || DB.D.length === 0){ setTimeout(renderWeeklyPayroll, 300); return; }
+
+  const wages = getWages();
+  const rows = _reportsCache || [];
+  const _vehsAll = DB.V||[];
+  const _subMap = {}; _vehsAll.forEach(v=>{ const so=(v.SubOwner||'').trim(); if(so) _subMap[v.Rego]=so; });
+
+  // 모든 주의 월요일 수집
+  const allWeeks = new Set();
+  Object.values(wages).forEach(dw=>Object.keys(dw).forEach(w=>{ if(/^\d{4}-\d{2}-\d{2}$/.test(w)) allWeeks.add(getMondayOfDate(w)); }));
+  rows.forEach(r=>{ if(r._isoDate){ const m=getMondayOfDate(r._isoDate); if(m) allWeeks.add(m); } });
+  const sortedWeeks = [...allWeeks].filter(Boolean).sort((a,b)=>b.localeCompare(a));
+
+  // 주차 셀렉트 채우기 (금요일 지급일 표시)
+  const curWeek = wSel.value || '';
+  wSel.innerHTML = sortedWeeks.map((w,i)=>{
+    const fri = new Date(w+'T00:00:00'); fri.setDate(fri.getDate()+4);
+    const friStr = fri.toLocaleDateString('en-AU',{day:'numeric',month:'short'});
+    const label = getWeekLabel(w) + ' (지급일: 금 '+friStr+')';
+    return '<option value="'+w+'"'+((curWeek?w===curWeek:i===0)?' selected':'')+'>'+label+'</option>';
+  }).join('');
+
+  const selectedWeek = wSel.value;
+  if(!selectedWeek){ sumEl.innerHTML=''; listEl.innerHTML='<div style="text-align:center;padding:24px;color:var(--t3);">주차 데이터 없음</div>'; return; }
+
+  const mon = selectedWeek;
+  const sunD = new Date(mon+'T00:00:00'); sunD.setDate(sunD.getDate()+6);
+  const sun = toLocalISO(sunD);
+  const friD = new Date(mon+'T00:00:00'); friD.setDate(friD.getDate()+4);
+  const friLabel = friD.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+
+  // 드라이버별 계산
+  const drivers = DB.D.map(d=>d.Name_KR||d.Name_EN).filter(Boolean);
+  let grandEarned=0, grandPaid=0, totalDrivers=0;
+  const driverPayroll = [];
+
+  for(const drv of drivers){
+    const drRow = DB.D.find(d=>(d.Name_KR||'')===drv||(d.Name_EN||'')===drv);
+    const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+    const weekRows = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
+    const ownRows = weekRows.filter(r=>!_subMap[(r.Rego||'').trim()]);
+
+    const earned = ownRows.reduce((s,r)=>s+_calcDRFromReport(r),0);
+
+    // 지급 내역
+    const drvWages = wages[drv]||{};
+    let paid = 0;
+    Object.entries(drvWages).forEach(([wk,data])=>{
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(wk)) return;
+      const wkMon = getMondayOfDate(wk);
+      if(wkMon === mon) paid += (data.entries||[]).reduce((s,e)=>s+(e.amount||0),0);
+    });
+
+    if(earned > 0 || paid > 0){
+      const balance = earned - paid;
+      driverPayroll.push({ drv, earned, paid, balance, shifts: ownRows.length });
+      grandEarned += earned;
+      grandPaid += paid;
+      totalDrivers++;
+    }
+  }
+
+  // 미지급 금액 기준 내림차순 정렬
+  driverPayroll.sort((a,b)=>b.balance - a.balance);
+  const grandBalance = grandEarned - grandPaid;
+
+  // 요약 카드
+  sumEl.innerHTML = `
+    <div style="background:linear-gradient(135deg,#eff6ff,#faf5ff);border:1.5px solid #bfdbfe;border-radius:14px;padding:16px;margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:800;color:#1e40af;margin-bottom:4px;">📅 이번 주 지급 현황</div>
+      <div style="font-size:11px;color:#6366f1;margin-bottom:10px;">지급 예정일: ${friLabel}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+        ${wstat('총 발생', grandEarned, '#059669')}
+        ${wstat('지급 완료', grandPaid, '#2563eb')}
+        ${wstat('미지급 잔액', grandBalance, grandBalance>0?'#dc2626':'#059669')}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
+        ${wstat('드라이버 수', totalDrivers+'명', '#7c3aed')}
+        ${wstat('미지급 인원', driverPayroll.filter(d=>d.balance>0).length+'명', driverPayroll.filter(d=>d.balance>0).length>0?'#ea580c':'#059669')}
+      </div>
+    </div>`;
+
+  // 드라이버별 목록
+  if(!driverPayroll.length){
+    listEl.innerHTML='<div style="text-align:center;padding:24px;color:var(--t3);font-size:13px;">이 주에 데이터가 없습니다.</div>';
+    return;
+  }
+
+  listEl.innerHTML = driverPayroll.map(d=>{
+    const isPaid = d.balance <= 0;
+    const bc = isPaid ? '#059669' : '#dc2626';
+    const bg = isPaid ? '#f0fdf4' : '#fef2f2';
+    return `<div style="background:${bg};border:1px solid ${bc}22;border-left:4px solid ${bc};border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;" onclick="selectWageDriver('${escH(d.drv)}')">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:14px;font-weight:800;color:var(--t1);">${escH(d.drv)}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:3px;">운행 ${d.shifts}건 · 발생 $${d.earned.toLocaleString()} · 지급 $${d.paid.toLocaleString()}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:18px;font-weight:900;color:${bc};">${isPaid?'':'+'} $${Math.abs(d.balance).toLocaleString()}</div>
+          <div style="font-size:10px;font-weight:700;color:${bc};background:${bg};padding:1px 6px;border-radius:6px;border:1px solid ${bc}33;">${isPaid?'✅ 지급완료':'💰 지급필요'}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════
+// INCIDENT REPORTS — Admin (BOAS SMS Element 7)
+// ═══════════════════════════════════════
+window._incidentCache = [];
+
+async function loadAdminIncidents(){
+  try {
+    const el = document.getElementById('admin-inc-list');
+    el.innerHTML='<div style="text-align:center;color:var(--t3);padding:30px;">불러오는 중...</div>';
+    const r = await fetch(APPS_SCRIPT_URL+'?action=get_incident_reports');
+    const j = await r.json();
+    if(j.ok){
+      window._incidentCache = (j.data||[]).sort((a,b)=>(b.Submitted||'').localeCompare(a.Submitted||''));
+      renderAdminIncidents();
+    } else {
+      el.innerHTML='<div style="text-align:center;color:#ef4444;padding:30px;">Error: '+(j.error||'Unknown')+'</div>';
+    }
+  } catch(e){
+    document.getElementById('admin-inc-list').innerHTML='<div style="text-align:center;color:#ef4444;padding:30px;">'+e.message+'</div>';
+  }
+}
+
+function renderAdminIncidents(){
+  const el = document.getElementById('admin-inc-list');
+  const filter = document.getElementById('inc-filter-status').value;
+  let list = window._incidentCache||[];
+  if(filter) list = list.filter(i=>i.Status===filter);
+
+  if(!list.length){
+    el.innerHTML='<div style="text-align:center;color:var(--t3);padding:30px;">No incidents '+(filter?'('+filter+')':'')+'</div>';
+    return;
+  }
+
+  const sevColor = s=>({Critical:'#dc2626',Serious:'#ea580c',Moderate:'#f59e0b',Minor:'#6b7280'}[s]||'#6b7280');
+  const statIcon = s=>({Open:'🔴',Investigating:'🟡',Resolved:'🟢',Closed:'⚪'}[s]||'⚪');
+  const statBg = s=>({Open:'#fef2f2',Investigating:'#fefce8',Resolved:'#f0fdf4',Closed:'#f9fafb'}[s]||'#f9fafb');
+
+  el.innerHTML = list.map(inc=>{
+    const sc = sevColor(inc.Severity);
+    return `<div class="crd" style="border-left:4px solid ${sc};margin-bottom:8px;padding:12px 14px;cursor:pointer;" onclick="showIncidentDetail('${inc.ID}')">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="font-size:13px;font-weight:800;color:var(--t1);">${statIcon(inc.Status)} ${inc.Type||'N/A'}</div>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <span style="font-size:10px;font-weight:700;color:#fff;background:${sc};padding:2px 8px;border-radius:10px;">${inc.Severity||'N/A'}</span>
+          <span style="font-size:10px;font-weight:600;color:var(--t3);background:${statBg(inc.Status)};padding:2px 8px;border-radius:10px;border:1px solid ${sc}33;">${inc.Status||'Open'}</span>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--t2);margin-bottom:4px;">${inc.Driver||'Unknown'} · ${inc.Rego||''} · ${inc.Date||''} ${inc.Time||''}</div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:4px;">${inc.Location||''}</div>
+      <div style="font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${inc.Description||''}</div>
+      ${inc.AdminNote?'<div style="font-size:10px;color:var(--ac);margin-top:4px;font-weight:600;">Admin: '+inc.AdminNote+'</div>':''}
+      <div style="font-size:9px;color:var(--t3);margin-top:4px;">${inc.ID} · Submitted: ${inc.Submitted||''}</div>
+    </div>`;
+  }).join('');
+}
+
+function showIncidentDetail(id){
+  const inc = (window._incidentCache||[]).find(i=>i.ID===id);
+  if(!inc) return;
+
+  const sevColor = s=>({Critical:'#dc2626',Serious:'#ea580c',Moderate:'#f59e0b',Minor:'#6b7280'}[s]||'#6b7280');
+  const sc = sevColor(inc.Severity);
+
+  const html = `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9200;display:flex;align-items:center;justify-content:center;padding:16px;" id="inc-detail-modal" onclick="if(event.target===this)this.remove()">
+    <div style="background:var(--sf);border-radius:16px;padding:18px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;" onclick="event.stopPropagation()">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div style="font-size:15px;font-weight:800;color:var(--t1);">🚨 Incident Detail</div>
+        <div onclick="document.getElementById('inc-detail-modal').remove()" style="cursor:pointer;font-size:18px;color:var(--t3);">&times;</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">ID</div><div style="font-size:12px;font-weight:700;">${inc.ID}</div></div>
+        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Status</div><div style="font-size:12px;font-weight:700;">${inc.Status||'Open'}</div></div>
+        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Type</div><div style="font-size:12px;font-weight:700;">${inc.Type||''}</div></div>
+        <div class="crd" style="padding:8px;border-left:3px solid ${sc}"><div style="font-size:9px;color:var(--t3);font-weight:700;">Severity</div><div style="font-size:12px;font-weight:700;color:${sc}">${inc.Severity||''}</div></div>
+        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Driver</div><div style="font-size:12px;font-weight:700;">${inc.Driver||''}</div></div>
+        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Rego</div><div style="font-size:12px;font-weight:700;">${inc.Rego||''}</div></div>
+        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Date/Time</div><div style="font-size:12px;font-weight:700;">${inc.Date||''} ${inc.Time||''}</div></div>
+        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Location</div><div style="font-size:12px;font-weight:700;">${inc.Location||''}</div></div>
+      </div>
+
+      <div class="crd" style="padding:10px;margin-bottom:8px;">
+        <div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:4px;">Description (사고 설명)</div>
+        <div style="font-size:12px;color:var(--t1);">${inc.Description||'N/A'}</div>
+      </div>
+
+      ${inc.Injuries?'<div class="crd" style="padding:10px;margin-bottom:8px;"><div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:4px;">Injuries (부상)</div><div style="font-size:12px;color:var(--t1);">'+inc.Injuries+'</div></div>':''}
+      ${inc.Witnesses?'<div class="crd" style="padding:10px;margin-bottom:8px;"><div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:4px;">Witnesses (목격자)</div><div style="font-size:12px;color:var(--t1);">'+inc.Witnesses+'</div></div>':''}
+      ${inc.ImmediateAction?'<div class="crd" style="padding:10px;margin-bottom:8px;"><div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:4px;">Immediate Action (즉시 조치)</div><div style="font-size:12px;color:var(--t1);">'+inc.ImmediateAction+'</div></div>':''}
+      ${inc.ReportedTo?'<div class="crd" style="padding:10px;margin-bottom:8px;"><div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:4px;">Reported To (보고 대상)</div><div style="font-size:12px;color:var(--t1);">'+inc.ReportedTo+'</div></div>':''}
+
+      <div style="border-top:1px solid var(--bd);padding-top:12px;margin-top:8px;">
+        <div style="font-size:12px;font-weight:800;color:var(--t1);margin-bottom:8px;">Admin Actions (관리자 조치)</div>
+        <div style="margin-bottom:8px;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">Status Update</div>
+          <select id="inc-upd-status" style="width:100%;padding:6px 10px;border-radius:8px;border:1.5px solid var(--bd);font-size:12px;font-weight:600;">
+            <option value="Open" ${inc.Status==='Open'?'selected':''}>🔴 Open</option>
+            <option value="Investigating" ${inc.Status==='Investigating'?'selected':''}>🟡 Investigating</option>
+            <option value="Resolved" ${inc.Status==='Resolved'?'selected':''}>🟢 Resolved</option>
+            <option value="Closed" ${inc.Status==='Closed'?'selected':''}>⚪ Closed</option>
+          </select>
+        </div>
+        <div style="margin-bottom:8px;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">Admin Note (관리자 메모)</div>
+          <textarea id="inc-upd-note" rows="2" style="width:100%;padding:6px 10px;border-radius:8px;border:1.5px solid var(--bd);font-size:12px;resize:vertical;">${inc.AdminNote||''}</textarea>
+        </div>
+        <div style="margin-bottom:8px;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">Investigated By (조사자)</div>
+          <input id="inc-upd-investigator" value="${inc.InvestigatedBy||''}" style="width:100%;padding:6px 10px;border-radius:8px;border:1.5px solid var(--bd);font-size:12px;">
+        </div>
+        <div style="margin-bottom:8px;">
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">Corrective Action (시정 조치)</div>
+          <textarea id="inc-upd-corrective" rows="2" style="width:100%;padding:6px 10px;border-radius:8px;border:1.5px solid var(--bd);font-size:12px;resize:vertical;">${inc.CorrectiveAction||''}</textarea>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn brd" style="flex:1;" onclick="document.getElementById('inc-detail-modal').remove()">Cancel (취소)</button>
+          <button class="btn bac" style="flex:2;" onclick="updateIncidentAdmin('${inc.ID}')">💾 Save (저장)</button>
+        </div>
+        <div id="inc-upd-err" style="color:#ef4444;font-size:12px;margin-top:6px;display:none;"></div>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function updateIncidentAdmin(id){
+  const errEl = document.getElementById('inc-upd-err');
+  errEl.style.display='none';
+  try {
+    const data = {
+      Status: document.getElementById('inc-upd-status').value,
+      AdminNote: document.getElementById('inc-upd-note').value.trim(),
+      InvestigatedBy: document.getElementById('inc-upd-investigator').value.trim(),
+      CorrectiveAction: document.getElementById('inc-upd-corrective').value.trim(),
+    };
+    if(data.InvestigatedBy && !data.InvestigatedDate){
+      data.InvestigatedDate = new Date().toISOString().split('T')[0];
+    }
+    if(data.Status==='Resolved'||data.Status==='Closed'){
+      data.ReviewDate = new Date().toISOString().split('T')[0];
+    }
+    const r = await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'update_incident_report',id:id,data:data})});
+    const j = await r.json();
+    if(j.ok){
+      const modal = document.getElementById('inc-detail-modal');
+      if(modal) modal.remove();
+      await loadAdminIncidents();
+    } else {
+      errEl.textContent = j.error||'Update failed';
+      errEl.style.display='block';
+    }
+  } catch(e){
+    errEl.textContent = e.message;
+    errEl.style.display='block';
+  }
+}
+
+// ═══════════════════════════════════════
+// SMS COMPLIANCE CHECKLIST (BOAS 8 Elements)
+// ═══════════════════════════════════════
+function renderSMSChecklist(){
+  const el = document.getElementById('sms-checklist-content');
+  // Gather compliance data from existing system
+  const driverCount = (DB.D||[]).length;
+  const vehicleCount = (DB.V||[]).length;
+  const hasIncidents = (window._incidentCache||[]).length > 0 || true; // form exists
+  const hasFatigue = typeof loadFatigueAlerts === 'function';
+  const hasLicenseCheck = DB.D && DB.D.some(d=>d.License_Expiry || d.Authority_Expiry);
+  const hasAuditLog = true; // appendAuditLog exists in GAS
+  const hasNotices = typeof loadAdminNotices === 'function';
+  const hasDrRecords = typeof loadDailyRecords === 'function';
+  const hasRoster = typeof loadRosterData === 'function';
+  const openIncidents = (window._incidentCache||[]).filter(i=>i.Status==='Open').length;
+  const resolvedIncidents = (window._incidentCache||[]).filter(i=>i.Status==='Resolved'||i.Status==='Closed').length;
+
+  const elements = [
+    {
+      num: 1, title: 'Safety Policy (안전 정책)',
+      desc: 'Written safety policy signed by senior management, communicated to all employees.',
+      status: hasNotices ? 'partial' : 'manual',
+      checks: [
+        { label: 'Safety policy document exists (안전 정책 문서)', auto: false, tip: 'Upload to company documents or display in notices' },
+        { label: 'Policy communicated to all drivers (전 드라이버 전달)', auto: hasNotices, tip: hasNotices ? 'Use Notices tab to distribute' : 'Set up notices system' },
+        { label: 'Annual review completed (연간 검토 완료)', auto: false, tip: 'Review safety policy annually, record review date' },
+      ]
+    },
+    {
+      num: 2, title: 'Management Responsibilities (관리 책임)',
+      desc: 'Defined safety roles, responsibilities, and organizational structure.',
+      status: driverCount > 0 ? 'partial' : 'manual',
+      checks: [
+        { label: 'Safety manager appointed (안전 관리자 지정)', auto: false, tip: 'Record safety officer in company profile' },
+        { label: 'Organizational chart current (조직도 최신)', auto: driverCount > 0, tip: driverCount + ' drivers registered in system' },
+        { label: 'Safety responsibilities documented (안전 책임 문서화)', auto: false, tip: 'Include in driver handbook/notices' },
+      ]
+    },
+    {
+      num: 3, title: 'Risk Management (위험 관리)',
+      desc: 'Systematic identification, assessment, and control of safety risks.',
+      status: hasFatigue && hasLicenseCheck ? 'good' : 'partial',
+      checks: [
+        { label: 'Risk register maintained (위험 등록부 관리)', auto: false, tip: 'Create and maintain risk register document' },
+        { label: 'Fatigue risk monitoring active (피로 위험 모니터링)', auto: hasFatigue, tip: hasFatigue ? 'NHVR fatigue compliance alerts active' : 'Enable fatigue monitoring' },
+        { label: 'Vehicle maintenance tracked (차량 정비 추적)', auto: vehicleCount > 0, tip: vehicleCount + ' vehicles tracked — service KM & HVIS alerts' },
+        { label: 'Route risk assessments (노선 위험 평가)', auto: false, tip: 'Document risk assessments for each route' },
+      ]
+    },
+    {
+      num: 4, title: 'Procedures & Documentation (절차 및 문서화)',
+      desc: 'Standard operating procedures for all safety-critical activities.',
+      status: hasDrRecords ? 'partial' : 'manual',
+      checks: [
+        { label: 'Pre-trip inspection SOP (출발 전 점검 SOP)', auto: hasDrRecords, tip: hasDrRecords ? 'Daily Record system captures pre/post trip' : 'Set up daily records' },
+        { label: 'Emergency procedures documented (비상 절차 문서화)', auto: false, tip: 'Create emergency procedure manual' },
+        { label: 'Passenger safety procedures (승객 안전 절차)', auto: false, tip: 'Document boarding, alighting, wheelchair procedures' },
+        { label: 'Document control system (문서 관리 시스템)', auto: hasAuditLog, tip: 'Audit log tracks all system changes' },
+      ]
+    },
+    {
+      num: 5, title: 'Employee Monitoring (직원 관리)',
+      desc: 'Fatigue management, drug/alcohol policy, health assessments, driver authority monitoring.',
+      status: hasFatigue && hasLicenseCheck ? 'good' : 'partial',
+      checks: [
+        { label: 'Fatigue management (HVNL 피로 관리)', auto: hasFatigue, tip: hasFatigue ? '12hr/24hr, 72hr/7day limits monitored' : 'Enable fatigue alerts' },
+        { label: 'Driver Authority expiry tracking (자격증 만료 추적)', auto: hasLicenseCheck, tip: hasLicenseCheck ? 'License & Authority expiry alerts active' : 'Add expiry dates to driver records' },
+        { label: 'Drug & alcohol policy (약물/음주 정책)', auto: false, tip: 'BAC 0.02 limit — document testing procedures' },
+        { label: 'Health assessment tracking (건강 검진 추적)', auto: false, tip: 'Under 60: every 3 years / 60+: annually' },
+        { label: 'Roster compliance (로스터 규정 준수)', auto: hasRoster, tip: hasRoster ? 'Roster system active' : 'Set up roster management' },
+      ]
+    },
+    {
+      num: 6, title: 'Training (교육)',
+      desc: 'Induction, ongoing training, and competency assessment for all safety-related roles.',
+      status: 'manual',
+      checks: [
+        { label: 'Driver induction program (드라이버 입문 교육)', auto: false, tip: 'Document induction training content and records' },
+        { label: 'Annual safety training (연간 안전 교육)', auto: false, tip: 'Schedule and record annual training sessions' },
+        { label: 'Training records maintained (교육 기록 관리)', auto: false, tip: 'Keep records of all training completions' },
+        { label: 'Competency assessments (역량 평가)', auto: false, tip: 'Regular driving assessments documented' },
+      ]
+    },
+    {
+      num: 7, title: 'Incident Management (사고 관리)',
+      desc: 'Incident reporting, investigation, corrective actions, and notification to authorities.',
+      status: openIncidents > 0 ? 'partial' : 'good',
+      checks: [
+        { label: 'Incident report form available (사고 보고 양식)', auto: true, tip: 'Driver app incident report form active' },
+        { label: 'Investigation process (조사 절차)', auto: true, tip: 'Admin investigation workflow in incident detail' },
+        { label: 'Corrective action tracking (시정 조치 추적)', auto: true, tip: 'Status tracking: Open → Investigating → Resolved → Closed' },
+        { label: 'Open incidents: ' + openIncidents + ' / Resolved: ' + resolvedIncidents, auto: openIncidents === 0, tip: openIncidents > 0 ? 'Review and resolve open incidents' : 'All incidents addressed' },
+        { label: 'Authority notification procedures (당국 보고 절차)', auto: false, tip: 'Document Roads & Maritime, OTSI, Police reporting triggers' },
+      ]
+    },
+    {
+      num: 8, title: 'Audit & Evaluation (감사 및 평가)',
+      desc: 'Annual internal audit and triennial independent audit of SMS effectiveness.',
+      status: 'manual',
+      checks: [
+        { label: 'Internal audit (annual) (내부 감사 — 연 1회)', auto: false, tip: 'Schedule annual internal SMS audit' },
+        { label: 'External audit (3-yearly) (외부 감사 — 3년마다)', auto: false, tip: 'Engage independent auditor for 3-year cycle' },
+        { label: 'Audit log system (감사 로그 시스템)', auto: hasAuditLog, tip: 'System audit log tracks all admin actions' },
+        { label: 'Continuous improvement plan (지속적 개선 계획)', auto: false, tip: 'Document improvement actions from audits' },
+      ]
+    }
+  ];
+
+  const statusLabel = s=>({good:'✅ Compliant',partial:'🟡 Partial',manual:'🔴 Action Needed'}[s]||'⚪ Unknown');
+  const statusColor = s=>({good:'#059669',partial:'#d97706',manual:'#dc2626'}[s]||'#6b7280');
+  const statusBg = s=>({good:'#ecfdf5',partial:'#fffbeb',manual:'#fef2f2'}[s]||'#f9fafb');
+
+  // Summary counts
+  const goodCount = elements.filter(e=>e.status==='good').length;
+  const partialCount = elements.filter(e=>e.status==='partial').length;
+  const manualCount = elements.filter(e=>e.status==='manual').length;
+
+  let html = `<div class="crd" style="padding:14px;margin-bottom:12px;background:linear-gradient(135deg,#eff6ff,#f0fdf4);">
+    <div style="font-size:14px;font-weight:800;color:var(--t1);margin-bottom:8px;">BOAS SMS Compliance Summary</div>
+    <div style="display:flex;gap:8px;">
+      <div style="flex:1;text-align:center;padding:8px;border-radius:8px;background:#ecfdf5;">
+        <div style="font-size:20px;font-weight:800;color:#059669;">${goodCount}</div>
+        <div style="font-size:9px;color:#059669;font-weight:700;">Compliant</div>
+      </div>
+      <div style="flex:1;text-align:center;padding:8px;border-radius:8px;background:#fffbeb;">
+        <div style="font-size:20px;font-weight:800;color:#d97706;">${partialCount}</div>
+        <div style="font-size:9px;color:#d97706;font-weight:700;">Partial</div>
+      </div>
+      <div style="flex:1;text-align:center;padding:8px;border-radius:8px;background:#fef2f2;">
+        <div style="font-size:20px;font-weight:800;color:#dc2626;">${manualCount}</div>
+        <div style="font-size:9px;color:#dc2626;font-weight:700;">Action Needed</div>
+      </div>
+    </div>
+  </div>`;
+
+  elements.forEach(el=>{
+    const sc = statusColor(el.status);
+    const sb = statusBg(el.status);
+    html += `<div class="crd" style="margin-bottom:8px;border-left:4px solid ${sc};">
+      <div style="padding:12px 14px;cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-size:13px;font-weight:800;color:var(--t1);">Element ${el.num}: ${el.title}</div>
+          <span style="font-size:10px;font-weight:700;color:${sc};background:${sb};padding:2px 10px;border-radius:10px;">${statusLabel(el.status)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--t3);margin-top:2px;">${el.desc}</div>
+      </div>
+      <div style="display:none;padding:0 14px 12px;border-top:1px solid var(--bd);">
+        ${el.checks.map(c=>`<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd)22;">
+          <div style="font-size:14px;margin-top:1px;">${c.auto?'✅':'⬜'}</div>
+          <div style="flex:1;">
+            <div style="font-size:12px;font-weight:600;color:${c.auto?'#059669':'var(--t2)'};">${c.label}</div>
+            <div style="font-size:10px;color:var(--t3);margin-top:2px;">${c.tip}</div>
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  });
+
+  el.innerHTML = html;
 }
 
 </script>

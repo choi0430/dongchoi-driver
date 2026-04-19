@@ -436,6 +436,9 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   <!-- LEAVE STATUS BANNER (dynamic - rendered by renderHomeLeaveStatus()) -->
   <div id="home-leave-status"></div>
 
+  <!-- EXPIRY ALERT BANNER (License / Authority) -->
+  <div id="home-expiry-alerts"></div>
+
   <!-- ACTIVE SHIFT -->
   <div id="home-shift-section" style="margin-top:10px;"></div>
 
@@ -1715,6 +1718,124 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   </div>
 </div>
 
+<!-- ═══ INCIDENT REPORT PAGE (사고/인시던트 보고) ═══ -->
+<div class="page" id="page-incident">
+  <div style="padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <div>
+        <div style="font-size:20px;font-weight:800;color:var(--text);">🚨 Incident Report (사고 보고)</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px;">Report any incidents immediately (사고 즉시 보고)</div>
+      </div>
+      <button class="btn btn-primary" style="width:auto;padding:10px 16px;font-size:13px;border-radius:10px;background:#dc2626;" onclick="showIncidentForm()">+ New Report</button>
+    </div>
+
+    <!-- NEW INCIDENT FORM -->
+    <div id="incident-form-container" style="display:none;margin-bottom:20px;">
+      <div style="background:var(--surface);border-radius:var(--radius);padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1.5px solid #fca5a5;">
+        <div style="font-weight:700;font-size:15px;margin-bottom:16px;color:#dc2626;">🚨 New Incident Report (새 사고 보고서)</div>
+
+        <div class="form-group">
+          <label class="form-label">Date (날짜) <span class="req">*</span></label>
+          <div style="display:flex;gap:6px;position:relative;">
+            <input type="text" class="form-input" id="inc-date" placeholder="dd/MM/yyyy" readonly style="flex:1;">
+            <button type="button" onclick="setToday('inc-date')" style="padding:0 10px;height:44px;background:#10b981;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;">Today</button>
+            <button type="button" onclick="openDatePicker('inc-date')" style="padding:0 11px;height:44px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:17px;cursor:pointer;flex-shrink:0;">📅</button>
+            <input type="date" id="inc-date-native" style="position:absolute;right:0;top:0;width:44px;height:44px;opacity:0;pointer-events:none;" onchange="setDateFromPicker('inc-date-native','inc-date')">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Time (시간) <span class="req">*</span></label>
+          <input type="time" class="form-input" id="inc-time">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Vehicle Rego (차량) <span class="req">*</span></label>
+          <select class="form-select" id="inc-rego">
+            <option value="">Select vehicle...</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Incident Type (유형) <span class="req">*</span></label>
+          <select class="form-select" id="inc-type">
+            <option value="">Select type (유형 선택)...</option>
+            <option value="Collision">🚗 Collision (충돌)</option>
+            <option value="Fire">🔥 Fire on Bus (차량 화재)</option>
+            <option value="Medical">🏥 Medical Incident (의료 사고)</option>
+            <option value="Passenger Injury">🤕 Passenger Injury (승객 부상)</option>
+            <option value="Slip/Trip/Fall">⚠️ Slip/Trip/Fall (미끄러짐/넘어짐)</option>
+            <option value="Security Threat">🔒 Security Threat (보안 위협)</option>
+            <option value="Offensive Behaviour">😠 Offensive Behaviour (공격적 행동)</option>
+            <option value="Vandalism">💥 Vandalism (기물 파손)</option>
+            <option value="Projectile">🪨 Projectile (투척물)</option>
+            <option value="Vehicle Damage">🔧 Vehicle Damage (차량 손상)</option>
+            <option value="Near Miss">⚡ Near Miss (아차 사고)</option>
+            <option value="Other">📝 Other (기타)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Severity (심각도) <span class="req">*</span></label>
+          <select class="form-select" id="inc-severity">
+            <option value="Minor">Minor — First Aid (경미 — 응급처치)</option>
+            <option value="Moderate">Moderate — Medical Attention (보통 — 의료 조치)</option>
+            <option value="Serious">Serious — Hospital (심각 — 입원)</option>
+            <option value="Critical">Critical — Life Threatening (위급 — 생명 위협)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Location (장소) <span class="req">*</span></label>
+          <input type="text" class="form-input" id="inc-location" placeholder="Street address or area (도로명 또는 지역)">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Description (설명) <span class="req">*</span></label>
+          <textarea class="form-textarea" id="inc-desc" rows="4" placeholder="Describe what happened in detail... (사고 경위를 상세히 기록하세요)"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Injuries (부상자) <span style="font-weight:400;color:var(--muted);font-size:11px;">names & injuries</span></label>
+          <textarea class="form-textarea" id="inc-injuries" rows="2" placeholder="Name - injury description (이름 - 부상 설명)"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Witnesses (목격자)</label>
+          <input type="text" class="form-input" id="inc-witnesses" placeholder="Names and contact info (이름, 연락처)">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Immediate Action Taken (즉시 조치)</label>
+          <textarea class="form-textarea" id="inc-action" rows="2" placeholder="What action was taken? (어떤 조치를 취했습니까?)"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Reported To (보고 대상)</label>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;" id="inc-reported-to">
+            <label style="display:flex;align-items:center;gap:4px;font-size:13px;background:var(--surface2);padding:6px 10px;border-radius:8px;cursor:pointer;"><input type="checkbox" value="Depot Manager"> Depot Manager</label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:13px;background:var(--surface2);padding:6px 10px;border-radius:8px;cursor:pointer;"><input type="checkbox" value="Police (000)"> Police (000)</label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:13px;background:var(--surface2);padding:6px 10px;border-radius:8px;cursor:pointer;"><input type="checkbox" value="Ambulance"> Ambulance</label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:13px;background:var(--surface2);padding:6px 10px;border-radius:8px;cursor:pointer;"><input type="checkbox" value="Roads & Maritime"> Roads & Maritime</label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:13px;background:var(--surface2);padding:6px 10px;border-radius:8px;cursor:pointer;"><input type="checkbox" value="OTSI"> OTSI</label>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:16px;">
+          <button class="btn btn-green" style="flex:1;background:#dc2626;" onclick="submitIncidentReport()">🚨 Submit Report (보고서 제출)</button>
+          <button class="btn btn-secondary" style="flex:1;" onclick="hideIncidentForm()">Cancel (취소)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Incident History -->
+    <div style="font-weight:800;font-size:15px;color:var(--text);padding:0 2px;margin-bottom:8px;">📋 My Incident Reports (나의 사고 보고 이력)</div>
+    <div id="my-incident-list">
+      <div style="padding:40px 20px;text-align:center;color:var(--muted);"><div style="font-size:40px;margin-bottom:12px;">✅</div>No incident reports (사고 보고 내역이 없습니다)</div>
+    </div>
+  </div>
+</div>
+
 </div><!-- /screen -->
 
 <!-- ★ SUB 인보이스 페이지 (오너드라이버용) -->
@@ -1758,6 +1879,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   <div class="nav-item" onclick="showPage('attractions')" id="nav-attractions"><div class="nav-icon">📍</div>Attraction (관광지)</div>
   <div class="nav-item" onclick="showPage('pay');renderPay();" id="nav-pay"><div class="nav-icon">💰</div>급여</div>
   <div class="nav-item" onclick="showPage('subinv');initDriverSubInv();" id="nav-subinv" style="display:none;"><div class="nav-icon">🧾</div>인보이스</div>
+  <div class="nav-item" onclick="showPage('incident');loadMyIncidents();" id="nav-incident"><div class="nav-icon">🚨</div>사고보고</div>
   <div class="nav-item" onclick="showPage('defect');renderMyDefects();" id="nav-defect"><div class="nav-icon">🔧</div>결함</div>
   <div class="nav-item" onclick="showPage('mot');initMotForm();" id="nav-mot"><div class="nav-icon">🚔</div>MOT</div>
   <div class="nav-item" onclick="showPage('leave');loadMyLeaves();" id="nav-leave"><div class="nav-icon">📅</div>Leave (휴무)</div>
@@ -3282,6 +3404,7 @@ function doLogin() {
   renderShiftSection();
   renderTodayReports();
   renderSalary();
+  renderExpiryAlerts();
   restoreSectionStates();
   initMyInfoPage();
   // 지난 운행 일지 로드 (비동기)
@@ -3821,6 +3944,7 @@ function autoRestoreSession() {
     renderShiftSection();
     renderTodayReports();
     renderSalary();
+    renderExpiryAlerts();
     initMyInfoPage();
     _myPastShiftsLoaded = false;
     loadMyPastShifts();
@@ -10322,6 +10446,190 @@ function renderHomeLeaveStatus(){
       <div style="font-size:11px;color:${a.fc}99;margin-top:3px;">${a.sub}</div>
     </div>`
   ).join('') + '</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INCIDENT REPORT SYSTEM (BOAS SMS Element 7 — 사고/인시던트 보고)
+// ═══════════════════════════════════════════════════════════════════════════
+var _myIncidents = [];
+
+function showIncidentForm(){
+  document.getElementById('incident-form-container').style.display='block';
+  // populate rego dropdown
+  const sel = document.getElementById('inc-rego');
+  sel.innerHTML = '<option value="">Select vehicle...</option>';
+  (MASTER.vehicles||[]).forEach(v=>{
+    sel.innerHTML += '<option value="'+v.Rego+'">'+v.Rego+(v.Make?' — '+v.Make:'')+'</option>';
+  });
+  // set current time
+  const now = new Date();
+  document.getElementById('inc-time').value = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  setToday('inc-date');
+}
+
+function hideIncidentForm(){
+  document.getElementById('incident-form-container').style.display='none';
+}
+
+async function submitIncidentReport(){
+  const date = document.getElementById('inc-date').value;
+  const time = document.getElementById('inc-time').value;
+  const rego = document.getElementById('inc-rego').value;
+  const type = document.getElementById('inc-type').value;
+  const severity = document.getElementById('inc-severity').value;
+  const location = document.getElementById('inc-location').value.trim();
+  const desc = document.getElementById('inc-desc').value.trim();
+
+  if(!date||!time||!rego||!type||!location||!desc){
+    alert('Please fill in all required fields (필수 항목을 모두 입력하세요)'); return;
+  }
+
+  const reportedTo = [];
+  document.querySelectorAll('#inc-reported-to input[type=checkbox]:checked').forEach(cb=>{
+    reportedTo.push(cb.value);
+  });
+
+  const data = {
+    Driver: currentDriver,
+    Date: date,
+    Time: time,
+    Rego: rego,
+    Type: type,
+    Severity: severity,
+    Location: location,
+    Description: desc,
+    Injuries: document.getElementById('inc-injuries').value.trim(),
+    Witnesses: document.getElementById('inc-witnesses').value.trim(),
+    ImmediateAction: document.getElementById('inc-action').value.trim(),
+    ReportedTo: reportedTo.join(', ')
+  };
+
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action:'save_incident_report', data:data, _user:currentDriver})
+    });
+    const json = await res.json();
+    if(json.ok){
+      alert('Incident report submitted successfully!\n사고 보고서가 제출되었습니다.\nID: '+(json.id||''));
+      hideIncidentForm();
+      // clear form
+      ['inc-desc','inc-injuries','inc-witnesses','inc-action','inc-location'].forEach(id=>{
+        const el=document.getElementById(id); if(el) el.value='';
+      });
+      document.querySelectorAll('#inc-reported-to input[type=checkbox]').forEach(cb=>cb.checked=false);
+      loadMyIncidents();
+    } else {
+      alert('Error: '+(json.error||'Unknown error'));
+    }
+  } catch(e){
+    alert('Network error: '+e.message);
+  }
+}
+
+async function loadMyIncidents(){
+  if(!currentDriver) return;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_incident_reports');
+    const json = await res.json();
+    if(json?.ok){
+      _myIncidents = (json.rows||[]).filter(r=>String(r.Driver||'').trim()===currentDriver);
+      renderMyIncidents();
+    }
+  } catch(e){ console.warn('Load incidents error:', e); }
+}
+
+function renderMyIncidents(){
+  const el = document.getElementById('my-incident-list');
+  if(!el) return;
+  if(!_myIncidents.length){
+    el.innerHTML='<div style="padding:40px 20px;text-align:center;color:var(--muted);"><div style="font-size:40px;margin-bottom:12px;">✅</div>No incident reports (사고 보고 내역이 없습니다)</div>';
+    return;
+  }
+  const severityColor = {Minor:'#059669',Moderate:'#d97706',Serious:'#dc2626',Critical:'#991b1b'};
+  const statusBg = {Open:'#fef2f2',Investigating:'#fefce8',Resolved:'#ecfdf5',Closed:'#f0f4ff'};
+  el.innerHTML = _myIncidents.sort((a,b)=>(b.Submitted||'').localeCompare(a.Submitted||'')).map(r=>{
+    const sc = severityColor[r.Severity]||'#6b7280';
+    const sb = statusBg[r.Status]||'#f9fafb';
+    return `<div style="background:${sb};border-radius:12px;padding:14px;margin-bottom:8px;border-left:4px solid ${sc};">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-weight:700;font-size:13px;color:var(--text);">${r.Type||'?'}</div>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <span style="font-size:10px;font-weight:700;color:${sc};background:${sc}15;padding:2px 8px;border-radius:6px;">${r.Severity||'?'}</span>
+          <span style="font-size:10px;font-weight:700;color:#6b7280;background:#f3f4f6;padding:2px 8px;border-radius:6px;">${r.Status||'Open'}</span>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">${r.Date||''} ${r.Time||''} · ${r.Rego||''} · ${r.Location||''}</div>
+      <div style="font-size:12px;color:var(--text);margin-top:6px;line-height:1.4;">${(r.Description||'').slice(0,150)}${(r.Description||'').length>150?'...':''}</div>
+      ${r.AdminNote?'<div style="font-size:11px;color:#2563eb;margin-top:6px;background:#eff6ff;padding:6px 8px;border-radius:6px;">📌 Admin: '+r.AdminNote+'</div>':''}
+      <div style="font-size:10px;color:var(--muted);margin-top:4px;">ID: ${r.ID||''}</div>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════
+// EXPIRY ALERTS — Driver Home (License / Authority)
+// ═══════════════════════════════════════
+function renderExpiryAlerts(){
+  const el = document.getElementById('home-expiry-alerts');
+  if(!el || !currentDriver) { if(el) el.innerHTML=''; return; }
+  const alerts = [];
+  const now = new Date();
+
+  function daysUntil(dateStr){
+    if(!dateStr) return 9999;
+    const d = new Date(dateStr);
+    if(isNaN(d)) return 9999;
+    return Math.floor((d - now) / 86400000);
+  }
+  function fmtExp(dateStr){
+    if(!dateStr) return '';
+    const d = new Date(dateStr);
+    if(isNaN(d)) return dateStr;
+    return d.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});
+  }
+
+  // License Expiry
+  const licDays = daysUntil(currentDriver.License_Expiry);
+  if(licDays < 90){
+    const expired = licDays < 0;
+    const urgent = licDays < 30;
+    alerts.push({
+      icon: '🪪',
+      title: expired ? 'License EXPIRED (면허 만료됨)' : 'License Expiry Warning (면허 만료 예정)',
+      msg: expired
+        ? `Your license expired ${Math.abs(licDays)} days ago (${fmtExp(currentDriver.License_Expiry)}). Renew immediately! (즉시 갱신하세요!)`
+        : `Your license expires in ${licDays} days (${fmtExp(currentDriver.License_Expiry)}). Please renew soon. (${licDays}일 후 만료 — 갱신 준비하세요)`,
+      bg: expired ? '#fef2f2' : urgent ? '#fff7ed' : '#fefce8',
+      bc: expired ? '#ef4444' : urgent ? '#f97316' : '#eab308',
+      fc: expired ? '#dc2626' : urgent ? '#ea580c' : '#ca8a04'
+    });
+  }
+
+  // Authority Expiry
+  const authDays = daysUntil(currentDriver.Authority_Expiry);
+  if(authDays < 90){
+    const expired = authDays < 0;
+    const urgent = authDays < 30;
+    alerts.push({
+      icon: '📜',
+      title: expired ? 'Driver Authority EXPIRED (자격증 만료됨)' : 'Driver Authority Expiry Warning (자격증 만료 예정)',
+      msg: expired
+        ? `Your Driver Authority expired ${Math.abs(authDays)} days ago (${fmtExp(currentDriver.Authority_Expiry)}). Contact admin immediately! (관리자에게 즉시 연락하세요!)`
+        : `Your Driver Authority expires in ${authDays} days (${fmtExp(currentDriver.Authority_Expiry)}). Please arrange renewal. (${authDays}일 후 만료 — 갱신 준비하세요)`,
+      bg: expired ? '#fef2f2' : urgent ? '#fff7ed' : '#fefce8',
+      bc: expired ? '#ef4444' : urgent ? '#f97316' : '#eab308',
+      fc: expired ? '#dc2626' : urgent ? '#ea580c' : '#ca8a04'
+    });
+  }
+
+  if(!alerts.length){ el.innerHTML=''; el.style.display='none'; return; }
+  el.style.display='block';
+  el.innerHTML = alerts.map(a=>`
+    <div style="margin:8px 12px 0;padding:10px 14px;border-radius:12px;background:${a.bg};border:1px solid ${a.bc}33;border-left:4px solid ${a.bc};">
+      <div style="font-size:13px;font-weight:800;color:${a.fc};margin-bottom:4px;">${a.icon} ${a.title}</div>
+      <div style="font-size:12px;color:${a.fc};line-height:1.4;">${a.msg}</div>
+    </div>`).join('');
 }
 
 </script>
