@@ -1904,8 +1904,8 @@ function nv(pg,ni){
     pdr:   ()=>renderDR(),
     pmot:  ()=>rMot(),
     pwage: ()=>rWage(ST.curWageDriver),
-    pbal:  ()=>renderBalance(),
-    pinv:  ()=>initInvoice(),
+    pbal:  ()=>{ if(!_balLoaded){ syncBalanceData(false).then(renderBalance); } else renderBalance(); },
+    pinv:  ()=>{ if(!_invHistoryCache){ loadInvHistory(true); } else initInvoice(); },
     pquo:  ()=>initQuotation(),
     pnotice: ()=>loadNoticesFromGAS(),
     pleave: ()=>{ renderAdminLeaveList(); if(_rosterData.length) renderLeaveAvailGrid(); else loadRosterAndRender(); },
@@ -5404,6 +5404,8 @@ async function saveBalTxn(){
   renderBalance();
   // Also refresh detail view if open
   if(document.getElementById('bal-detail-modal').style.display==='flex') renderBalDetail();
+  // ★ 인보이스 탭 동기화 (수금/결제 등록 시 인보이스에도 반영)
+  _invHistoryCache = null;
 }
 
 async function deleteBalTxn(type, idx){
@@ -5425,7 +5427,33 @@ async function deleteBalTxn(type, idx){
     toast('Deleted (삭제 완료)','ok');
     renderBalance();
     renderBalDetail();
+    // ★ 인보이스 탭 동기화
+    _invHistoryCache = null;
   } catch(e){ toast('삭제 실패: '+e.message,'err'); }
+}
+
+// ── 잔액 ↔ 인보이스 양방향 동기화 ──
+// 인보이스 또는 잔액 변경 시 양쪽 캐시를 무효화하고 현재 보이는 탭 재렌더
+async function _syncBalanceAndInvoice(){
+  // 1) 양쪽 캐시 무효화
+  _balLoaded = false;
+  _invHistoryCache = null;
+  // 2) 현재 활성 페이지 확인
+  const activePg = document.querySelector('.pg.on')?.id;
+  // 3) 잔액 탭이 열려 있으면 잔액 동기화 + 렌더
+  if(activePg === 'pbal'){
+    await syncBalanceData(false);
+    renderBalance();
+    if(document.getElementById('bal-detail-modal')?.style.display==='flex') renderBalDetail();
+  }
+  // 4) 인보이스 탭이 열려 있으면 인보이스 리로드
+  if(activePg === 'pinv'){
+    await loadInvHistory(true);
+  }
+  // 5) 대시보드가 열려 있으면 대시보드도 갱신
+  if(activePg === 'pdash' && typeof rDash === 'function'){
+    try { rDash(); } catch(e){}
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -6945,6 +6973,7 @@ async function saveInvoiceToSheet() {
     } catch(e) { console.warn('[Invoice→Balance] 거래 등록 오류:', e); }
 
     _invHistoryCache = null; // 캐시 무효화
+    _balLoaded = false; // ★ 잔액 캐시도 무효화
     _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; // 다음 인보이스를 위해 번호 초기화
 
     // ★ 저장 완료 후 크레딧/선수금 & 수동항목 캐시 초기화 (다음 인보이스에 잔류 방지)
@@ -7569,6 +7598,7 @@ async function updateInvStatus(invNumber, status, field) {
     }
 
     await loadInvHistory(true);
+    _syncBalanceAndInvoice(); // ★ 잔액 탭 동기화
   } catch(e) { toast('❌ '+e.message,'er'); }
 }
 
@@ -7583,6 +7613,7 @@ async function deleteInvoiceRecord(invNumber) {
     if (!json.ok) throw new Error(json.error||'삭제 실패');
     toast(`🗑️ ${invNumber} 삭제 완료`,'ok');
     await loadInvHistory(true);
+    _syncBalanceAndInvoice(); // ★ 잔액 탭 동기화
   } catch(e) { toast('❌ '+e.message,'er'); }
 }
 
@@ -7710,6 +7741,7 @@ function openPartialPayment(invNumber, agency, grandTotal, alreadyPaid) {
       overlay.remove();
       _invHistoryCache = null;
       await loadInvHistory(true);
+      _syncBalanceAndInvoice(); // ★ 잔액 탭 동기화
 
     } catch(e) {
       toast('❌ 수금 등록 실패: '+e.message,'er');
@@ -7785,6 +7817,7 @@ function openPrepaidCreditInModal(agency) {
       if (!json.ok) throw new Error(json.error||'등록 실패');
 
       _balLoaded = false;
+      _invHistoryCache = null; // ★ 인보이스 캐시도 무효화
       _balAgencyTxns.push(txnData);
       toast(`✅ ${label} $${amt.toLocaleString('en-AU',{minimumFractionDigits:2})} 등록 완료`,'ok');
       overlay.remove();
