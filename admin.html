@@ -7054,8 +7054,11 @@ function _renderInvHistPage() {
     // 수금 현황 계산 (백엔드에서 계산된 PaidCR 사용)
     const invNum = String(inv.InvNumber||'').trim();
     const paidCR = parseFloat(inv.PaidCR) || 0;
-    const remaining = Math.max(0, roundMoney(amt - paidCR));
-    const isPaidFull = remaining <= 0 && amt > 0;
+    // ★ Status가 'paid'이면 전액결제 처리 (PaidCR이 없어도 잔액 0으로 표시)
+    const isPaidByStatus = inv.Status === 'paid';
+    const effectivePaid = isPaidByStatus ? amt : paidCR;
+    const remaining = Math.max(0, roundMoney(amt - effectivePaid));
+    const isPaidFull = (remaining <= 0 && amt > 0) || isPaidByStatus;
     const isPartial = paidCR > 0 && !isPaidFull;
     // ★ Items JSON에서 가이드 이름 & 투어코드 추출
     let _guides = [], _tourcodes = [];
@@ -7069,11 +7072,11 @@ function _renderInvHistPage() {
     const guideHTML = _guides.length ? `<span style="font-size:10px;color:var(--t2);"><b>👤</b> ${_guides.map(g=>escH(g)).join(', ')}</span>` : '';
     const tcHTML = _tourcodes.length ? `<span style="font-size:10px;color:var(--t2);"><b>🏷</b> ${_tourcodes.map(t=>escH(t)).join(', ')}</span>` : '';
     // 수금 진행률 바
-    const pctPaid = amt > 0 ? Math.min(100, Math.round(paidCR / amt * 100)) : 0;
+    const pctPaid = amt > 0 ? Math.min(100, Math.round(effectivePaid / amt * 100)) : 0;
     const progressHTML = amt > 0 && inv.Status!=='cancelled' ? `
       <div style="margin-top:5px;">
         <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--t3);margin-bottom:2px;">
-          <span>수금 $${roundMoney(paidCR).toLocaleString('en-AU',{minimumFractionDigits:2})} / $${amt.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
+          <span>수금 $${roundMoney(effectivePaid).toLocaleString('en-AU',{minimumFractionDigits:2})} / $${amt.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
           <span style="font-weight:700;color:${isPaidFull?'var(--gn)':isPartial?'var(--or)':'var(--rd)'};">${isPaidFull?'완료':remaining>0?'잔액 $'+remaining.toLocaleString('en-AU',{minimumFractionDigits:2}):''}</span>
         </div>
         <div style="height:4px;background:var(--b1);border-radius:2px;overflow:hidden;">
@@ -7100,7 +7103,7 @@ function _renderInvHistPage() {
           <div style="font-size:15px;font-weight:800;color:var(--gn);">$${amt.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
           <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap;">
             <button onclick="previewIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">👁미리보기</button>
-            ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="openPartialPayment('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}',${amt},${paidCR})" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fbbf24;background:#fffbeb;color:#92400e;cursor:pointer;font-weight:600;">💰수금</button>`:''}
+            ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="openPartialPayment('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}',${amt},${effectivePaid})" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fbbf24;background:#fffbeb;color:#92400e;cursor:pointer;font-weight:600;">💰수금</button>`:''}
             ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','paid','PaidDate')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #86efac;background:#f0fdf4;color:#166534;cursor:pointer;font-weight:600;">✅전액결제</button>`:''}
             ${inv.Status!=='cancelled'?`<button onclick="resendInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;cursor:pointer;font-weight:600;">✉️발송</button>`:''}
             ${inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','cancelled','')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:600;">❌취소</button>`:''}
