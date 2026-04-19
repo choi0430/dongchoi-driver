@@ -2106,6 +2106,23 @@ function rDash(){
       }
     });
   }
+  // ── SVC 불일치 알림 (드라이버가 권장 금액과 다른 금액 선택) ──
+  try {
+    const _drRows = _drCache || [];
+    _drRows.forEach(r => {
+      if(!r.svcMismatch) return;
+      try {
+        const mm = typeof r.svcMismatch === 'string' ? JSON.parse(r.svcMismatch) : r.svcMismatch;
+        if(!mm || !mm.selected) return;
+        const diff = mm.selected - mm.expected;
+        const sign = diff > 0 ? '+' : '';
+        als.push({sort: -3000, type:'svc_mismatch',
+          bg:'#fef3c7', bc:'#f59e0b', fc:'#92400e', icon:'💰',
+          m:`<b>${r.Driver||r.driver||'?'}</b> — ${r.Date||''} ${mm.course||''} (${mm.seats||''}) · 권장 $${mm.expected} → 선택 $${mm.selected} (${sign}$${diff}) <span style="color:#dc2626;font-weight:700;">수당 불일치</span>`
+        });
+      } catch(e){}
+    });
+  } catch(e){ console.warn('SVC mismatch check failed:', e); }
   // ── DONG CHOI 차량 기록 완전성 알림 ──
   let dcSummary = [];
   try { dcSummary = getDCRecordSummary(); } catch(e){ console.warn('DC record check failed:', e); }
@@ -3783,14 +3800,8 @@ async function importFromReports(){
     // DR_Cost: 저장값 사용, 0이면 직접 계산 (헤더 밀림 등 이전 오류 보정)
     let drCost = parseFloat(r.DR_Cost)||0;
     if(drCost === 0 && svcAmt > 0){
-      // M_PriceDriver에서 base 조회
-      const capRaw2 = (String(r.Seats||'')).replace('S','').trim();
-      const capKey2 = parseInt(capRaw2)>=50?'50':parseInt(capRaw2)>=40?'40':parseInt(capRaw2)>=25?'25':'21';
-      const pdEntry = DB.PD[attraction];
-      const drBase2 = pdEntry ? (Number(pdEntry[capKey2]?.base)||0) : 0;
-      // base가 있으면 base + extras, 없으면 SVC 그대로
-      const baseForCalc = drBase2 > 0 ? drBase2 : svcAmt;
-      drCost = baseForCalc + otAmt + hotelAmt + distAmt + earlyAmt + trailerAmt + nightDRAmt + washAmt + mealAmt + tipAmt + tollAmt + fuelAmt;
+      // 드라이버 선택 SVC = 드라이버 수당 base
+      drCost = svcAmt + otAmt + hotelAmt + distAmt + earlyAmt + trailerAmt + nightDRAmt + washAmt + mealAmt + tipAmt + tollAmt + fuelAmt;
     }
 
     // 중복 체크 (날짜+차량+코스+드라이버 모두 동일한 건만 스킵)
@@ -9069,12 +9080,8 @@ function renderDR(){
     //   components 합(gross_calc)과 dr 비교 → 거의 같으면 gross → 차감 필요
     const fuelVal = (r.Fuel_Personal==='Y') ? (parseFloat(r.Fuel)||0) : 0;
     const tollVal = (r.Toll_Personal==='Y') ? toll : 0;
-    const _seatsNum = parseInt(String(r.Seats||'').replace(/[^0-9]/g,''))||25;
-    const _ckDR = _seatsNum>=50?'50':_seatsNum>=40?'40':_seatsNum>=25?'25':'21';
-    const _pdE = DB.PD?.[String(r.Attraction||'').trim()];
-    const _drB = _pdE ? (Number(_pdE[_ckDR]?.base)||0) : 0;
-    const _baseDR = _drB>0 ? _drB : svc;
-    const grossCalc = _baseDR + ot + htl + dst + erl + trl + ngt + wsh + meal + tip + tollVal + fuelVal;
+    // 드라이버 선택 SVC = 드라이버 수당 base
+    const grossCalc = svc + ot + htl + dst + erl + trl + ngt + wsh + meal + tip + tollVal + fuelVal;
     const isGross = nightOwner > 0 && Math.abs(dr - grossCalc) < 0.5;
     const total = Math.max(0, isGross ? (dr - nightOwner) : dr);
     const rowIdx = r._rowIndex;
@@ -9104,7 +9111,8 @@ function renderDR(){
       tip  ? `TIP $${tip}` : '',
     ].filter(Boolean).map(b=>`<span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;background:var(--sf2);color:var(--t2);margin:1px;">${b}</span>`).join('')
     + (etc ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;font-size:10px;background:#fef3c7;color:#92400e;margin:1px;">ETC $${etc}${etcDesc?' ('+escH(etcDesc)+')':''}<button onclick="clearDREtc(${rowIdx})" style="background:none;border:none;color:#ef4444;font-size:11px;cursor:pointer;padding:0 1px;line-height:1;" title="ETC 삭제">✕</button></span>` : '')
-    + (nightOwner ? `<span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;margin:1px;">야경납입 -$${nightOwner}</span>` : '');
+    + (nightOwner ? `<span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;margin:1px;">야경납입 -$${nightOwner}</span>` : '')
+    + (()=>{ try { const _mm=r.SVC_Mismatch; if(!_mm) return ''; const mm=typeof _mm==='string'?JSON.parse(_mm):_mm; if(!mm||!mm.selected) return ''; return '<span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;margin:1px;font-weight:700;">💰 수당불일치 $'+mm.expected+'→$'+mm.selected+'</span>'; } catch(e){ return ''; } })();
 
     return `<div style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
@@ -9295,12 +9303,8 @@ async function saveDREdit(){
   const _seats = String(updated.Seats||'').replace(/[^0-9]/g,'')||'25';
   const _sn = parseInt(_seats);
 
-  // DR: M_PriceDriver base + extras − 회사 납입 (net)
-  const _pdEntry = DB.PD[updated.Attraction];
-  const _ck = _sn>=50?'50':_sn>=40?'40':_sn>=25?'25':'21';
-  const _drBase = _pdEntry ? (Number(_pdEntry[_ck]?.base)||0) : 0;
-  const _base = _drBase > 0 ? _drBase : _svc;
-  updated.DR_Cost = _base + _ot + _htl + _dst + _erl + _trl + _ngt + _wsh + _mel + _tip + _toll + _fuel - _nown;
+  // DR: 드라이버 선택 SVC = base + extras − 회사 납입 (net)
+  updated.DR_Cost = _svc + _ot + _htl + _dst + _erl + _trl + _ngt + _wsh + _mel + _tip + _toll + _fuel - _nown;
 
   // ★ Total_TA = M_PriceDriver base (= SVC_Charge) — 에이전시 TA는 잔액 탭에서 실시간 계산
   updated.Total_TA = _svc;
@@ -9565,12 +9569,8 @@ function _calcDRFromReport(r){
   const tip=parseFloat(r.Tip)||0;
   const toll=r.Toll_Personal==='Y'?(parseFloat(r.Toll)||0):0;
   const fuel=r.Fuel_Personal==='Y'?(parseFloat(r.Fuel)||0):0;
-  const seats=String(r.Seats||'').replace('S','').trim();
-  const ck=parseInt(seats)>=50?'50':parseInt(seats)>=40?'40':parseInt(seats)>=25?'25':'21';
-  const att2=String(r.Attraction||'').trim();
-  const pdEntry=DB.PD?.[att2];
-  const drBase=pdEntry?(Number(pdEntry[ck]?.base)||0):0;
-  const base=drBase>0?drBase:svc;
+  // 드라이버가 선택한 SVC_Charge = 드라이버 수당 base
+  const base=svc;
   const gross=base+ot+htl+dst+erl+trl+ngt+wsh+mel+tip+toll+fuel;
   // 저장된 DR_Cost가 gross(미차감)인지 net(차감완료)인지 감지하여 항상 net 반환
   if(stored>0){

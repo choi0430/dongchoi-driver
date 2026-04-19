@@ -4394,6 +4394,7 @@ function submitDailyReport(){
     etcDesc: document.getElementById('f-etc-desc')?.value?.trim() || '',
     manualBonus: (()=>{ const rg=document.getElementById('pre-rego')?.value||''; const vh=MASTER.vehicles?.find(v=>v.Rego===rg); const isM=vh?.Transmission==='Manual'; const sv=getSvcValue(); return (isM&&sv>=250)?20:0; })(),
     remarks: document.getElementById('dr-remarks').value,
+    svcMismatch: window._svcMismatch ? JSON.stringify(window._svcMismatch) : '',
   };
   if(report.seats) shift.seats = report.seats; // 마지막 인승 저장 (다음 리포트 초기값)
   shift.dailyReports.push(report);
@@ -4441,6 +4442,7 @@ function submitDailyReport(){
     Tip: report.tip,
     Etc: report.etc || 0,
     Etc_Desc: report.etcDesc || '',
+    SVC_Mismatch: report.svcMismatch || '',
     Manual_Bonus: report.manualBonus || 0,
     Total_TA: report.svcCharge,   // ★ M_PriceDriver base (= SVC_Charge) 저장 — 에이전시 TA는 admin에서 실시간 계산
     DR_Cost: report.dr,
@@ -7177,25 +7179,15 @@ function calcTotal(){
   const etcVal = parseFloat(document.getElementById('f-etc')?.value||0);
 
   // ── 드라이버 기본 수당 계산 ──
-  // 우선순위: M_PriceDriver 코스별 인승별 base → RATES[att].dr fallback → SVC 추산
-  let drBase = 0;
+  // 드라이버가 선택한 SVC 금액 = 드라이버 수당 base
+  // M_PriceDriver base와 다르면 _svcMismatch 플래그 (관리자 알림용)
   const seatK = seatKey(seats);
+  const drBase = svcVal; // 드라이버가 선택한 금액이 곧 수당
   const courseData = att ? getCourseData(att) : null;
-  if(courseData && courseData[seatK] && courseData[seatK].base > 0){
-    // M_PriceDriver 기반 정확한 드라이버 base pay
-    drBase = courseData[seatK].base;
-    // 드라이버가 SVC를 다르게 선택한 경우 — 비율로 조정
-    // (코스 base SVC를 알 수 없으므로, 다른 SVC 선택 시 그냥 base 유지)
-  } else if(att && (RATES[att] || RATES[att.toUpperCase()] || RATES[Object.keys(RATES).find(k=>k.toLowerCase()===att.trim().toLowerCase())])){
-    // 구버전 RATES fallback (대소문자 무시)
-    const rk = RATES[att] ? att : (RATES[att.toUpperCase()] ? att.toUpperCase() : Object.keys(RATES).find(k=>k.toLowerCase()===att.trim().toLowerCase()));
-    drBase = RATES[rk]?.dr || 0;
-  } else {
-    // 코스 없거나 매핑 없는 경우: SVC 값 기반 추산
-    // TA = SVC 기준, DR은 roughly SVC * 0.55 수준 (시스템 규칙 없는 경우 추정치)
-    // 단, 코스가 없으면 0으로 두고 드라이버가 직접 확인
-    drBase = 0;
-  }
+  const _pdBase = (courseData && courseData[seatK]) ? courseData[seatK].base : 0;
+  window._svcMismatch = (_pdBase > 0 && svcVal !== _pdBase)
+    ? { selected: svcVal, expected: _pdBase, course: att, seats: seats }
+    : null;
 
   let dr = drBase + otVal;
   dr += getHotelValue(); // 호텔 서차지 전액 드라이버 지급
@@ -7849,13 +7841,8 @@ function calcDRCostFromRow(r) {
   const tip  = parseFloat(r.Tip)||0;
   const toll = r.Toll_Personal==='Y' ? (parseFloat(r.Toll)||0) : 0;
   const fuel = r.Fuel_Personal==='Y' ? (parseFloat(r.Fuel)||0) : 0;
-  // M_PriceDriver에서 base 조회
-  const seatsNum = parseInt(String(r.Seats||'').replace(/[^0-9]/g,''))||25;
-  const ck = seatsNum>=50?'50':seatsNum>=40?'40':seatsNum>=25?'25':'21';
-  const att = String(r.Attraction||'').trim();
-  const pdEntry = typeof MASTER!=='undefined' ? MASTER.priceDriver?.find(p=>p.Course===att) : null;
-  const drBase = pdEntry ? (Number(pdEntry['seats_'+ck+'_base'])||0) : 0;
-  const base = drBase > 0 ? drBase : svc;
+  // 드라이버 선택 SVC = 드라이버 수당 base
+  const base = svc;
   const gross = base + ot + htl + dst + erl + trl + ngt + wsh + mel + tip + toll + fuel;
   // ★ 저장된 DR_Cost가 gross(미차감)인지 net(차감완료)인지 자동 감지
   //   → 항상 net(실 지급액) 반환. admin 화면과 동일한 금액 보장.
