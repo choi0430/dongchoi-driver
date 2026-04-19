@@ -2127,15 +2127,21 @@ function applyMasterData(data) {
     .filter((n, i, arr) => arr.indexOf(n) === i)
     .map(n => ({Name:n, Mobile:'', Address:''}));
   MASTER.agencies = [...fromClients, ...fromPrice];
-  // M_Courses 대신 M_PriceDriver에서 코스 목록 동기화 (중복 없음, 자동 최신화)
+  // M_PriceDriver + M_PriceClient 양쪽에서 코스 목록 동기화 (가격표 추가 시 자동 반영)
   const pdRows = data.M_PriceDriver || [];
-  MASTER.courses = pdRows
-    .filter(r => r.Course && String(r.Course).trim())
-    .filter((r, i, arr) => arr.findIndex(x => x.Course === r.Course) === i)
-    .map(r => ({
-      Course_Name: String(r.Course).trim(),
-      max_hours: r.max_hours || ''
-    }));
+  const pcRows = data.M_PriceClient || [];
+  const _courseMap = {};
+  // PriceDriver 기준 (max_hours 포함)
+  pdRows.forEach(r => {
+    const name = String(r.Course||'').trim();
+    if(name && !_courseMap[name]) _courseMap[name] = { Course_Name: name, max_hours: r.max_hours || '' };
+  });
+  // PriceClient에만 있는 코스도 추가
+  pcRows.forEach(r => {
+    const name = String(r.Course||'').trim();
+    if(name && !_courseMap[name]) _courseMap[name] = { Course_Name: name, max_hours: r.max_hours || '' };
+  });
+  MASTER.courses = Object.values(_courseMap);
   MASTER.hotels      = (data.M_Hotels      || []);
   // ★ GAS 호텔 목록을 localStorage에 캐시
   try {
