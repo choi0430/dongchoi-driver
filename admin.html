@@ -2107,7 +2107,8 @@ function rDash(){
     });
   }
   // ── DONG CHOI 차량 기록 완전성 알림 ──
-  const dcSummary = getDCRecordSummary();
+  let dcSummary = [];
+  try { dcSummary = getDCRecordSummary(); } catch(e){ console.warn('DC record check failed:', e); }
   dcSummary.forEach(({vehicle:v, issues})=>{
     const errors = issues.filter(i=>i.severity==='error');
     const warns = issues.filter(i=>i.severity==='warn');
@@ -2826,7 +2827,7 @@ function flt(t,v){
 // SUB CONTRACT
 // ═══════════════════════════════════════
 const DC_OWNERS = ['DONG CHOI PTY LTD', null, ''];
-const DC_COMPANY = 'DONG CHOI PTY LTD';
+const DC_ACCREDITATION_NAME = 'DONG CHOI PTY LTD';
 
 function getSubVehicles(){
   return DB.V.filter(v => !DC_OWNERS.includes(v.Owner));
@@ -2837,12 +2838,12 @@ function getSubVehicles(){
 // DONG CHOI PTY LTD 차량 필수 기록 완전성 검사
 // ═══════════════════════════════════════════════════════════════════
 function isDongChoiVehicle(v){
-  return (v.Accreditation||'').trim().toUpperCase() === DC_COMPANY ||
+  return (v.Accreditation||'').trim().toUpperCase() === DC_ACCREDITATION_NAME ||
          DC_OWNERS.includes((v.Owner||'').trim()) && !(v.Owner||'').trim();
   // Accreditation이 DONG CHOI PTY LTD이거나, Owner가 비어있으면 (회사 차량)
 }
 function isDCAccredited(v){
-  return (v.Accreditation||'').trim().toUpperCase() === DC_COMPANY;
+  return (v.Accreditation||'').trim().toUpperCase() === DC_ACCREDITATION_NAME;
 }
 
 /**
