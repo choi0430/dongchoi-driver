@@ -4469,7 +4469,14 @@ async function initSubInvoice(){
   document.getElementById('sub-inv-to').value = toLocalISO(now);
   // 항목 초기화
   if(!document.getElementById('sub-inv-items').children.length) addSubInvRow();
-  // 이력 렌더
+  // 인보이스 캐시 로드 후 이력 렌더
+  if(!_invHistoryCache){
+    try{
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+      const json = await res.json();
+      if(json.ok) _invHistoryCache = (json.rows||[]).reverse();
+    }catch(e){ console.warn('SUB inv history load failed', e); }
+  }
   renderSubInvHistory();
 }
 
