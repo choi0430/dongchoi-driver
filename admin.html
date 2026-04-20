@@ -11183,21 +11183,32 @@ async function syncSub(){
   await loadPSFromSheets();
   // 1) 차량 Owner 기반 (레거시)
   getSubVehicles().forEach(v=>{ if(v.Owner&&!DB.PS[v.Owner]) DB.PS[v.Owner]={}; });
-  // 2) M_SUB 시트 기반 (단일 소스) — M_SUB에 등록된 활성 업체는 DB.PS에 반드시 슬롯 보장
+  // 2) M_SUB 시트 기반 — M_SUB에 등록된 활성 업체는 DB.PS에 반드시 슬롯 보장
   const subs = await loadSubCompanies();
   subs.forEach(s=>{
     if(!s.SubName) return;
     if((s.Active||'Y').toUpperCase()==='N') return;
     if(!DB.PS[s.SubName]) DB.PS[s.SubName]={};
   });
-  // 3) M_SUB에 없고 차량도 없는 유령 슬롯 제거 (M_SUB가 단일 소스)
-  const subNames = new Set(subs.filter(s=>s.SubName&&(s.Active||'Y').toUpperCase()!=='N').map(s=>s.SubName));
-  const vehOwners = new Set(getSubVehicles().map(v=>v.Owner).filter(Boolean));
-  Object.keys(DB.PS).forEach(key=>{
-    if(!subNames.has(key) && !vehOwners.has(key)){
-      delete DB.PS[key];
-    }
-  });
+  // 3) 양방향 동기화: M_PriceSub(DB.PS)에만 있고 M_SUB에 없는 업체 → 자동 등록
+  const subNames = new Set(subs.map(s=>s.SubName).filter(Boolean));
+  const newFromPS = Object.keys(DB.PS).filter(k => !subNames.has(k));
+  if(newFromPS.length){
+    console.log('[syncSub] 요금표에서 발견된 미등록 업체 자동 등록:', newFromPS);
+    const promises = newFromPS.map(name =>
+      fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'add_master', sheet:'M_SUB',
+          data:{SubName:name, ABN:'', Contact:'', Email:'', Phone:'', PriceType:'cost', MarginRate:'0', OwnerDriver:'', Active:'Y'}
+        })
+      }).then(r=>r.json()).then(j=>{
+        if(j.ok){
+          _subCompanies.push({SubName:name, ABN:'', Contact:'', Email:'', Phone:'', PriceType:'cost', MarginRate:'0', OwnerDriver:'', Active:'Y', _rowIndex:j.row||null});
+        }
+      }).catch(e=>console.warn('M_SUB 자동 등록 실패:', name, e))
+    );
+    await Promise.all(promises);
+    if(newFromPS.length) toast('📋 요금표에서 '+newFromPS.length+'개 신규 업체가 자동 등록되었습니다','ok');
+  }
 }
 
 async function loadAllFromSheets(){
