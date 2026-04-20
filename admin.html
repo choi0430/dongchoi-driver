@@ -4677,6 +4677,21 @@ async function generateSubInvoice(){
   }catch(e){ showToast('❌ 네트워크 오류','error'); }
 }
 
+function _fmtSubInvDate(v){
+  if(!v) return '';
+  const s = String(v);
+  // ISO format: 2026-04-17T14:00:00.000Z → 17/04/2026
+  if(s.includes('T')){
+    const d = new Date(s);
+    return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+  }
+  // 2026-04-17 → 17/04/2026
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)){
+    const [y,m,d] = s.split('-');
+    return d+'/'+m+'/'+y;
+  }
+  return s;
+}
 function renderSubInvHistory(){
   const el = document.getElementById('sub-inv-history');
   if(!el) return;
@@ -4684,6 +4699,9 @@ function renderSubInvHistory(){
   if(!invs.length){ el.innerHTML='<div style="text-align:center;padding:10px;color:var(--t3);font-size:12px;">SUB 인보이스 이력이 없습니다.</div>'; return; }
   el.innerHTML = invs.sort((a,b)=>(b.InvNumber||'').localeCompare(a.InvNumber||'')).slice(0,20).map(inv=>{
     const paid = (inv.Status||'').toLowerCase()==='paid';
+    const from = _fmtSubInvDate(inv.PeriodFrom);
+    const to = _fmtSubInvDate(inv.PeriodTo);
+    const issued = _fmtSubInvDate(inv.IssuedDate);
     return `<div class="crd" style="padding:8px 10px;margin-bottom:6px;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
@@ -4691,9 +4709,9 @@ function renderSubInvHistory(){
           <span style="font-size:11px;color:var(--t3);margin-left:6px;">${inv.Agency||''}</span>
           <span style="font-size:10px;color:var(--t3);margin-left:4px;">(${inv.SubCompany||''})</span>
         </div>
-        <div style="font-size:13px;font-weight:700;color:${paid?'var(--gn)':'var(--ac)'};">$${inv.GrandTotal||0}</div>
+        <div style="font-size:13px;font-weight:700;color:${paid?'var(--gn)':'var(--ac)'};">$${Number(inv.GrandTotal||0).toLocaleString()}</div>
       </div>
-      <div style="font-size:10px;color:var(--t3);margin-top:2px;">${inv.PeriodFrom||''}~${inv.PeriodTo||''} | ${inv.IssuedDate||''} ${inv.EmailSentDate?'| ✉️ '+inv.EmailSentDate:''}</div>
+      <div style="font-size:10px;color:var(--t3);margin-top:2px;">${from}~${to} | 발행: ${issued} ${inv.EmailSentDate?'| ✉️ '+_fmtSubInvDate(inv.EmailSentDate):''}</div>
     </div>`;
   }).join('');
 }
