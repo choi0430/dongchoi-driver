@@ -43,7 +43,7 @@ const MASTER_HEADERS = {
                  'License_No','License_Expiry','Authority_No','Authority_Expiry','WWC_No','WWC_Expiry',
                  'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','SubCompany','Active'],
   // ── SUB 업체 관리 ──
-  'M_SUB':      ['SubName','ABN','Contact','Email','Phone','PriceType','MarginRate','OwnerDriver','Active'],
+  'M_SUB':      ['SubName','ABN','Contact','Email','Phone','Address','Bank_Name','BSB','Account_Number','Account_Name','PriceType','MarginRate','OwnerDriver','Active'],
   'M_Clients':  ['Name','ClientID','Mobile','Email','Address','Bank_Name','BSB','Account_Number'],
   'M_Guides':   ['GuideID','Guide_Name','Mobile','Agency','Email','Remarks'],
   'M_Hotels':   ['Hotel_Name','Phone','Address','Surcharge_Area'],
