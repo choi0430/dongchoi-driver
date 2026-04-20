@@ -1428,11 +1428,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
             <th style="min-width:70px;">날짜</th>
             <th style="min-width:60px;">차량</th>
             <th style="min-width:80px;">투어코드</th>
-            <th style="min-width:80px;">코스</th>
+            <th style="min-width:100px;">코스</th>
             <th style="min-width:40px;">인승</th>
             <th style="min-width:55px;">금액</th>
             <th style="min-width:40px;">OT</th>
-            <th style="min-width:40px;">기타</th>
+            <th style="min-width:55px;">기타금액</th>
+            <th style="min-width:90px;">기타내용</th>
             <th style="width:30px;"></th>
           </tr></thead>
           <tbody id="sub-inv-items"></tbody>
@@ -4398,6 +4399,60 @@ function renderSubDriverPay(){
 // SUB 인보이스 MODULE (재발행)
 // ═══════════════════════════════════════════════════════════════════
 let _subInvRowCount = 0;
+// 코스 & 기타 드롭다운 기본 목록 (사용자 추가 가능)
+let _subInvCourses = ['Blue Mountains','Hunter Valley','City','Airport Transfer','Sending','Port Stephens','Canberra','South Coast','Jervis Bay','Snow Mountains','Illawarra'];
+let _subInvEtcLabels = ['Trailer','Toll','Wash','Early Bird','Distance','Night Tour','Hotel','Melbourne','Fuel','Tip'];
+
+function _buildCourseSelect(id, val){
+  let opts = _subInvCourses.map(c=>`<option value="${c}"${c===val?' selected':''}>${c}</option>`).join('');
+  return `<select id="${id}" class="profit-finp" style="width:100px;font-size:10px;padding:3px;" onchange="_onSubInvCourseChange(this)">
+    <option value="">— 선택 —</option>${opts}<option value="__add__">+ 직접입력</option></select>`;
+}
+function _onSubInvCourseChange(sel){
+  if(sel.value==='__add__'){
+    const v = prompt('새 코스명을 입력하세요:');
+    if(v && v.trim()){
+      const name = v.trim();
+      if(!_subInvCourses.includes(name)) _subInvCourses.push(name);
+      // 현재 select에 옵션 추가 후 선택
+      const opt = document.createElement('option'); opt.value=name; opt.textContent=name;
+      sel.insertBefore(opt, sel.querySelector('option[value="__add__"]'));
+      sel.value = name;
+      // 다른 행의 코스 select에도 새 옵션 반영
+      document.querySelectorAll('#sub-inv-items select[id^="sir-tour-"]').forEach(s=>{
+        if(s===sel) return;
+        if(!s.querySelector(`option[value="${name}"]`)){
+          const o2 = document.createElement('option'); o2.value=name; o2.textContent=name;
+          s.insertBefore(o2, s.querySelector('option[value="__add__"]'));
+        }
+      });
+    } else { sel.value=''; }
+  }
+}
+function _buildEtcSelect(id, val){
+  let opts = _subInvEtcLabels.map(c=>`<option value="${c}"${c===val?' selected':''}>${c}</option>`).join('');
+  return `<select id="${id}" class="profit-finp" style="width:90px;font-size:10px;padding:3px;" onchange="_onSubInvEtcChange(this)">
+    <option value="">— 선택 —</option>${opts}<option value="__add__">+ 직접입력</option></select>`;
+}
+function _onSubInvEtcChange(sel){
+  if(sel.value==='__add__'){
+    const v = prompt('기타 항목명을 입력하세요:');
+    if(v && v.trim()){
+      const name = v.trim();
+      if(!_subInvEtcLabels.includes(name)) _subInvEtcLabels.push(name);
+      const opt = document.createElement('option'); opt.value=name; opt.textContent=name;
+      sel.insertBefore(opt, sel.querySelector('option[value="__add__"]'));
+      sel.value = name;
+      document.querySelectorAll('#sub-inv-items select[id^="sir-etcl-"]').forEach(s=>{
+        if(s===sel) return;
+        if(!s.querySelector(`option[value="${name}"]`)){
+          const o2 = document.createElement('option'); o2.value=name; o2.textContent=name;
+          s.insertBefore(o2, s.querySelector('option[value="__add__"]'));
+        }
+      });
+    } else { sel.value=''; }
+  }
+}
 
 async function initSubInvoice(){
   // SUB 업체 목록 로드
@@ -4436,13 +4491,14 @@ function addSubInvRow(){
     <td><input type="date" id="sir-date-${n}" class="profit-finp" style="width:70px;font-size:10px;padding:3px;"></td>
     <td><select id="sir-rego-${n}" class="profit-finp" style="width:60px;font-size:10px;padding:3px;"><option value="">—</option>${vehOpts}</select></td>
     <td><input id="sir-tc-${n}" class="profit-finp" style="width:80px;font-size:10px;padding:3px;" placeholder="투어코드"></td>
-    <td><input id="sir-tour-${n}" class="profit-finp" style="width:80px;font-size:10px;padding:3px;" placeholder="코스"></td>
+    <td>${_buildCourseSelect('sir-tour-'+n, '')}</td>
     <td><select id="sir-seats-${n}" class="profit-finp" style="width:40px;font-size:10px;padding:3px;">
       <option value="21S">21</option><option value="25S">25</option><option value="40S">40</option><option value="50S">50</option>
     </select></td>
     <td><input type="number" id="sir-amt-${n}" class="profit-finp" style="width:55px;font-size:10px;padding:3px;" value="0" oninput="calcSubInvTotal()"></td>
     <td><input type="number" id="sir-ot-${n}" class="profit-finp" style="width:40px;font-size:10px;padding:3px;" value="0" oninput="calcSubInvTotal()"></td>
-    <td><input type="number" id="sir-etc-${n}" class="profit-finp" style="width:40px;font-size:10px;padding:3px;" value="0" oninput="calcSubInvTotal()"></td>
+    <td><input type="number" id="sir-etc-${n}" class="profit-finp" style="width:55px;font-size:10px;padding:3px;" value="0" oninput="calcSubInvTotal()"></td>
+    <td>${_buildEtcSelect('sir-etcl-'+n, '')}</td>
     <td><button class="btn brd sm" style="padding:2px 5px;font-size:10px;color:var(--rd);" onclick="document.getElementById('sub-inv-row-${n}').remove();calcSubInvTotal();">✕</button></td>`;
   tbody.appendChild(tr);
 }
@@ -4459,7 +4515,8 @@ function getSubInvItems(){
     const amt  = parseFloat(document.getElementById('sir-amt-'+id)?.value||0);
     const ot   = parseFloat(document.getElementById('sir-ot-'+id)?.value||0);
     const etc  = parseFloat(document.getElementById('sir-etc-'+id)?.value||0);
-    items.push({date, rego, tourCode:tc, tour, seats, amount:amt, ot, etc, total: amt+ot+etc});
+    const etcLabel = document.getElementById('sir-etcl-'+id)?.value||'';
+    items.push({date, rego, tourCode:tc, tour, seats, amount:amt, ot, etc, etcLabel, total: amt+ot+etc});
   });
   return items;
 }
@@ -4487,7 +4544,7 @@ function buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTota
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:center;">${i.seats||''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${i.amount||0}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${i.ot||0}</td>
-    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${i.etc||0}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${i.etc||0}${i.etcLabel?' ('+i.etcLabel+')':''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;font-weight:700;">$${i.total||0}</td>
   </tr>`).join('');
   return `<div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;">
@@ -4517,7 +4574,7 @@ function buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTota
         <th style="padding:6px 8px;font-size:10px;text-align:center;">Seats</th>
         <th style="padding:6px 8px;font-size:10px;text-align:right;">Amount</th>
         <th style="padding:6px 8px;font-size:10px;text-align:right;">OT</th>
-        <th style="padding:6px 8px;font-size:10px;text-align:right;">Etc</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">Etc (Details)</th>
         <th style="padding:6px 8px;font-size:10px;text-align:right;">Total</th>
       </tr></thead>
       <tbody>${rowsHtml}</tbody>
@@ -4538,14 +4595,14 @@ function previewSubInvoice(){
   const subName = document.getElementById('sub-inv-company').value;
   const from = document.getElementById('sub-inv-from').value;
   const to = document.getElementById('sub-inv-to').value;
-  if(!agency || !subName){ showToast('SUB 업체와 여행사를 선택하세요','error'); return; }
+  if(!subName){ showToast('SUB 업체를 선택하세요','error'); return; }
   const items = getSubInvItems().filter(i=>i.total>0);
-  if(!items.length){ showToast('항목을 입력하세요','error'); return; }
+  if(!items.length){ showToast('금액이 입력된 항목이 없습니다','error'); return; }
   const exGst = items.reduce((s,i)=>s+i.total,0);
   const gst = Math.round(exGst*0.1*100)/100;
   const grandTotal = exGst + gst;
   const invNum = 'SUB-PREVIEW';
-  const html = buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTotal, gst);
+  const html = buildSubInvoiceHtml(invNum, agency||'(여행사 미지정)', from, to, items, subName, grandTotal, gst);
   if(typeof _showDocModal === 'function'){
     _showDocModal(html, null, 'SUB-Invoice-Preview.pdf');
   } else {
@@ -4558,9 +4615,9 @@ async function generateSubInvoice(){
   const subName = document.getElementById('sub-inv-company').value;
   const from = document.getElementById('sub-inv-from').value;
   const to = document.getElementById('sub-inv-to').value;
-  if(!agency || !subName){ showToast('SUB 업체와 여행사를 선택하세요','error'); return; }
+  if(!subName){ showToast('SUB 업체를 선택하세요','error'); return; }
   const items = getSubInvItems().filter(i=>i.total>0);
-  if(!items.length){ showToast('항목을 입력하세요','error'); return; }
+  if(!items.length){ showToast('금액이 입력된 항목이 없습니다','error'); return; }
 
   // ── DC Accreditation 기록 완전성 체크 ──
   const _sInvRegos = [...new Set(items.map(i=>(i.rego||'').trim()).filter(Boolean))];
@@ -4585,10 +4642,11 @@ async function generateSubInvoice(){
   const existing = (_invHistoryCache||[]).filter(inv=>(inv.InvNumber||'').startsWith('INV-'+ym));
   const nextNum = String(existing.length+1).padStart(3,'0');
   const invNum = 'INV-'+ym+'-'+nextNum;
-  const html = buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTotal, gst);
+  const agencyLabel = agency || subName;
+  const html = buildSubInvoiceHtml(invNum, agencyLabel, from, to, items, subName, grandTotal, gst);
   // Invoices 시트에 저장
   const invData = {
-    InvNumber: invNum, Agency: agency, PeriodFrom: from, PeriodTo: to,
+    InvNumber: invNum, Agency: agencyLabel, PeriodFrom: from, PeriodTo: to,
     GrandTotal: grandTotal.toFixed(2), GST: gst.toFixed(2), ExGST: exGst.toFixed(2),
     Status: 'Issued', IssuedDate: new Date().toLocaleDateString('en-AU'),
     Items: JSON.stringify(items), ManualItems:'', Deductions:'',
@@ -4603,9 +4661,9 @@ async function generateSubInvoice(){
     if(json.ok){
       showToast('✅ '+invNum+' 발행 완료','success');
       _invHistoryCache = null; // 캐시 초기화
-      const pdfName = invNum+'_'+agency+'.pdf';
+      const pdfName = invNum+'_'+agencyLabel+'.pdf';
       if(typeof _showDocModal === 'function'){
-        _showDocModal(html, {invNumber:invNum, agency, from, to}, pdfName);
+        _showDocModal(html, {invNumber:invNum, agency:agencyLabel, from, to}, pdfName);
       }
       renderSubInvHistory();
     } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
