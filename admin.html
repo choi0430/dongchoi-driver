@@ -9217,7 +9217,7 @@ function renderDR(){
     // 드라이버 선택 SVC = 드라이버 수당 base
     const grossCalc = svc + ot + htl + dst + erl + trl + ngt + wsh + meal + tip + tollVal + fuelVal;
     const isGross = nightOwner > 0 && Math.abs(dr - grossCalc) < 0.5;
-    const total = Math.max(0, isGross ? (dr - nightOwner) : dr);
+    const total = isGross ? (dr - nightOwner) : dr;  // 마이너스 허용 (개인 야경 납입)
     const rowIdx = r._rowIndex;
 
     // 시간 계산
@@ -9707,12 +9707,15 @@ function _calcDRFromReport(r){
   const base=svc;
   const gross=base+ot+htl+dst+erl+trl+ngt+wsh+mel+tip+toll+fuel;
   // 저장된 DR_Cost가 gross(미차감)인지 net(차감완료)인지 감지하여 항상 net 반환
-  if(stored>0){
-    if(own>0 && Math.abs(stored-gross)<0.5) return Math.max(0, stored-own); // gross → 차감
+  // ★ 마이너스 허용: 개인 야경 시 base=0, owner>0이면 실수령 = -owner
+  if(stored>0 || (stored===0 && own>0)){
+    if(own>0 && Math.abs(stored-gross)<0.5) return stored-own; // gross → 차감
+    if(stored===0 && own>0) return -own; // base 0 + 납입만 있는 경우
     return stored; // 이미 net
   }
+  if(base===0 && own>0) return -own; // 개인 야경: 기본 수당 없고 납입만
   if(base===0) return 0;
-  return Math.max(0, gross - own);
+  return gross - own; // 마이너스 허용
 }
 
 // ── 주간 서차지 합계 계산 ──────────────────────────────
@@ -9855,7 +9858,7 @@ function _reportRow(r){
         (guide||tourcode?'<div style="font-size:10px;color:var(--t3);margin-top:1px;">👤 '+escH(guide||'')+(tourcode?' · '+escH(tourcode):'')+'</div>':'')+
       '</div>'+
       '<div style="text-align:right;flex-shrink:0;margin-left:8px;">'+
-        '<div style="font-size:15px;font-weight:800;color:var(--gn);">$'+drCost.toLocaleString()+'</div>'+
+        '<div style="font-size:15px;font-weight:800;color:'+(drCost<0?'var(--rd)':'var(--gn)')+';">'+(drCost<0?'-$'+Math.abs(drCost).toLocaleString():'$'+drCost.toLocaleString())+'</div>'+
         (nightOwn>0?'<div style="font-size:10px;color:'+(_rwSub?'#7c3aed':'var(--rd)')+';font-weight:700;">'+(_rwSub?'차주('+escH(_rwSub)+')납입':'회사납입')+' -$'+nightOwn.toLocaleString()+'</div>':'')+
         '<div style="font-size:10px;color:var(--t3);margin-top:1px;">실수령</div>'+
       '</div>'+

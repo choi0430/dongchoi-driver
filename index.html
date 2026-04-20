@@ -6928,10 +6928,21 @@ function onNightChange(){
 
   // 야경 선택 시 OT 초기화
   selectOTAmount(0);
-  showToast('🌃 야경 선택 — OT $0 (추가 운행 시 버튼으로 신청 가능)', 'info');
 
   const r = getNightRate();
   const isPrivate = type.startsWith('private_');
+
+  // 개인 야경: SVC를 $0으로 초기화 (기본 수당 없음, 납입금만 발생)
+  if(isPrivate){
+    cselSetValue('f-svc-select', '0');
+    const customEl = document.getElementById('f-svc-custom');
+    if(customEl) customEl.value = 0;
+    const wrapEl = document.getElementById('f-svc-custom-wrap');
+    if(wrapEl) wrapEl.style.display = 'none';
+    showToast('🌃 개인 야경 — 기본 수당 $0, 납입금만 발생합니다', 'info');
+  } else {
+    showToast('🌃 야경 선택 — OT $0 (추가 운행 시 버튼으로 신청 가능)', 'info');
+  }
   const typeLabel = {
     guide_opt:       '가이드 옵션 (현장 수령)',
     agency_incl:     '여행사 포함 약식',
@@ -8441,7 +8452,9 @@ function showPayDetail(wk){
           <span style="font-size:11px;font-weight:600;color:${b.color};">+$${b.val}</span>
         </div>`).join('');
 
-      const netDr = (r.dr||0);  // DR_Cost는 이미 야경납입 차감 후 저장됨
+      // DR_Cost는 이미 야경납입 차감 후 저장됨. 개인 야경 시 마이너스 가능.
+      let netDr = (r.dr||0);
+      if(netDr===0 && (r.nightOwner||0)>0 && baseRate===0) netDr = -(r.nightOwner||0);
 
       const _rSub = getSubOwnerForRego(r.rego);
       html+=`<div class="pay-report-row" ${_rSub?'style="border-left:3px solid #7c3aed;"':''}>
@@ -8455,7 +8468,7 @@ function showPayDetail(wk){
             ${(r.guide||r.tourcode)?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">'+(r.guide?'👤 '+r.guide:'')+(r.guide&&r.tourcode?' · ':'')+( r.tourcode?'🏷 '+r.tourcode:'')+'</div>':''}
           </div>
           <div style="text-align:right;">
-            <div class="pay-report-amount" style="color:${netDr<(r.dr||0)?'var(--orange)':'var(--green)'};">$${netDr}</div>
+            <div class="pay-report-amount" style="color:${netDr<0?'var(--red)':netDr<(r.dr||0)?'var(--orange)':'var(--green)'};">${netDr<0?'-$'+Math.abs(netDr):'$'+netDr}</div>
             <div style="font-size:10px;color:var(--muted);margin-top:1px;">실수령</div>
           </div>
         </div>
@@ -8464,7 +8477,7 @@ function showPayDetail(wk){
           ${nightOwnerNote}
           <div style="display:flex;justify-content:space-between;padding:5px 0 2px;border-top:1px solid var(--border);margin-top:4px;">
             <span style="font-size:11px;font-weight:700;color:var(--text);">DR 소계</span>
-            <span style="font-size:11px;font-weight:700;color:var(--green);">$${netDr}</span>
+            <span style="font-size:11px;font-weight:700;color:${netDr<0?'var(--red)':'var(--green)'};">${netDr<0?'-$'+Math.abs(netDr):'$'+netDr}</span>
           </div>
         </div>
         ${r.remarks?'<div style="font-size:11px;color:var(--muted);margin-top:6px;">📝 '+r.remarks+'</div>':''}
