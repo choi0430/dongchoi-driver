@@ -4429,6 +4429,49 @@ function _onSubInvCourseChange(sel){
     } else { sel.value=''; }
   }
 }
+// 투어코드 드롭다운 (리포트에서 기존 코드 수집 + 직접입력)
+let _subInvTourCodes = [];
+function _collectTourCodes(){
+  const codes = new Set(_subInvTourCodes);
+  // 리포트 데이터에서 투어코드 수집
+  (DB.R||[]).forEach(r=>{ const c=(r.Tour_Code||'').trim(); if(c) codes.add(c); });
+  // 인보이스 이력에서도 수집
+  (_invHistoryCache||[]).forEach(inv=>{
+    try{
+      const items = JSON.parse(inv.Items||'[]');
+      items.forEach(i=>{ const c=(i.tourCode||'').trim(); if(c) codes.add(c); });
+    }catch(e){}
+  });
+  _subInvTourCodes = [...codes].sort();
+  return _subInvTourCodes;
+}
+function _buildTourCodeSelect(id, val){
+  const codes = _collectTourCodes();
+  let opts = codes.map(c=>`<option value="${c}"${c===val?' selected':''}>${c}</option>`).join('');
+  return `<select id="${id}" class="profit-finp" style="width:100px;font-size:10px;padding:3px;" onchange="_onSubInvTCChange(this)">
+    <option value="">— 코드 —</option>${opts}<option value="__add__">+ 직접입력</option></select>`;
+}
+function _onSubInvTCChange(sel){
+  if(sel.value==='__add__'){
+    const v = prompt('투어코드를 입력하세요:');
+    if(v && v.trim()){
+      const code = v.trim();
+      if(!_subInvTourCodes.includes(code)) _subInvTourCodes.push(code);
+      const opt = document.createElement('option'); opt.value=code; opt.textContent=code;
+      sel.insertBefore(opt, sel.querySelector('option[value="__add__"]'));
+      sel.value = code;
+      // 다른 행에도 반영
+      document.querySelectorAll('#sub-inv-items select[id^="sir-tc-"]').forEach(s=>{
+        if(s===sel) return;
+        if(!s.querySelector(`option[value="${code}"]`)){
+          const o2 = document.createElement('option'); o2.value=code; o2.textContent=code;
+          s.insertBefore(o2, s.querySelector('option[value="__add__"]'));
+        }
+      });
+    } else { sel.value=''; }
+  }
+}
+
 function _buildEtcSelect(id, val){
   let opts = _subInvEtcLabels.map(c=>`<option value="${c}"${c===val?' selected':''}>${c}</option>`).join('');
   return `<select id="${id}" class="profit-finp" style="width:90px;font-size:10px;padding:3px;" onchange="_onSubInvEtcChange(this)">
@@ -4488,16 +4531,19 @@ function onSubInvCompanyChange(){
 function addSubInvRow(){
   const tbody = document.getElementById('sub-inv-items');
   const n = _subInvRowCount++;
-  // SUB 소속 차량 목록
-  const subName = document.getElementById('sub-inv-company')?.value||'';
-  const vehs = (DB.V||[]).filter(v=>!subName || (v.SubOwner||v.Owner||'').trim()===subName);
-  const vehOpts = vehs.map(v=>`<option value="${v.Rego}">${v.Rego}</option>`).join('');
+  // 전체 차량 목록 (DC + SUB 혼합 — 투어코드로 통합 인보이스 가능)
+  const allVehs = (DB.V||[]).slice().sort((a,b)=>(a.Rego||'').localeCompare(b.Rego||''));
+  const vehOpts = allVehs.map(v=>{
+    const owner = (v.SubOwner||v.Owner||'').trim();
+    const label = v.Rego + (owner ? ' ('+owner+')' : '');
+    return `<option value="${v.Rego}">${label}</option>`;
+  }).join('');
   const tr = document.createElement('tr');
   tr.id='sub-inv-row-'+n;
   tr.innerHTML = `
     <td><input type="date" id="sir-date-${n}" class="profit-finp" style="width:70px;font-size:10px;padding:3px;"></td>
-    <td><select id="sir-rego-${n}" class="profit-finp" style="width:60px;font-size:10px;padding:3px;"><option value="">—</option>${vehOpts}</select></td>
-    <td><input id="sir-tc-${n}" class="profit-finp" style="width:80px;font-size:10px;padding:3px;" placeholder="투어코드"></td>
+    <td><select id="sir-rego-${n}" class="profit-finp" style="width:90px;font-size:10px;padding:3px;"><option value="">—</option>${vehOpts}</select></td>
+    <td>${_buildTourCodeSelect('sir-tc-'+n, '')}</td>
     <td>${_buildCourseSelect('sir-tour-'+n, '')}</td>
     <td><select id="sir-seats-${n}" class="profit-finp" style="width:40px;font-size:10px;padding:3px;">
       <option value="21S">21</option><option value="25S">25</option><option value="40S">40</option><option value="50S">50</option>
@@ -4733,6 +4779,7 @@ function _showSubInvDetail(invNum){
     const etcInfo = (i.etc||0)>0 ? '$'+(i.etc||0)+(i.etcLabel?' ('+i.etcLabel+')':'') : '';
     return `<tr>
       <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;">${d}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;color:var(--ac);font-weight:600;">${i.tourCode||''}</td>
       <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;">${i.tour||i.etcLabel||''}</td>
       <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;">${i.rego||''}</td>
       <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;text-align:right;">${(i.amount||0)>0?'$'+Number(i.amount).toLocaleString():''}</td>
@@ -4761,6 +4808,7 @@ function _showSubInvDetail(invNum){
     <table style="width:100%;border-collapse:collapse;margin-bottom:12px;">
       <thead><tr style="background:var(--sf2);">
         <th style="padding:5px 8px;font-size:10px;text-align:left;">날짜</th>
+        <th style="padding:5px 8px;font-size:10px;text-align:left;">투어코드</th>
         <th style="padding:5px 8px;font-size:10px;text-align:left;">코스</th>
         <th style="padding:5px 8px;font-size:10px;text-align:left;">차량</th>
         <th style="padding:5px 8px;font-size:10px;text-align:right;">금액</th>
