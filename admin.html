@@ -4702,7 +4702,8 @@ function renderSubInvHistory(){
     const from = _fmtSubInvDate(inv.PeriodFrom);
     const to = _fmtSubInvDate(inv.PeriodTo);
     const issued = _fmtSubInvDate(inv.IssuedDate);
-    return `<div class="crd" style="padding:8px 10px;margin-bottom:6px;">
+    const invIdx = inv.InvNumber||'';
+    return `<div class="crd" style="padding:8px 10px;margin-bottom:6px;cursor:pointer;" onclick="_showSubInvDetail('${invIdx.replace(/'/g,"\\'")}')">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
           <span style="font-size:12px;font-weight:700;color:var(--ac);">${inv.InvNumber}</span>
@@ -4714,6 +4715,69 @@ function renderSubInvHistory(){
       <div style="font-size:10px;color:var(--t3);margin-top:2px;">${from}~${to} | 발행: ${issued} ${inv.EmailSentDate?'| ✉️ '+_fmtSubInvDate(inv.EmailSentDate):''}</div>
     </div>`;
   }).join('');
+}
+
+function _showSubInvDetail(invNum){
+  const inv = (_invHistoryCache||[]).find(i=>i.InvNumber===invNum);
+  if(!inv) return;
+  let items = [];
+  try{ items = JSON.parse(inv.Items||'[]'); }catch(e){}
+  const from = _fmtSubInvDate(inv.PeriodFrom);
+  const to = _fmtSubInvDate(inv.PeriodTo);
+  const issued = _fmtSubInvDate(inv.IssuedDate);
+  const paid = (inv.Status||'').toLowerCase()==='paid';
+
+  // 항목 테이블 생성
+  const rowsHtml = items.map(i=>{
+    const d = _fmtSubInvDate(i.date);
+    const etcInfo = (i.etc||0)>0 ? '$'+(i.etc||0)+(i.etcLabel?' ('+i.etcLabel+')':'') : '';
+    return `<tr>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;">${d}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;">${i.tour||i.etcLabel||''}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;">${i.rego||''}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;text-align:right;">${(i.amount||0)>0?'$'+Number(i.amount).toLocaleString():''}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;text-align:right;">${(i.ot||0)>0?'$'+Number(i.ot).toLocaleString():''}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;text-align:right;">${etcInfo}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--b1);font-size:11px;text-align:right;font-weight:700;">$${Number(i.total||0).toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+
+  const exGst = Number(inv.ExGST||0);
+  const gst = Number(inv.GST||0);
+  const total = Number(inv.GrandTotal||0);
+
+  const html = `<div style="padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
+      <div>
+        <div style="font-size:18px;font-weight:800;color:var(--ac);">${inv.InvNumber}</div>
+        <div style="font-size:12px;color:var(--t3);margin-top:2px;">${inv.SubCompany||inv.Agency||''}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:10px;color:var(--t3);">발행일: ${issued}</div>
+        <div style="font-size:10px;color:var(--t3);">기간: ${from} ~ ${to}</div>
+        <div style="margin-top:4px;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;display:inline-block;background:${paid?'var(--gn)':'var(--ac)'};color:#fff;">${paid?'PAID':'ISSUED'}</div>
+      </div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:12px;">
+      <thead><tr style="background:var(--sf2);">
+        <th style="padding:5px 8px;font-size:10px;text-align:left;">날짜</th>
+        <th style="padding:5px 8px;font-size:10px;text-align:left;">코스</th>
+        <th style="padding:5px 8px;font-size:10px;text-align:left;">차량</th>
+        <th style="padding:5px 8px;font-size:10px;text-align:right;">금액</th>
+        <th style="padding:5px 8px;font-size:10px;text-align:right;">OT</th>
+        <th style="padding:5px 8px;font-size:10px;text-align:right;">기타</th>
+        <th style="padding:5px 8px;font-size:10px;text-align:right;">소계</th>
+      </tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    <div style="text-align:right;padding:8px;background:var(--sf2);border-radius:8px;">
+      <div style="font-size:11px;color:var(--t3);">Ex GST: <strong>$${exGst.toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+      <div style="font-size:11px;color:var(--t3);">GST (10%): <strong>$${gst.toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+      <div style="font-size:18px;font-weight:800;color:var(--ac);margin-top:4px;">Total: $${total.toLocaleString(undefined,{minimumFractionDigits:2})}</div>
+    </div>
+  </div>`;
+
+  openGenModal(html);
 }
 
 // ═══════════════════════════════════════════════════════════════════
