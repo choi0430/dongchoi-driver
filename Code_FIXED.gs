@@ -336,6 +336,12 @@ function doPost(e) {
       case 'replace_master':
         return cors(replaceMasterSheet(payload.sheet, payload.rows));
 
+      case 'dedup_sub': {
+        const r = deduplicateSub();
+        if (r.ok) appendAuditLog(_user, 'dedup_sub', 'M_SUB', '', r.removed + '개 중복 삭제');
+        return cors(r);
+      }
+
       // ── 가이드 전화번호 일괄 업데이트 ──
       case 'bulk_update_guide_phones': {
         const r = bulkUpdateGuidePhones(payload.guides || []);
@@ -1094,6 +1100,38 @@ function deleteMasterRow(sheetName, rowIndex) {
 
     sheet.deleteRow(ri);
     return {ok: true};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function deduplicateSub() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('M_SUB');
+    if (!sheet) return {ok: false, msg: 'M_SUB sheet not found'};
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return {ok: true, removed: 0};
+    const headers = data[0];
+    const nameIdx = headers.indexOf('SubName');
+    if (nameIdx < 0) return {ok: false, msg: 'SubName column not found'};
+    // Find duplicate rows (keep first occurrence, delete later ones)
+    const seen = {};
+    const rowsToDelete = []; // 1-based row numbers
+    for (let i = 1; i < data.length; i++) {
+      const name = String(data[i][nameIdx] || '').trim().toUpperCase();
+      if (!name) continue;
+      if (seen[name]) {
+        rowsToDelete.push(i + 1); // 1-based
+      } else {
+        seen[name] = true;
+      }
+    }
+    // Delete from bottom to top to preserve row indices
+    for (let j = rowsToDelete.length - 1; j >= 0; j--) {
+      sheet.deleteRow(rowsToDelete[j]);
+    }
+    return {ok: true, removed: rowsToDelete.length};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }

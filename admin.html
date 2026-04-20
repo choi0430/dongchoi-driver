@@ -4027,7 +4027,21 @@ async function renderSubCompanyList(){
   const list = document.getElementById('sub-company-list');
   if(!list) return;
   list.innerHTML='<div style="text-align:center;padding:20px;color:var(--t3);">로딩 중...</div>';
-  const subs = await loadSubCompanies();
+  // 중복 감지 → 서버 dedup 실행 후 재로드
+  let subs = await loadSubCompanies(true);
+  const _seen = new Set();
+  const _hasDup = subs.some(s => {
+    const k = (s.SubName||'').trim().toUpperCase();
+    if(_seen.has(k)) return true;
+    _seen.add(k); return false;
+  });
+  if(_hasDup){
+    try{
+      await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'dedup_sub'})});
+      subs = await loadSubCompanies(true);
+      toast('🧹 중복 업체가 정리되었습니다','ok');
+    }catch(e){ console.warn('dedup_sub 실패:',e); }
+  }
   if(!subs.length){
     list.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">등록된 SUB 업체가 없습니다.<br>위의 [+ 업체 추가] 버튼으로 등록하세요.</div>';
     return;
@@ -11183,16 +11197,17 @@ async function syncSub(){
   await loadPSFromSheets();
   // 1) 차량 Owner 기반 (레거시)
   getSubVehicles().forEach(v=>{ if(v.Owner&&!DB.PS[v.Owner]) DB.PS[v.Owner]={}; });
-  // 2) M_SUB 시트 기반 — M_SUB에 등록된 활성 업체는 DB.PS에 반드시 슬롯 보장
-  const subs = await loadSubCompanies();
+  // 2) M_SUB 시트 기반 — 항상 최신 데이터 로드 후 활성 업체 DB.PS 슬롯 보장
+  const subs = await loadSubCompanies(true); // force=true로 항상 최신
   subs.forEach(s=>{
     if(!s.SubName) return;
     if((s.Active||'Y').toUpperCase()==='N') return;
     if(!DB.PS[s.SubName]) DB.PS[s.SubName]={};
   });
   // 3) 양방향 동기화: M_PriceSub(DB.PS)에만 있고 M_SUB에 없는 업체 → 자동 등록
-  const subNames = new Set(subs.map(s=>s.SubName).filter(Boolean));
-  const newFromPS = Object.keys(DB.PS).filter(k => !subNames.has(k));
+  //    대소문자/공백 무시 비교로 중복 방지
+  const subNamesNorm = new Set(subs.map(s=>(s.SubName||'').trim().toUpperCase()));
+  const newFromPS = Object.keys(DB.PS).filter(k => !subNamesNorm.has(k.trim().toUpperCase()));
   if(newFromPS.length){
     console.log('[syncSub] 요금표에서 발견된 미등록 업체 자동 등록:', newFromPS);
     const promises = newFromPS.map(name =>
