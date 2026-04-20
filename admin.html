@@ -4037,10 +4037,21 @@ async function renderSubCompanyList(){
   });
   if(_hasDup){
     try{
-      await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'dedup_sub'})});
-      subs = await loadSubCompanies(true);
-      toast('🧹 중복 업체가 정리되었습니다','ok');
+      const dedupRes = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'dedup_sub'})});
+      const dedupJson = await dedupRes.json();
+      if(dedupJson.ok && dedupJson.removed > 0){
+        subs = await loadSubCompanies(true);
+        toast('🧹 중복 '+dedupJson.removed+'개 정리 완료','ok');
+      }
     }catch(e){ console.warn('dedup_sub 실패:',e); }
+    // GAS dedup 미배포 시 클라이언트에서 중복 필터링 (첫 번째만 유지)
+    const _seen2 = new Set();
+    subs = subs.filter(s => {
+      const k = (s.SubName||'').trim().toUpperCase();
+      if(_seen2.has(k)) return false;
+      _seen2.add(k); return true;
+    });
+    _subCompanies = subs; // 캐시도 업데이트
   }
   if(!subs.length){
     list.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">등록된 SUB 업체가 없습니다.<br>위의 [+ 업체 추가] 버튼으로 등록하세요.</div>';
@@ -4130,8 +4141,28 @@ async function saveSubCompany(idx){
     Active: document.getElementById('sc-active').value,
   };
   const isNew = idx===null;
-  const action = isNew ? 'add_master' : 'update_master';
-  const body = isNew ? {action, sheet:'M_SUB', data} : {action, sheet:'M_SUB', rowIndex: _subCompanies[idx]._rowIndex, data};
+  const rowIdx = isNew ? null : _subCompanies[idx]?._rowIndex;
+  // _rowIndex가 없으면 (자동 등록 업체 등) → 기존 행 삭제 후 새로 추가
+  let action, body;
+  if(isNew){
+    action = 'add_master';
+    body = {action, sheet:'M_SUB', data};
+  } else if(rowIdx){
+    action = 'update_master';
+    body = {action, sheet:'M_SUB', rowIndex: rowIdx, data};
+  } else {
+    // rowIndex 없는 기존 업체 → delete_by_name 후 add (안전한 업데이트)
+    action = 'add_master';
+    body = {action, sheet:'M_SUB', data};
+    // 기존 이름으로 된 행을 먼저 삭제 시도
+    const oldName = _subCompanies[idx]?.SubName;
+    if(oldName){
+      try{
+        await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+          body:JSON.stringify({action:'delete_sub_by_name', name:oldName})});
+      }catch(e){ console.warn('delete_sub_by_name failed:', e); }
+    }
+  }
   try{
     showToast('저장 중...','info');
     const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'}, body:JSON.stringify(body)});

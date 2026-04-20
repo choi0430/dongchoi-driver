@@ -342,6 +342,12 @@ function doPost(e) {
         return cors(r);
       }
 
+      case 'delete_sub_by_name': {
+        const r = deleteSubByName(payload.name);
+        if (r.ok) appendAuditLog(_user, 'delete_sub_by_name', 'M_SUB', '', payload.name + ' 삭제 (' + r.removed + '행)');
+        return cors(r);
+      }
+
       // ── 가이드 전화번호 일괄 업데이트 ──
       case 'bulk_update_guide_phones': {
         const r = bulkUpdateGuidePhones(payload.guides || []);
@@ -1128,6 +1134,32 @@ function deduplicateSub() {
       }
     }
     // Delete from bottom to top to preserve row indices
+    for (let j = rowsToDelete.length - 1; j >= 0; j--) {
+      sheet.deleteRow(rowsToDelete[j]);
+    }
+    return {ok: true, removed: rowsToDelete.length};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function deleteSubByName(name) {
+  try {
+    if (!name) return {ok: false, msg: 'name required'};
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('M_SUB');
+    if (!sheet) return {ok: false, msg: 'M_SUB sheet not found'};
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const nameIdx = headers.indexOf('SubName');
+    if (nameIdx < 0) return {ok: false, msg: 'SubName column not found'};
+    const target = String(name).trim().toUpperCase();
+    const rowsToDelete = [];
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][nameIdx] || '').trim().toUpperCase() === target) {
+        rowsToDelete.push(i + 1);
+      }
+    }
     for (let j = rowsToDelete.length - 1; j >= 0; j--) {
       sheet.deleteRow(rowsToDelete[j]);
     }
