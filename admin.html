@@ -5811,12 +5811,23 @@ function renderBalDetail(){
       return `<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:${m.bg};color:${m.color};font-weight:600;">${m.label}</span>`;
     };
 
-    // ★ 인보이스 Items에서 가이드/투어코드 맵 구축
+    // ★ 인보이스 Items에서 가이드/투어코드 맵 구축 (최상위 Guide/TourCode 우선)
     const _invInfoMap = {};
     if(_invHistoryCache){
       _invHistoryCache.forEach(inv => {
         const invNum = String(inv.InvNumber||'').trim();
         if(!invNum) return;
+        // 최상위 필드 우선 (saveInvoiceToSheet에서 저장)
+        const topGuide = (inv.Guide||'').trim();
+        const topTourCode = (inv.TourCode||'').trim();
+        if (topGuide || topTourCode) {
+          _invInfoMap[invNum] = {
+            guides: topGuide ? topGuide.split(',').map(s=>s.trim()).filter(Boolean) : [],
+            tourcodes: topTourCode ? topTourCode.split(',').map(s=>s.trim()).filter(Boolean) : []
+          };
+          return;
+        }
+        // fallback: Items JSON 파싱
         try {
           const _itms = typeof inv.Items==='string' && inv.Items.trim().startsWith('[') ? JSON.parse(inv.Items) : [];
           const _manItms = typeof inv.ManualItems==='string' && inv.ManualItems.trim().startsWith('[') ? JSON.parse(inv.ManualItems) : [];
@@ -7840,6 +7851,17 @@ async function saveInvoiceToSheet() {
   const _manKey = agency + '_' + from.slice(0,7);
   const manualItems = _getInvManualItems(_manKey);
 
+  // ★ 가이드/투어코드 추출 (리포트 + 수동항목)
+  const _allRows = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)]);
+  const _invGuides = [...new Set([
+    ..._allRows.filter(r=>!r._manual).map(r=>(r.Guide||'').trim()).filter(Boolean),
+    ...manualItems.map(m=>(m.guide||'').trim()).filter(Boolean)
+  ])];
+  const _invTourCodes = [...new Set([
+    ..._allRows.filter(r=>!r._manual).map(r=>(r.Tour_Code||'').trim()).filter(Boolean),
+    ...manualItems.map(m=>(m.tourcode||m.tourCode||'').trim()).filter(Boolean)
+  ])];
+
   const data = {
     InvNumber:   invNum,
     Agency:      agency,
@@ -7853,6 +7875,8 @@ async function saveInvoiceToSheet() {
     Items:       JSON.stringify(itemsSummary).slice(0,49000),
     ManualItems: JSON.stringify(manualItems).slice(0,49000),
     Deductions:  JSON.stringify(_invDeductions.filter(d=>d.amount>0)),
+    Guide:       _invGuides.join(', '),
+    TourCode:    _invTourCodes.join(', '),
     Notes:       `${rows.length}건, 그룹:${_invGroupMode}`,
     CreatedBy:   getAdminUser()
   };
@@ -7898,9 +7922,15 @@ async function saveInvoiceToSheet() {
       const dueDateStr = toLocalISO(dueBaseDate);
       const todayStr = toLocalISO(new Date());
       const _allTxnItems = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)]);
-      const _txnCodes = [...new Set(_allTxnItems.map(r=>String(r.Tour_Code||'').trim()).filter(Boolean))];
+      const _txnCodes = [...new Set([
+        ..._allTxnItems.map(r=>String(r.Tour_Code||'').trim()).filter(Boolean),
+        ...manualItems.map(m=>(m.tourcode||m.tourCode||'').trim()).filter(Boolean)
+      ])];
       const txnTourCode = _txnCodes.join(', ');
-      const _txnGuides = [...new Set(_allTxnItems.map(r=>String(r.Guide||'').trim()).filter(Boolean))];
+      const _txnGuides = [...new Set([
+        ..._allTxnItems.map(r=>String(r.Guide||'').trim()).filter(Boolean),
+        ...manualItems.map(m=>(m.guide||'').trim()).filter(Boolean)
+      ])];
       const txnGuide = _txnGuides.join(', ');
       const drAmount = roundMoney(grandTotal);
 
