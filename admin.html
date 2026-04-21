@@ -5094,9 +5094,10 @@ function _showSubInvDetail(invNum, editMode){
     </tr>`;
   }).join('');
 
-  const exGst = Number(inv.ExGST||0);
-  const gst = Number(inv.GST||0);
-  const total = Number(inv.GrandTotal||0);
+  // GST 포함: items 합계가 GST 포함 총액
+  const total = items.reduce((s,i)=>s+Number(i.total||0),0);
+  const exGst = Math.round(total/1.1*100)/100;
+  const gst = Math.round((total - exGst)*100)/100;
   const editBtnHtml = isEdit
     ? `<div style="display:flex;gap:6px;margin-top:10px;">
         <button class="btn bac" onclick="_saveSubInvEdit().catch(e=>toast('❌ 저장 오류: '+e.message,'er'))" style="background:var(--gn);color:#fff;flex:1;">💾 저장</button>
