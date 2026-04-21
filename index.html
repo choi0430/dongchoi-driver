@@ -10384,10 +10384,31 @@ function renderDriverRoster(){
   });
   html += '</div>';
 
-  // 주간 요약
+  // ★ 연속 근무일수 계산 (주 경계 무시, 오늘 기준 역순으로 탐색)
+  let consecutiveDays = 0;
+  const _checkDate = new Date(todayISO + 'T00:00:00');
+  // 오늘이 근무일이 아니면 어제부터 체크 (오늘 아직 근무 전일 수 있음)
+  const _todayStatus = lookup[todayISO] || '';
+  if (_todayStatus !== 'WORKED') _checkDate.setDate(_checkDate.getDate() - 1);
+  for (let _i = 0; _i < 30; _i++) {  // 최대 30일 역순 탐색
+    const _ciso = _checkDate.getFullYear() + '-' + pad2(_checkDate.getMonth()+1) + '-' + pad2(_checkDate.getDate());
+    if (lookup[_ciso] === 'WORKED') {
+      consecutiveDays++;
+      _checkDate.setDate(_checkDate.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+
+  // 주간 요약 + 연속 근무 경고
+  const _weekLabel = `이번 주 근무: <strong style="color:#2563eb;font-size:14px;">${workedCount}일</strong>`;
+  const _consLabel = consecutiveDays > workedCount
+    ? ` · 연속 근무: <strong style="color:${consecutiveDays>=6?'#dc2626':'#2563eb'};font-size:14px;">${consecutiveDays}일</strong>` : '';
+  const _fatigueWarn = consecutiveDays >= 6
+    ? '<span style="color:#dc2626;font-weight:700;"> ⚠️ 피로 주의</span>'
+    : (workedCount >= 6 ? '<span style="color:#dc2626;font-weight:700;"> ⚠️ 피로 주의</span>' : '');
   html += `<div style="margin-top:10px;text-align:center;font-size:12px;color:var(--muted);">
-    이번 주 근무: <strong style="color:${workedCount>=6?'#dc2626':'#2563eb'};font-size:14px;">${workedCount}일</strong>
-    ${workedCount>=6?'<span style="color:#dc2626;font-weight:700;"> ⚠️ 피로 주의</span>':''}
+    ${_weekLabel}${_consLabel} ${_fatigueWarn}
   </div>`;
 
   el.innerHTML = html;
