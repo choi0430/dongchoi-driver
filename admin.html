@@ -1833,7 +1833,7 @@ function safeSetLocal(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
   } catch(e) {
     if (e.name === 'QuotaExceededError') {
-      showToast('저장 공간 부족 - 캐시 삭제 중', 'warning');
+      toast('저장 공간 부족 - 캐시 삭제 중', 'er');
       const keys = Object.keys(localStorage).filter(k => k.startsWith('cache_'));
       keys.forEach(k => localStorage.removeItem(k));
       try { localStorage.setItem(key, JSON.stringify(value)); } catch(e2) { console.error('Failed to save:', key); }
@@ -4162,7 +4162,7 @@ function openSubCompanyForm(idx){
 
 async function saveSubCompany(idx){
   const name = document.getElementById('sc-name').value.trim();
-  if(!name){ showToast('업체명을 입력하세요','error'); return; }
+  if(!name){ toast('업체명을 입력하세요','er'); return; }
   const data = {
     SubName: name,
     ABN: document.getElementById('sc-abn').value.trim(),
@@ -4203,20 +4203,20 @@ async function saveSubCompany(idx){
     }
   }
   try{
-    showToast('저장 중...','info');
+    toast('저장 중...','in');
     const json = await gasPost(body);
     if(json.ok){
-      showToast('✅ SUB 업체 저장 완료','success');
+      toast('✅ SUB 업체 저장 완료','ok');
       closeGenModal();
       await loadSubCompanies(true);
       renderSubCompanyList();
       window._psLastSync = 0;
       await syncSub();
       if(ST.subTab==='rates') rSub();
-    } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
+    } else { toast('❌ 저장 실패: '+(json.error||''),'er'); }
   }catch(e){
     console.error('saveSubCompany error:', e);
-    showToast('❌ 저장 오류: '+e.message,'error');
+    toast('❌ 저장 오류: '+e.message,'er');
   }
 }
 
@@ -4227,14 +4227,14 @@ async function deleteSubCompany(idx){
   try{
     const json = await gasPost({action:'delete_master', sheet:'M_SUB', rowIndex: s._rowIndex});
     if(json.ok){
-      showToast('🗑 삭제 완료','success');
+      toast('🗑 삭제 완료','ok');
       await loadSubCompanies(true);
       renderSubCompanyList();
       window._psLastSync = 0;
       await syncSub();
       if(ST.subTab==='rates') rSub();
-    } else { showToast('❌ 삭제 실패: '+(json.error||''),'error'); }
-  }catch(e){ showToast('❌ 삭제 실패: '+e.message,'error'); }
+    } else { toast('❌ 삭제 실패: '+(json.error||''),'er'); }
+  }catch(e){ toast('❌ 삭제 실패: '+e.message,'er'); }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4578,7 +4578,7 @@ function addSubInvRow(){
 /* ── 투어코드 검색 → 리포트 자동 불러오기 ── */
 function _searchByTourCode(){
   const q = (document.getElementById('sub-inv-tc-search')?.value||'').trim().toUpperCase();
-  if(!q){ showToast('투어코드를 입력하세요','error'); return; }
+  if(!q){ toast('투어코드를 입력하세요','er'); return; }
   const from = document.getElementById('sub-inv-from')?.value||'';
   const to   = document.getElementById('sub-inv-to')?.value||'';
   const matches = (DB.R||[]).filter(r=>{
@@ -4597,7 +4597,7 @@ function _searchByTourCode(){
 function _loadAllByDateRange(){
   const from = document.getElementById('sub-inv-from')?.value||'';
   const to   = document.getElementById('sub-inv-to')?.value||'';
-  if(!from && !to){ showToast('기간을 먼저 설정하세요','error'); return; }
+  if(!from && !to){ toast('기간을 먼저 설정하세요','er'); return; }
   const matches = (DB.R||[]).filter(r=>{
     const d = (r.Date||'').slice(0,10);
     if(from && d < from) return false;
@@ -4672,7 +4672,7 @@ function _tcToggleAll(checked){
 function _addSelectedReports(){
   const matches = window._tcSearchMatches||[];
   const checked = document.querySelectorAll('.tc-sel-chk:checked');
-  if(!checked.length){ showToast('추가할 항목을 선택하세요','error'); return; }
+  if(!checked.length){ toast('추가할 항목을 선택하세요','er'); return; }
   // 기존 빈 행 제거
   const tbody = document.getElementById('sub-inv-items');
   const existing = tbody.querySelectorAll('tr');
@@ -4689,7 +4689,7 @@ function _addSelectedReports(){
   });
   calcSubInvTotal();
   document.getElementById('sub-inv-search-result').style.display='none';
-  showToast(checked.length+'건 추가됨','ok');
+  toast(checked.length+'건 추가됨','ok');
 }
 
 function _addSubInvRowFromReport(r){
@@ -4844,9 +4844,9 @@ function previewSubInvoice(){
   const subName = document.getElementById('sub-inv-company').value;
   const from = document.getElementById('sub-inv-from').value;
   const to = document.getElementById('sub-inv-to').value;
-  if(!subName){ showToast('SUB 업체를 선택하세요','error'); return; }
+  if(!subName){ toast('SUB 업체를 선택하세요','er'); return; }
   const items = getSubInvItems().filter(i=>i.total>0);
-  if(!items.length){ showToast('금액이 입력된 항목이 없습니다','error'); return; }
+  if(!items.length){ toast('금액이 입력된 항목이 없습니다','er'); return; }
   const exGst = items.reduce((s,i)=>s+i.total,0);
   const gst = Math.round(exGst*0.1*100)/100;
   const grandTotal = exGst + gst;
@@ -4865,9 +4865,9 @@ async function generateSubInvoice(){
   const subName = document.getElementById('sub-inv-company').value;
   const from = document.getElementById('sub-inv-from').value;
   const to = document.getElementById('sub-inv-to').value;
-  if(!subName){ showToast('SUB 업체를 선택하세요','error'); return; }
+  if(!subName){ toast('SUB 업체를 선택하세요','er'); return; }
   const items = getSubInvItems().filter(i=>i.total>0);
-  if(!items.length){ showToast('금액이 입력된 항목이 없습니다','error'); return; }
+  if(!items.length){ toast('금액이 입력된 항목이 없습니다','er'); return; }
 
   // ── DC Accreditation 기록 완전성 체크 ──
   try{
@@ -4905,7 +4905,7 @@ async function generateSubInvoice(){
     Notes: 'SUB 재발행: '+subName, CreatedBy: ST.user||'admin',
     Source: 'SUB', SubCompany: subName
   };
-  showToast('🧾 인보이스 저장 중...','info');
+  toast('🧾 인보이스 저장 중...','in');
   const res = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({action:'save_invoice', data:invData, _user:ST.user||'admin'})});
   // GAS POST redirect 처리: redirected 응답은 text로 먼저 읽고 JSON 파싱 시도
@@ -4913,11 +4913,11 @@ async function generateSubInvoice(){
   let json;
   try{ json = JSON.parse(txt); }catch(pe){
     console.error('GAS response parse failed:', txt.slice(0,200));
-    showToast('❌ 서버 응답 파싱 실패. 다시 시도해주세요.','error');
+    toast('❌ 서버 응답 파싱 실패. 다시 시도해주세요.','er');
     return;
   }
   if(json.ok){
-    showToast('✅ '+invNum+' 발행 완료','success');
+    toast('✅ '+invNum+' 발행 완료','ok');
     _invHistoryCache = null; // 캐시 초기화
     const pdfName = invNum+'_'+agencyLabel+'.pdf';
     if(typeof _showDocModal === 'function'){
@@ -4930,10 +4930,10 @@ async function generateSubInvoice(){
       if(hJson.ok) _invHistoryCache = (hJson.rows||[]).reverse();
     }catch(e){}
     renderSubInvHistory();
-  } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
+  } else { toast('❌ 저장 실패: '+(json.error||''),'er'); }
   }catch(e){
     console.error('generateSubInvoice error:', e);
-    showToast('❌ 인보이스 생성 오류: '+e.message,'error');
+    toast('❌ 인보이스 생성 오류: '+e.message,'er');
   }
 }
 
@@ -5025,7 +5025,7 @@ function _showSubInvDetail(invNum, editMode){
   const total = Number(inv.GrandTotal||0);
   const editBtnHtml = isEdit
     ? `<div style="display:flex;gap:6px;margin-top:10px;">
-        <button class="btn bac" onclick="_saveSubInvEdit().catch(e=>showToast('❌ 저장 오류: '+e.message,'error'))" style="background:var(--gn);color:#fff;flex:1;">💾 저장</button>
+        <button class="btn bac" onclick="_saveSubInvEdit().catch(e=>toast('❌ 저장 오류: '+e.message,'er'))" style="background:var(--gn);color:#fff;flex:1;">💾 저장</button>
         <button class="btn bac" onclick="closeGenModal();_showSubInvDetail('${invNum.replace(/'/g,"\\'")}');" style="flex:1;">취소</button>
        </div>`
     : `<div style="margin-top:10px;text-align:center;">
@@ -5143,10 +5143,10 @@ async function _saveSubInvEdit(){
       },
       _user: (typeof ST!=='undefined' && ST.user)||'admin'
     };
-    showToast('💾 저장 중...','info');
+    toast('💾 저장 중...','in');
     const json = await gasPost(body);
     if(json.ok){
-      showToast('✅ 인보이스 수정 완료','success');
+      toast('✅ 인보이스 수정 완료','ok');
       _invHistoryCache = null;
       try {
         const r2 = await fetch(APPS_SCRIPT_URL+'?action=get_invoices');
