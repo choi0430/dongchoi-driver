@@ -62,9 +62,9 @@ const MASTER_HEADERS = {
   'Notices':    ['ID','Title','Content','Type','Date','Active'],
   'Audit_Log':  ['Timestamp','User','Action','Sheet','RowIndex','Summary'],
   'Invoices':   ['InvNumber','Agency','PeriodFrom','PeriodTo','GrandTotal','GST','ExGST',
-                 'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Deductions','Notes','CreatedBy','Source','SubCompany'],
+                 'Status','IssuedDate','EmailSentDate','PaidDate','Items','ManualItems','Deductions','Guide','TourCode','Notes','CreatedBy','Source','SubCompany'],
   // ── 거래처 잔액 관리 ──
-  'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','DR','CR','Remark','StartDate','FinishDate','DueDate'],
+  'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','Guide','Type','DR','CR','Remark','StartDate','FinishDate','DueDate'],
   'SUB_Txn':    ['RowID','SubCompany','Category','Date','InvoiceNo','Description','DR','CR','Remark'],
   // ── 서비스 요금 옵션 (차량 좌석별) ──
   'M_SvcOptions': ['VehicleSize','Label','Amount'],
@@ -131,6 +131,69 @@ function formatDateForSheet(date) {
     return Utilities.formatDate(date, 'Australia/Sydney', 'dd/MM/yyyy');
   }
   return String(date);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ★ CacheService 래퍼 — 읽기 가속화
+// ═══════════════════════════════════════════════════════════════════════════
+// 마스터 데이터: 600초(10분) / 리포트: 300초(5분) / 인보이스: 300초(5분)
+const CACHE_TTL = {
+  master:   600,   // 마스터 시트 (M_Vehicles 등)
+  report:   300,   // Daily_Report 등
+  invoice:  300,   // Invoices
+  txn:      300,   // Agency_Txn, SUB_Txn
+};
+
+/**
+ * 캐시에서 읽기. 없으면 fetchFn() 실행 후 캐시 저장.
+ * CacheService 한도: 값당 100KB → 초과 시 캐시 건너뜀.
+ */
+function cachedGet(cacheKey, ttlSeconds, fetchFn) {
+  const cache = CacheService.getScriptCache();
+  try {
+    const hit = cache.get(cacheKey);
+    if (hit) return JSON.parse(hit);
+  } catch(e) { /* 캐시 파싱 실패 → 새로 조회 */ }
+
+  const result = fetchFn();
+
+  // 캐시 저장 시도 (100KB 초과 시 조용히 스킵)
+  try {
+    const json = JSON.stringify(result);
+    if (json.length < 100000) {  // 100KB 한도
+      cache.put(cacheKey, json, ttlSeconds);
+    }
+  } catch(e) { /* 캐시 저장 실패 무시 */ }
+
+  return result;
+}
+
+/**
+ * 특정 시트의 캐시를 무효화.
+ * 쓰기(POST) 작업 후 호출하여 다음 읽기 시 최신 데이터 반환.
+ */
+function invalidateCache(sheetName) {
+  const cache = CacheService.getScriptCache();
+  try {
+    // 개별 시트 캐시
+    cache.remove('sheet_' + sheetName);
+    cache.remove('report_' + sheetName);
+    // getAllMasters 통합 캐시도 무효화
+    cache.remove('all_masters');
+  } catch(e) { /* 무시 */ }
+}
+
+/** 여러 시트 캐시를 한번에 무효화 */
+function invalidateCacheMulti(sheetNames) {
+  const cache = CacheService.getScriptCache();
+  try {
+    const keys = ['all_masters'];
+    sheetNames.forEach(function(s) {
+      keys.push('sheet_' + s);
+      keys.push('report_' + s);
+    });
+    cache.removeAll(keys);
+  } catch(e) { /* 무시 */ }
 }
 
 function ensureSheet(ss, sheetName) {
@@ -276,6 +339,36 @@ function doPost(e) {
     const payload = JSON.parse(e.postData.contents);
     const action = payload.action;
     const _user  = payload._user || 'unknown';
+
+    // ★ POST 시 관련 캐시 즉시 무효화 (다음 GET에서 최신 데이터 반환)
+    const _cacheMap = {
+      save_report: ['Daily_Report'], update_report: [payload.sheet||'Daily_Report'], delete_report: [payload.sheet||'Daily_Report'],
+      save_predeparture: ['Pre_Departure'], save_endofshift: ['End_of_Shift'], submit_mot: ['MOT_Report'],
+      add_master: [payload.sheet], update_master: [payload.sheet], delete_master: [payload.sheet], replace_master: [payload.sheet],
+      save_invoice: ['Invoices'], update_invoice_status: ['Invoices'], delete_invoice: ['Invoices'],
+      add_ledger: ['Ledger'], update_ledger: ['Ledger'], delete_ledger: ['Ledger'], replace_ledger: ['Ledger'],
+      add_wage: ['Wages'], update_wage: ['Wages'], delete_wage: ['Wages'], replace_wages: ['Wages'],
+      add_agency_txn: ['Agency_Txn'], update_agency_txn: ['Agency_Txn'], delete_agency_txn: ['Agency_Txn'],
+      add_sub_txn: ['SUB_Txn'], update_sub_txn: ['SUB_Txn'], delete_sub_txn: ['SUB_Txn'],
+      save_notices: ['Notices'], dedup_sub: ['M_SUB'], delete_sub_by_name: ['M_SUB'],
+      replace_sub_rates: ['Sub_Rates'], replace_price_sub: ['M_PriceSub'],
+      save_invoice_override: ['Invoice_Overrides'], delete_invoice_override: ['Invoice_Overrides'],
+      bulk_save_invoice_overrides: ['Invoice_Overrides'],
+      save_invoice_deduction: ['Invoice_Deductions'], delete_invoice_deduction: ['Invoice_Deductions'],
+      save_invoice_deductions_bulk: ['Invoice_Deductions'],
+      save_invoice_manual_item: ['Invoice_Manual_Items'], delete_invoice_manual_item: ['Invoice_Manual_Items'],
+      save_invoice_manual_items_bulk: ['Invoice_Manual_Items'],
+      save_defect_report: ['Defect_Reports'], update_defect_status: ['Defect_Reports'],
+      save_incident_report: ['Incident_Reports'], update_incident_report: ['Incident_Reports'],
+      save_bus_damage: ['Bus_Damage'], save_maint_record: ['Maint_Records'], delete_maint_record: ['Maint_Records'],
+      save_company_profile: ['Company_Profile'],
+      update_driver_pin: ['M_Drivers'], update_driver_info: ['M_Drivers'],
+      bulk_update_guide_phones: ['M_Guides'],
+    };
+    const _sheetsToInvalidate = _cacheMap[action];
+    if (_sheetsToInvalidate && _sheetsToInvalidate.length > 0) {
+      invalidateCacheMulti(_sheetsToInvalidate.filter(Boolean));
+    }
 
     switch (action) {
       // ── Report Operations ──
@@ -593,41 +686,65 @@ function doPost(e) {
 
 function getReports(sheetName, driver) {
   try {
-    const ss = SpreadsheetApp.openById(SHEET_ID);
-    const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
-
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return {ok: true, rows: []};
-
-    const headers = data[0];
-    const DATE_FIELDS = ['Date', 'Submitted', 'License_Expiry', 'Authority_Expiry', 'Rego_Date', 'HVIS_Date'];
-
-    function formatCell(h, v) {
-      if (DATE_FIELDS.indexOf(h) !== -1 && v instanceof Date && !isNaN(v)) {
-        return formatDateForSheet(v);
-      }
-      return v;
-    }
-
-    let rows = data.slice(1).map(row => {
-      const obj = {};
-      headers.forEach((h, i) => {
-        obj[h] = formatCell(h, row[i]);
-      });
-      return obj;
+    // ★ 전체 리포트를 캐시 (드라이버 필터는 캐시 후 적용)
+    const allRows = cachedGet('report_' + sheetName, CACHE_TTL.report, function() {
+      return _getReportsRaw(sheetName);
     });
+    if (!allRows.ok) return allRows;
 
-    if (driver) rows = rows.filter(r => r.Driver === driver);
-    return {ok: true, rows};
+    let rows = allRows.rows;
+    if (driver) rows = rows.filter(function(r) { return r.Driver === driver; });
+    return {ok: true, rows: rows};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
 }
 
-function getMaster(sheetName) {
+/** 캐시 없이 시트에서 직접 읽기 (내부용) */
+function _getReportsRaw(sheetName) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return {ok: true, rows: []};
+
+  const headers = data[0];
+  const DATE_FIELDS = ['Date', 'Submitted', 'License_Expiry', 'Authority_Expiry', 'Rego_Date', 'HVIS_Date'];
+
+  function formatCell(h, v) {
+    if (DATE_FIELDS.indexOf(h) !== -1 && v instanceof Date && !isNaN(v)) {
+      return formatDateForSheet(v);
+    }
+    return v;
+  }
+
+  var rows = data.slice(1).map(function(row) {
+    var obj = {};
+    headers.forEach(function(h, i) {
+      obj[h] = formatCell(h, row[i]);
+    });
+    return obj;
+  });
+
+  return {ok: true, rows: rows};
+}
+
+function getMaster(sheetName, ss) {
+  // ★ 캐시 적용: ss가 전달되지 않은 경우에만 캐시 사용
+  if (!ss) {
+    return cachedGet('sheet_' + sheetName, CACHE_TTL.master, function() {
+      return _getMasterRaw(sheetName, null);
+    });
+  }
+  // ss가 전달된 경우 (getAllMasters 등): 캐시 없이 직접 조회
+  return _getMasterRaw(sheetName, ss);
+}
+
+/** 캐시 없이 시트에서 직접 읽기 (내부용). ss가 null이면 자동 open. */
+function _getMasterRaw(sheetName, ss) {
   try {
-    const ss = SpreadsheetApp.openById(SHEET_ID);
+    if (!ss) ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, sheetName); // 누락 컬럼 자동 보정
 
     const data = sheet.getDataRange().getValues();
@@ -636,11 +753,10 @@ function getMaster(sheetName) {
     const headers = data[0];
 
     // 시트 헤더(공백 포함 가능)를 MASTER_HEADERS 정규 키(언더스코어)로 매핑
-    // 예: "Manufacture Date" → "Manufacture_Date"
     const canonicalHeaders = MASTER_HEADERS[sheetName];
     const normToCanonical = {};
     if (canonicalHeaders) {
-      canonicalHeaders.forEach(ch => {
+      canonicalHeaders.forEach(function(ch) {
         normToCanonical[normalizeKey(ch)] = ch;
       });
     }
@@ -648,43 +764,46 @@ function getMaster(sheetName) {
     // 전화번호 컬럼 인덱스 사전 탐색 (앞 0 복원용)
     const PHONE_FIELDS = ['phone','mobile','mobile_1','mobile_2','moblie_2'];
     const phoneColIdxSet = new Set();
-    headers.forEach((h, i) => {
+    headers.forEach(function(h, i) {
       if (PHONE_FIELDS.includes(normalizeKey(h))) phoneColIdxSet.add(i);
     });
 
-    const rows = data.slice(1).map((row, rowIdx) => {
+    const rows = data.slice(1).map(function(row, rowIdx) {
       const obj = {};
-      headers.forEach((h, i) => {
-        // 시트 헤더를 정규 키로 변환 (공백↔언더스코어 자동 처리)
+      headers.forEach(function(h, i) {
         const nk = normalizeKey(h);
         let canonKey = (h && normToCanonical[nk]) || h;
-        // 별칭 매핑 (예: Phone → Mobile_1)
         if (!normToCanonical[nk] && FIELD_ALIASES[nk]) {
           for (const alias of FIELD_ALIASES[nk]) {
             if (normToCanonical[alias]) { canonKey = normToCanonical[alias]; break; }
           }
         }
         let val = row[i];
-        // ★ 전화번호 필드: 앞 0 자동 복원 (Google Sheets 숫자→텍스트 보정)
         if (phoneColIdxSet.has(i) && val !== '' && val !== null && val !== undefined) {
           let s = String(val).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
-          if (s.length === 9) s = '0' + s;   // 04xxxxxxxx → 0 복원
+          if (s.length === 9) s = '0' + s;
           val = s;
         }
         obj[canonKey] = val;
       });
-      // 행 번호 저장 (1-based 시트 행): 헤더(1) + rowIdx(0-based) + 1
       obj._rowIndex = rowIdx + 2;
       return obj;
     });
 
-    return {ok: true, sheet: sheetName, rows};
+    return {ok: true, sheet: sheetName, rows: rows};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
 }
 
 function getAllMasters() {
+  // ★ 통합 캐시 — 전체 마스터를 한 번에 캐시 (100KB 초과 시 개별 캐시 폴백)
+  return cachedGet('all_masters', CACHE_TTL.master, function() {
+    return _getAllMastersRaw();
+  });
+}
+
+function _getAllMastersRaw() {
   try {
     const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
                     'M_PriceClient', 'M_PriceDriver', 'M_PriceSub', 'M_SUB',
@@ -694,8 +813,11 @@ function getAllMasters() {
                     'Invoice_Deductions', 'Invoice_Manual_Items'];
     const result = {};
 
-    sheets.forEach(name => {
-      const r = getMaster(name);
+    // ★ 스프레드시트를 1번만 열고 모든 시트를 순회
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+
+    sheets.forEach(function(name) {
+      const r = getMaster(name, ss);  // ss 전달 → openById 재호출 방지
       result[name] = r.ok ? r.rows : [];
     });
 
@@ -1695,6 +1817,12 @@ function saveInvoice(data) {
  * 모든 인보이스 조회
  */
 function getInvoices() {
+  return cachedGet('sheet_Invoices', CACHE_TTL.invoice, function() {
+    return _getInvoicesRaw();
+  });
+}
+
+function _getInvoicesRaw() {
   try {
     const ss    = SpreadsheetApp.openById(SHEET_ID);
     // ★ ensureSheet로 누락 컬럼(Deductions 등) 자동 추가
@@ -1706,13 +1834,13 @@ function getInvoices() {
 
     const headers = data[0];
     const rows = [];
-    for (let i = 1; i < data.length; i++) {
-      const obj = {};
-      headers.forEach((h, ci) => { obj[h] = data[i][ci]; });
+    for (var i = 1; i < data.length; i++) {
+      var obj = {};
+      headers.forEach(function(h, ci) { obj[h] = data[i][ci]; });
       obj._rowIndex = i + 1;
       rows.push(obj);
     }
-    return { ok: true, rows };
+    return { ok: true, rows: rows };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
