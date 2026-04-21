@@ -4716,6 +4716,10 @@ function _addSubInvRowFromReport(r){
   const tcVal = (r.Tour_Code||'').trim();
   const tourVal = (r.Attraction||'').trim();
   const seatsVal = (r.Seats||'').trim();
+  // OT 시간 자동 추출 (Start_Time ~ End_Time)
+  const st = (typeof parseSheetTime==='function' ? parseSheetTime(r.Start_Time) : '') || String(r.Start_Time||'').replace(/.*T(\d{2}:\d{2}).*/, '$1');
+  const et = (typeof parseSheetTime==='function' ? parseSheetTime(r.End_Time) : '') || String(r.End_Time||'').replace(/.*T(\d{2}:\d{2}).*/, '$1');
+  const otTimeVal = (st && et) ? st+'-'+et : '';
 
   const tr = document.createElement('tr');
   tr.id='sub-inv-row-'+n;
@@ -4732,7 +4736,7 @@ function _addSubInvRowFromReport(r){
     </select></td>
     <td><input type="number" id="sir-amt-${n}" class="profit-finp" style="width:55px;font-size:10px;padding:3px;" value="${svc}" oninput="calcSubInvTotal()"></td>
     <td><input type="number" id="sir-ot-${n}" class="profit-finp" style="width:40px;font-size:10px;padding:3px;" value="${ot}" oninput="calcSubInvTotal()"></td>
-    <td><input id="sir-ottime-${n}" class="profit-finp" style="width:70px;font-size:10px;padding:3px;" placeholder="08:50-17:40"></td>
+    <td><input id="sir-ottime-${n}" class="profit-finp" style="width:70px;font-size:10px;padding:3px;" value="${otTimeVal}" placeholder="08:50-17:40"></td>
     <td><input type="number" id="sir-etc-${n}" class="profit-finp" style="width:55px;font-size:10px;padding:3px;" value="${extras}" oninput="calcSubInvTotal()"></td>
     <td>${_buildEtcSelect('sir-etcl-'+n, etcLabel)}</td>
     <td><button class="btn brd sm" style="padding:2px 5px;font-size:10px;color:var(--rd);" onclick="document.getElementById('sub-inv-row-${n}').remove();calcSubInvTotal();">✕</button></td>`;
