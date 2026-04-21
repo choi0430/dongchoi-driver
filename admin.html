@@ -1399,7 +1399,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- ★ SUB 인보이스 뷰 -->
   <div id="sub-view-invoice" style="display:none;">
     <div style="padding:12px 14px 0;">
-      <div style="font-size:12px;color:var(--t3);margin-bottom:8px;">SUB 인보이스 → Dong Choi 명의로 여행사 재발행</div>
+      <div style="font-size:12px;color:var(--t3);margin-bottom:8px;">SUB 업체 → Dong Choi 청구 인보이스 관리</div>
       <!-- SUB 선택 -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
         <select id="sub-inv-company" class="profit-sel" style="flex:1;" onchange="onSubInvCompanyChange()">
@@ -5032,18 +5032,23 @@ function renderSubInvHistory(){
   if(!invs.length){ el.innerHTML='<div style="text-align:center;padding:10px;color:var(--t3);font-size:12px;">SUB 인보이스 이력이 없습니다.</div>'; return; }
   el.innerHTML = invs.sort((a,b)=>(b.InvNumber||'').localeCompare(a.InvNumber||'')).slice(0,20).map(inv=>{
     const paid = (inv.Status||'').toLowerCase()==='paid';
-    const from = _fmtSubInvDate(inv.PeriodFrom);
-    const to = _fmtSubInvDate(inv.PeriodTo);
+    // 기간: 항목 날짜 기반 자동 인식
+    let itms = []; try{ itms = JSON.parse(inv.Items||'[]'); }catch(e){}
+    const iDates = itms.map(i=>(i.date||'').slice(0,10)).filter(Boolean).sort();
+    const from = iDates.length ? _fmtSubInvDate(iDates[0]) : _fmtSubInvDate(inv.PeriodFrom);
+    const to = iDates.length ? _fmtSubInvDate(iDates[iDates.length-1]) : _fmtSubInvDate(inv.PeriodTo);
     const issued = _fmtSubInvDate(inv.IssuedDate);
+    // GST 포함 총액: items 합계
+    const itemsTotal = itms.reduce((s,i)=>s+Number(i.total||0),0);
+    const displayTotal = itemsTotal > 0 ? itemsTotal : Number(inv.GrandTotal||0);
     const invIdx = inv.InvNumber||'';
     return `<div class="crd" style="padding:8px 10px;margin-bottom:6px;cursor:pointer;" onclick="_showSubInvDetail('${invIdx.replace(/'/g,"\\'")}')">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
           <span style="font-size:12px;font-weight:700;color:var(--ac);">${inv.InvNumber}</span>
-          <span style="font-size:11px;color:var(--t3);margin-left:6px;">${inv.Agency||''}</span>
-          <span style="font-size:10px;color:var(--t3);margin-left:4px;">(${inv.SubCompany||''})</span>
+          <span style="font-size:11px;font-weight:600;margin-left:6px;">${inv.SubCompany||inv.Agency||''}</span>
         </div>
-        <div style="font-size:13px;font-weight:700;color:${paid?'var(--gn)':'var(--ac)'};">$${Number(inv.GrandTotal||0).toLocaleString()}</div>
+        <div style="font-size:13px;font-weight:700;color:${paid?'var(--gn)':'var(--ac)'};">$${displayTotal.toLocaleString()}</div>
       </div>
       <div style="font-size:10px;color:var(--t3);margin-top:2px;">${from}~${to} | 발행: ${issued} ${inv.EmailSentDate?'| ✉️ '+_fmtSubInvDate(inv.EmailSentDate):''}</div>
     </div>`;
@@ -5057,8 +5062,10 @@ function _showSubInvDetail(invNum, editMode){
   if(!inv) return;
   let items = [];
   try{ items = JSON.parse(inv.Items||'[]'); }catch(e){}
-  const from = _fmtSubInvDate(inv.PeriodFrom);
-  const to = _fmtSubInvDate(inv.PeriodTo);
+  // 기간: 항목 날짜 기반 자동 인식
+  const itemDates = items.map(i=>(i.date||'').slice(0,10)).filter(Boolean).sort();
+  const from = itemDates.length ? _fmtSubInvDate(itemDates[0]) : _fmtSubInvDate(inv.PeriodFrom);
+  const to = itemDates.length ? _fmtSubInvDate(itemDates[itemDates.length-1]) : _fmtSubInvDate(inv.PeriodTo);
   const issued = _fmtSubInvDate(inv.IssuedDate);
   const paid = (inv.Status||'').toLowerCase()==='paid';
   const isEdit = !!editMode;
@@ -5108,11 +5115,16 @@ function _showSubInvDetail(invNum, editMode){
         <button class="btn brd sm" onclick="closeGenModal();">✕ 닫기</button>
        </div>`;
 
+  const subCompany = inv.SubCompany||inv.Agency||'';
+  const cp = window._companyProfile || {};
+  const billTo = cp.CompanyName || 'Dong Choi Pty Ltd';
+
   const html = `<div style="padding:16px;width:100%;box-sizing:border-box;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
       <div>
         <div style="font-size:18px;font-weight:800;color:var(--ac);">${inv.InvNumber}</div>
-        <div style="font-size:12px;color:var(--t3);margin-top:2px;">${inv.SubCompany||inv.Agency||''}</div>
+        <div style="font-size:13px;font-weight:700;margin-top:2px;">${subCompany}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:4px;">Bill To: ${billTo}</div>
       </div>
       <div style="text-align:right;">
         <div style="font-size:10px;color:var(--t3);">발행일: ${issued}</div>
