@@ -7804,7 +7804,9 @@ async function saveInvoiceToSheet() {
   const invNum = getExistingOrNewInvNum(agency, from);
 
   // ★ 중복 번호 방지: 발행 이력에서 동일 번호가 이미 있는지 확인
-  if (_invHistoryCache) {
+  // 단, _lastGeneratedInvNum과 동일하면 수정 모드이므로 업데이트 허용
+  const _isEditMode = (_lastGeneratedInvNum === invNum);
+  if (_invHistoryCache && !_isEditMode) {
     const dup = _invHistoryCache.find(inv => String(inv.InvNumber).trim() === invNum);
     if (dup) {
       toast(`⚠️ ${invNum}은 이미 발행된 인보이스입니다. 페이지를 새로고침하세요.`, 'er');
