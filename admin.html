@@ -4997,7 +4997,7 @@ function _showSubInvDetail(invNum, editMode){
     const d = _fmtSubInvDate(i.date);
     const etcInfo = (i.etc||0)>0 ? '$'+(i.etc||0)+(i.etcLabel?' ('+i.etcLabel+')':'') : '';
     if(isEdit){
-      return `<tr>
+      return `<tr id="sied-row-${idx}">
         <td style="padding:3px 4px;border-bottom:1px solid var(--b1);"><input type="date" id="sied-date-${idx}" class="profit-finp" style="width:68px;font-size:9px;padding:2px;" value="${i.date||''}"></td>
         <td style="padding:3px 4px;border-bottom:1px solid var(--b1);"><input id="sied-tc-${idx}" class="profit-finp" style="width:70px;font-size:9px;padding:2px;" value="${i.tourCode||''}" placeholder="투어코드"></td>
         <td style="padding:3px 4px;border-bottom:1px solid var(--b1);"><input id="sied-tour-${idx}" class="profit-finp" style="width:75px;font-size:9px;padding:2px;" value="${i.tour||''}"></td>
@@ -5006,6 +5006,7 @@ function _showSubInvDetail(invNum, editMode){
         <td style="padding:3px 4px;border-bottom:1px solid var(--b1);"><input type="number" id="sied-ot-${idx}" class="profit-finp" style="width:40px;font-size:9px;padding:2px;text-align:right;" value="${i.ot||0}" oninput="_recalcSubInvEdit()"><input id="sied-ottime-${idx}" class="profit-finp" style="width:60px;font-size:8px;padding:2px;margin-top:1px;" value="${i.otTime||''}" placeholder="시간"></td>
         <td style="padding:3px 4px;border-bottom:1px solid var(--b1);"><input type="number" id="sied-etc-${idx}" class="profit-finp" style="width:40px;font-size:9px;padding:2px;text-align:right;" value="${i.etc||0}" oninput="_recalcSubInvEdit()"><input id="sied-etcl-${idx}" class="profit-finp" style="width:55px;font-size:8px;padding:2px;margin-top:1px;" value="${i.etcLabel||''}" placeholder="내용"></td>
         <td style="padding:3px 4px;border-bottom:1px solid var(--b1);font-size:10px;text-align:right;font-weight:700;" id="sied-total-${idx}">$${Number(i.total||0).toLocaleString()}</td>
+        <td style="padding:3px 4px;border-bottom:1px solid var(--b1);"><button onclick="_delSubInvEditRow(${idx})" style="background:none;border:none;color:var(--rd);font-size:14px;cursor:pointer;padding:2px 4px;">✕</button></td>
       </tr>`;
     }
     return `<tr>
@@ -5070,11 +5071,18 @@ function _showSubInvDetail(invNum, editMode){
   openGenModal(html);
 }
 
+function _delSubInvEditRow(idx){
+  const row = document.getElementById('sied-row-'+idx);
+  if(row) row.remove();
+  _recalcSubInvEdit();
+}
+
 function _recalcSubInvEdit(){
   if(!_subInvEditData) return;
   const n = _subInvEditData.items.length;
   let sum = 0;
   for(let i=0;i<n;i++){
+    if(!document.getElementById('sied-row-'+i)) continue; // 삭제된 행 skip
     const amt = parseFloat(document.getElementById('sied-amt-'+i)?.value||0);
     const ot = parseFloat(document.getElementById('sied-ot-'+i)?.value||0);
     const etc = parseFloat(document.getElementById('sied-etc-'+i)?.value||0);
@@ -5103,8 +5111,9 @@ async function _saveSubInvEdit(){
       alert('인보이스 번호가 없습니다.');
       return;
     }
-    // 각 행에서 수정된 값 수집
+    // 각 행에서 수정된 값 수집 (삭제된 행 제외)
     const updatedItems = items.map((orig,idx)=>{
+      if(!document.getElementById('sied-row-'+idx)) return null; // 삭제된 행
       const date = document.getElementById('sied-date-'+idx)?.value||orig.date||'';
       const tourCode = document.getElementById('sied-tc-'+idx)?.value||'';
       const tour = document.getElementById('sied-tour-'+idx)?.value||'';
@@ -5116,7 +5125,8 @@ async function _saveSubInvEdit(){
       const etcLabel = document.getElementById('sied-etcl-'+idx)?.value||'';
       const seats = orig.seats||'';
       return {date, rego, tourCode, tour, seats, amount, ot, otTime, etc, etcLabel, total:amount+ot+etc};
-    });
+    }).filter(Boolean);
+    if(!updatedItems.length){ alert('항목이 모두 삭제되었습니다.'); return; }
     const sum = updatedItems.reduce((s,i)=>s+(i.total||0),0);
     const exGst = Math.round(sum/1.1*100)/100;
     const gst = Math.round((sum-exGst)*100)/100;
