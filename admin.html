@@ -8077,6 +8077,7 @@ function _renderInvHistPage() {
           <div style="font-size:15px;font-weight:800;color:var(--gn);">$${amt.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
           <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap;">
             <button onclick="previewIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">👁미리보기</button>
+            <button onclick="editIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #a78bfa;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">✏️수정</button>
             ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="openPartialPayment('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}',${amt},${effectivePaid})" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fbbf24;background:#fffbeb;color:#92400e;cursor:pointer;font-weight:600;">💰수금</button>`:''}
             ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','paid','PaidDate')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #86efac;background:#f0fdf4;color:#166534;cursor:pointer;font-weight:600;">✅전액결제</button>`:''}
             ${inv.Status!=='cancelled'?`<button onclick="resendInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;cursor:pointer;font-weight:600;">✉️발송</button>`:''}
@@ -8087,6 +8088,78 @@ function _renderInvHistPage() {
       </div>
     </div>`;
   }).join('');
+}
+
+// ─── 발행된 인보이스 수정 (폼으로 불러오기) ───
+async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
+  periodFrom = _normInvDate(periodFrom);
+  periodTo   = _normInvDate(periodTo);
+  if (!agency || !periodFrom || !periodTo) { toast('⚠️ 인보이스 정보가 부족합니다','er'); return; }
+
+  // ① 폼 필드 설정
+  const agencySel = document.getElementById('inv-agency');
+  if (agencySel) {
+    // 옵션에 없으면 추가
+    if (![...agencySel.options].some(o => o.value === agency)) {
+      agencySel.add(new Option(agency, agency));
+    }
+    agencySel.value = agency;
+  }
+  document.getElementById('inv-from').value = periodFrom;
+  document.getElementById('inv-to').value = periodTo;
+
+  // ② 인보이스 번호 고정 (기존 번호 유지)
+  _lastGeneratedInvNum = invNumber;
+  _lastGenInvAgency = agency;
+  _lastGenInvFrom = periodFrom;
+
+  // ③ 저장된 인보이스에서 deductions, manual items 복원
+  const savedInv = (_invHistoryCache||[]).find(inv => String(inv.InvNumber) === invNumber);
+  if (savedInv) {
+    // Deductions 복원
+    let _dedJSON = '';
+    if (savedInv.Deductions && String(savedInv.Deductions).trim().startsWith('[')) {
+      _dedJSON = String(savedInv.Deductions).trim();
+    }
+    if (!_dedJSON) {
+      Object.keys(savedInv).forEach(k => { const v = String(savedInv[k]||'').trim(); if (v.startsWith('[') && v.indexOf('"type"') >= 0) _dedJSON = v; });
+    }
+    if (_dedJSON) { try { _invDeductions = JSON.parse(_dedJSON); } catch(e) { _invDeductions = []; } }
+
+    // ManualItems 복원
+    let _manJSON = '';
+    if (savedInv.ManualItems && String(savedInv.ManualItems).trim().startsWith('[') && String(savedInv.ManualItems).indexOf('"date"') >= 0) {
+      _manJSON = String(savedInv.ManualItems).trim();
+    }
+    if (_manJSON) {
+      try {
+        const manuals = JSON.parse(_manJSON);
+        const mKey = agency + '_' + periodFrom.slice(0,7);
+        if (!window._invoiceManualServer) window._invoiceManualServer = {};
+        window._invoiceManualServer[mKey] = manuals.map(m => ({
+          id: m.id || ('man_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)),
+          date: m.date||'', rego: m.rego||'', tour: m.tour||'',
+          seats: m.seats||'', tourcode: m.tourcode||'', note: m.note||'',
+          amount: Number(m.amount)||0, ot: Number(m.ot)||0, hotel: Number(m.hotel)||0,
+          dist: Number(m.dist)||0, trailer: Number(m.trailer)||0, toll: Number(m.toll)||0,
+          start: m.start||'', end: m.end||'', driver: m.driver||'',
+          guide: m.guide||'', pickup: m.pickup||'', dropoff: m.dropoff||''
+        }));
+      } catch(e) { console.warn('ManualItems parse failed:', e); }
+    }
+  }
+
+  // ④ 초기화 및 리포트 로드
+  _invExcludes = {};
+  _invOverrides = {};
+
+  // ⑤ 인보이스 작성 영역으로 스크롤
+  const invPreview = document.getElementById('inv-preview');
+  if (invPreview) invPreview.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  toast('✏️ ' + invNumber + ' 수정 모드','ok');
+  await loadInvReports();
+  renderInvManualList();
 }
 
 async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
