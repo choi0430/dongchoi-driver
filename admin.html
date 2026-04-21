@@ -4852,6 +4852,7 @@ function previewSubInvoice(){
 }
 
 async function generateSubInvoice(){
+  try{
   const agency = document.getElementById('sub-inv-agency').value;
   const subName = document.getElementById('sub-inv-company').value;
   const from = document.getElementById('sub-inv-from').value;
@@ -4861,19 +4862,21 @@ async function generateSubInvoice(){
   if(!items.length){ showToast('금액이 입력된 항목이 없습니다','error'); return; }
 
   // ── DC Accreditation 기록 완전성 체크 ──
-  const _sInvRegos = [...new Set(items.map(i=>(i.rego||'').trim()).filter(Boolean))];
-  const _sDcMissing = [];
-  _sInvRegos.forEach(rego=>{
-    const v = (DB.V||[]).find(x=>x.Rego===rego);
-    if(v && isDCAccredited(v)){
-      const iss = checkVehicleRecords(v, {checkDrivers:true});
-      if(iss.length) _sDcMissing.push({rego, issues:iss});
+  try{
+    const _sInvRegos = [...new Set(items.map(i=>(i.rego||'').trim()).filter(Boolean))];
+    const _sDcMissing = [];
+    _sInvRegos.forEach(rego=>{
+      const v = (DB.V||[]).find(x=>x.Rego===rego);
+      if(v && isDCAccredited(v)){
+        const iss = checkVehicleRecords(v, {checkDrivers:true});
+        if(iss.length) _sDcMissing.push({rego, issues:iss});
+      }
+    });
+    if(_sDcMissing.length > 0){
+      const _mList = _sDcMissing.map(m=>'• '+m.rego+': '+m.issues.map(i=>i.label).join(', ')).join('\n');
+      if(!confirm('⚠️ DC Accreditation 차량 기록 누락\n\n'+_mList+'\n\n누락된 정보가 있지만 인보이스를 계속 생성하시겠습니까?')) return;
     }
-  });
-  if(_sDcMissing.length > 0){
-    const _mList = _sDcMissing.map(m=>'• '+m.rego+': '+m.issues.map(i=>i.label).join(', ')).join('\n');
-    if(!confirm('⚠️ DC Accreditation 차량 기록 누락\n\n'+_mList+'\n\n누락된 정보가 있지만 인보이스를 계속 생성하시겠습니까?')) return;
-  }
+  }catch(accErr){ console.warn('Accreditation check skipped:', accErr); }
 
   const exGst = items.reduce((s,i)=>s+i.total,0);
   const gst = Math.round(exGst*0.1*100)/100;
@@ -4894,21 +4897,36 @@ async function generateSubInvoice(){
     Notes: 'SUB 재발행: '+subName, CreatedBy: ST.user||'admin',
     Source: 'SUB', SubCompany: subName
   };
-  try{
-    showToast('🧾 인보이스 저장 중...','info');
-    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'save_invoice', data:invData, _user:ST.user||'admin'})});
-    const json = await res.json();
-    if(json.ok){
-      showToast('✅ '+invNum+' 발행 완료','success');
-      _invHistoryCache = null; // 캐시 초기화
-      const pdfName = invNum+'_'+agencyLabel+'.pdf';
-      if(typeof _showDocModal === 'function'){
-        _showDocModal(html, {invNumber:invNum, agency:agencyLabel, from, to}, pdfName);
-      }
-      renderSubInvHistory();
-    } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
-  }catch(e){ showToast('❌ 네트워크 오류','error'); }
+  showToast('🧾 인보이스 저장 중...','info');
+  const res = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({action:'save_invoice', data:invData, _user:ST.user||'admin'})});
+  // GAS POST redirect 처리: redirected 응답은 text로 먼저 읽고 JSON 파싱 시도
+  const txt = await res.text();
+  let json;
+  try{ json = JSON.parse(txt); }catch(pe){
+    console.error('GAS response parse failed:', txt.slice(0,200));
+    showToast('❌ 서버 응답 파싱 실패. 다시 시도해주세요.','error');
+    return;
+  }
+  if(json.ok){
+    showToast('✅ '+invNum+' 발행 완료','success');
+    _invHistoryCache = null; // 캐시 초기화
+    const pdfName = invNum+'_'+agencyLabel+'.pdf';
+    if(typeof _showDocModal === 'function'){
+      _showDocModal(html, {invNumber:invNum, agency:agencyLabel, from, to}, pdfName);
+    }
+    // 캐시 다시 로드
+    try{
+      const hRes = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+      const hJson = await hRes.json();
+      if(hJson.ok) _invHistoryCache = (hJson.rows||[]).reverse();
+    }catch(e){}
+    renderSubInvHistory();
+  } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
+  }catch(e){
+    console.error('generateSubInvoice error:', e);
+    showToast('❌ 인보이스 생성 오류: '+e.message,'error');
+  }
 }
 
 function _fmtSubInvDate(v){
