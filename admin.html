@@ -1817,6 +1817,16 @@ function parseSheetTime(ts) {
 }
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
 
+// ===== GAS POST 안전 호출 헬퍼 =====
+async function gasPost(bodyObj){
+  const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'}, body:JSON.stringify(bodyObj)});
+  const txt = await res.text();
+  try{ return JSON.parse(txt); }catch(e){
+    console.error('GAS response parse failed:', txt.slice(0,300));
+    throw new Error('서버 응답 파싱 실패 (HTML 반환됨). 페이지 새로고침 후 다시 시도해주세요.');
+  }
+}
+
 // ===== SECURITY & MONEY HELPERS =====
 function safeSetLocal(key, value) {
   try {
@@ -4194,19 +4204,20 @@ async function saveSubCompany(idx){
   }
   try{
     showToast('저장 중...','info');
-    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'}, body:JSON.stringify(body)});
-    const json = await res.json();
+    const json = await gasPost(body);
     if(json.ok){
       showToast('✅ SUB 업체 저장 완료','success');
       closeGenModal();
       await loadSubCompanies(true);
       renderSubCompanyList();
-      // 요금표 탭 동기화: M_SUB 변경 → DB.PS 갱신 → 탭 리렌더
-      window._psLastSync = 0; // 캐시 무효화
+      window._psLastSync = 0;
       await syncSub();
       if(ST.subTab==='rates') rSub();
     } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
-  }catch(e){ showToast('❌ 네트워크 오류','error'); }
+  }catch(e){
+    console.error('saveSubCompany error:', e);
+    showToast('❌ 저장 오류: '+e.message,'error');
+  }
 }
 
 async function deleteSubCompany(idx){
@@ -4214,19 +4225,16 @@ async function deleteSubCompany(idx){
   if(!s) return;
   if(!confirm(`"${s.SubName}" 업체를 삭제하시겠습니까?`)) return;
   try{
-    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'delete_master', sheet:'M_SUB', rowIndex: s._rowIndex})});
-    const json = await res.json();
+    const json = await gasPost({action:'delete_master', sheet:'M_SUB', rowIndex: s._rowIndex});
     if(json.ok){
       showToast('🗑 삭제 완료','success');
       await loadSubCompanies(true);
       renderSubCompanyList();
-      // 요금표 탭 동기화: 삭제된 업체 DB.PS에서도 제거
       window._psLastSync = 0;
       await syncSub();
       if(ST.subTab==='rates') rSub();
-    }
-  }catch(e){ showToast('❌ 삭제 실패','error'); }
+    } else { showToast('❌ 삭제 실패: '+(json.error||''),'error'); }
+  }catch(e){ showToast('❌ 삭제 실패: '+e.message,'error'); }
 }
 
 // ═══════════════════════════════════════════════════════════════════
