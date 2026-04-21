@@ -6887,8 +6887,8 @@ function setInvPeriod(type) {
   loadInvReports();
 }
 
-function onInvAgencyChange() { _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; _editItemFilter = null; loadInvReports(); }
-function onInvDateChange()   { _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; _editItemFilter = null; loadInvReports(); }
+function onInvAgencyChange() { _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; _editItemFilter = null; _trueEditData = null; loadInvReports(); }
+function onInvDateChange()   { _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; _editItemFilter = null; _trueEditData = null; loadInvReports(); }
 
 // ── 초기화 ──
 function toggleInvSettings() {
@@ -6959,8 +6959,8 @@ function calcInvRow(r) {
   // seats 숫자 추출: "21S" → 21
   const seatNum = parseInt(seats.replace(/[^0-9]/g,''))||21;
 
-  // ── 수동 항목: 이미 TA 금액이므로 DR→TA 변환 건너뛰 ──
-  if (r._manual) {
+  // ── 저장된 항목 / 수동 항목: 이미 TA 금액이므로 DR→TA 변환 건너뛰 ──
+  if (r._fromSaved || r._manual) {
     const baseRate = parseFloat(r.SVC_Charge) || 0;
     const ot = otDR;
     const hotel = hotelDR;
@@ -7188,6 +7188,14 @@ async function loadInvReports() {
 
   prev.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">⏳ 리포트 불러오는 중...</div>';
 
+  // ★ 진정한 수정 모드: Daily_Report 대신 저장된 Items 사용
+  if (_trueEditData && _trueEditData.rows) {
+    const rows = [..._trueEditData.rows];
+    renderInvManualList();
+    renderInvPreview(rows, agency, from, to);
+    return;
+  }
+
   // 캐시 or 새 조회 — agency 선택 전에도 리포트 로드해서 드롭다운 채우기
   if (!_invReports) {
     try {
@@ -7334,6 +7342,10 @@ function _subInvItemsToRows(agency, from, to) {
 
 // 수동 항목 포함 rows 빌드 (미리보기 갱신용)
 function _buildInvRows(agency, from, to) {
+  // ★ 진정한 수정 모드: 저장된 Items로부터 구성된 행 반환
+  if (_trueEditData && _trueEditData.rows) {
+    return [..._trueEditData.rows];
+  }
   const agencyLower = agency.toLowerCase();
   const sheetRows = (_invReports || []).filter(r => {
     const ra = (r._agency || String(r.Agency||'').trim()).toLowerCase();
@@ -7472,12 +7484,14 @@ function renderInvPreview(rows, agency, from, to) {
 
   const gst = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
-  const invNum = getInvNum(agency, from);
-  _lastGeneratedInvNum = invNum;  _lastGenInvAgency = agency;  _lastGenInvFrom = from;
+  // ★ 수정 모드: 기존 번호 유지, 아니면 새 번호 생성
+  const invNum = (_trueEditData && _lastGeneratedInvNum) ? _lastGeneratedInvNum : getInvNum(agency, from);
+  if (!_trueEditData) { _lastGeneratedInvNum = invNum; _lastGenInvAgency = agency; _lastGenInvFrom = from; }
 
   // 발행 이력 확인
+  const isEditMode = !!_trueEditData;
   const histKey = `dc_inv_issued_${invNum}`;
-  const issuedAt = localStorage.getItem(histKey);
+  const issuedAt = isEditMode ? (_trueEditData.savedInv?.IssuedDate||'') : localStorage.getItem(histKey);
 
   prev.innerHTML = `
     <!-- 요약 카드 -->
@@ -7761,6 +7775,7 @@ let _lastGeneratedInvNum = null;      // generateInvoice에서 생성한 번호 
 let _lastGenInvAgency = null;         // _lastGeneratedInvNum이 어떤 여행사 것인지 추적
 let _lastGenInvFrom = null;           // _lastGeneratedInvNum이 어떤 기간 것인지 추적
 let _editItemFilter = null;           // 수정 모드: 저장된 Items 키 맵 { 'date|rego|tour': count }
+let _trueEditData = null;            // 진정한 수정 모드: { rows, invNumber, savedInv }
 
 // ★ 현재 여행사+기간에 맞는 인보이스 번호 조회 (이력 → _last → 신규 순)
 function getExistingOrNewInvNum(agency, from) {
@@ -7994,7 +8009,7 @@ async function saveInvoiceToSheet() {
 
     _invHistoryCache = null; // 캐시 무효화
     _balLoaded = false; // ★ 잔액 캐시도 무효화
-    _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; _editItemFilter = null; // 다음 인보이스를 위해 번호 초기화
+    _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; _editItemFilter = null; _trueEditData = null; // 다음 인보이스를 위해 번호 초기화
 
     // ★ 저장 완료 후 크레딧/선수금 & 수동항목 캐시 초기화 (다음 인보이스에 잔류 방지)
     const _resetKey = agency + '_' + from.slice(0,7);
@@ -8240,77 +8255,92 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   // ④ 초기화
   _invExcludes = {};
   _invOverrides = {};
-  _editItemFilter = null; // 먼저 초기화
+  _editItemFilter = null;
+  _trueEditData = null;
 
   // ④-b 투어코드 필터 초기화
   const tcSel = document.getElementById('inv-tourcode');
   if (tcSel) tcSel.value = '';
 
-  // ④-c 저장된 Items에서 필터 맵 구축 (loadInvReports 전에 설정해야 _buildInvRows에서 적용됨)
-  if (savedInv) {
-    let itemsJSON = '';
-    if (savedInv.Items && String(savedInv.Items).trim().startsWith('[')) {
-      itemsJSON = String(savedInv.Items).trim();
-    }
-    if (itemsJSON) {
-      try {
-        const savedItems = JSON.parse(itemsJSON);
-        if (savedItems.length > 0) {
-          _editItemFilter = {};
-          savedItems.forEach(it => {
-            const key = (it.date||'').slice(0,10) + '|' + String(it.rego||'').trim() + '|' + String(it.tour||'').trim();
-            _editItemFilter[key] = (_editItemFilter[key] || 0) + 1;
-          });
-          console.log('[EditMode] _editItemFilter set:', Object.keys(_editItemFilter).length, 'unique keys from', savedItems.length, 'items');
-        }
-      } catch(e) { console.warn('Items parse failed:', e); _editItemFilter = null; }
-    } else {
-      console.warn('[EditMode] savedInv.Items is empty or missing. InvNumber:', invNumber, 'Keys:', Object.keys(savedInv).join(','));
+  // ⑤ 저장된 Items → 행 변환 (진정한 수정 모드)
+  if (savedInv && savedInv.Items && String(savedInv.Items).trim().startsWith('[')) {
+    try {
+      const savedItems = JSON.parse(savedInv.Items);
+      // Items JSON → report-row 형식 변환 (_fromSaved=true → calcInvRow에서 TA 역산 건너뛰기)
+      const editRows = savedItems.map(it => ({
+        _iso:            (it.date||'').slice(0,10),
+        Date:            it.date||'',
+        Rego:            it.rego||'',
+        Attraction:      it.tour||'',
+        Seats:           it.seats||'21S',
+        Driver:          it.driver||'',
+        Guide:           it.guide||'',
+        Tour_Code:       it.tourcode||'',
+        Pickup:          it.pickup||'',
+        Dropoff:         it.dropoff||'',
+        _timeStart:      it.timeStart||'',
+        _timeEnd:        it.timeEnd||'',
+        SVC_Charge:      Number(it.base)||0,
+        OT:              Number(it.ot)||0,
+        Hotel_Surcharge: Number(it.hotel)||0,
+        Dist_Surcharge:  Number(it.dist)||0,
+        Early:           Number(it.early)||0,
+        Parking:         Number(it.parking)||0,
+        Trailer:         Number(it.trailer)||0,
+        Night_DR:        Number(it.night)||0,
+        Night_Type:      '',
+        Tip:             Number(it.tip)||0,
+        Meal:            Number(it.meal)||0,
+        Toll:            Number(it.toll)||0,
+        Etc:             Number(it.etc)||0,
+        Etc_Desc:        it.etcDesc||'',
+        _agency:         agency,
+        Agency:          agency,
+        _fromSaved:      true,       // ★ calcInvRow에서 TA 역산 건너뛰기
+        _rateSource:     it.rateSource||'svc',
+      }));
+
+      // 수동 항목도 행으로 추가
+      const mKey = agency + '_' + periodFrom.slice(0,7);
+      const manualItems = _getInvManualItems ? _getInvManualItems(mKey) : [];
+      const manualRows = manualItems.map(m => ({
+        _iso: (m.date||'').slice(0,10),
+        Date: m.date||'', Rego: m.rego||'', Attraction: m.tour||'',
+        Seats: m.seats||'21S', Driver: m.driver||'', Guide: m.guide||'',
+        Tour_Code: m.tourcode||'', Pickup: m.pickup||'', Dropoff: m.dropoff||'',
+        _timeStart: m.start||'', _timeEnd: m.end||'',
+        SVC_Charge: Number(m.amount)||0, OT: Number(m.ot)||0,
+        Hotel_Surcharge: Number(m.hotel)||0, Dist_Surcharge: Number(m.dist)||0,
+        Trailer: Number(m.trailer)||0, Toll: Number(m.toll)||0,
+        Early: 0, Parking: 0, Night_DR: 0, Night_Type: '', Tip: 0, Meal: 0, Etc: 0, Etc_Desc: '',
+        _agency: agency, Agency: agency,
+        _manual: true, _manualId: m.id, _fromSaved: true, _rateSource: 'manual',
+      }));
+
+      _trueEditData = {
+        rows: [...editRows, ...manualRows],
+        invNumber,
+        savedInv,
+      };
+      _invEditMode = true; // 자동으로 수정 모드 활성화
+
+      console.log('[TrueEditMode] Loaded', editRows.length, 'items +', manualRows.length, 'manual from', invNumber);
+    } catch(e) {
+      console.warn('Items parse failed:', e);
+      _trueEditData = null;
     }
   }
 
-  // ⑤ 인보이스 작성 영역으로 스크롤
+  // ⑥ 인보이스 작성 영역으로 스크롤
   const invPreview = document.getElementById('inv-preview');
   if (invPreview) invPreview.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  toast('✏️ ' + invNumber + ' 수정 모드' + (_editItemFilter ? ` (${Object.values(_editItemFilter).reduce((a,b)=>a+b,0)}건)` : ' ⚠️항목 데이터 없음'),'ok');
+  const itemCount = _trueEditData ? _trueEditData.rows.length : 0;
+  toast('✏️ ' + invNumber + ' 수정 모드 (' + itemCount + '건)','ok');
+
+  // ⑦ 렌더링 (loadInvReports는 _trueEditData가 있으면 Daily_Report 조회 없이 바로 렌더)
   await loadInvReports();
   renderInvManualList();
-
-  // ⑥ 오버라이드 복원 (저장 시 금액이 수정되었던 항목)
-  if (savedInv && savedInv.Items) {
-    try {
-      const savedItems = JSON.parse(savedInv.Items);
-      const overrideItems = savedItems.filter(it => it.overridden);
-      if (overrideItems.length) {
-        const rows = _buildInvRows(agency, periodFrom, periodTo);
-        const overKeyMap = {};
-        overrideItems.forEach(it => {
-          const key = (it.date||'').slice(0,10) + '|' + String(it.rego||'').trim() + '|' + String(it.tour||'').trim();
-          if (!overKeyMap[key]) overKeyMap[key] = [];
-          overKeyMap[key].push(it);
-        });
-        const overUsed = {};
-        rows.forEach((r, ri) => {
-          if (r._manual) return;
-          const key = (r._iso||'').slice(0,10) + '|' + String(r.Rego||'').trim() + '|' + String(r.Attraction||'').trim();
-          if (overKeyMap[key]) {
-            overUsed[key] = (overUsed[key] || 0);
-            if (overUsed[key] < overKeyMap[key].length) {
-              const ov = overKeyMap[key][overUsed[key]];
-              const rowKey = _invRowKey(r, ri);
-              _invOverrides[rowKey] = {};
-              if (ov.base !== undefined) _invOverrides[rowKey].base = ov.base;
-              if (ov.ot !== undefined)   _invOverrides[rowKey].ot   = ov.ot;
-              if (ov.extra !== undefined) _invOverrides[rowKey].extra = ov.extra;
-              overUsed[key]++;
-            }
-          }
-        });
-        _refreshInvPreview();
-      }
-    } catch(e) { console.warn('Override restore failed:', e); }
-  }
 }
 
 async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
