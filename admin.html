@@ -5063,64 +5063,86 @@ function _recalcSubInvEdit(){
 }
 
 async function _saveSubInvEdit(){
-  if(!_subInvEditData) return;
-  const {invNum, inv, items} = _subInvEditData;
-  // 각 행에서 수정된 값 수집
-  const updatedItems = items.map((orig,idx)=>{
-    const date = document.getElementById('sied-date-'+idx)?.value||orig.date||'';
-    const tourCode = document.getElementById('sied-tc-'+idx)?.value||'';
-    const tour = document.getElementById('sied-tour-'+idx)?.value||'';
-    const rego = document.getElementById('sied-rego-'+idx)?.value||'';
-    const amount = parseFloat(document.getElementById('sied-amt-'+idx)?.value||0);
-    const ot = parseFloat(document.getElementById('sied-ot-'+idx)?.value||0);
-    const otTime = document.getElementById('sied-ottime-'+idx)?.value||'';
-    const etc = parseFloat(document.getElementById('sied-etc-'+idx)?.value||0);
-    const etcLabel = document.getElementById('sied-etcl-'+idx)?.value||'';
-    const seats = orig.seats||'';
-    return {date, rego, tourCode, tour, seats, amount, ot, otTime, etc, etcLabel, total:amount+ot+etc};
-  });
-  const sum = updatedItems.reduce((s,i)=>s+i.total,0);
-  const exGst = Math.round(sum/1.1*100)/100;
-  const gst = Math.round((sum-exGst)*100)/100;
+  console.log('[_saveSubInvEdit] called, editData=', _subInvEditData);
+  try {
+    if(!_subInvEditData){
+      showToast('⚠️ 편집 데이터 없음 (모달 재열기)','error');
+      console.warn('[_saveSubInvEdit] _subInvEditData is null');
+      return;
+    }
+    const {invNum, inv, items} = _subInvEditData;
+    if(!invNum){
+      showToast('⚠️ 인보이스 번호 없음','error');
+      return;
+    }
+    // 각 행에서 수정된 값 수집
+    const updatedItems = items.map((orig,idx)=>{
+      const date = document.getElementById('sied-date-'+idx)?.value||orig.date||'';
+      const tourCode = document.getElementById('sied-tc-'+idx)?.value||'';
+      const tour = document.getElementById('sied-tour-'+idx)?.value||'';
+      const rego = document.getElementById('sied-rego-'+idx)?.value||'';
+      const amount = parseFloat(document.getElementById('sied-amt-'+idx)?.value||0)||0;
+      const ot = parseFloat(document.getElementById('sied-ot-'+idx)?.value||0)||0;
+      const otTime = document.getElementById('sied-ottime-'+idx)?.value||'';
+      const etc = parseFloat(document.getElementById('sied-etc-'+idx)?.value||0)||0;
+      const etcLabel = document.getElementById('sied-etcl-'+idx)?.value||'';
+      const seats = orig.seats||'';
+      return {date, rego, tourCode, tour, seats, amount, ot, otTime, etc, etcLabel, total:amount+ot+etc};
+    });
+    const sum = updatedItems.reduce((s,i)=>s+(i.total||0),0);
+    const exGst = Math.round(sum/1.1*100)/100;
+    const gst = Math.round((sum-exGst)*100)/100;
 
-  const body = {
-    action:'save_invoice',
-    data:{
-      InvNumber: invNum,
-      Agency: inv.Agency||inv.SubCompany||'',
-      PeriodFrom: inv.PeriodFrom||'',
-      PeriodTo: inv.PeriodTo||'',
-      GrandTotal: String(sum.toFixed(2)),
-      GST: String(gst.toFixed(2)),
-      ExGST: String(exGst.toFixed(2)),
-      Status: inv.Status||'Issued',
-      IssuedDate: inv.IssuedDate||'',
-      Items: JSON.stringify(updatedItems),
-      ManualItems: inv.ManualItems||'',
-      Deductions: inv.Deductions||'',
-      Notes: inv.Notes||'',
-      CreatedBy: inv.CreatedBy||'admin',
-      Source: 'SUB',
-      SubCompany: inv.SubCompany||''
-    },
-    _user: ST.user||'admin'
-  };
-  try{
+    const body = {
+      action:'save_invoice',
+      data:{
+        InvNumber: invNum,
+        Agency: inv.Agency||inv.SubCompany||'',
+        PeriodFrom: inv.PeriodFrom||'',
+        PeriodTo: inv.PeriodTo||'',
+        GrandTotal: String(sum.toFixed(2)),
+        GST: String(gst.toFixed(2)),
+        ExGST: String(exGst.toFixed(2)),
+        Status: inv.Status||'Issued',
+        IssuedDate: inv.IssuedDate||'',
+        Items: JSON.stringify(updatedItems),
+        ManualItems: inv.ManualItems||'',
+        Deductions: inv.Deductions||'',
+        Notes: inv.Notes||'',
+        CreatedBy: inv.CreatedBy||'admin',
+        Source: 'SUB',
+        SubCompany: inv.SubCompany||''
+      },
+      _user: (typeof ST!=='undefined' && ST.user)||'admin'
+    };
+    console.log('[_saveSubInvEdit] sending body:', body);
     showToast('💾 저장 중...','info');
     const res = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body)});
-    const json = await res.json();
+    const txt = await res.text();
+    console.log('[_saveSubInvEdit] raw response:', txt);
+    let json;
+    try { json = JSON.parse(txt); }
+    catch(pe){ showToast('❌ 응답 파싱 실패: '+txt.slice(0,80),'error'); return; }
     if(json.ok){
       showToast('✅ 인보이스 수정 완료','success');
       _invHistoryCache = null;
-      const r2 = await fetch(APPS_SCRIPT_URL+'?action=get_invoices');
-      const j2 = await r2.json();
-      if(j2.ok) _invHistoryCache = (j2.rows||[]).reverse();
-      closeGenModal();
-      renderSubInvHistory();
-    } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
-  }catch(e){ showToast('❌ 네트워크 오류','error'); }
-  _subInvEditData = null;
+      try {
+        const r2 = await fetch(APPS_SCRIPT_URL+'?action=get_invoices');
+        const j2 = await r2.json();
+        if(j2.ok) _invHistoryCache = (j2.rows||[]).reverse();
+      } catch(fe){ console.warn('reload failed',fe); }
+      if(typeof closeGenModal==='function') closeGenModal();
+      if(typeof renderSubInvHistory==='function') renderSubInvHistory();
+      _subInvEditData = null;
+    } else {
+      showToast('❌ 저장 실패: '+(json.error||'unknown'),'error');
+    }
+  } catch(e){
+    console.error('[_saveSubInvEdit] error:', e);
+    showToast('❌ 오류: '+(e.message||e),'error');
+  }
 }
+window._saveSubInvEdit = _saveSubInvEdit;
 
 // ═══════════════════════════════════════════════════════════════════
 // BALANCE MODULE (거래처 잔액 관리: 여행사 / 외주 SUB / 드라이버)
