@@ -3378,9 +3378,9 @@ function calcAgencyTA(r){
   let erlTA = 0;
   if(erl>0){ let atE=agPC?findCourse(agPC,'Airport Transfer'):null; if(!atE){for(const ag of Object.keys(DB.PC||{})){atE=findCourse(DB.PC[ag],'Airport Transfer');if(atE)break;}} if(atE){const sd2=atE[capKey]||atE['21']; erlTA=Math.round((parseFloat(sd2?.rate)||0)*0.3);} }
 
-  // Parking (공항 픽업) — 호주로(Tour Hojuro) 21/25S 제외
+  // Parking (공항 픽업) — 호주로(Tour Hojuro), Plus Australia 21/25S 제외
   const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
-  const _isHojuro = /호주로|hojuro/i.test(agency);
+  const _isHojuro = /호주로|hojuro|plus\s*australia/i.test(agency);
   const parking = (apPat.test(r.Pickup||'') && !(_isHojuro && !isLarge)) ? (isLarge?40:30) : 0;
 
   // Toll (대형 버스만 TA)
@@ -6946,10 +6946,10 @@ function calcInvRow(r) {
   // ── Airport Parking Fee ──
   // 픽업지가 공항인 경우에만 청구: 21/25S $30, 40/50S $40
   // (dropoff=Airport는 승객을 내려주는 것이므로 주차비 없음)
-  // 호주로(Tour Hojuro) 21/25S는 공항 주차비 청구 불가
+  // 호주로(Tour Hojuro), Plus Australia 21/25S는 공항 주차비 청구 불가
   const pickupVal  = String(r.Pickup  || '').trim();
   const apPattern  = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
-  const _isHojuro  = /호주로|hojuro/i.test(agency);
+  const _isHojuro  = /호주로|hojuro|plus\s*australia/i.test(agency);
   const autoParking = (apPattern.test(pickupVal) && !(_isHojuro && seatNum < 40)) ? (seatNum >= 40 ? 40 : 30) : 0;
 
   // 행별 주차비 수동 override (localStorage: '1'=강제추가, '0'=강제제외, null=자동)
