@@ -1362,7 +1362,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 정산 내역 뷰 -->
   <div id="sub-view-ledger" style="display:none;">
     <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;">
-      <select id="ledger-week-sel" class="profit-sel" style="flex:1;" onchange="renderLedger()"></select>
+      <select id="ledger-week-sel" class="profit-sel" style="flex:1;" onchange="onLedgerWeekChange()"></select>
       <button class="btn bac sm" onclick="addLedgerWeek()" style="white-space:nowrap;padding:0 10px;">+</button>
       <button class="btn brd sm" onclick="deleteLedgerWeek()" style="white-space:nowrap;padding:0 10px;" title="선택한 주간 삭제">🗑</button>
     </div>
@@ -3531,6 +3531,23 @@ async function initLedger(){
   }
   sel.value = ST.ledgerWeek;
   renderLedger();
+
+  // ★ 현재 선택된 주간에 건이 없으면 자동으로 리포트 불러오기
+  const curWeek = ledger.find(w => w.weekStart === ST.ledgerWeek);
+  if (curWeek && curWeek.entries.length === 0) {
+    await importFromReports();
+  }
+}
+
+// ★ 주간 선택 변경 시 렌더 + 빈 주간이면 자동 import
+async function onLedgerWeekChange() {
+  ST.ledgerWeek = document.getElementById('ledger-week-sel')?.value;
+  renderLedger();
+  const ledger = getLedger();
+  const curWeek = ledger.find(w => w.weekStart === ST.ledgerWeek);
+  if (curWeek && curWeek.entries.length === 0) {
+    await importFromReports();
+  }
 }
 
 function renderLedger(){
