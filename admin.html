@@ -4585,16 +4585,17 @@ function addSubInvRow(){
 async function _searchByTourCode(){
   const q = (document.getElementById('sub-inv-tc-search')?.value||'').trim().toUpperCase();
   if(!q){ toast('투어코드를 입력하세요','er'); return; }
+  const from = document.getElementById('sub-inv-from')?.value||'';
+  const to   = document.getElementById('sub-inv-to')?.value||'';
+
+  // 1) 드라이버 리포트(DB.R) 검색
   let reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
   if(!reports.length){
     toast('리포트 데이터 로딩 중...','in');
     try{ await ensureReportsCache(); if(_reportsCache){DB.R=_reportsCache;} }catch(e){}
     reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
-    if(!reports.length){ toast('리포트 데이터를 불러올 수 없습니다.','er'); return; }
   }
-  const from = document.getElementById('sub-inv-from')?.value||'';
-  const to   = document.getElementById('sub-inv-to')?.value||'';
-  const matches = reports.filter(r=>{
+  const reportMatches = reports.filter(r=>{
     const tc = (r.Tour_Code||'').trim().toUpperCase();
     if(!tc.includes(q)) return false;
     if(from||to){
@@ -4604,7 +4605,48 @@ async function _searchByTourCode(){
     }
     return true;
   });
-  _renderSearchResults(matches, q);
+
+  // 2) SUB 인보이스 이력 항목 검색 → 리포트 형식으로 변환
+  const invMatches = [];
+  (_invHistoryCache||[]).forEach(inv=>{
+    let items = [];
+    try{ items = JSON.parse(inv.Items||'[]'); }catch(e){}
+    items.forEach(it=>{
+      const tc = (it.tourCode||'').trim().toUpperCase();
+      if(!tc.includes(q)) return;
+      const d = (it.date||'').slice(0,10);
+      if(from && d < from) return;
+      if(to   && d > to) return;
+      // 리포트 형식으로 변환
+      invMatches.push({
+        Date: it.date||'',
+        Rego: it.rego||'',
+        Tour_Code: it.tourCode||'',
+        Attraction: it.tour||'',
+        Seats: it.seats||'',
+        SVC_Charge: it.amount||0,
+        OT: it.ot||0,
+        Trailer: 0, Hotel_Surcharge: 0, Dist_Surcharge: 0, Early: 0, Toll: 0,
+        Start_Time: '', End_Time: '',
+        _source: 'inv',
+        _invNum: inv.InvNumber||''
+      });
+    });
+  });
+
+  // 3) 병합 (중복 제거: 같은 날짜+투어코드+코스 → 리포트 우선)
+  const seen = new Set();
+  reportMatches.forEach(r=>{ seen.add((r.Date||'').slice(0,10)+'|'+(r.Tour_Code||'').trim()+'|'+(r.Attraction||'').trim()); });
+  const uniqueInv = invMatches.filter(r=>{
+    const key = (r.Date||'').slice(0,10)+'|'+(r.Tour_Code||'').trim()+'|'+(r.Attraction||'').trim();
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const allMatches = [...reportMatches, ...uniqueInv];
+  if(!allMatches.length){ toast('리포트 및 인보이스에서 검색 결과 없음','er'); }
+  _renderSearchResults(allMatches, q);
 }
 
 async function _loadAllByDateRange(){
@@ -4643,7 +4685,7 @@ function _renderSearchResults(matches, label){
   html += '<table style="width:100%;border-collapse:collapse;font-size:10px;">';
   html += '<thead><tr style="background:var(--sf2);position:sticky;top:0;">';
   html += '<th style="padding:4px 6px;text-align:center;"><input type="checkbox" id="tc-sel-all" onchange="_tcToggleAll(this.checked)" checked></th>';
-  html += '<th style="padding:4px 6px;">날짜</th><th style="padding:4px 6px;">차량</th>';
+  html += '<th style="padding:4px 6px;">출처</th><th style="padding:4px 6px;">날짜</th><th style="padding:4px 6px;">차량</th>';
   html += '<th style="padding:4px 6px;">투어코드</th><th style="padding:4px 6px;">코스</th>';
   html += '<th style="padding:4px 6px;">인승</th><th style="padding:4px 6px;text-align:right;">금액</th>';
   html += '<th style="padding:4px 6px;text-align:right;">OT</th><th style="padding:4px 6px;text-align:right;">기타</th>';
@@ -4658,14 +4700,13 @@ function _renderSearchResults(matches, label){
     const early = Number(r.Early||0);
     const toll = Number(r.Toll||0);
     const extras = trailer+hotel+dist+early+toll;
-    const etcParts = [];
-    if(trailer) etcParts.push('Trailer $'+trailer);
-    if(hotel) etcParts.push('Hotel $'+hotel);
-    if(dist) etcParts.push('Dist $'+dist);
-    if(early) etcParts.push('Early $'+early);
-    if(toll) etcParts.push('Toll $'+toll);
+    const isInv = r._source==='inv';
+    const srcBadge = isInv
+      ? '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#e8d5f5;color:#7c3aed;">INV '+r._invNum+'</span>'
+      : '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#d5e8f0;color:#2563eb;">리포트</span>';
     html += '<tr style="border-bottom:1px solid var(--brd);'+(i%2?'background:var(--sf1);':'')+'">';
     html += '<td style="padding:4px 6px;text-align:center;"><input type="checkbox" class="tc-sel-chk" data-idx="'+i+'" checked></td>';
+    html += '<td style="padding:4px 6px;">'+srcBadge+'</td>';
     html += '<td style="padding:4px 6px;">'+dt+'</td>';
     html += '<td style="padding:4px 6px;">'+(r.Rego||'')+'</td>';
     html += '<td style="padding:4px 6px;">'+(r.Tour_Code||'')+'</td>';
