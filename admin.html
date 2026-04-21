@@ -9008,11 +9008,35 @@ ${DC_COMPANY.bank ? `
 }
 
 // ─── 인보이스 미리보기 (발행 없이) ───
-function previewInvoiceDoc() {
+async function previewInvoiceDoc() {
   const agency = document.getElementById('inv-agency')?.value;
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
+
+  // ★ 리포트 캐시가 비어 있으면 다시 로드
+  if (!_invReports) {
+    toast('📄 리포트 로딩 중...','in');
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.ok) {
+          _invReports = json.rows.map(r => ({
+            ...r,
+            _iso: parseToISO(r.Date || ''),
+            _agency: String(r.Agency||'').trim(),
+            _timeStart: parseSheetTime(r.Time_Start),
+            _timeEnd:   parseSheetTime(r.Time_End),
+          }));
+        }
+      }
+    } catch(e) { console.warn('Report reload failed:', e); }
+  }
+  // ★ 인보이스 이력 캐시가 비어 있으면 다시 로드 (SUB 항목 병합용)
+  if (!_invHistoryCache) {
+    try { await loadInvHistory(false); } catch(e) {}
+  }
 
   let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
@@ -9032,6 +9056,29 @@ async function downloadInvoicePdf() {
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
+
+  // ★ 캐시가 비어 있으면 다시 로드 (리포트/SUB 항목 누락 방지)
+  if (!_invReports) {
+    toast('📄 리포트 로딩 중...','in');
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.ok) {
+          _invReports = json.rows.map(r => ({
+            ...r,
+            _iso: parseToISO(r.Date || ''),
+            _agency: String(r.Agency||'').trim(),
+            _timeStart: parseSheetTime(r.Time_Start),
+            _timeEnd:   parseSheetTime(r.Time_End),
+          }));
+        }
+      }
+    } catch(e) { console.warn('Report reload failed:', e); }
+  }
+  if (!_invHistoryCache) {
+    try { await loadInvHistory(false); } catch(e) {}
+  }
 
   let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
@@ -9062,6 +9109,26 @@ async function generateInvoice() {
     }
     document.getElementById('inv-abn')?.focus();
     return;
+  }
+
+  // ★ 캐시가 비어 있으면 다시 로드 (리포트/SUB 항목 누락 방지)
+  if (!_invReports) {
+    toast('📄 리포트 로딩 중...','in');
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.ok) {
+          _invReports = json.rows.map(r => ({
+            ...r,
+            _iso: parseToISO(r.Date || ''),
+            _agency: String(r.Agency||'').trim(),
+            _timeStart: parseSheetTime(r.Time_Start),
+            _timeEnd:   parseSheetTime(r.Time_End),
+          }));
+        }
+      }
+    } catch(e) { console.warn('Report reload failed:', e); }
   }
 
   let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
