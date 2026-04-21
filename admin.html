@@ -5871,125 +5871,278 @@ function _buildWeeklyData() {
     .sort((a, b) => b.monISO.localeCompare(a.monISO));
 }
 
+/* ── Cash Flow for a specific week ── */
+let _cfWeekOffset = 0; // 0 = this week, -1 = last week, +1 = next week
+
+function _buildCashFlowForWeek(targetMonISO) {
+  const monD = new Date(targetMonISO + 'T00:00:00');
+  const sunD = new Date(monD); sunD.setDate(sunD.getDate() + 6);
+  const monS = targetMonISO;
+  const sunS = sunD.toISOString().slice(0, 10);
+
+  const receivables = []; // agency income due this week
+  const subPayables = []; // sub costs due this week
+  const driverPay = [];   // driver wages for this week
+
+  // ── 1. Agency Receivables (DueDate in target week) ──
+  const agCR = {}; // agency+invoiceId → total CR (payments received)
+  (_balAgencyTxns || []).forEach(tx => {
+    if (String(tx.Type || '').toUpperCase() === 'CR' || (Number(tx.CR) || 0) > 0) {
+      const key = (tx.Agency || '') + '|' + (tx.InvoiceID || '');
+      agCR[key] = (agCR[key] || 0) + (Number(tx.CR) || 0);
+    }
+  });
+
+  (_balAgencyTxns || []).forEach(tx => {
+    const dr = Number(tx.DR) || 0;
+    if (dr <= 0) return;
+
+    // Determine DueDate
+    let dueISO = _tryParseDate(tx.DueDate);
+    if (!dueISO) {
+      // Fallback: FinishDate + 14 days
+      let finISO = _tryParseDate(tx.FinishDate);
+      if (!finISO) finISO = _tryParseDate(tx.StartDate);
+      if (!finISO) finISO = _tryParseDate(tx.Date);
+      if (finISO) {
+        const fd = new Date(finISO + 'T00:00:00');
+        fd.setDate(fd.getDate() + 14);
+        dueISO = fd.toISOString().slice(0, 10);
+      }
+    }
+    if (!dueISO) return;
+    if (dueISO < monS || dueISO > sunS) return;
+
+    // Check unpaid balance
+    const key = (tx.Agency || '') + '|' + (tx.InvoiceID || '');
+    const paid = agCR[key] || 0;
+    const balance = roundMoney(dr - paid);
+    if (balance <= 0.01) return; // already fully paid
+
+    receivables.push({
+      agency: tx.Agency || 'Unknown',
+      invoiceId: tx.InvoiceID || '',
+      amount: dr,
+      paid: paid,
+      balance: balance,
+      dueDate: dueISO,
+      tourCode: tx.TourCode || ''
+    });
+  });
+
+  // ── 2. Sub Payables (Date + 14 days in target week, or DueDate) ──
+  (_balSubTxns || []).forEach(tx => {
+    const dr = Number(tx.DR) || 0;
+    if (dr <= 0) return;
+
+    let dueISO = _tryParseDate(tx.DueDate);
+    if (!dueISO) {
+      const dateISO = _tryParseDate(tx.Date);
+      if (dateISO) {
+        const dd = new Date(dateISO + 'T00:00:00');
+        dd.setDate(dd.getDate() + 14);
+        dueISO = dd.toISOString().slice(0, 10);
+      }
+    }
+    if (!dueISO) return;
+    if (dueISO < monS || dueISO > sunS) return;
+
+    subPayables.push({
+      company: tx.SubCompany || 'Unknown',
+      invoiceNo: tx.InvoiceNo || '',
+      description: tx.Description || '',
+      amount: dr,
+      dueDate: dueISO
+    });
+  });
+
+  // ── 3. Driver Wages (work dates in target week) ──
+  const driverTotals = {}; // driver → { dr, cr }
+  (_balWageTxns || []).forEach(tx => {
+    const dateISO = _tryParseDate(tx.date);
+    if (!dateISO) return;
+    if (dateISO < monS || dateISO > sunS) return;
+
+    const name = tx.driver || 'Unknown';
+    if (!driverTotals[name]) driverTotals[name] = { dr: 0, cr: 0 };
+    if (tx.type === 'DR') driverTotals[name].dr += (Number(tx.amount) || 0);
+    if (tx.type === 'CR') driverTotals[name].cr += (Number(tx.amount) || 0);
+  });
+
+  Object.entries(driverTotals).forEach(([name, v]) => {
+    if (v.dr > 0) {
+      driverPay.push({
+        driver: name,
+        earned: roundMoney(v.dr),
+        paid: roundMoney(v.cr),
+        remaining: roundMoney(v.dr - v.cr)
+      });
+    }
+  });
+
+  const totalIn = roundMoney(receivables.reduce((s, r) => s + r.balance, 0));
+  const totalSubOut = roundMoney(subPayables.reduce((s, r) => s + r.amount, 0));
+  const totalWageOut = roundMoney(driverPay.reduce((s, r) => s + r.remaining, 0));
+  return {
+    receivables, subPayables, driverPay,
+    totalIn, totalSubOut, totalWageOut,
+    netCashFlow: roundMoney(totalIn - totalSubOut - totalWageOut)
+  };
+}
+
 function renderBalWeeklySummary() {
-  const data = _buildWeeklyData();
   const summaryEl = document.getElementById('bal-weekly-summary');
   const listEl = document.getElementById('bal-weekly-list');
+  const $f = (v) => '$' + Math.abs(v).toLocaleString('en-AU', { minimumFractionDigits: 2 });
 
-  // ★ 전체 합계: 기존 잔액 탭의 정확한 합계 사용 (날짜 파싱 누락 방지)
+  // Determine target week
+  const today = new Date();
+  const dayOff = (today.getDay() + 6) % 7; // 0=Mon
+  const thisMon = new Date(today);
+  thisMon.setDate(thisMon.getDate() - dayOff + (_cfWeekOffset * 7));
+  const targetMonISO = thisMon.toISOString().slice(0, 10);
+
+  const cf = _buildCashFlowForWeek(targetMonISO);
+  const isThisWeek = _cfWeekOffset === 0;
+  const weekTitle = isThisWeek ? '\uC774\uBC88 \uC8FC \uD604\uAE08 \uD750\uB984' : _weekLabel(targetMonISO); // 이번 주 현금 흐름
+  const netColor = cf.netCashFlow >= 0 ? 'var(--gn)' : 'var(--rd)';
+  const netSign = cf.netCashFlow >= 0 ? '+' : '\u2212';
+
+  // ── Week navigation + Cash flow summary ──
+  summaryEl.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <button onclick="_cfWeekOffset--;renderBalWeeklySummary();" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;color:var(--t2);">\u25C0 \uC774\uC804</button>
+      <div style="text-align:center;">
+        <div style="font-weight:700;font-size:14px;color:var(--t1);">\uD83D\uDCB0 ${escH(weekTitle)}</div>
+        <div style="font-size:10px;color:var(--t3);">${_weekLabel(targetMonISO)}</div>
+      </div>
+      <button onclick="_cfWeekOffset++;renderBalWeeklySummary();" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;color:var(--t2);">\uB2E4\uC74C \u25B6</button>
+    </div>
+    ${!isThisWeek ? '<div style="text-align:center;margin-bottom:8px;"><button onclick="_cfWeekOffset=0;renderBalWeeklySummary();" style="background:var(--ac);color:#fff;border:none;border-radius:6px;padding:4px 14px;font-size:11px;cursor:pointer;">\uC624\uB298 \uC8FC\uAC04\uC73C\uB85C</button></div>' : ''}
+    <div style="background:${cf.netCashFlow>=0?'var(--gnd)':'var(--rdd)'};border:1px solid ${cf.netCashFlow>=0?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'};border-radius:12px;padding:14px;text-align:center;margin-bottom:10px;">
+      <div style="font-size:10px;color:var(--t3);margin-bottom:4px;">\uC21C \uD604\uAE08 \uD750\uB984 (\uBC1B\uC744 \uB3C8 - \uC9C0\uAE09\uD560 \uB3C8)</div>
+      <div style="font-size:24px;font-weight:800;color:${netColor};font-family:var(--fn);">${netSign}${$f(cf.netCashFlow)}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
+      <div style="background:var(--acd);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:8px;text-align:center;">
+        <div style="font-size:9px;color:var(--t3);">\uBC1B\uC744 \uB3C8</div>
+        <div style="font-size:14px;font-weight:700;color:var(--ac);font-family:var(--fn);">${$f(cf.totalIn)}</div>
+      </div>
+      <div style="background:var(--rdd);border:1px solid rgba(239,68,68,.15);border-radius:10px;padding:8px;text-align:center;">
+        <div style="font-size:9px;color:var(--t3);">\uC11C\uBE0C \uC9C0\uAE09</div>
+        <div style="font-size:14px;font-weight:700;color:var(--or);font-family:var(--fn);">${$f(cf.totalSubOut)}</div>
+      </div>
+      <div style="background:var(--rdd);border:1px solid rgba(239,68,68,.15);border-radius:10px;padding:8px;text-align:center;">
+        <div style="font-size:9px;color:var(--t3);">\uB4DC\uB77C\uC774\uBC84 \uAE09\uC5EC</div>
+        <div style="font-size:14px;font-weight:700;color:var(--rd);font-family:var(--fn);">${$f(cf.totalWageOut)}</div>
+      </div>
+    </div>`;
+
+  // ── Detailed breakdown ──
+  const hasData = cf.receivables.length || cf.subPayables.length || cf.driverPay.length;
+  if (!hasData) {
+    listEl.innerHTML = '<div style="text-align:center;color:var(--t3);padding:30px 0;font-size:12px;">\uC774 \uC8FC\uC5D0\uB294 \uC608\uC815\uB41C \uC218\uAE08/\uC9C0\uAE09\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.</div>';
+  } else {
+    let html = '';
+
+    // Receivables by agency
+    if (cf.receivables.length) {
+      const byAgency = {};
+      cf.receivables.forEach(r => {
+        if (!byAgency[r.agency]) byAgency[r.agency] = [];
+        byAgency[r.agency].push(r);
+      });
+      html += '<div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-bottom:10px;padding:12px 14px;">';
+      html += '<div style="font-size:12px;font-weight:700;color:var(--ac);margin-bottom:8px;">\uD83C\uDFE2 \uC5EC\uD589\uC0AC \uC218\uAE08 \uC608\uC815</div>';
+      Object.entries(byAgency).sort((a,b) => {
+        const aSum = a[1].reduce((s,r) => s+r.balance, 0);
+        const bSum = b[1].reduce((s,r) => s+r.balance, 0);
+        return bSum - aSum;
+      }).forEach(([agency, items]) => {
+        const agTotal = roundMoney(items.reduce((s,r) => s+r.balance, 0));
+        html += '<div style="margin-bottom:6px;">';
+        html += '<div style="display:flex;justify-content:space-between;font-size:11px;font-weight:600;padding:2px 0;">';
+        html += '<span style="color:var(--t1);">' + escH(agency) + '</span>';
+        html += '<span style="color:var(--ac);font-family:var(--fn);">' + $f(agTotal) + '</span></div>';
+        items.forEach(r => {
+          html += '<div style="display:flex;justify-content:space-between;padding:1px 0 1px 10px;font-size:10px;color:var(--t3);">';
+          html += '<span>' + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')</span>';
+          html += '<span style="font-family:var(--fn);">' + $f(r.balance) + '</span></div>';
+        });
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    // Sub payables
+    if (cf.subPayables.length) {
+      html += '<div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-bottom:10px;padding:12px 14px;">';
+      html += '<div style="font-size:12px;font-weight:700;color:var(--or);margin-bottom:8px;">\uD83D\uDE8C \uC11C\uBE0C \uC9C0\uAE09 \uC608\uC815</div>';
+      cf.subPayables.sort((a,b) => b.amount - a.amount).forEach(s => {
+        html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">';
+        html += '<span style="color:var(--t2);">' + escH(s.company) + (s.invoiceNo ? ' <span style="color:var(--t3);font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + '</span>';
+        html += '<span style="font-weight:600;font-family:var(--fn);color:var(--or);">' + $f(s.amount) + '</span></div>';
+      });
+      html += '</div>';
+    }
+
+    // Driver wages
+    if (cf.driverPay.length) {
+      html += '<div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-bottom:10px;padding:12px 14px;">';
+      html += '<div style="font-size:12px;font-weight:700;color:var(--rd);margin-bottom:8px;">\uD83D\uDC64 \uB4DC\uB77C\uC774\uBC84 \uAE09\uC5EC</div>';
+      cf.driverPay.sort((a,b) => b.remaining - a.remaining).forEach(d => {
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11px;">';
+        html += '<span style="color:var(--t2);">' + escH(d.driver) + '</span>';
+        html += '<div style="text-align:right;">';
+        html += '<span style="font-weight:600;font-family:var(--fn);color:var(--rd);">' + $f(d.remaining) + '</span>';
+        if (d.paid > 0) html += ' <span style="font-size:9px;color:var(--t3);">(\uC9C0\uAE09\uC644\uB8CC ' + $f(d.paid) + ')</span>';
+        html += '</div></div>';
+      });
+      html += '</div>';
+    }
+
+    listEl.innerHTML = html;
+  }
+
+  // ── Collapsible cumulative totals ──
   const agBal = _agencyBalances();
   const subBal = _subBalances();
   const wageBal = _wageBalances();
-  const totIncome = agBal.reduce((s, a) => s + a.dr, 0);       // 전체 청구액 (DR)
-  const totCollected = agBal.reduce((s, a) => s + a.cr, 0);    // 수금액 (CR)
-  const totReceivable = roundMoney(totIncome - totCollected);   // 미수금
-  const totSub = subBal.reduce((s, a) => s + a.dr + a.wageDr, 0);  // 서브 총 발생
-  const totSubPaid = subBal.reduce((s, a) => s + a.cr + a.wageCr, 0); // 서브 지급 완료
-  const totWage = wageBal.reduce((s, a) => s + a.dr, 0);       // 드라이버 총 발생
-  const totWagePaid = wageBal.reduce((s, a) => s + a.cr, 0);   // 드라이버 지급 완료
-  const totExpense = roundMoney(totSub + totWage);
-  const totNet = roundMoney(totIncome - totExpense);
-  const $f = (v) => '$' + Math.abs(v).toLocaleString('en-AU', { minimumFractionDigits: 2 });
+  const totIncome = agBal.reduce((s, a) => s + a.dr, 0);
+  const totCollected = agBal.reduce((s, a) => s + a.cr, 0);
+  const totReceivable = roundMoney(totIncome - totCollected);
+  const totSub = subBal.reduce((s, a) => s + a.dr + a.wageDr, 0);
+  const totSubPaid = subBal.reduce((s, a) => s + a.cr + a.wageCr, 0);
+  const totWage = wageBal.reduce((s, a) => s + a.dr, 0);
+  const totWagePaid = wageBal.reduce((s, a) => s + a.cr, 0);
+  const totNet = roundMoney(totIncome - totSub - totWage);
 
-  summaryEl.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div style="background:var(--acd);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:10px;text-align:center;">
-        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">\uCD1D \uC218\uC785 (\uC5EC\uD589\uC0AC \uCCAD\uAD6C)</div>
-        <div style="font-size:16px;font-weight:700;color:var(--ac);font-family:var(--fn);">${$f(totIncome)}</div>
-        <div style="font-size:9px;color:var(--t3);margin-top:2px;">\uC218\uAE08 ${$f(totCollected)} / \uBBF8\uC218\uAE08 <span style="color:var(--or);font-weight:600;">${$f(totReceivable)}</span></div>
+  listEl.innerHTML += `
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-top:10px;overflow:hidden;">
+      <div onclick="document.getElementById('cf-cumul').style.display=document.getElementById('cf-cumul').style.display==='none'?'':'none';this.querySelector('.cf-arr').textContent=document.getElementById('cf-cumul').style.display==='none'?'\u25B6':'\u25BC'"
+           style="padding:10px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:12px;font-weight:700;color:var(--t2);">\uD83D\uDCCA \uC804\uCCB4 \uB204\uC801 \uC694\uC57D</span>
+        <span class="cf-arr" style="font-size:11px;color:var(--t3);">\u25B6</span>
       </div>
-      <div style="background:var(--rdd);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:10px;text-align:center;">
-        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">\uCD1D \uC9C0\uCD9C (\uC11C\uBE0C+\uB4DC\uB77C\uC774\uBC84)</div>
-        <div style="font-size:16px;font-weight:700;color:var(--rd);font-family:var(--fn);">${$f(totExpense)}</div>
-        <div style="font-size:9px;color:var(--t3);margin-top:2px;">\uC11C\uBE0C ${$f(totSub)} / \uB4DC\uB77C\uC774\uBC84 ${$f(totWage)}</div>
-      </div>
-    </div>
-    <div style="background:${totNet>=0?'var(--gnd)':'var(--rdd)'};border:1px solid ${totNet>=0?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'};border-radius:10px;padding:12px;text-align:center;margin-bottom:8px;">
-      <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">\uC21C\uC774\uC775 (\uC218\uC785 - \uC11C\uBE0C - \uB4DC\uB77C\uC774\uBC84)</div>
-      <div style="font-size:20px;font-weight:800;color:${totNet>=0?'var(--gn)':'var(--rd)'};font-family:var(--fn);">${totNet>=0?'+':'\u2212'}${$f(totNet)}</div>
-      <div style="font-size:10px;color:var(--t3);margin-top:4px;">\uB9C8\uC9C4\uC728 ${totIncome>0?roundMoney(totNet/totIncome*100).toFixed(1):'0.0'}%  \u00B7  ${data.length}\uC8FC</div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-      <div style="background:var(--sf2);border:1px solid var(--b1);border-radius:10px;padding:8px;text-align:center;">
-        <div style="font-size:9px;color:var(--t3);">\uBBF8\uC218\uAE08 (\uBC1B\uC744 \uB3C8)</div>
-        <div style="font-size:14px;font-weight:700;color:var(--or);font-family:var(--fn);">${$f(totReceivable)}</div>
-      </div>
-      <div style="background:var(--sf2);border:1px solid var(--b1);border-radius:10px;padding:8px;text-align:center;">
-        <div style="font-size:9px;color:var(--t3);">\uBBF8\uC9C0\uAE09 (\uC904 \uB3C8)</div>
-        <div style="font-size:14px;font-weight:700;color:var(--rd);font-family:var(--fn);">${$f(roundMoney((totSub-totSubPaid)+(totWage-totWagePaid)))}</div>
-      </div>
-    </div>`;
-
-  if (!data.length) {
-    listEl.innerHTML = '<div style="text-align:center;color:var(--t3);padding:40px 0;">\uB370\uC774\uD130\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uC778\uBCF4\uC774\uC2A4\uB97C \uBC1C\uD589\uD558\uBA74 \uD45C\uC2DC\uB429\uB2C8\uB2E4.</div>';
-    return;
-  }
-
-  listEl.innerHTML = data.map(w => {
-    const incomeList = Object.entries(w.income).sort((a,b) => b[1]-a[1]);
-    const subList = Object.entries(w.subCost).sort((a,b) => b[1]-a[1]);
-    const wageList = Object.entries(w.wageCost).sort((a,b) => b[1]-a[1]);
-    const weekId = 'bwk-' + w.monISO;
-    const netColor = w.net >= 0 ? 'var(--gn)' : 'var(--rd)';
-    const netSign = w.net >= 0 ? '+' : '−';
-
-    return `
-    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-bottom:10px;overflow:hidden;">
-      <!-- 주간 헤더 (클릭으로 접기/펼치기) -->
-      <div onclick="document.getElementById('${weekId}').style.display=document.getElementById('${weekId}').style.display==='none'?'':'none';this.querySelector('.bwk-arrow').textContent=document.getElementById('${weekId}').style.display==='none'?'▶':'▼'"
-           style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <div style="font-weight:700;font-size:13px;color:var(--t1);">📅 ${_weekLabel(w.monISO)}</div>
-          <div style="font-size:10px;color:var(--t3);margin-top:2px;">\uC218\uC785 ${$f(w.totalIncome)} \u00B7 \uC11C\uBE0C ${$f(w.totalSubCost)} \u00B7 \uB4DC\uB77C\uC774\uBC84 ${$f(w.totalWageCost)}</div>
-        </div>
-        <div style="text-align:right;display:flex;align-items:center;gap:8px;">
-          <div>
-            <div style="font-size:16px;font-weight:800;font-family:var(--fn);color:${netColor};">${netSign}${$f(w.net)}</div>
-            <div style="font-size:9px;color:var(--t3);">${w.totalIncome>0?roundMoney(w.net/w.totalIncome*100).toFixed(1):'0.0'}%</div>
+      <div id="cf-cumul" style="display:none;padding:0 14px 12px;border-top:1px solid var(--b1);">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+          <div style="background:var(--acd);border-radius:8px;padding:8px;text-align:center;">
+            <div style="font-size:9px;color:var(--t3);">\uCD1D \uC218\uC785</div>
+            <div style="font-size:13px;font-weight:700;color:var(--ac);font-family:var(--fn);">${$f(totIncome)}</div>
+            <div style="font-size:9px;color:var(--t3);">\uBBF8\uC218\uAE08 <span style="color:var(--or);">${$f(totReceivable)}</span></div>
           </div>
-          <span class="bwk-arrow" style="font-size:11px;color:var(--t3);">▶</span>
+          <div style="background:var(--rdd);border-radius:8px;padding:8px;text-align:center;">
+            <div style="font-size:9px;color:var(--t3);">\uCD1D \uC9C0\uCD9C</div>
+            <div style="font-size:13px;font-weight:700;color:var(--rd);font-family:var(--fn);">${$f(roundMoney(totSub + totWage))}</div>
+            <div style="font-size:9px;color:var(--t3);">\uBBF8\uC9C0\uAE09 <span style="color:var(--rd);">${$f(roundMoney((totSub-totSubPaid)+(totWage-totWagePaid)))}</span></div>
+          </div>
         </div>
-      </div>
-      <!-- 주간 상세 (접혀 있음) -->
-      <div id="${weekId}" style="display:none;padding:0 14px 12px;border-top:1px solid var(--b1);">
-        <!-- 수입 (여행사별) -->
-        <div style="margin-top:10px;margin-bottom:8px;">
-          <div style="font-size:11px;font-weight:700;color:var(--ac);margin-bottom:4px;">\uD83C\uDFE2 \uC5EC\uD589\uC0AC \uC218\uC785 (${$f(w.totalIncome)})</div>
-          ${incomeList.map(([name, amt]) => `
-            <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
-              <span style="color:var(--t2);">${escH(name)}</span>
-              <span style="font-weight:600;font-family:var(--fn);color:var(--ac);">${$f(amt)}</span>
-            </div>`).join('')}
-          ${incomeList.length === 0 ? '<div style="font-size:11px;color:var(--t3);padding:3px 0;">—</div>' : ''}
-        </div>
-        <!-- 서브 지출 -->
-        <div style="margin-bottom:8px;">
-          <div style="font-size:11px;font-weight:700;color:var(--or);margin-bottom:4px;">\uD83D\uDE8C \uC11C\uBE0C \uC9C0\uCD9C (${$f(w.totalSubCost)})</div>
-          ${subList.map(([name, amt]) => `
-            <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
-              <span style="color:var(--t2);">${escH(name)}</span>
-              <span style="font-weight:600;font-family:var(--fn);color:var(--or);">${$f(amt)}</span>
-            </div>`).join('')}
-          ${subList.length === 0 ? '<div style="font-size:11px;color:var(--t3);padding:3px 0;">—</div>' : ''}
-        </div>
-        <!-- 드라이버 급여 -->
-        <div style="margin-bottom:8px;">
-          <div style="font-size:11px;font-weight:700;color:var(--rd);margin-bottom:4px;">\uD83D\uDC64 \uB4DC\uB77C\uC774\uBC84 \uAE09\uC5EC (${$f(w.totalWageCost)})</div>
-          ${wageList.map(([name, amt]) => `
-            <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
-              <span style="color:var(--t2);">${escH(name)}</span>
-              <span style="font-weight:600;font-family:var(--fn);color:var(--rd);">${$f(amt)}</span>
-            </div>`).join('')}
-          ${wageList.length === 0 ? '<div style="font-size:11px;color:var(--t3);padding:3px 0;">—</div>' : ''}
-        </div>
-        <!-- 주간 순이익 바 -->
-        <div style="background:${w.net>=0?'var(--gnd)':'var(--rdd)'};border-radius:8px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:11px;font-weight:600;color:var(--t2);">\uC8FC\uAC04 \uC21C\uC774\uC775</span>
-          <span style="font-size:14px;font-weight:800;font-family:var(--fn);color:${netColor};">${netSign}${$f(w.net)}</span>
+        <div style="background:${totNet>=0?'var(--gnd)':'var(--rdd)'};border-radius:8px;padding:8px 10px;margin-top:8px;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:11px;font-weight:600;color:var(--t2);">\uC21C\uC774\uC775</span>
+          <span style="font-size:14px;font-weight:800;font-family:var(--fn);color:${totNet>=0?'var(--gn)':'var(--rd)'};">${totNet>=0?'+':'\u2212'}${$f(totNet)}</span>
         </div>
       </div>
     </div>`;
-  }).join('');
 }
 
 // ── DETAIL VIEW ──
