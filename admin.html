@@ -5775,10 +5775,28 @@ function _getMonday(dateStr) {
 }
 
 function _weekLabel(monISO) {
+  const DAYS = ['\uC77C','\uC6D4','\uD654','\uC218','\uBAA9','\uAE08','\uD1A0']; // 일월화수목금토
   const mon = new Date(monISO + 'T00:00:00');
   const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
-  const fm = (d) => `${d.getMonth()+1}/${d.getDate()}`;
-  return fm(mon) + '(\uC6D4) ~ ' + fm(sun) + '(\uC77C)';
+  const fm = (d) => (d.getMonth()+1) + '/' + d.getDate() + '(' + DAYS[d.getDay()] + ')';
+  return fm(mon) + ' ~ ' + fm(sun);
+}
+
+function _tryParseDate(val) {
+  // GAS Date, ISO string, DD/MM/YYYY 등 다양한 날짜 형식 처리
+  if (!val) return '';
+  const s = String(val).trim();
+  // ISO: "2026-03-29" or "2026-03-29T13:00:00.000Z"
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // DD/MM/YYYY
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
+  // parseToISO 폴백
+  const iso = parseToISO(s);
+  if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  // 숫자 (Excel serial date) — GAS에서 직렬화 오류 시
+  if (/^\d+$/.test(s)) { const d = new Date((Number(s) - 25569) * 86400000); if (!isNaN(d.getTime())) return d.toISOString().slice(0,10); }
+  return '';
 }
 
 function _buildWeeklyData() {
@@ -5790,7 +5808,6 @@ function _buildWeeklyData() {
   }
 
   // ① 여행사 수입 (Agency_Txn → DR: 청구액, 인보이스 연결 건)
-  // ★ StartDate/FinishDate 기준으로 주차 배정 (인보이스 서비스 기간)
   _balAgencyTxns.forEach(t => {
     const txnType = String(t.Type||'').trim();
     if (txnType !== 'invoice') return;
@@ -5799,11 +5816,15 @@ function _buildWeeklyData() {
     const agency = String(t.Agency||'').trim();
     if (!agency) return;
 
-    // 서비스 기간의 시작일 기준 주차
-    const dateField = t.StartDate || t.Date || '';
-    const iso = parseToISO(String(dateField));
+    // 날짜 우선순위: StartDate → Date → InvoiceID에서 추출
+    let iso = _tryParseDate(t.StartDate) || _tryParseDate(t.Date);
+    if (!iso) {
+      // INV-YYYYMM-NNN 형식에서 연월 추출 (최후 폴백)
+      const invM = String(t.InvoiceID||'').match(/INV-(\d{4})(\d{2})/);
+      if (invM) iso = invM[1] + '-' + invM[2] + '-01';
+    }
     const monISO = _getMonday(iso);
-    if (!monISO) return;
+    if (!monISO) { console.warn('[WeeklySummary] Agency date parse fail:', agency, t.StartDate, t.Date); return; }
 
     ensureWeek(monISO);
     weeks[monISO].income[agency] = (weeks[monISO].income[agency] || 0) + dr;
@@ -5819,7 +5840,7 @@ function _buildWeeklyData() {
     const sub = String(t.SubCompany||'').trim();
     if (!sub) return;
 
-    const iso = parseToISO(String(t.Date||''));
+    const iso = _tryParseDate(t.Date);
     const monISO = _getMonday(iso);
     if (!monISO) return;
 
@@ -5855,33 +5876,52 @@ function renderBalWeeklySummary() {
   const summaryEl = document.getElementById('bal-weekly-summary');
   const listEl = document.getElementById('bal-weekly-list');
 
-  // 전체 합계
-  const totIncome = data.reduce((s, w) => s + w.totalIncome, 0);
-  const totSub = data.reduce((s, w) => s + w.totalSubCost, 0);
-  const totWage = data.reduce((s, w) => s + w.totalWageCost, 0);
-  const totNet = roundMoney(totIncome - totSub - totWage);
+  // ★ 전체 합계: 기존 잔액 탭의 정확한 합계 사용 (날짜 파싱 누락 방지)
+  const agBal = _agencyBalances();
+  const subBal = _subBalances();
+  const wageBal = _wageBalances();
+  const totIncome = agBal.reduce((s, a) => s + a.dr, 0);       // 전체 청구액 (DR)
+  const totCollected = agBal.reduce((s, a) => s + a.cr, 0);    // 수금액 (CR)
+  const totReceivable = roundMoney(totIncome - totCollected);   // 미수금
+  const totSub = subBal.reduce((s, a) => s + a.dr + a.wageDr, 0);  // 서브 총 발생
+  const totSubPaid = subBal.reduce((s, a) => s + a.cr + a.wageCr, 0); // 서브 지급 완료
+  const totWage = wageBal.reduce((s, a) => s + a.dr, 0);       // 드라이버 총 발생
+  const totWagePaid = wageBal.reduce((s, a) => s + a.cr, 0);   // 드라이버 지급 완료
   const totExpense = roundMoney(totSub + totWage);
+  const totNet = roundMoney(totIncome - totExpense);
   const $f = (v) => '$' + Math.abs(v).toLocaleString('en-AU', { minimumFractionDigits: 2 });
 
   summaryEl.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
       <div style="background:var(--acd);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:10px;text-align:center;">
-        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 수입 (여행사)</div>
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">\uCD1D \uC218\uC785 (\uC5EC\uD589\uC0AC \uCCAD\uAD6C)</div>
         <div style="font-size:16px;font-weight:700;color:var(--ac);font-family:var(--fn);">${$f(totIncome)}</div>
+        <div style="font-size:9px;color:var(--t3);margin-top:2px;">\uC218\uAE08 ${$f(totCollected)} / \uBBF8\uC218\uAE08 <span style="color:var(--or);font-weight:600;">${$f(totReceivable)}</span></div>
       </div>
       <div style="background:var(--rdd);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:10px;text-align:center;">
-        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 지출 (서브+드라이버)</div>
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">\uCD1D \uC9C0\uCD9C (\uC11C\uBE0C+\uB4DC\uB77C\uC774\uBC84)</div>
         <div style="font-size:16px;font-weight:700;color:var(--rd);font-family:var(--fn);">${$f(totExpense)}</div>
+        <div style="font-size:9px;color:var(--t3);margin-top:2px;">\uC11C\uBE0C ${$f(totSub)} / \uB4DC\uB77C\uC774\uBC84 ${$f(totWage)}</div>
       </div>
     </div>
-    <div style="background:${totNet>=0?'var(--gnd)':'var(--rdd)'};border:1px solid ${totNet>=0?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'};border-radius:10px;padding:12px;text-align:center;">
-      <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">순이익 (수입 - 서브 - 드라이버)</div>
-      <div style="font-size:20px;font-weight:800;color:${totNet>=0?'var(--gn)':'var(--rd)'};font-family:var(--fn);">${totNet>=0?'+':'−'}${$f(totNet)}</div>
-      <div style="font-size:10px;color:var(--t3);margin-top:4px;">마진율 ${totIncome>0?roundMoney(totNet/totIncome*100).toFixed(1):'0.0'}%  ·  ${data.length}주</div>
+    <div style="background:${totNet>=0?'var(--gnd)':'var(--rdd)'};border:1px solid ${totNet>=0?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'};border-radius:10px;padding:12px;text-align:center;margin-bottom:8px;">
+      <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">\uC21C\uC774\uC775 (\uC218\uC785 - \uC11C\uBE0C - \uB4DC\uB77C\uC774\uBC84)</div>
+      <div style="font-size:20px;font-weight:800;color:${totNet>=0?'var(--gn)':'var(--rd)'};font-family:var(--fn);">${totNet>=0?'+':'\u2212'}${$f(totNet)}</div>
+      <div style="font-size:10px;color:var(--t3);margin-top:4px;">\uB9C8\uC9C4\uC728 ${totIncome>0?roundMoney(totNet/totIncome*100).toFixed(1):'0.0'}%  \u00B7  ${data.length}\uC8FC</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div style="background:var(--sf2);border:1px solid var(--b1);border-radius:10px;padding:8px;text-align:center;">
+        <div style="font-size:9px;color:var(--t3);">\uBBF8\uC218\uAE08 (\uBC1B\uC744 \uB3C8)</div>
+        <div style="font-size:14px;font-weight:700;color:var(--or);font-family:var(--fn);">${$f(totReceivable)}</div>
+      </div>
+      <div style="background:var(--sf2);border:1px solid var(--b1);border-radius:10px;padding:8px;text-align:center;">
+        <div style="font-size:9px;color:var(--t3);">\uBBF8\uC9C0\uAE09 (\uC904 \uB3C8)</div>
+        <div style="font-size:14px;font-weight:700;color:var(--rd);font-family:var(--fn);">${$f(roundMoney((totSub-totSubPaid)+(totWage-totWagePaid)))}</div>
+      </div>
     </div>`;
 
   if (!data.length) {
-    listEl.innerHTML = '<div style="text-align:center;color:var(--t3);padding:40px 0;">데이터가 없습니다. 인보이스를 발행하면 표시됩니다.</div>';
+    listEl.innerHTML = '<div style="text-align:center;color:var(--t3);padding:40px 0;">\uB370\uC774\uD130\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uC778\uBCF4\uC774\uC2A4\uB97C \uBC1C\uD589\uD558\uBA74 \uD45C\uC2DC\uB429\uB2C8\uB2E4.</div>';
     return;
   }
 
@@ -5900,7 +5940,7 @@ function renderBalWeeklySummary() {
            style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
         <div>
           <div style="font-weight:700;font-size:13px;color:var(--t1);">📅 ${_weekLabel(w.monISO)}</div>
-          <div style="font-size:10px;color:var(--t3);margin-top:2px;">수입 ${$f(w.totalIncome)} · 서브 ${$f(w.totalSubCost)} · 드라이버 ${$f(w.totalWageCost)}</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:2px;">\uC218\uC785 ${$f(w.totalIncome)} \u00B7 \uC11C\uBE0C ${$f(w.totalSubCost)} \u00B7 \uB4DC\uB77C\uC774\uBC84 ${$f(w.totalWageCost)}</div>
         </div>
         <div style="text-align:right;display:flex;align-items:center;gap:8px;">
           <div>
@@ -5914,7 +5954,7 @@ function renderBalWeeklySummary() {
       <div id="${weekId}" style="display:none;padding:0 14px 12px;border-top:1px solid var(--b1);">
         <!-- 수입 (여행사별) -->
         <div style="margin-top:10px;margin-bottom:8px;">
-          <div style="font-size:11px;font-weight:700;color:var(--ac);margin-bottom:4px;">🏢 여행사 수입 (${$f(w.totalIncome)})</div>
+          <div style="font-size:11px;font-weight:700;color:var(--ac);margin-bottom:4px;">\uD83C\uDFE2 \uC5EC\uD589\uC0AC \uC218\uC785 (${$f(w.totalIncome)})</div>
           ${incomeList.map(([name, amt]) => `
             <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
               <span style="color:var(--t2);">${escH(name)}</span>
@@ -5924,7 +5964,7 @@ function renderBalWeeklySummary() {
         </div>
         <!-- 서브 지출 -->
         <div style="margin-bottom:8px;">
-          <div style="font-size:11px;font-weight:700;color:var(--or);margin-bottom:4px;">🚌 서브 지출 (${$f(w.totalSubCost)})</div>
+          <div style="font-size:11px;font-weight:700;color:var(--or);margin-bottom:4px;">\uD83D\uDE8C \uC11C\uBE0C \uC9C0\uCD9C (${$f(w.totalSubCost)})</div>
           ${subList.map(([name, amt]) => `
             <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
               <span style="color:var(--t2);">${escH(name)}</span>
@@ -5934,7 +5974,7 @@ function renderBalWeeklySummary() {
         </div>
         <!-- 드라이버 급여 -->
         <div style="margin-bottom:8px;">
-          <div style="font-size:11px;font-weight:700;color:var(--rd);margin-bottom:4px;">👤 드라이버 급여 (${$f(w.totalWageCost)})</div>
+          <div style="font-size:11px;font-weight:700;color:var(--rd);margin-bottom:4px;">\uD83D\uDC64 \uB4DC\uB77C\uC774\uBC84 \uAE09\uC5EC (${$f(w.totalWageCost)})</div>
           ${wageList.map(([name, amt]) => `
             <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
               <span style="color:var(--t2);">${escH(name)}</span>
@@ -5944,7 +5984,7 @@ function renderBalWeeklySummary() {
         </div>
         <!-- 주간 순이익 바 -->
         <div style="background:${w.net>=0?'var(--gnd)':'var(--rdd)'};border-radius:8px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:11px;font-weight:600;color:var(--t2);">주간 순이익</span>
+          <span style="font-size:11px;font-weight:600;color:var(--t2);">\uC8FC\uAC04 \uC21C\uC774\uC775</span>
           <span style="font-size:14px;font-weight:800;font-family:var(--fn);color:${netColor};">${netSign}${$f(w.net)}</span>
         </div>
       </div>
