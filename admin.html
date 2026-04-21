@@ -13812,10 +13812,20 @@ function renderLeaveAvailGrid(){
       const onclick = isPending ? '' : `onclick="toggleRosterCell('${drv}','${d.iso}','${status}')"`;
       html += `<td style="background:${st.bg};color:${st.tx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;font-size:11px;cursor:${cursor};user-select:none;transition:opacity 0.15s;" title="${title}" ${onclick}>${st.label}</td>`;
     });
-    // 주간 근무일수 합계
-    const countBg = workedCount >= 6 ? '#fef2f2' : workedCount >= 1 ? '#eff6ff' : '#f9fafb';
-    const countTx = workedCount >= 6 ? '#dc2626' : workedCount >= 1 ? '#2563eb' : '#9ca3af';
-    html += `<td style="background:${countBg};color:${countTx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:800;font-size:14px;">${workedCount}</td>`;
+    // ★ 연속 근무일수 계산 (주 경계 무시, 오늘 기준 역순 탐색)
+    let _consDays = 0;
+    const _chkD = new Date(todayISO + 'T00:00:00');
+    const _todaySt = rosterLookup[drv]?.[todayISO] || '';
+    if (_todaySt !== 'WORKED') _chkD.setDate(_chkD.getDate() - 1);
+    for (let _ci = 0; _ci < 30; _ci++) {
+      const _ciso = _chkD.getFullYear() + '-' + String(_chkD.getMonth()+1).padStart(2,'0') + '-' + String(_chkD.getDate()).padStart(2,'0');
+      if (rosterLookup[drv]?.[_ciso] === 'WORKED') { _consDays++; _chkD.setDate(_chkD.getDate()-1); } else break;
+    }
+    const _maxDays = Math.max(workedCount, _consDays);
+    const countBg = _maxDays >= 6 ? '#fef2f2' : workedCount >= 1 ? '#eff6ff' : '#f9fafb';
+    const countTx = _maxDays >= 6 ? '#dc2626' : workedCount >= 1 ? '#2563eb' : '#9ca3af';
+    const _consExtra = _consDays > workedCount ? `<div style="font-size:9px;color:#dc2626;margin-top:2px;">연속${_consDays}일⚠️</div>` : '';
+    html += `<td style="background:${countBg};color:${countTx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:800;font-size:14px;">${workedCount}${_consExtra}</td>`;
     html += '</tr>';
   });
   html += '</table>';
