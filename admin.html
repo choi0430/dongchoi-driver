@@ -1532,7 +1532,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div style="display:flex;gap:0;padding:10px 14px 0;">
     <button id="bal-tab-agency" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;" onclick="showBalTab('agency')">🏢 여행사</button>
     <button id="bal-tab-sub" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="showBalTab('sub')">🚌 외주(SUB)</button>
-    <button id="bal-tab-wage" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="showBalTab('wage')">👤 드라이버</button>
+    <button id="bal-tab-wage" class="btn bac sm" style="border-radius:0;border-right:none;" onclick="showBalTab('wage')">👤 드라이버</button>
+    <button id="bal-tab-weekly" class="btn bac sm" style="border-radius:0 8px 8px 0;" onclick="showBalTab('weekly')">📈 주간요약</button>
   </div>
 
   <!-- ═══ TOUR AGENCY BALANCE ═══ -->
@@ -1563,6 +1564,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <button class="btn bac sm" onclick="openBalTxnModal('wage',null)">+ Add Payment (지급 추가)</button>
     </div>
     <div id="bal-wage-list" style="padding:8px 14px 80px;"></div>
+  </div>
+
+  <!-- ═══ WEEKLY SUMMARY (주간 요약) ═══ -->
+  <div id="bal-view-weekly" style="display:none;">
+    <div id="bal-weekly-summary" style="padding:10px 14px 0;"></div>
+    <div id="bal-weekly-list" style="padding:8px 14px 80px;"></div>
   </div>
 </div>
 
@@ -5334,7 +5341,7 @@ let _balLoaded = false;
 
 function showBalTab(tab){
   _balTab = tab;
-  ['agency','sub','wage'].forEach(t=>{
+  ['agency','sub','wage','weekly'].forEach(t=>{
     const v = document.getElementById('bal-view-'+t);
     const b = document.getElementById('bal-tab-'+t);
     if(v) v.style.display = t===tab?'':'none';
@@ -5582,6 +5589,7 @@ function _buildWageTxns(){
 function renderBalance(){
   if(_balTab==='agency') renderBalAgencyList();
   else if(_balTab==='sub') renderBalSubList();
+  else if(_balTab==='weekly') renderBalWeeklySummary();
   else renderBalWageList();
 }
 
@@ -5754,6 +5762,194 @@ function renderBalWageList(){
         <div style="font-size:9px;color:var(--t3);">${a.balance>0?'미지급':'정산 완료'}</div>
       </div>
     </div>`).join('');
+}
+
+// ── WEEKLY SUMMARY (주간 수입/지출/순이익 요약) ──
+function _getMonday(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0,10);
+}
+
+function _weekLabel(monISO) {
+  const mon = new Date(monISO + 'T00:00:00');
+  const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+  const fm = (d) => `${d.getMonth()+1}/${d.getDate()}`;
+  return `${fm(mon)}(월) ~ ${fm(sun)}(���)`;
+}
+
+function _buildWeeklyData() {
+  const weeks = {}; // { monISO: { income:{}, subCost:{}, wageCost:{}, totals } }
+
+  // Helper: ensure week bucket
+  function ensureWeek(monISO) {
+    if (!weeks[monISO]) weeks[monISO] = { income: {}, subCost: {}, wageCost: {}, totalIncome: 0, totalSubCost: 0, totalWageCost: 0 };
+  }
+
+  // ① 여행사 수입 (Agency_Txn → DR: 청구액, 인보이스 연결 건)
+  // ★ StartDate/FinishDate 기준으로 주차 배정 (인보이스 서비스 기간)
+  _balAgencyTxns.forEach(t => {
+    const txnType = String(t.Type||'').trim();
+    if (txnType !== 'invoice') return;
+    const dr = Number(t.DR) || 0;
+    if (dr <= 0) return;
+    const agency = String(t.Agency||'').trim();
+    if (!agency) return;
+
+    // 서비스 기간의 시작일 기준 주차
+    const dateField = t.StartDate || t.Date || '';
+    const iso = parseToISO(String(dateField));
+    const monISO = _getMonday(iso);
+    if (!monISO) return;
+
+    ensureWeek(monISO);
+    weeks[monISO].income[agency] = (weeks[monISO].income[agency] || 0) + dr;
+    weeks[monISO].totalIncome += dr;
+  });
+
+  // ② 서브 지출 (SUB_Txn → DR: 발생 비용)
+  _balSubTxns.forEach(t => {
+    const cat = String(t.Category||'').trim();
+    if (cat === 'Wage') return; // 급여는 별도 처리
+    const dr = Number(t.DR) || 0;
+    if (dr <= 0) return;
+    const sub = String(t.SubCompany||'').trim();
+    if (!sub) return;
+
+    const iso = parseToISO(String(t.Date||''));
+    const monISO = _getMonday(iso);
+    if (!monISO) return;
+
+    ensureWeek(monISO);
+    weeks[monISO].subCost[sub] = (weeks[monISO].subCost[sub] || 0) + dr;
+    weeks[monISO].totalSubCost += dr;
+  });
+
+  // ③ 드라이버 지출 (DR: 발생 수당)
+  _balWageTxns.forEach(t => {
+    if (t.type !== 'DR') return;
+    const amt = Number(t.amount) || 0;
+    if (amt <= 0) return;
+    const driver = t.driver || '';
+    if (!driver) return;
+
+    const monISO = _getMonday(t.date || '');
+    if (!monISO) return;
+
+    ensureWeek(monISO);
+    weeks[monISO].wageCost[driver] = (weeks[monISO].wageCost[driver] || 0) + amt;
+    weeks[monISO].totalWageCost += amt;
+  });
+
+  // Sort weeks descending (newest first)
+  return Object.entries(weeks)
+    .map(([mon, w]) => ({ monISO: mon, ...w, net: roundMoney(w.totalIncome - w.totalSubCost - w.totalWageCost) }))
+    .sort((a, b) => b.monISO.localeCompare(a.monISO));
+}
+
+function renderBalWeeklySummary() {
+  const data = _buildWeeklyData();
+  const summaryEl = document.getElementById('bal-weekly-summary');
+  const listEl = document.getElementById('bal-weekly-list');
+
+  // 전체 합계
+  const totIncome = data.reduce((s, w) => s + w.totalIncome, 0);
+  const totSub = data.reduce((s, w) => s + w.totalSubCost, 0);
+  const totWage = data.reduce((s, w) => s + w.totalWageCost, 0);
+  const totNet = roundMoney(totIncome - totSub - totWage);
+  const totExpense = roundMoney(totSub + totWage);
+  const $f = (v) => '$' + Math.abs(v).toLocaleString('en-AU', { minimumFractionDigits: 2 });
+
+  summaryEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div style="background:var(--acd);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 수입 (여행사)</div>
+        <div style="font-size:16px;font-weight:700;color:var(--ac);font-family:var(--fn);">${$f(totIncome)}</div>
+      </div>
+      <div style="background:var(--rdd);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 지출 (서브+드라이버)</div>
+        <div style="font-size:16px;font-weight:700;color:var(--rd);font-family:var(--fn);">${$f(totExpense)}</div>
+      </div>
+    </div>
+    <div style="background:${totNet>=0?'var(--gnd)':'var(--rdd)'};border:1px solid ${totNet>=0?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'};border-radius:10px;padding:12px;text-align:center;">
+      <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">순이익 (수입 - 서브 - 드라이버)</div>
+      <div style="font-size:20px;font-weight:800;color:${totNet>=0?'var(--gn)':'var(--rd)'};font-family:var(--fn);">${totNet>=0?'+':'−'}${$f(totNet)}</div>
+      <div style="font-size:10px;color:var(--t3);margin-top:4px;">마진율 ${totIncome>0?roundMoney(totNet/totIncome*100).toFixed(1):'0.0'}%  ·  ${data.length}주</div>
+    </div>`;
+
+  if (!data.length) {
+    listEl.innerHTML = '<div style="text-align:center;color:var(--t3);padding:40px 0;">데이터가 없습니다. 인보이스를 발행하면 표시됩니다.</div>';
+    return;
+  }
+
+  listEl.innerHTML = data.map(w => {
+    const incomeList = Object.entries(w.income).sort((a,b) => b[1]-a[1]);
+    const subList = Object.entries(w.subCost).sort((a,b) => b[1]-a[1]);
+    const wageList = Object.entries(w.wageCost).sort((a,b) => b[1]-a[1]);
+    const weekId = 'bwk-' + w.monISO;
+    const netColor = w.net >= 0 ? 'var(--gn)' : 'var(--rd)';
+    const netSign = w.net >= 0 ? '+' : '−';
+
+    return `
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-bottom:10px;overflow:hidden;">
+      <!-- 주간 헤더 (클릭으로 접기/펼치기) -->
+      <div onclick="document.getElementById('${weekId}').style.display=document.getElementById('${weekId}').style.display==='none'?'':'none';this.querySelector('.bwk-arrow').textContent=document.getElementById('${weekId}').style.display==='none'?'▶':'▼'"
+           style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:700;font-size:13px;color:var(--t1);">📅 ${_weekLabel(w.monISO)}</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:2px;">수입 ${$f(w.totalIncome)} · 서브 ${$f(w.totalSubCost)} · 드라이버 ${$f(w.totalWageCost)}</div>
+        </div>
+        <div style="text-align:right;display:flex;align-items:center;gap:8px;">
+          <div>
+            <div style="font-size:16px;font-weight:800;font-family:var(--fn);color:${netColor};">${netSign}${$f(w.net)}</div>
+            <div style="font-size:9px;color:var(--t3);">${w.totalIncome>0?roundMoney(w.net/w.totalIncome*100).toFixed(1):'0.0'}%</div>
+          </div>
+          <span class="bwk-arrow" style="font-size:11px;color:var(--t3);">▶</span>
+        </div>
+      </div>
+      <!-- 주간 상세 (접혀 있음) -->
+      <div id="${weekId}" style="display:none;padding:0 14px 12px;border-top:1px solid var(--b1);">
+        <!-- 수입 (여행사별) -->
+        <div style="margin-top:10px;margin-bottom:8px;">
+          <div style="font-size:11px;font-weight:700;color:var(--ac);margin-bottom:4px;">🏢 여행사 수입 (${$f(w.totalIncome)})</div>
+          ${incomeList.map(([name, amt]) => `
+            <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
+              <span style="color:var(--t2);">${escH(name)}</span>
+              <span style="font-weight:600;font-family:var(--fn);color:var(--ac);">${$f(amt)}</span>
+            </div>`).join('')}
+          ${incomeList.length === 0 ? '<div style="font-size:11px;color:var(--t3);padding:3px 0;">—</div>' : ''}
+        </div>
+        <!-- 서브 지출 -->
+        <div style="margin-bottom:8px;">
+          <div style="font-size:11px;font-weight:700;color:var(--or);margin-bottom:4px;">🚌 서브 지출 (${$f(w.totalSubCost)})</div>
+          ${subList.map(([name, amt]) => `
+            <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
+              <span style="color:var(--t2);">${escH(name)}</span>
+              <span style="font-weight:600;font-family:var(--fn);color:var(--or);">${$f(amt)}</span>
+            </div>`).join('')}
+          ${subList.length === 0 ? '<div style="font-size:11px;color:var(--t3);padding:3px 0;">—</div>' : ''}
+        </div>
+        <!-- 드라이버 급여 -->
+        <div style="margin-bottom:8px;">
+          <div style="font-size:11px;font-weight:700;color:var(--rd);margin-bottom:4px;">👤 드라이버 급여 (${$f(w.totalWageCost)})</div>
+          ${wageList.map(([name, amt]) => `
+            <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
+              <span style="color:var(--t2);">${escH(name)}</span>
+              <span style="font-weight:600;font-family:var(--fn);color:var(--rd);">${$f(amt)}</span>
+            </div>`).join('')}
+          ${wageList.length === 0 ? '<div style="font-size:11px;color:var(--t3);padding:3px 0;">—</div>' : ''}
+        </div>
+        <!-- 주간 순이익 바 -->
+        <div style="background:${w.net>=0?'var(--gnd)':'var(--rdd)'};border-radius:8px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:11px;font-weight:600;color:var(--t2);">주간 순이익</span>
+          <span style="font-size:14px;font-weight:800;font-family:var(--fn);color:${netColor};">${netSign}${$f(w.net)}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // ── DETAIL VIEW ──
@@ -7976,7 +8172,7 @@ async function saveInvoiceToSheet() {
       const drAmount = roundMoney(grandTotal);
 
       // 중복 체크: 동일 InvoiceID가 이미 있는지 확인
-      const existingTxn = (_balAgencyTxns||[]).find(t => String(t.InvoiceID||'').trim() === invNum);
+      const existingTxn = (_balAgencyTxns||[]).find(t => String(t.InvoiceID||'').trim() === invNum && String(t.Type||'').trim() === 'invoice');
       if (!existingTxn) {
         const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: from, FinishDate: to, DueDate: dueDateStr };
 
@@ -8004,6 +8200,31 @@ async function saveInvoiceToSheet() {
         });
 
         _balLoaded = false;
+      } else {
+        // ★ 수정 모드: 기존 Agency_Txn DR 금액이 변경되었으면 업데이트
+        const oldDR = roundMoney(Number(existingTxn.DR)||0);
+        if (Math.abs(oldDR - drAmount) > 0.01) {
+          console.log('[Invoice→Balance] DR 금액 변경 감지:', invNum, oldDR, '→', drAmount);
+          const rowIdx = existingTxn._rowIndex || existingTxn.rowIndex;
+          if (rowIdx) {
+            fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+              body: JSON.stringify({action:'update_agency_txn', rowIndex: rowIdx, data: {DR: drAmount, Remark: `인보이스 수정 (${_allTxnItems.length}건, ${fmtDate(from)}~${fmtDate(to)})`}, _user:getAdminUser()})
+            }).then(r=>r.json()).then(j=>{
+              if(j.ok) { console.log('[Invoice→Balance] DR 금액 업데이트:', invNum, drAmount); existingTxn.DR = drAmount; }
+            }).catch(e=>console.warn('[Invoice→Balance] DR update error:', e));
+          } else {
+            // rowIndex 없으면 삭제 후 재등록
+            const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: from, FinishDate: to, DueDate: dueDateStr };
+            const drTxn = { ...baseTxn, Type: 'invoice', DR: drAmount, CR: 0,
+              Remark: `인보이스 수정 (${_allTxnItems.length}건, ${fmtDate(from)}~${fmtDate(to)})` };
+            fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+              body: JSON.stringify({action:'add_agency_txn', data:drTxn, _user:getAdminUser()})
+            }).then(r=>r.json()).then(j=>{
+              if(j.ok) console.log('[Invoice→Balance] DR(invoice) 재등록:', invNum, drAmount);
+            }).catch(e=>console.warn('[Invoice→Balance] DR re-add error:', e));
+          }
+          _balLoaded = false;
+        }
       }
     } catch(e) { console.warn('[Invoice→Balance] 거래 등록 오류:', e); }
 
