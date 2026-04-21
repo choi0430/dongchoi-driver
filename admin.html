@@ -8391,7 +8391,19 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
     }
   }
 
-  const subject = `Tax Invoice ${invNumber} — ${agency} (${fd(actualFrom)} – ${fd(actualTo)})`;
+  // ★ 투어코드 추출 (재발송)
+  let _resendTourCodes = [];
+  if (savedInv) {
+    // fallback: Items/ManualItems에서 직접 추출
+    try {
+      const _fi = savedInv.Items ? JSON.parse(savedInv.Items) : [];
+      const _fm = savedInv.ManualItems ? JSON.parse(savedInv.ManualItems) : [];
+      const _allTC2 = [..._fi, ..._fm].map(i => (i.tourcode||i.tourCode||'').trim()).filter(Boolean);
+      if (_allTC2.length) _resendTourCodes = [...new Set(_allTC2)];
+    } catch(e) {}
+  }
+  const _rsTcStr = _resendTourCodes.length ? ' [' + _resendTourCodes.join(', ') + ']' : '';
+  const subject = `Tax Invoice ${invNumber} — ${agency} (${fd(actualFrom)} – ${fd(actualTo)})${_rsTcStr}`;
   const body =
     `Dear ${agency},\n\n` +
     `Please find attached Tax Invoice ${invNumber} for services provided during ${fd(actualFrom)} – ${fd(actualTo)}.\n\n` +
@@ -9366,7 +9378,10 @@ async function emailInvoice() {
   const actualFrom = isoDates.length > 0 ? isoDates[0] : from;
   const actualTo   = isoDates.length > 0 ? isoDates[isoDates.length - 1] : to;
 
-  const subject = `Tax Invoice ${invNum} — ${agency} (${fd(actualFrom)} – ${fd(actualTo)})`;
+  // ★ 투어코드 추출
+  const _tourCodes = [...new Set(rows.map(r=>(r.Tour_Code||'').trim()).filter(Boolean))];
+  const _tcStr = _tourCodes.length ? ' [' + _tourCodes.join(', ') + ']' : '';
+  const subject = `Tax Invoice ${invNum} — ${agency} (${fd(actualFrom)} – ${fd(actualTo)})${_tcStr}`;
   const body =
     `Dear ${agency},\n\n` +
     `Please find attached Tax Invoice ${invNum} for services provided during ${fd(actualFrom)} – ${fd(actualTo)}.\n\n` +
