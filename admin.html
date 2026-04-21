@@ -1747,6 +1747,7 @@ const DB = {
   C:  [],
   G:  [],
   H:  [],
+  R:  [],
   PC: {},
   PD: {},
   PS: {},
@@ -4530,6 +4531,13 @@ async function initSubInvoice(){
   document.getElementById('sub-inv-to').value = toLocalISO(now);
   // 항목 초기화
   if(!document.getElementById('sub-inv-items').children.length) addSubInvRow();
+  // 리포트 데이터 로드 (투어코드 검색용)
+  if(!(DB.R||[]).length){
+    try{
+      await ensureReportsCache();
+      if(_reportsCache) DB.R = _reportsCache;
+    }catch(e){ console.warn('Reports load for SUB invoice failed', e); }
+  }
   // 인보이스 캐시 로드 후 이력 렌더
   if(!_invHistoryCache){
     try{
@@ -4576,13 +4584,15 @@ function addSubInvRow(){
 }
 
 /* ── 투어코드 검색 → 리포트 자동 불러오기 ── */
-function _searchByTourCode(){
+async function _searchByTourCode(){
   const q = (document.getElementById('sub-inv-tc-search')?.value||'').trim().toUpperCase();
   if(!q){ toast('투어코드를 입력하세요','er'); return; }
-  const reports = DB.R||[];
+  let reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
   if(!reports.length){
-    toast('리포트 데이터(DB.R)가 아직 로드되지 않았습니다. 리포트 탭을 먼저 열어주세요.','er');
-    return;
+    toast('리포트 데이터 로딩 중...','in');
+    try{ await ensureReportsCache(); if(_reportsCache){DB.R=_reportsCache;} }catch(e){}
+    reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
+    if(!reports.length){ toast('리포트 데이터를 불러올 수 없습니다.','er'); return; }
   }
   const from = document.getElementById('sub-inv-from')?.value||'';
   const to   = document.getElementById('sub-inv-to')?.value||'';
@@ -4599,11 +4609,18 @@ function _searchByTourCode(){
   _renderSearchResults(matches, q);
 }
 
-function _loadAllByDateRange(){
+async function _loadAllByDateRange(){
   const from = document.getElementById('sub-inv-from')?.value||'';
   const to   = document.getElementById('sub-inv-to')?.value||'';
   if(!from && !to){ toast('기간을 먼저 설정하세요','er'); return; }
-  const matches = (DB.R||[]).filter(r=>{
+  let reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
+  if(!reports.length){
+    toast('리포트 데이터 로딩 중...','in');
+    try{ await ensureReportsCache(); if(_reportsCache){DB.R=_reportsCache;} }catch(e){}
+    reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
+    if(!reports.length){ toast('리포트 데이터를 불러올 수 없습니다.','er'); return; }
+  }
+  const matches = reports.filter(r=>{
     const d = (r.Date||'').slice(0,10);
     if(from && d < from) return false;
     if(to   && d > to)   return false;
