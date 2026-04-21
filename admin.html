@@ -4016,16 +4016,19 @@ function deleteLedgerEntry(idx){
 // ═══════════════════════════════════════════════════════════════════
 // Generic Modal Utility
 // ═══════════════════════════════════════════════════════════════════
-function openGenModal(html){
+function openGenModal(html, opts){
   closeGenModal();
+  const o = opts||{};
   const overlay = document.createElement('div');
   overlay.id='gen-modal-overlay';
   overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
   const box = document.createElement('div');
-  box.style.cssText='background:var(--bg,#fff);border-radius:14px;max-width:500px;width:90%;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);';
+  box.style.cssText='background:var(--bg,#fff);border-radius:14px;max-width:'+(o.maxWidth||'500px')+';width:90%;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);';
   box.innerHTML=html;
   overlay.appendChild(box);
-  overlay.addEventListener('click',e=>{ if(e.target===overlay) closeGenModal(); });
+  if(!o.preventBackdropClose){
+    overlay.addEventListener('click',e=>{ if(e.target===overlay) closeGenModal(); });
+  }
   document.body.appendChild(overlay);
 }
 function closeGenModal(){ document.getElementById('gen-modal-overlay')?.remove(); }
@@ -5092,7 +5095,7 @@ function _showSubInvDetail(invNum, editMode){
     ${editBtnHtml}
   </div>`;
 
-  openGenModal(html);
+  openGenModal(html, isEdit ? {preventBackdropClose:true, maxWidth:'700px'} : {});
 }
 
 function _delSubInvEditRow(idx){
