@@ -7432,7 +7432,9 @@ function renderInvPreview(rows, agency, from, to) {
         Object.keys(tours).sort().forEach(tc => {
           const trows = tours[tc];
           const tTotal = trows.reduce((s,{r})=>s+calcInvRow(r).total,0);
-          if(trows.length>0) groupHeaders[trows[0].ri] = `<tr style="background:#f0fdf4;"><td colspan="6" style="padding:8px 6px;font-weight:800;color:#166534;font-size:11px;letter-spacing:.5px;">🗺 ${escH(tc)} · ${trows.length}건 · $${tTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>`;
+          const guides = [...new Set(trows.map(({r})=>(r.Guide||'').trim()).filter(Boolean))];
+          const guideStr = guides.length ? ' · 👤 '+guides.map(g=>escH(g)).join(', ') : '';
+          if(trows.length>0) groupHeaders[trows[0].ri] = `<tr style="background:#f0fdf4;"><td colspan="6" style="padding:8px 6px;font-weight:800;color:#166534;font-size:11px;letter-spacing:.5px;">🗺 ${escH(tc)}${guideStr} · ${trows.length}건 · $${tTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>`;
           sorted.push(...trows);
         });
         orderedRows = sorted;
@@ -8769,7 +8771,8 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
   const groupLabel = {date:'날짜순',week:'주별',tour:'투어코드별'}[_invGroupMode];
 
   let _prevRowDate = null; // 날짜 구분선용
-  function _makeTableRow(r) {
+  let _tourGroupGuide = null; // 투어그룹 모드 시 현재 가이드 추적
+  function _makeTableRow(r, opts={}) {
     const c   = calcInvRow(r);
     const ri  = rows.indexOf(r);
     const rk  = _invRowKey(r, ri >= 0 ? ri : 0);
@@ -8804,6 +8807,23 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     const displayTourCode = r.Tour_Code || r.Attraction || '-';
     const routeRow = routeStr ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#0369a1;font-size:10px;padding:0 10px 4px;">📍 '+routeStr+'</td></tr>' : '';
     const extrasRow = extras ? '<tr class="sub-row"><td></td><td colspan="5" style="color:#64748b;font-size:11px;">'+extras+'</td></tr>' : '';
+    // ★ 투어코드 그룹 모드: 투어코드/가이드를 그룹 헤더에 표시하므로 행에서는 생략
+    // 단, 가이드가 중간에 바뀌면 해당 행에 표시
+    let tcCellContent = escH(displayTourCode);
+    let guideCellContent = r.Guide ? '<div style="font-size:10px;color:#059669;margin-top:2px;">👤 '+escH(r.Guide)+'</div>' : '';
+    if (opts.tourGroupMode) {
+      tcCellContent = ''; // 투어코드는 헤더에 이미 표시됨
+      const curGuide = (r.Guide||'').trim();
+      if (_tourGroupGuide === null) {
+        _tourGroupGuide = curGuide; // 첫 행: 헤더에 표시되므로 생략
+        guideCellContent = '';
+      } else if (curGuide !== _tourGroupGuide) {
+        _tourGroupGuide = curGuide; // 가이드 변경: 표시
+        guideCellContent = curGuide ? '<div style="font-size:10px;color:#b45309;margin-top:2px;">🔄 👤 '+escH(curGuide)+'</div>' : '';
+      } else {
+        guideCellContent = ''; // 동일 가이드: 생략
+      }
+    }
     // ★ 날짜 변경 시 구분선 추가
     const curDate = r._iso || r.Date || '';
     const dateSep = (_prevRowDate && _prevRowDate !== curDate) ? ' style="border-top:2px solid #cbd5e1;"' : '';
@@ -8813,7 +8833,7 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
       '<td>'+escH(r.Attraction||'-')+seatsStr+baseLabel+'</td>' +
       '<td>'+escH(r.Rego||'-')+'</td>' +
       '<td style="color:#64748b;white-space:nowrap;font-size:11px;">'+timeStr+'</td>' +
-      '<td style="color:#64748b;white-space:nowrap">'+escH(displayTourCode)+(r.Guide ? '<div style="font-size:10px;color:#059669;margin-top:2px;">👤 '+escH(r.Guide)+'</div>' : '')+'</td>' +
+      '<td style="color:#64748b;white-space:nowrap">'+tcCellContent+guideCellContent+'</td>' +
       '<td style="font-weight:700">$'+oTotal.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2})+'</td>' +
       '</tr>' + routeRow + extrasRow;
   }
@@ -8833,7 +8853,11 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
       rows.forEach(r => { const key = r.Tour_Code||r.Attraction||'Other'; if(!tours[key]) tours[key]=[]; tours[key].push(r); });
       return Object.keys(tours).sort().map(tc => {
         const trows = tours[tc]; const tTotal = trows.reduce((s,r)=>s+calcInvRow(r).total,0);
-        return `<tr style="background:#f0fdf4;"><td colspan="6" style="font-weight:800;color:#166534;font-size:11px;padding:8px 12px;letter-spacing:.5px;">🗺 TOUR CODE: ${escH(tc)} &nbsp;·&nbsp; ${trows.length}건 &nbsp;·&nbsp; $${tTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>` + trows.map(r => _makeTableRow(r)).join('');
+        // 가이드 목록 추출 (중복 제거)
+        const guides = [...new Set(trows.map(r=>(r.Guide||'').trim()).filter(Boolean))];
+        const guideStr = guides.length ? ' &nbsp;·&nbsp; 👤 '+guides.map(g=>escH(g)).join(', ') : '';
+        _tourGroupGuide = null; // 그룹별 가이드 추적 리셋
+        return `<tr style="background:#f0fdf4;"><td colspan="6" style="font-weight:800;color:#166534;font-size:11px;padding:8px 12px;letter-spacing:.5px;">🗺 TOUR CODE: ${escH(tc)}${guideStr} &nbsp;·&nbsp; ${trows.length}건 &nbsp;·&nbsp; $${tTotal.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>` + trows.map(r => _makeTableRow(r, {tourGroupMode:true})).join('');
       }).join('');
     } else {
       return rows.map(r => _makeTableRow(r)).join('');
