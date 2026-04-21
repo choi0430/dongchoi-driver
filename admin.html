@@ -1453,7 +1453,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <!-- 합계 & 버튼 -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:10px;background:var(--sf2);border-radius:10px;">
         <div>
-          <div style="font-size:11px;color:var(--t3);">합계 (GST 별도)</div>
+          <div style="font-size:11px;color:var(--t3);">합계 (GST 포함)</div>
           <div style="font-size:22px;font-weight:800;color:var(--ac);" id="sub-inv-total">$0</div>
         </div>
         <div style="display:flex;gap:6px;">
@@ -4840,42 +4840,45 @@ function calcSubInvTotal(){
 }
 
 function buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTotal, gst){
-  // 기존 인보이스 템플릿과 동일 (Dong Choi 명의)
+  // SUB 인보이스: SUB 업체가 Dong Choi에 청구하는 방향
   const cp = window._companyProfile || {};
-  const companyName = cp.CompanyName || 'Dong Choi Pty Ltd';
-  const abn = cp.ABN || '';
-  const address = cp.Address || '';
-  const phone = cp.Phone || '';
-  const email = cp.Email || '';
+  const billTo = cp.CompanyName || 'Dong Choi Pty Ltd';
+  const billToAbn = cp.ABN || '';
   const exGst = grandTotal - gst;
+
+  // 기간 자동 인식: 항목 날짜 중 첫날~마지막날
+  const itemDates = items.map(i=>(i.date||'').slice(0,10)).filter(Boolean).sort();
+  const autoFrom = itemDates.length ? itemDates[0] : from;
+  const autoTo = itemDates.length ? itemDates[itemDates.length-1] : to;
+  const fmtFrom = _fmtSubInvDate(autoFrom);
+  const fmtTo = _fmtSubInvDate(autoTo);
+
   const rowsHtml = items.map(i=>`<tr>
-    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.date||''}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${_fmtSubInvDate(i.date)||''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.rego||''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.tourCode||''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.tour||''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:center;">${i.seats||''}</td>
-    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${i.amount||0}</td>
-    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${i.ot||0}${i.otTime?' <span style="font-size:9px;color:#888;">('+i.otTime+')</span>':''}</td>
-    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${i.etc||0}${i.etcLabel?' ('+i.etcLabel+')':''}</td>
-    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;font-weight:700;">$${i.total||0}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${Number(i.amount||0).toLocaleString()}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">${(i.ot||0)>0?'$'+Number(i.ot).toLocaleString():''}${i.otTime?' <span style="font-size:9px;color:#888;">('+i.otTime+')</span>':''}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">${(i.etc||0)>0?'$'+Number(i.etc).toLocaleString():''}${i.etcLabel?' ('+i.etcLabel+')':''}</td>
+    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;font-weight:700;">$${Number(i.total||0).toLocaleString()}</td>
   </tr>`).join('');
   return `<div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
-      <div><div style="font-size:20px;font-weight:700;">${companyName}</div>
-        <div style="font-size:11px;color:#666;">${abn?'ABN: '+abn:''}</div>
-        <div style="font-size:11px;color:#666;">${address}</div>
-        <div style="font-size:11px;color:#666;">${phone} | ${email}</div>
+      <div><div style="font-size:20px;font-weight:700;">${subName}</div>
+        <div style="font-size:11px;color:#666;">Agency: ${agency||''}</div>
       </div>
       <div style="text-align:right;">
         <div style="font-size:22px;font-weight:700;color:#4f46e5;">TAX INVOICE</div>
         <div style="font-size:13px;font-weight:700;">${invNum}</div>
         <div style="font-size:11px;color:#666;">Date: ${new Date().toLocaleDateString('en-AU')}</div>
-        <div style="font-size:11px;color:#666;">Period: ${from} — ${to}</div>
+        <div style="font-size:11px;color:#666;">Period: ${fmtFrom} — ${fmtTo}</div>
       </div>
     </div>
     <div style="margin-bottom:16px;padding:10px;background:#f8f9fa;border-radius:6px;">
-      <div style="font-size:12px;font-weight:700;">Bill To: ${agency}</div>
-      <div style="font-size:10px;color:#888;">Source: SUB — ${subName}</div>
+      <div style="font-size:12px;font-weight:700;">Bill To: ${billTo}</div>
+      <div style="font-size:10px;color:#888;">${billToAbn?'ABN: '+billToAbn:''}</div>
     </div>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
       <thead><tr style="background:#4f46e5;color:white;">
@@ -4897,7 +4900,7 @@ function buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTota
       <div style="font-size:18px;font-weight:800;color:#4f46e5;margin-top:4px;">Total: $${grandTotal.toFixed(2)}</div>
     </div>
     <div style="margin-top:20px;padding:10px;background:#f0f0f0;border-radius:6px;font-size:10px;color:#888;">
-      ${cp.BankName?'Bank: '+cp.BankName+' | BSB: '+(cp.BSB||'')+' | Acc: '+(cp.AccountNumber||''):''}
+      Payment to: ${subName}
     </div>
   </div>`;
 }
@@ -4910,9 +4913,10 @@ function previewSubInvoice(){
   if(!subName){ toast('SUB 업체를 선택하세요','er'); return; }
   const items = getSubInvItems().filter(i=>i.total>0);
   if(!items.length){ toast('금액이 입력된 항목이 없습니다','er'); return; }
-  const exGst = items.reduce((s,i)=>s+i.total,0);
-  const gst = Math.round(exGst*0.1*100)/100;
-  const grandTotal = exGst + gst;
+  // GST 포함 금액: grandTotal = sum, exGst = grandTotal/1.1
+  const grandTotal = items.reduce((s,i)=>s+i.total,0);
+  const exGst = Math.round(grandTotal/1.1*100)/100;
+  const gst = Math.round((grandTotal - exGst)*100)/100;
   const invNum = 'SUB-PREVIEW';
   const html = buildSubInvoiceHtml(invNum, agency||'(여행사 미지정)', from, to, items, subName, grandTotal, gst);
   if(typeof _showDocModal === 'function'){
@@ -4949,19 +4953,25 @@ async function generateSubInvoice(){
     }
   }catch(accErr){ console.warn('Accreditation check skipped:', accErr); }
 
-  const exGst = items.reduce((s,i)=>s+i.total,0);
-  const gst = Math.round(exGst*0.1*100)/100;
-  const grandTotal = exGst + gst;
-  // 인보이스 번호 생성
-  const ym = from ? from.slice(0,7).replace('-','') : new Date().toISOString().slice(0,7).replace('-','');
-  const existing = (_invHistoryCache||[]).filter(inv=>(inv.InvNumber||'').startsWith('INV-'+ym));
-  const nextNum = String(existing.length+1).padStart(3,'0');
-  const invNum = 'INV-'+ym+'-'+nextNum;
+  // GST 포함 금액: grandTotal = sum, exGst = grandTotal/1.1
+  const grandTotal = items.reduce((s,i)=>s+i.total,0);
+  const exGst = Math.round(grandTotal/1.1*100)/100;
+  const gst = Math.round((grandTotal - exGst)*100)/100;
+
+  // 기간 자동 인식: 항목 날짜 중 첫날~마지막날
+  const itemDates = items.map(i=>(i.date||'').slice(0,10)).filter(Boolean).sort();
+  const autoFrom = itemDates.length ? itemDates[0] : from;
+  const autoTo = itemDates.length ? itemDates[itemDates.length-1] : to;
+
+  // SUB 인보이스 번호 생성 (D1, D2, D3... 여행사 INV-와 구분)
+  const existingSub = (_invHistoryCache||[]).filter(inv=>(inv.InvNumber||'').match(/^D\d+$/));
+  const maxD = existingSub.reduce((m,inv)=>{ const n=parseInt((inv.InvNumber||'').replace('D',''),10)||0; return n>m?n:m; }, 0);
+  const invNum = 'D'+(maxD+1);
   const agencyLabel = agency || subName;
-  const html = buildSubInvoiceHtml(invNum, agencyLabel, from, to, items, subName, grandTotal, gst);
+  const html = buildSubInvoiceHtml(invNum, agencyLabel, autoFrom, autoTo, items, subName, grandTotal, gst);
   // Invoices 시트에 저장
   const invData = {
-    InvNumber: invNum, Agency: agencyLabel, PeriodFrom: from, PeriodTo: to,
+    InvNumber: invNum, Agency: agencyLabel, PeriodFrom: autoFrom, PeriodTo: autoTo,
     GrandTotal: grandTotal.toFixed(2), GST: gst.toFixed(2), ExGST: exGst.toFixed(2),
     Status: 'Issued', IssuedDate: new Date().toLocaleDateString('en-AU'),
     Items: JSON.stringify(items), ManualItems:'', Deductions:'',
