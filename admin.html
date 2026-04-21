@@ -4579,9 +4579,14 @@ function addSubInvRow(){
 function _searchByTourCode(){
   const q = (document.getElementById('sub-inv-tc-search')?.value||'').trim().toUpperCase();
   if(!q){ toast('투어코드를 입력하세요','er'); return; }
+  const reports = DB.R||[];
+  if(!reports.length){
+    toast('리포트 데이터(DB.R)가 아직 로드되지 않았습니다. 리포트 탭을 먼저 열어주세요.','er');
+    return;
+  }
   const from = document.getElementById('sub-inv-from')?.value||'';
   const to   = document.getElementById('sub-inv-to')?.value||'';
-  const matches = (DB.R||[]).filter(r=>{
+  const matches = reports.filter(r=>{
     const tc = (r.Tour_Code||'').trim().toUpperCase();
     if(!tc.includes(q)) return false;
     if(from||to){
@@ -4611,7 +4616,9 @@ function _renderSearchResults(matches, label){
   const box = document.getElementById('sub-inv-search-result');
   if(!matches.length){
     box.style.display='block';
-    box.innerHTML='<div style="padding:10px;font-size:11px;color:var(--t3);">검색 결과 없음 ('+label+')</div>';
+    const samples = [...new Set((DB.R||[]).map(r=>(r.Tour_Code||'').trim()).filter(Boolean))].slice(0,10);
+    const sampleHtml = samples.length ? '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB 투어코드 예시: '+samples.join(', ')+'</div>' : '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB.R 총 '+((DB.R||[]).length)+'건, Tour_Code 있는 건: '+((DB.R||[]).filter(r=>r.Tour_Code).length)+'건</div>';
+    box.innerHTML='<div style="padding:10px;font-size:11px;color:var(--t3);">검색 결과 없음 ('+label+')'+sampleHtml+'</div>';
     return;
   }
   // 날짜순 정렬
