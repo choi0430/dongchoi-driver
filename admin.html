@@ -4415,6 +4415,38 @@ function renderSubDriverPay(){
 // ═══════════════════════════════════════════════════════════════════
 // SUB 인보이스 MODULE (재발행)
 // ═══════════════════════════════════════════════════════════════════
+
+// ─── SUB 업체별 인보이스 번호 접두어 ───
+const _SUB_PREFIX_MAP = {
+  'TRIPLE A COACHES PTY LTD': 'D',
+  'TRIPLE A COACHES': 'D',
+  'HOO KEUN RYU': 'HK',
+};
+function _getSubInvPrefix(subName) {
+  const upper = (subName||'').trim().toUpperCase();
+  for (const [key, prefix] of Object.entries(_SUB_PREFIX_MAP)) {
+    if (upper.includes(key) || key.includes(upper)) return prefix;
+  }
+  // 자동 생성: 이름의 각 단어 첫 글자 (최대 3자)
+  const words = upper.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return words.map(w=>w[0]).join('').slice(0,3);
+  if (words.length === 1) return words[0].slice(0,2);
+  return 'S'; // fallback
+}
+// SUB 인보이스 번호 패턴 판별 (Source 필드 없는 이전 데이터 호환)
+function _isSubInvNumber(invNum) {
+  if (!invNum) return false;
+  // INV-로 시작하면 여행사 인보이스
+  if (/^INV-/i.test(invNum)) return false;
+  // 알려진 SUB 접두어 + 숫자
+  const knownPrefixes = [...new Set(Object.values(_SUB_PREFIX_MAP))];
+  for (const p of knownPrefixes) {
+    if (new RegExp('^' + p + '\\d+$').test(invNum)) return true;
+  }
+  // 알파벳 1~3자 + 숫자 패턴 (자동 생성 접두어)
+  return /^[A-Z]{1,3}\d+$/.test(invNum);
+}
+
 let _subInvRowCount = 0;
 // 코스 & 기타 드롭다운 기본 목록 (사용자 추가 가능)
 let _subInvCourses = ['Blue Mountains','Hunter Valley','City','Airport Transfer','Sending','Port Stephens','Canberra','South Coast','Jervis Bay','Snow Mountains','Illawarra'];
@@ -4963,10 +4995,12 @@ async function generateSubInvoice(){
   const autoFrom = itemDates.length ? itemDates[0] : from;
   const autoTo = itemDates.length ? itemDates[itemDates.length-1] : to;
 
-  // SUB 인보이스 번호 생성 (D1, D2, D3... 여행사 INV-와 구분)
-  const existingSub = (_invHistoryCache||[]).filter(inv=>(inv.InvNumber||'').match(/^D\d+$/));
-  const maxD = existingSub.reduce((m,inv)=>{ const n=parseInt((inv.InvNumber||'').replace('D',''),10)||0; return n>m?n:m; }, 0);
-  const invNum = 'D'+(maxD+1);
+  // SUB 인보이스 번호 생성 — 업체별 접두어 (TRIPLE A→D, Hoo Keun Ryu→HK, 기타→S)
+  const _subPrefix = _getSubInvPrefix(subName);
+  const _prefixRe = new RegExp('^' + _subPrefix + '(\\d+)$');
+  const existingSub = (_invHistoryCache||[]).filter(inv => _prefixRe.test(inv.InvNumber||''));
+  const maxD = existingSub.reduce((m,inv)=>{ const n = parseInt((inv.InvNumber||'').replace(_subPrefix,''),10)||0; return n>m?n:m; }, 0);
+  const invNum = _subPrefix+(maxD+1);
   const agencyLabel = agency || subName;
   const html = buildSubInvoiceHtml(invNum, agencyLabel, autoFrom, autoTo, items, subName, grandTotal, gst);
   // Invoices 시트에 저장
@@ -7206,7 +7240,7 @@ async function loadInvReports() {
 
 // ── SUB 인보이스 항목을 report-row 형식으로 변환 (M_PriceClient로 재계산) ──
 function _subInvItemsToRows(agency, from, to) {
-  const subInvs = (_invHistoryCache||[]).filter(inv => inv.Source==='SUB' || /^D\d+$/.test(inv.InvNumber||''));
+  const subInvs = (_invHistoryCache||[]).filter(inv => inv.Source==='SUB' || _isSubInvNumber(inv.InvNumber||''));
   const result = [];
   subInvs.forEach(inv => {
     let items = [];
@@ -7949,7 +7983,7 @@ function renderInvHistory() {
 
   // 월별 그룹핑 (SUB 인보이스 D시리즈 제외 — 여행사 발행 인보이스만)
   const monthMap = {};
-  _invHistoryCache.filter(inv => !(inv.Source==='SUB' || /^D\d+$/.test(inv.InvNumber||''))).forEach(inv => {
+  _invHistoryCache.filter(inv => !(inv.Source==='SUB' || _isSubInvNumber(inv.InvNumber||''))).forEach(inv => {
     const iso = parseToISO(inv.IssuedDate||inv.PeriodFrom||'');
     const mk = iso && iso.length>=7 ? iso.slice(0,7) : '0000-00';
     if(!monthMap[mk]) monthMap[mk]=[];
