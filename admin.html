@@ -7106,6 +7106,19 @@ async function loadInvReports() {
   const manualRows = _manualItemsToRows(agency, from).filter(r => r._iso >= from && r._iso <= to);
   let rows = [...sheetRows, ...manualRows];
 
+  // ★ SUB 인보이스 항목 병합 (중복 제거 후 추가)
+  const subRows = _subInvItemsToRows(agency, from, to);
+  if (subRows.length) {
+    const existKeys = new Set(rows.map(r => (r._iso||'').slice(0,10)+'|'+String(r.Tour_Code||'').trim().toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase()));
+    const uniqueSub = subRows.filter(r => {
+      const key = (r._iso||'').slice(0,10)+'|'+String(r.Tour_Code||'').trim().toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase();
+      if (existKeys.has(key)) return false;
+      existKeys.add(key);
+      return true;
+    });
+    rows = [...rows, ...uniqueSub];
+  }
+
   // ★ 투어코드 드롭다운 갱신 (필터 적용 전 전체 목록에서)
   const tcSel = document.getElementById('inv-tourcode');
   if(tcSel){
@@ -7128,6 +7141,58 @@ async function loadInvReports() {
   renderInvPreview(rows, agency, from, to);
 }
 
+// ── SUB 인보이스 항목을 report-row 형식으로 변환 (M_PriceClient로 재계산) ──
+function _subInvItemsToRows(agency, from, to) {
+  const subInvs = (_invHistoryCache||[]).filter(inv => inv.Source==='SUB' || /^D\d+$/.test(inv.InvNumber||''));
+  const result = [];
+  subInvs.forEach(inv => {
+    let items = [];
+    try { items = JSON.parse(inv.Items||'[]'); } catch(e) {}
+    items.forEach(it => {
+      const iso = parseToISO(it.date) || (it.date||'').slice(0,10);
+      if (!iso) return;
+      if (from && iso < from) return;
+      if (to && iso > to) return;
+      // seats 매핑: SUB 아이템의 seats 필드 → "21S", "25S", "40S", "50S" 형식
+      let seatVal = String(it.seats||'').trim();
+      if (seatVal && !/S$/i.test(seatVal)) seatVal += 'S';
+      result.push({
+        _iso:            iso,
+        Date:            it.date || '',
+        Rego:            it.rego || '',
+        Attraction:      it.tour || '',
+        Seats:           seatVal || '21S',
+        Tour_Code:       it.tourCode || '',
+        SVC_Charge:      Number(it.amount||0),  // SUB 금액 → fallback용 (요금표 우선)
+        OT:              Number(it.ot||0),
+        Hotel_Surcharge: 0,
+        Dist_Surcharge:  0,
+        Trailer:         0,
+        Toll:            0,
+        Early:           0,
+        Night_Type:      '',
+        Night_DR:        0,
+        Tip:             0,
+        Meal:            0,
+        Etc:             Number(it.etc||0),
+        Etc_Desc:        it.etcLabel || '',
+        Pickup:          '',
+        Dropoff:         '',
+        _timeStart:      '',
+        _timeEnd:        '',
+        Driver:          inv.SubCompany || '(SUB)',
+        Guide:           '',
+        _agency:         agency,
+        Agency:          agency,
+        _source:         'sub',
+        _subInvNum:      inv.InvNumber || '',
+        _subCompany:     inv.SubCompany || '',
+      });
+    });
+  });
+  return result;
+}
+
 // 수동 항목 포함 rows 빌드 (미리보기 갱신용)
 function _buildInvRows(agency, from, to) {
   const agencyLower = agency.toLowerCase();
@@ -7137,6 +7202,15 @@ function _buildInvRows(agency, from, to) {
   });
   const manualRows = _manualItemsToRows(agency, from).filter(r => r._iso >= from && r._iso <= to);
   let rows = [...sheetRows, ...manualRows];
+  // ★ SUB 인보이스 항목 병합 (중복 제거)
+  const subRows = _subInvItemsToRows(agency, from, to);
+  if (subRows.length) {
+    const existKeys = new Set(rows.map(r => (r._iso||'').slice(0,10)+'|'+String(r.Tour_Code||'').trim().toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase()));
+    subRows.forEach(r => {
+      const key = (r._iso||'').slice(0,10)+'|'+String(r.Tour_Code||'').trim().toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase();
+      if (!existKeys.has(key)) { existKeys.add(key); rows.push(r); }
+    });
+  }
   // ★ 투어코드 필터 적용
   const selectedTC = document.getElementById('inv-tourcode')?.value;
   if(selectedTC) rows = rows.filter(r => String(r.Tour_Code||'').trim() === selectedTC);
@@ -7379,6 +7453,7 @@ function renderInvPreview(rows, agency, from, to) {
         ? `<span style="font-size:9px;background:#dcfce7;color:#166534;border-radius:4px;padding:1px 5px;">표</span>`
         : `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;">SVC</span>`;
       const manualBadge = r._manual ? `<span style="font-size:9px;background:#e0e7ff;color:#3730a3;border-radius:4px;padding:1px 5px;">수동</span>` : '';
+      const subBadge = r._source==='sub' ? `<span style="font-size:9px;background:#fce7f3;color:#9d174d;border-radius:4px;padding:1px 5px;">SUB</span>` : '';
       const ovBadge = isOverridden ? `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;">수정됨</span>` : '';
       return header + `<tr style="border-bottom:1px solid var(--bd);${exclStyle}" data-inv-row="${ri}">
         <td style="padding:6px;white-space:nowrap;vertical-align:top;">
@@ -7387,8 +7462,8 @@ function renderInvPreview(rows, agency, from, to) {
         </td>
         <td style="padding:6px;vertical-align:top;">
           <div style="font-weight:600;">${escH(r.Attraction||'—')}</div>
-          <div style="font-size:10px;color:var(--t3);">${escH(r.Rego||'—')}${r.Seats?' ('+escH(r.Seats)+')':''} ${srcBadge} ${manualBadge} ${ovBadge}</div>
-          <div style="font-size:10px;color:var(--t3);">🚌 ${escH(r.Driver||'—')}${r.Guide?' &nbsp;·&nbsp; 🧭 '+escH(r.Guide):''}${r.Tour_Code?' &nbsp;·&nbsp; '+escH(r.Tour_Code):''}</div>
+          <div style="font-size:10px;color:var(--t3);">${escH(r.Rego||'—')}${r.Seats?' ('+escH(r.Seats)+')':''} ${srcBadge} ${manualBadge} ${subBadge} ${ovBadge}</div>
+          <div style="font-size:10px;color:var(--t3);">🚌 ${escH(r.Driver||'—')}${r.Guide?' &nbsp;·&nbsp; 🧭 '+escH(r.Guide):''}${r.Tour_Code?' &nbsp;·&nbsp; '+escH(r.Tour_Code):''}${r._subInvNum?' &nbsp;·&nbsp; <span style="color:#9d174d;">📋'+escH(r._subInvNum)+'</span>':''}</div>
           ${r._timeStart||r._timeEnd ? `<div style="font-size:10px;color:var(--t3);">⏱ ${r._timeStart||''}${r._timeEnd?' ~ '+r._timeEnd:''}</div>` : ''}
           ${r.Pickup||r.Dropoff ? `<div style="font-size:10px;color:var(--ac);margin-top:1px;">📍 ${escH(r.Pickup||'—')} → ${escH(r.Dropoff||'—')}</div>` : ''}
         </td>
