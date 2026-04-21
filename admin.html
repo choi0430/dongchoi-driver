@@ -5025,7 +5025,7 @@ function _showSubInvDetail(invNum, editMode){
   const total = Number(inv.GrandTotal||0);
   const editBtnHtml = isEdit
     ? `<div style="display:flex;gap:6px;margin-top:10px;">
-        <button class="btn bac" onclick="alert('저장 버튼 클릭됨'); try { _saveSubInvEdit(); } catch(e){ alert('함수 에러: '+e.message); }" style="background:var(--gn);color:#fff;flex:1;">💾 저장</button>
+        <button class="btn bac" onclick="_saveSubInvEdit().catch(e=>showToast('❌ 저장 오류: '+e.message,'error'))" style="background:var(--gn);color:#fff;flex:1;">💾 저장</button>
         <button class="btn bac" onclick="closeGenModal();_showSubInvDetail('${invNum.replace(/'/g,"\\'")}');" style="flex:1;">취소</button>
        </div>`
     : `<div style="margin-top:10px;text-align:center;">
@@ -5093,16 +5093,14 @@ function _recalcSubInvEdit(){
 }
 
 async function _saveSubInvEdit(){
-  console.log('[_saveSubInvEdit] called, editData=', _subInvEditData);
   try {
     if(!_subInvEditData){
-      showToast('⚠️ 편집 데이터 없음 (모달 재열기)','error');
-      console.warn('[_saveSubInvEdit] _subInvEditData is null');
+      alert('편집 데이터가 없습니다. 수정 모드를 다시 열어주세요.');
       return;
     }
     const {invNum, inv, items} = _subInvEditData;
     if(!invNum){
-      showToast('⚠️ 인보이스 번호 없음','error');
+      alert('인보이스 번호가 없습니다.');
       return;
     }
     // 각 행에서 수정된 값 수집
@@ -5145,14 +5143,8 @@ async function _saveSubInvEdit(){
       },
       _user: (typeof ST!=='undefined' && ST.user)||'admin'
     };
-    console.log('[_saveSubInvEdit] sending body:', body);
     showToast('💾 저장 중...','info');
-    const res = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body)});
-    const txt = await res.text();
-    console.log('[_saveSubInvEdit] raw response:', txt);
-    let json;
-    try { json = JSON.parse(txt); }
-    catch(pe){ showToast('❌ 응답 파싱 실패: '+txt.slice(0,80),'error'); return; }
+    const json = await gasPost(body);
     if(json.ok){
       showToast('✅ 인보이스 수정 완료','success');
       _invHistoryCache = null;
@@ -5160,16 +5152,16 @@ async function _saveSubInvEdit(){
         const r2 = await fetch(APPS_SCRIPT_URL+'?action=get_invoices');
         const j2 = await r2.json();
         if(j2.ok) _invHistoryCache = (j2.rows||[]).reverse();
-      } catch(fe){ console.warn('reload failed',fe); }
+      } catch(fe){}
       if(typeof closeGenModal==='function') closeGenModal();
       if(typeof renderSubInvHistory==='function') renderSubInvHistory();
       _subInvEditData = null;
     } else {
-      showToast('❌ 저장 실패: '+(json.error||'unknown'),'error');
+      alert('저장 실패: '+(json.error||'알 수 없는 오류'));
     }
   } catch(e){
     console.error('[_saveSubInvEdit] error:', e);
-    showToast('❌ 오류: '+(e.message||e),'error');
+    alert('저장 오류: '+e.message);
   }
 }
 window._saveSubInvEdit = _saveSubInvEdit;
