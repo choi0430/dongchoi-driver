@@ -6459,6 +6459,69 @@ function deleteInvItem(id) {
   toast('항목 삭제됨', 'ok');
 }
 
+// ─── 리포트/SUB 항목을 수동 항목으로 변환하여 편집 ───
+function _editInvRowAsManual(ri) {
+  const agency = document.getElementById('inv-agency')?.value;
+  const from   = document.getElementById('inv-from')?.value;
+  const to     = document.getElementById('inv-to')?.value;
+  if (!agency || !from || !to) return;
+  let rows = _buildInvRows(agency, from, to).sort((a, b) => (a._iso||'').localeCompare(b._iso||''));
+  const r = rows[ri];
+  if (!r) { toast('항목을 찾을 수 없습니다', 'er'); return; }
+
+  // 수동 항목 모달 열기 (빈 id = 신규 추가)
+  _invItemEditId = null;
+  const modal = document.getElementById('inv-item-modal');
+  const title = document.getElementById('inv-modal-title');
+  modal.style.display = 'flex';
+  title.textContent = '✏️ 항목 편집 (복사)';
+
+  // 에러 초기화
+  const errEl = document.getElementById('iim-err');
+  if (errEl) { errEl.style.display='none'; errEl.textContent=''; }
+  _populateIimDropdowns();
+
+  // 기존 데이터로 필드 채우기
+  const c = calcInvRow(r);
+  document.getElementById('iim-date').value     = r._iso || '';
+  const tourSel = document.getElementById('iim-tour');
+  const tourCustom = document.getElementById('iim-tour-custom');
+  const tourVal = r.Attraction || '';
+  if ([...tourSel.options].some(o => o.value === tourVal)) {
+    tourSel.value = tourVal; tourCustom.style.display = 'none';
+  } else {
+    tourSel.value = '__custom__'; tourCustom.style.display = ''; tourCustom.value = tourVal;
+  }
+  document.getElementById('iim-start').value    = r._timeStart || '';
+  document.getElementById('iim-end').value      = r._timeEnd || '';
+  document.getElementById('iim-seats').value    = r.Seats || '';
+  document.getElementById('iim-tourcode').value = r.Tour_Code || '';
+  document.getElementById('iim-driver').value   = r.Driver || '';
+  document.getElementById('iim-guide').value    = r.Guide || '';
+  document.getElementById('iim-rego').value     = r.Rego || '';
+  document.getElementById('iim-pickup').value   = r.Pickup || '';
+  document.getElementById('iim-dropoff').value  = r.Dropoff || '';
+  document.getElementById('iim-amount').value   = c.baseRate || '';
+  document.getElementById('iim-ot').value       = c.ot || '';
+  document.getElementById('iim-hotel').value    = c.hotel || '';
+  document.getElementById('iim-trailer').value  = c.trailerVal || '';
+  document.getElementById('iim-toll').value     = c.tollVal || '';
+  document.getElementById('iim-dist').value     = c.dist || '';
+  document.getElementById('iim-note').value     = '';
+
+  // 원본 행을 자동 제외 (수동 복사본이 대체)
+  const rowKey = _invRowKey(r, ri);
+  _invExcludes[rowKey] = true;
+}
+
+// ─── 리포트/SUB 항목 삭제 (제외 처리) ───
+function _deleteInvRow(rowKey, agency, from, to) {
+  if (!confirm('이 항목을 제외하시겠습니까?')) return;
+  _invExcludes[rowKey] = true;
+  _refreshInvPreview();
+  toast('항목 제외됨', 'ok');
+}
+
 function renderInvManualList() {
   const el  = document.getElementById('inv-manual-list');
   const inlineEl = document.getElementById('inv-manual-inline');
@@ -7460,7 +7523,7 @@ function renderInvPreview(rows, agency, from, to) {
       return header + `<tr style="border-bottom:1px solid var(--bd);${exclStyle}" data-inv-row="${ri}">
         <td style="padding:6px;white-space:nowrap;vertical-align:top;">
           ${fmtDate(r._iso)}
-          ${_invEditMode ? `<div style="margin-top:3px;display:flex;gap:2px;flex-wrap:wrap;"><button onclick="_toggleInvExclude('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid ${excl?'#86efac':'#fecaca'};background:${excl?'#f0fdf4':'#fef2f2'};color:${excl?'#166534':'#ef4444'};cursor:pointer;">${excl?'포함':'제외'}</button>${r._manual && r._manualId ? `<button onclick="openInvItemModal('${escH(r._manualId)}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;">✏️</button><button onclick="deleteInvItem('${escH(r._manualId)}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;">🗑</button>` : ''}</div>` : ''}
+          ${_invEditMode ? `<div style="margin-top:3px;display:flex;gap:2px;flex-wrap:wrap;"><button onclick="_toggleInvExclude('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid ${excl?'#86efac':'#fecaca'};background:${excl?'#f0fdf4':'#fef2f2'};color:${excl?'#166534':'#ef4444'};cursor:pointer;">${excl?'포함':'제외'}</button>${r._manual && r._manualId ? `<button onclick="openInvItemModal('${escH(r._manualId)}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;">✏️</button><button onclick="deleteInvItem('${escH(r._manualId)}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;">🗑</button>` : `<button onclick="_editInvRowAsManual(${ri})" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;">✏️</button><button onclick="_deleteInvRow('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;">🗑</button>`}</div>` : ''}
         </td>
         <td style="padding:6px;vertical-align:top;">
           <div style="font-weight:600;">${escH(r.Attraction||'—')}</div>
