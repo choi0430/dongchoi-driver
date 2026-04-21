@@ -5288,6 +5288,9 @@ async function syncBalanceData(force){
     // ★ Ledger → SUB_Txn 자동 동기화 (외주 + Dong Choi 차량)
     await _syncLedgerToSubTxn();
 
+    // ★ SUB 인보이스(D1,D2...) → SUB_Txn 자동 동기화
+    await _syncSubInvoicesToSubTxn();
+
     // Driver wage: derive from Daily_Report DR_Cost + wages
     _buildWageTxns();
     _balLoaded = true;
@@ -5374,6 +5377,78 @@ async function _syncLedgerToSubTxn(){
     }
   } catch(e) {
     console.warn('[SUB Sync] Ledger→SUB_Txn 동기화 오류:', e);
+  }
+}
+
+// ★ SUB 인보이스(D1,D2...) → SUB_Txn 자동 동기화
+async function _syncSubInvoicesToSubTxn(){
+  try {
+    // 인보이스 캐시 로드
+    let invs = _invHistoryCache;
+    if(!invs){
+      try {
+        const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+        const json = await res.json();
+        if(json.ok) invs = json.rows||[];
+      } catch(e){ console.warn('Invoice load for sync failed', e); return; }
+    }
+    if(!invs || !invs.length) return;
+
+    // SUB 인보이스만 필터 (InvNumber가 D로 시작)
+    const subInvs = invs.filter(inv => (inv.InvNumber||'').match(/^D\d/));
+    if(!subInvs.length) return;
+
+    // 기존 SUB_Txn에서 인보이스 자동 등록분 식별 (Description에 "SUBINV:" 접두사)
+    const existingKeys = new Set(
+      _balSubTxns.filter(t => String(t.Description||'').startsWith('SUBINV:'))
+        .map(t => String(t.Description||''))
+    );
+
+    const newTxns = [];
+    subInvs.forEach(inv => {
+      const invNum = inv.InvNumber||'';
+      const subCompany = (inv.SubCompany||'').trim();
+      if(!subCompany) return;
+      const key = 'SUBINV:' + invNum;
+      if(existingKeys.has(key)) return; // 이미 등록됨
+
+      const total = Number(inv.GrandTotal||0);
+      if(total <= 0) return;
+
+      const issuedDate = (inv.IssuedDate||'').slice(0,10);
+      const periodFrom = _fmtSubInvDate(inv.PeriodFrom||'');
+      const periodTo = _fmtSubInvDate(inv.PeriodTo||'');
+
+      newTxns.push({
+        SubCompany: subCompany,
+        Category: 'Outsourcing',
+        Date: issuedDate,
+        InvoiceNo: invNum,
+        Description: key,
+        DR: total,
+        CR: 0,
+        Remark: invNum + ' (' + periodFrom + '~' + periodTo + ')'
+      });
+    });
+
+    if(newTxns.length === 0) return;
+    console.log('[SUB Sync] SubInvoice→SUB_Txn 자동 등록:', newTxns.length, '건');
+
+    for(const txn of newTxns) {
+      try {
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST', headers: {'Content-Type':'text/plain'},
+          body: JSON.stringify({action:'add_sub_txn', data:txn, _user:getAdminUser()})
+        });
+        const txt = await res.text();
+        let j; try{ j = JSON.parse(txt); }catch(e){ continue; }
+        if(j.ok) {
+          _balSubTxns.push({...txn, _rowIndex:j.row||j.rowIndex});
+        }
+      } catch(e2) { console.warn('[SUB Sync] 등록 실패:', txn.Description, e2); }
+    }
+  } catch(e) {
+    console.warn('[SUB Sync] SubInvoice→SUB_Txn 동기화 오류:', e);
   }
 }
 
