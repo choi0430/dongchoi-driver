@@ -6887,8 +6887,8 @@ function setInvPeriod(type) {
   loadInvReports();
 }
 
-function onInvAgencyChange() { _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; loadInvReports(); }
-function onInvDateChange()   { _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; loadInvReports(); }
+function onInvAgencyChange() { _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; _editItemFilter = null; loadInvReports(); }
+function onInvDateChange()   { _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; _editItemFilter = null; loadInvReports(); }
 
 // ── 초기화 ──
 function toggleInvSettings() {
@@ -7263,6 +7263,17 @@ async function loadInvReports() {
     rows = rows.filter(r => String(r.Tour_Code||'').trim() === selectedTC);
   }
 
+  // ★ 수정 모드: 저장된 인보이스 항목만 표시
+  if (_editItemFilter) {
+    const usedCount = {};
+    rows = rows.filter(r => {
+      if (r._manual) return true;
+      const key = (r._iso||'').slice(0,10) + '|' + String(r.Rego||'').trim() + '|' + String(r.Attraction||'').trim();
+      usedCount[key] = (usedCount[key] || 0) + 1;
+      return _editItemFilter[key] && usedCount[key] <= _editItemFilter[key];
+    });
+  }
+
   // 수동 항목 목록 렌더
   renderInvManualList();
 
@@ -7342,6 +7353,17 @@ function _buildInvRows(agency, from, to) {
   // ★ 투어코드 필터 적용
   const selectedTC = document.getElementById('inv-tourcode')?.value;
   if(selectedTC) rows = rows.filter(r => String(r.Tour_Code||'').trim() === selectedTC);
+
+  // ★ 수정 모드: 저장된 인보이스 항목만 표시 (나머지 필터링)
+  if (_editItemFilter) {
+    const usedCount = {};
+    rows = rows.filter(r => {
+      if (r._manual) return true; // 수동 항목은 ManualItems에서 복원되므로 유지
+      const key = (r._iso||'').slice(0,10) + '|' + String(r.Rego||'').trim() + '|' + String(r.Attraction||'').trim();
+      usedCount[key] = (usedCount[key] || 0) + 1;
+      return _editItemFilter[key] && usedCount[key] <= _editItemFilter[key];
+    });
+  }
   return rows;
 }
 
@@ -7738,6 +7760,7 @@ let _invHistoryCache = null;          // 인보이스 이력 캐시
 let _lastGeneratedInvNum = null;      // generateInvoice에서 생성한 번호 (saveInvoiceToSheet에서 재사용)
 let _lastGenInvAgency = null;         // _lastGeneratedInvNum이 어떤 여행사 것인지 추적
 let _lastGenInvFrom = null;           // _lastGeneratedInvNum이 어떤 기간 것인지 추적
+let _editItemFilter = null;           // 수정 모드: 저장된 Items 키 맵 { 'date|rego|tour': count }
 
 // ★ 현재 여행사+기간에 맞는 인보이스 번호 조회 (이력 → _last → 신규 순)
 function getExistingOrNewInvNum(agency, from) {
@@ -7971,7 +7994,7 @@ async function saveInvoiceToSheet() {
 
     _invHistoryCache = null; // 캐시 무효화
     _balLoaded = false; // ★ 잔액 캐시도 무효화
-    _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; // 다음 인보이스를 위해 번호 초기화
+    _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; _editItemFilter = null; // 다음 인보이스를 위해 번호 초기화
 
     // ★ 저장 완료 후 크레딧/선수금 & 수동항목 캐시 초기화 (다음 인보이스에 잔류 방지)
     const _resetKey = agency + '_' + from.slice(0,7);
@@ -8201,17 +8224,80 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     }
   }
 
-  // ④ 초기화 및 리포트 로드
+  // ④ 초기화
   _invExcludes = {};
   _invOverrides = {};
+  _editItemFilter = null; // 먼저 초기화
+
+  // ④-b 투어코드 필터 초기화
+  const tcSel = document.getElementById('inv-tourcode');
+  if (tcSel) tcSel.value = '';
+
+  // ④-c 저장된 Items에서 필터 맵 구축 (loadInvReports 전에 설정해야 _buildInvRows에서 적용됨)
+  if (savedInv) {
+    let itemsJSON = '';
+    if (savedInv.Items && String(savedInv.Items).trim().startsWith('[')) {
+      itemsJSON = String(savedInv.Items).trim();
+    }
+    if (itemsJSON) {
+      try {
+        const savedItems = JSON.parse(itemsJSON);
+        if (savedItems.length > 0) {
+          _editItemFilter = {};
+          savedItems.forEach(it => {
+            const key = (it.date||'').slice(0,10) + '|' + String(it.rego||'').trim() + '|' + String(it.tour||'').trim();
+            _editItemFilter[key] = (_editItemFilter[key] || 0) + 1;
+          });
+          console.log('[EditMode] _editItemFilter set:', Object.keys(_editItemFilter).length, 'unique keys from', savedItems.length, 'items');
+        }
+      } catch(e) { console.warn('Items parse failed:', e); _editItemFilter = null; }
+    } else {
+      console.warn('[EditMode] savedInv.Items is empty or missing. InvNumber:', invNumber, 'Keys:', Object.keys(savedInv).join(','));
+    }
+  }
 
   // ⑤ 인보이스 작성 영역으로 스크롤
   const invPreview = document.getElementById('inv-preview');
   if (invPreview) invPreview.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  toast('✏️ ' + invNumber + ' 수정 모드','ok');
+  toast('✏️ ' + invNumber + ' 수정 모드' + (_editItemFilter ? ` (${Object.values(_editItemFilter).reduce((a,b)=>a+b,0)}건)` : ' ⚠️항목 데이터 없음'),'ok');
   await loadInvReports();
   renderInvManualList();
+
+  // ⑥ 오버라이드 복원 (저장 시 금액이 수정되었던 항목)
+  if (savedInv && savedInv.Items) {
+    try {
+      const savedItems = JSON.parse(savedInv.Items);
+      const overrideItems = savedItems.filter(it => it.overridden);
+      if (overrideItems.length) {
+        const rows = _buildInvRows(agency, periodFrom, periodTo);
+        const overKeyMap = {};
+        overrideItems.forEach(it => {
+          const key = (it.date||'').slice(0,10) + '|' + String(it.rego||'').trim() + '|' + String(it.tour||'').trim();
+          if (!overKeyMap[key]) overKeyMap[key] = [];
+          overKeyMap[key].push(it);
+        });
+        const overUsed = {};
+        rows.forEach((r, ri) => {
+          if (r._manual) return;
+          const key = (r._iso||'').slice(0,10) + '|' + String(r.Rego||'').trim() + '|' + String(r.Attraction||'').trim();
+          if (overKeyMap[key]) {
+            overUsed[key] = (overUsed[key] || 0);
+            if (overUsed[key] < overKeyMap[key].length) {
+              const ov = overKeyMap[key][overUsed[key]];
+              const rowKey = _invRowKey(r, ri);
+              _invOverrides[rowKey] = {};
+              if (ov.base !== undefined) _invOverrides[rowKey].base = ov.base;
+              if (ov.ot !== undefined)   _invOverrides[rowKey].ot   = ov.ot;
+              if (ov.extra !== undefined) _invOverrides[rowKey].extra = ov.extra;
+              overUsed[key]++;
+            }
+          }
+        });
+        _refreshInvPreview();
+      }
+    } catch(e) { console.warn('Override restore failed:', e); }
+  }
 }
 
 async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {

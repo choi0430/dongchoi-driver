@@ -1185,6 +1185,9 @@ function updateMasterRow(sheetName, rowIndex, data) {
     const ri = parseInt(rowIndex);
     if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
 
+    // ★ 기존 행 데이터를 먼저 읽어서 누락 필드 보존
+    const existingRow = sheet.getRange(ri, 1, 1, headers.length).getValues()[0];
+
     // 정확한 키 먼저, 없으면 정규화 키로 fallback (공백↔언더스코어 불일치 허용)
     const normMap = buildNormMap(data);
     var PHONE_COL_NAMES = ['phone','mobile','mobile_1','mobile_2','moblie_2'];
@@ -1193,7 +1196,7 @@ function updateMasterRow(sheetName, rowIndex, data) {
       if (data[h] !== undefined) val = data[h];
       else {
         const nk = normalizeKey(h);
-        val = normMap[nk] !== undefined ? normMap[nk] : '';
+        val = normMap[nk] !== undefined ? normMap[nk] : existingRow[i];
       }
       // ★ 전화번호 필드: 앞 0 복원 + 텍스트 서식
       if (PHONE_COL_NAMES.includes(normalizeKey(h)) && val !== '' && val !== null && val !== undefined) {
