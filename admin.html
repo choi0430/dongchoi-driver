@@ -8341,13 +8341,23 @@ async function saveInvoiceToSheet() {
     // ★ 거래처 잔액에 Agency_Txn 자동 등록 (행 분리 방식)
     // Type별 개별 행: invoice(DR), prepaid_use(CR), credit_use(CR)
     try {
-      // Due date 계산 — 마지막 일정일 + 14일 (모든 여행사 공통)
-      let lastDate = null;
+      // ★ 실제 첫날/마지막날 계산 (인보이스 항목 기준)
+      let firstDate = null, lastDate = null;
       rows.forEach(r => {
         const iso = r._iso || parseToISO(r.Date || '');
-        if (iso) { const d = new Date(iso + 'T00:00:00'); if (!isNaN(d.getTime()) && (!lastDate || d > lastDate)) lastDate = d; }
+        if (iso) {
+          const d = new Date(iso + 'T00:00:00');
+          if (!isNaN(d.getTime())) {
+            if (!firstDate || d < firstDate) firstDate = d;
+            if (!lastDate || d > lastDate) lastDate = d;
+          }
+        }
       });
+      if (!firstDate) { firstDate = new Date(from + 'T00:00:00'); if(isNaN(firstDate.getTime())) firstDate = new Date(); }
       if (!lastDate) { lastDate = new Date(to + 'T00:00:00'); if(isNaN(lastDate.getTime())) lastDate = new Date(); }
+      const actualFrom = toLocalISO(firstDate);
+      const actualTo = toLocalISO(lastDate);
+      // Due date = 마지막 일정일 + 14일
       const dueBaseDate = new Date(lastDate);
       dueBaseDate.setDate(dueBaseDate.getDate() + 14);
       const dueDateStr = toLocalISO(dueBaseDate);
@@ -8368,11 +8378,11 @@ async function saveInvoiceToSheet() {
       // 중복 체크: 동일 InvoiceID가 이미 있는지 확인
       const existingTxn = (_balAgencyTxns||[]).find(t => String(t.InvoiceID||'').trim() === invNum && String(t.Type||'').trim() === 'invoice');
       if (!existingTxn) {
-        const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: from, FinishDate: to, DueDate: dueDateStr };
+        const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: actualFrom, FinishDate: actualTo, DueDate: dueDateStr };
 
         // ① DR 행: 인보이스 총 청구액
         const drTxn = { ...baseTxn, Type: 'invoice', DR: drAmount, CR: 0,
-          Remark: `인보이스 발행 (${_allTxnItems.length}건, ${fmtDate(from)}~${fmtDate(to)})` };
+          Remark: `\uC778\uBCF4\uC774\uC2A4 \uBC1C\uD589 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})` };
         fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
           body: JSON.stringify({action:'add_agency_txn', data:drTxn, _user:getAdminUser()})
         }).then(r=>r.json()).then(j=>{
@@ -8402,15 +8412,15 @@ async function saveInvoiceToSheet() {
           const rowIdx = existingTxn._rowIndex || existingTxn.rowIndex;
           if (rowIdx) {
             fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
-              body: JSON.stringify({action:'update_agency_txn', rowIndex: rowIdx, data: {DR: drAmount, Remark: `인보이스 수정 (${_allTxnItems.length}건, ${fmtDate(from)}~${fmtDate(to)})`}, _user:getAdminUser()})
+              body: JSON.stringify({action:'update_agency_txn', rowIndex: rowIdx, data: {DR: drAmount, StartDate: actualFrom, FinishDate: actualTo, DueDate: dueDateStr, Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})`}, _user:getAdminUser()})
             }).then(r=>r.json()).then(j=>{
               if(j.ok) { console.log('[Invoice→Balance] DR 금액 업데이트:', invNum, drAmount); existingTxn.DR = drAmount; }
             }).catch(e=>console.warn('[Invoice→Balance] DR update error:', e));
           } else {
             // rowIndex 없으면 삭제 후 재등록
-            const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: from, FinishDate: to, DueDate: dueDateStr };
+            const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: actualFrom, FinishDate: actualTo, DueDate: dueDateStr };
             const drTxn = { ...baseTxn, Type: 'invoice', DR: drAmount, CR: 0,
-              Remark: `인보이스 수정 (${_allTxnItems.length}건, ${fmtDate(from)}~${fmtDate(to)})` };
+              Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})` };
             fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
               body: JSON.stringify({action:'add_agency_txn', data:drTxn, _user:getAdminUser()})
             }).then(r=>r.json()).then(j=>{
