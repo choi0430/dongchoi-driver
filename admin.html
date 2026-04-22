@@ -11256,7 +11256,7 @@ async function getEarnedFromSheets(driverName, weekStart) {
   return total;
 }
 
-async function selectWageDriver(drv){setWageTab('single');ST.wageDriver=drv;await rWage();}
+async function selectWageDriver(drv, targetWeek){setWageTab('single');ST.wageDriver=drv;ST._wageTargetWeek=targetWeek||null;await rWage();}
 let _wageWeekIdx = 0; // 0 = latest week
 let _wageWeeksList = []; // sorted weeks (newest first)
 
@@ -11302,6 +11302,12 @@ function initWageWeeks(){
     });
   }
   _wageWeeksList = [...weekSet].sort((a,b)=>b.localeCompare(a));
+  // Jump to target week if set (from weekly payroll click)
+  if(ST._wageTargetWeek){
+    const idx = _wageWeeksList.indexOf(ST._wageTargetWeek);
+    if(idx >= 0) _wageWeekIdx = idx;
+    ST._wageTargetWeek = null;
+  }
   // Clamp index
   if(_wageWeekIdx < 0) _wageWeekIdx = 0;
   if(_wageWeekIdx >= _wageWeeksList.length) _wageWeekIdx = _wageWeeksList.length - 1;
@@ -15713,7 +15719,7 @@ function renderWeeklyPayroll(){
     const isPaid = d.balance <= 0;
     const bc = isPaid ? '#059669' : '#dc2626';
     const bg = isPaid ? '#f0fdf4' : '#fef2f2';
-    return `<div style="background:${bg};border:1px solid ${bc}22;border-left:4px solid ${bc};border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;" onclick="selectWageDriver('${escH(d.drv)}')">
+    return `<div style="background:${bg};border:1px solid ${bc}22;border-left:4px solid ${bc};border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;" onclick="selectWageDriver('${escH(d.drv)}','${mon}')">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
           <div style="font-size:14px;font-weight:800;color:var(--t1);">${escH(d.drv)}</div>
