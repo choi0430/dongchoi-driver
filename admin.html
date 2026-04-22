@@ -5878,7 +5878,8 @@ function _buildCashFlowForWeek(targetMonISO) {
   const monD = new Date(targetMonISO + 'T00:00:00');
   const sunD = new Date(monD); sunD.setDate(sunD.getDate() + 6);
   const monS = targetMonISO;
-  const sunS = sunD.toISOString().slice(0, 10);
+  const _localISO = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const sunS = _localISO(sunD);
 
   const receivables = []; // agency income due this week
   const subPayables = []; // sub costs due this week
@@ -5907,7 +5908,7 @@ function _buildCashFlowForWeek(targetMonISO) {
       if (finISO) {
         const fd = new Date(finISO + 'T00:00:00');
         fd.setDate(fd.getDate() + 14);
-        dueISO = fd.toISOString().slice(0, 10);
+        dueISO = _localISO(fd);
       }
     }
     if (!dueISO) return;
@@ -5941,7 +5942,7 @@ function _buildCashFlowForWeek(targetMonISO) {
       if (dateISO) {
         const dd = new Date(dateISO + 'T00:00:00');
         dd.setDate(dd.getDate() + 14);
-        dueISO = dd.toISOString().slice(0, 10);
+        dueISO = _localISO(dd);
       }
     }
     if (!dueISO) return;
@@ -5982,10 +5983,13 @@ function _buildCashFlowForWeek(targetMonISO) {
 
   const totalIn = roundMoney(receivables.reduce((s, r) => s + r.balance, 0));
   const totalSubOut = roundMoney(subPayables.reduce((s, r) => s + r.amount, 0));
-  const totalWageOut = roundMoney(driverPay.reduce((s, r) => s + r.remaining, 0));
+  // 드라이버: 실제 지급해야 할 금액 (발생-지급, 마이너스면 0)
+  const totalWageEarned = roundMoney(driverPay.reduce((s, r) => s + r.earned, 0));
+  const totalWagePaid = roundMoney(driverPay.reduce((s, r) => s + r.paid, 0));
+  const totalWageOut = roundMoney(Math.max(0, totalWageEarned - totalWagePaid));
   return {
     receivables, subPayables, driverPay,
-    totalIn, totalSubOut, totalWageOut,
+    totalIn, totalSubOut, totalWageOut, totalWageEarned, totalWagePaid,
     netCashFlow: roundMoney(totalIn - totalSubOut - totalWageOut)
   };
 }
@@ -5995,12 +5999,13 @@ function renderBalWeeklySummary() {
   const listEl = document.getElementById('bal-weekly-list');
   const $f = (v) => '$' + Math.abs(v).toLocaleString('en-AU', { minimumFractionDigits: 2 });
 
-  // Determine target week
+  // Determine target week (local timezone)
   const today = new Date();
   const dayOff = (today.getDay() + 6) % 7; // 0=Mon
   const thisMon = new Date(today);
   thisMon.setDate(thisMon.getDate() - dayOff + (_cfWeekOffset * 7));
-  const targetMonISO = thisMon.toISOString().slice(0, 10);
+  const _lISO = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const targetMonISO = _lISO(thisMon);
 
   const cf = _buildCashFlowForWeek(targetMonISO);
   const isThisWeek = _cfWeekOffset === 0;
@@ -6033,8 +6038,9 @@ function renderBalWeeklySummary() {
         <div style="font-size:14px;font-weight:700;color:var(--or);font-family:var(--fn);">${$f(cf.totalSubOut)}</div>
       </div>
       <div style="background:var(--rdd);border:1px solid rgba(239,68,68,.15);border-radius:10px;padding:8px;text-align:center;">
-        <div style="font-size:9px;color:var(--t3);">\uB4DC\uB77C\uC774\uBC84 \uAE09\uC5EC</div>
+        <div style="font-size:9px;color:var(--t3);">\uB4DC\uB77C\uC774\uBC84 \uBBF8\uC9C0\uAE09</div>
         <div style="font-size:14px;font-weight:700;color:var(--rd);font-family:var(--fn);">${$f(cf.totalWageOut)}</div>
+        <div style="font-size:8px;color:var(--t3);">\uBC1C\uC0DD ${$f(cf.totalWageEarned)}</div>
       </div>
     </div>`;
 
@@ -6086,16 +6092,26 @@ function renderBalWeeklySummary() {
       html += '</div>';
     }
 
-    // Driver wages
+    // Driver wages — 발생/지급/미지급 표시
     if (cf.driverPay.length) {
       html += '<div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-bottom:10px;padding:12px 14px;">';
-      html += '<div style="font-size:12px;font-weight:700;color:var(--rd);margin-bottom:8px;">\uD83D\uDC64 \uB4DC\uB77C\uC774\uBC84 \uAE09\uC5EC</div>';
+      html += '<div style="font-size:12px;font-weight:700;color:var(--rd);margin-bottom:4px;">\uD83D\uDC64 \uB4DC\uB77C\uC774\uBC84 \uAE09\uC5EC</div>';
+      html += '<div style="font-size:10px;color:var(--t3);margin-bottom:8px;">\uBC1C\uC0DD ' + $f(cf.totalWageEarned) + ' / \uC9C0\uAE09 ' + $f(cf.totalWagePaid) + ' / \uBBF8\uC9C0\uAE09 <span style="color:var(--rd);font-weight:600;">' + $f(cf.totalWageOut) + '</span></div>';
       cf.driverPay.sort((a,b) => b.remaining - a.remaining).forEach(d => {
+        const isOverpaid = d.remaining < 0;
         html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11px;">';
-        html += '<span style="color:var(--t2);">' + escH(d.driver) + '</span>';
+        html += '<div><span style="color:var(--t2);">' + escH(d.driver) + '</span>';
+        html += ' <span style="font-size:9px;color:var(--t3);">(\uBC1C\uC0DD ' + $f(d.earned) + ')</span></div>';
         html += '<div style="text-align:right;">';
-        html += '<span style="font-weight:600;font-family:var(--fn);color:var(--rd);">' + $f(d.remaining) + '</span>';
-        if (d.paid > 0) html += ' <span style="font-size:9px;color:var(--t3);">(\uC9C0\uAE09\uC644\uB8CC ' + $f(d.paid) + ')</span>';
+        if (isOverpaid) {
+          html += '<span style="font-weight:600;font-family:var(--fn);color:var(--gn);">\uC644\uB8CC</span>';
+          html += ' <span style="font-size:9px;color:var(--t3);">\uCD08\uACFC\uC9C0\uAE09 ' + $f(Math.abs(d.remaining)) + '</span>';
+        } else if (d.remaining === 0 && d.paid > 0) {
+          html += '<span style="font-weight:600;font-family:var(--fn);color:var(--gn);">\uC644\uB8CC</span>';
+        } else {
+          html += '<span style="font-weight:600;font-family:var(--fn);color:var(--rd);">' + $f(d.remaining) + '</span>';
+          if (d.paid > 0) html += ' <span style="font-size:9px;color:var(--t3);">(\uC9C0\uAE09 ' + $f(d.paid) + ')</span>';
+        }
         html += '</div></div>';
       });
       html += '</div>';
