@@ -5898,15 +5898,17 @@ function _buildCashFlowForWeek(targetMonISO) {
     const dr = Number(tx.DR) || 0;
     if (dr <= 0) return;
 
-    // DueDate = 마지막 일정일(FinishDate) + 14일
-    let finISO = _tryParseDate(tx.FinishDate);
-    if (!finISO) finISO = _tryParseDate(tx.StartDate);
-    if (!finISO) finISO = _tryParseDate(tx.Date);
-    let dueISO = '';
-    if (finISO) {
-      const fd = new Date(finISO + 'T00:00:00');
-      fd.setDate(fd.getDate() + 14);
-      dueISO = _localISO(fd);
+    // DueDate: 저장된 값 사용 (마지막 일정일+14일), 없으면 FinishDate+14일 fallback
+    let dueISO = _tryParseDate(tx.DueDate);
+    if (!dueISO) {
+      let finISO = _tryParseDate(tx.FinishDate);
+      if (!finISO) finISO = _tryParseDate(tx.StartDate);
+      if (!finISO) finISO = _tryParseDate(tx.Date);
+      if (finISO) {
+        const fd = new Date(finISO + 'T00:00:00');
+        fd.setDate(fd.getDate() + 14);
+        dueISO = _localISO(fd);
+      }
     }
     if (!dueISO) return;
     if (dueISO < monS || dueISO > sunS) return;
