@@ -15651,12 +15651,32 @@ function renderWeeklyPayroll(){
 
   const selectedWeek = _weeklyPayrollWeeks[_weeklyPayrollIdx] || '';
 
-  // 드롭다운 채우기
+  // 각 주차별 지급 상태 계산 + 드롭다운 채우기
+  const driverNames = DB.D.map(d=>d.Name_KR||d.Name_EN).filter(Boolean);
   wSel.innerHTML = _weeklyPayrollWeeks.map((w,i)=>{
     const fri = new Date(w+'T00:00:00'); fri.setDate(fri.getDate()+11);
     const friStr = fri.toLocaleDateString('en-AU',{day:'numeric',month:'short'});
-    const label = getWeekLabel(w) + ' (지급일: 금 '+friStr+')';
-    return '<option value="'+w+'"'+(i===_weeklyPayrollIdx?' selected':'')+'>'+label+'</option>';
+    const wSun = new Date(w+'T00:00:00'); wSun.setDate(wSun.getDate()+6);
+    const wSunISO = toLocalISO(wSun);
+    // 빠른 잔액 계산
+    let wEarned=0, wPaid=0;
+    for(const drv of driverNames){
+      const drRow = DB.D.find(d=>(d.Name_KR||'')===drv||(d.Name_EN||'')===drv);
+      const mNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+      const wRows = rows.filter(r=>mNames.has(String(r.Driver||'').trim()) && r._isoDate>=w && r._isoDate<=wSunISO);
+      const oRows = wRows.filter(r=>!_subMap[(r.Rego||'').trim()]);
+      wEarned += oRows.reduce((s,r)=>s+_calcDRFromReport(r),0);
+      const dw = wages[drv]||{};
+      Object.entries(dw).forEach(([wk,data])=>{
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(wk)) return;
+        if(getMondayOfDate(wk)===w) wPaid += (data.entries||[]).reduce((s,e)=>s+(e.amount||0),0);
+      });
+    }
+    const wBal = wEarned - wPaid;
+    const status = wEarned===0 && wPaid===0 ? '' : wBal<=0 ? '✅' : '💰';
+    const label = status + ' ' + getWeekLabel(w) + ' (지급일: 금 '+friStr+')';
+    const color = wEarned===0 && wPaid===0 ? '' : wBal<=0 ? 'color:#059669' : 'color:#dc2626;font-weight:700';
+    return '<option value="'+w+'" style="'+color+'"'+(i===_weeklyPayrollIdx?' selected':'')+'>'+label+'</option>';
   }).join('');
   wSel.value = selectedWeek;
   if(!selectedWeek){ sumEl.innerHTML=''; listEl.innerHTML='<div style="text-align:center;padding:24px;color:var(--t3);">주차 데이터 없음</div>'; return; }
