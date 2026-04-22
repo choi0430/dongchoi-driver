@@ -1239,12 +1239,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </div>
   <!-- 주급 보기 뷰 (금요일 지급 기준) -->
   <div id="wage-view-weekly" style="display:none;padding:10px 14px 0;">
-    <div id="wage-weekly-nav" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:0 2px;">
-      <button onclick="_weeklyPayrollIdx++;renderWeeklyPayroll();" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;color:var(--t2);">◀ 이전</button>
-      <div id="wage-weekly-label" style="text-align:center;font-weight:700;font-size:13px;color:var(--t1);"></div>
-      <button onclick="_weeklyPayrollIdx--;renderWeeklyPayroll();" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;color:var(--t2);">다음 ▶</button>
+    <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;">
+      <button onclick="_weeklyPayrollIdx++;renderWeeklyPayroll();" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;color:var(--t2);flex-shrink:0;">◀</button>
+      <select id="wage-weekly-sel" class="profit-sel" style="flex:1;" onchange="_weeklyPayrollIdx=_weeklyPayrollWeeks.indexOf(this.value);renderWeeklyPayroll();">
+        <option value="">Loading...</option>
+      </select>
+      <button onclick="_weeklyPayrollIdx--;renderWeeklyPayroll();" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;color:var(--t2);flex-shrink:0;">▶</button>
     </div>
-    <select id="wage-weekly-sel" style="display:none;"><option value="">-</option></select>
     <div id="wage-weekly-summary"></div>
     <div id="wage-weekly-list" style="padding-bottom:80px;"></div>
   </div>
@@ -15649,19 +15650,15 @@ function renderWeeklyPayroll(){
   if(_weeklyPayrollIdx >= _weeklyPayrollWeeks.length) _weeklyPayrollIdx = _weeklyPayrollWeeks.length - 1;
 
   const selectedWeek = _weeklyPayrollWeeks[_weeklyPayrollIdx] || '';
-  wSel.value = selectedWeek;
 
-  // 주차 라벨 업데이트
-  const labelEl = document.getElementById('wage-weekly-label');
-  if(labelEl && selectedWeek) {
-    const fri = new Date(selectedWeek+'T00:00:00'); fri.setDate(fri.getDate()+11);
+  // 드롭다운 채우기
+  wSel.innerHTML = _weeklyPayrollWeeks.map((w,i)=>{
+    const fri = new Date(w+'T00:00:00'); fri.setDate(fri.getDate()+11);
     const friStr = fri.toLocaleDateString('en-AU',{day:'numeric',month:'short'});
-    const sunD = new Date(selectedWeek+'T00:00:00'); sunD.setDate(sunD.getDate()+6);
-    const fmtD = d => String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
-    const monD = new Date(selectedWeek+'T00:00:00');
-    const pos = (_weeklyPayrollWeeks.length - _weeklyPayrollIdx) + '/' + _weeklyPayrollWeeks.length;
-    labelEl.innerHTML = '📅 ' + fmtD(monD) + ' — ' + fmtD(sunD) + '<div style="font-size:10px;color:var(--t3);font-weight:400;">지급일: 금 ' + friStr + ' · ' + pos + '</div>';
-  }
+    const label = getWeekLabel(w) + ' (지급일: 금 '+friStr+')';
+    return '<option value="'+w+'"'+(i===_weeklyPayrollIdx?' selected':'')+'>'+label+'</option>';
+  }).join('');
+  wSel.value = selectedWeek;
   if(!selectedWeek){ sumEl.innerHTML=''; listEl.innerHTML='<div style="text-align:center;padding:24px;color:var(--t3);">주차 데이터 없음</div>'; return; }
 
   const mon = selectedWeek;
