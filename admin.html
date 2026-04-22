@@ -8985,11 +8985,13 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
 
   const client = DB.C.find(c => c.Name === agency) || {};
   let toEmail  = (client.Email || '').trim();
+  const ccEmail = (client.Email_CC || '').trim();
   if (!toEmail) {
     toEmail = (prompt(`${agency}의 이메일 주소를 입력하세요:`, '') || '').trim();
     if (!toEmail) return;
   }
-  if (!confirm(`${invNumber}을(를) ${toEmail}으로 발송하시겠습니까?`)) return;
+  const ccInfo = ccEmail ? `\nCC: ${ccEmail}` : '';
+  if (!confirm(`${invNumber}을(를) ${toEmail}으로 발송하시겠습니까?${ccInfo}`)) return;
 
   // ★ FIX: 미리보기에서 전달된 HTML이 있으면 그대로 사용 (내용 불일치 방지)
   let docHtml = previewHtml || '';
@@ -9155,7 +9157,7 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
     toast('✉️ 인보이스 발송 중... (PDF 첨부)','ok');
 
     const _payload = JSON.stringify({
-      action:'send_invoice_email', to:toEmail, subject, body,
+      action:'send_invoice_email', to:toEmail, cc:ccEmail||'', subject, body,
       docHtml: _minHtml, pdfName,
       senderName: DC_COMPANY.name||'Dong Choi Pty Ltd',
       replyTo: DC_COMPANY.email||'branden.dongchoi@gmail.com',
@@ -9173,10 +9175,11 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
     if (!json.ok) throw new Error(json.error||'발송 실패');
 
     // ★ PDF 첨부 결과 표시
+    const _ccMsg = ccEmail ? ` (CC: ${ccEmail})` : '';
     if (json.pdfAttached) {
-      toast(`✉️ ${toEmail} 으로 ${invNumber} 발송 완료 (PDF 첨부 ✅)`,'ok');
+      toast(`✉️ ${toEmail}${_ccMsg} 으로 ${invNumber} 발송 완료 (PDF 첨부 ✅)`,'ok');
     } else {
-      toast(`⚠️ ${toEmail} 으로 ${invNumber} 발송 완료 (PDF 첨부 실패: ${json.pdfError||'알 수 없음'})`,'er');
+      toast(`⚠️ ${toEmail}${_ccMsg} 으로 ${invNumber} 발송 완료 (PDF 첨부 실패: ${json.pdfError||'알 수 없음'})`,'er');
     }
 
     // ④ 상태를 'emailed'로 자동 업데이트
@@ -10077,6 +10080,7 @@ async function emailInvoice() {
 
   const client = DB.C.find(c => c.Name === agency) || {};
   let toEmail  = (client.Email || '').trim();
+  const ccEmail = (client.Email_CC || '').trim();
   // ★ 현재 여행사/기간에 맞는 번호 조회 (이력 → 현재 생성분 → 신규 순)
   const invNum = getExistingOrNewInvNum(agency, from);
 
@@ -10143,6 +10147,7 @@ async function emailInvoice() {
       body: JSON.stringify({
         action:     'send_invoice_email',
         to:         toEmail,
+        cc:         ccEmail || '',
         subject,
         body,
         docHtml: _minHtml,
@@ -10155,10 +10160,11 @@ async function emailInvoice() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json.ok) {
+      const ccInfo = ccEmail ? ` (CC: ${ccEmail})` : '';
       if (json.pdfAttached) {
-        toast(`✉️ ${toEmail} 으로 인보이스 발송 완료 (PDF 첨부 ✅)`, 'ok');
+        toast(`✉️ ${toEmail}${ccInfo} 으로 인보이스 발송 완료 (PDF 첨부 ✅)`, 'ok');
       } else {
-        toast(`⚠️ ${toEmail} 으로 발송 완료 (PDF 첨부 실패: ${json.pdfError||'알 수 없음'})`, 'er');
+        toast(`⚠️ ${toEmail}${ccInfo} 으로 발송 완료 (PDF 첨부 실패: ${json.pdfError||'알 수 없음'})`, 'er');
       }
     } else {
       throw new Error(json.error || '발송 실패');
@@ -12171,6 +12177,7 @@ function openView(type, idx) {
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin-bottom:8px;padding:0 2px;">🏢 여행사 정보</div>`;
     html += row2([['여행사명', d.Name], ['Client ID', d.ClientID]]);
     html += row2([['연락처', fixPhone(d.Phone||d.Mobile)], ['이메일', d.Email]]);
+    if(d.Email_CC) html += row('추가 이메일 (CC)', d.Email_CC);
     html += row('주소', d.Address);
     html += `<div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">🏦 계좌 정보</div>`;
     html += row2([['은행', d.Bank_Name], ['BSB', d.BSB]]);
@@ -12293,6 +12300,7 @@ function openM(type,idx){
         <div><label class="fl">연락처</label><input class="fi" id="f2" value="${fixPhone(d.Phone||d.Mobile)}"></div>
         <div><label class="fl">이메일 (Invoice용)</label><input class="fi" id="f2b" value="${d.Email||''}" placeholder="billing@agencyname.com.au"></div>
       </div>
+      <div class="fr"><label class="fl">추가 이메일 (CC)</label><input class="fi" id="f2c" value="${d.Email_CC||''}" placeholder="쉼표로 구분: cc1@example.com, cc2@example.com"></div>
       <div class="fr"><label class="fl">주소</label><input class="fi" id="f3" value="${d.Address||''}"></div>
       <div class="fr3">
         <div><label class="fl">은행</label><input class="fi" id="f4" value="${d.Bank_Name||''}"></div>
@@ -12450,7 +12458,7 @@ function saveM(){
     obj={_rowIndex:ie?(DB.C[idx]?._rowIndex||null):null,
          Name:gv('f0'),ClientID:gv('f1')||Date.now().toString(16).slice(-8),
          ABN:gv('f1b')||'',
-         Mobile:gv('f2'),Email:gv('f2b')||'',Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6')};
+         Mobile:gv('f2'),Email:gv('f2b')||'',Email_CC:gv('f2c')||'',Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6')};
     ie?DB.C[idx]=obj:DB.C.push(obj);
     if(obj.Name && !DB.PC[obj.Name]) {
       initPriceClientForAgency(obj.Name); // M_PriceClient에 모든 Course 빈 행 자동 생성
@@ -12871,6 +12879,7 @@ async function syncClients(){
     return {
     _rowIndex: r._rowIndex||null,
     Name:r.Name||'', ClientID:r.ClientID||'', ABN:r.ABN||'', Mobile:ph, Phone:ph, Email:r.Email||'',
+    Email_CC:r.Email_CC||r['Email_CC']||'',
     Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||''
   };});
   // PC 동기화
@@ -15388,6 +15397,7 @@ async function emailQuotation() {
 
   const client = (DB.C||[]).find(c=>c.Name===agency)||{};
   let toEmail = (client.Email||'').trim();
+  const ccEmailQuo = (client.Email_CC||'').trim();
   const quoNum = _quoNum();
   const grandTotal = _quoItems.reduce((s,i)=>s+((i.price||0)+(i.ot||0)+(i.extra||0))*(i.qty||1),0);
   const validDate = document.getElementById('quo-valid')?.value||'';
@@ -15435,7 +15445,7 @@ async function emailQuotation() {
     const res = await fetch(APPS_SCRIPT_URL, {
       method:'POST', headers:{'Content-Type':'text/plain'},
       body: JSON.stringify({
-        action:'send_invoice_email', to:toEmail, subject, body,
+        action:'send_invoice_email', to:toEmail, cc:ccEmailQuo||'', subject, body,
         pdfBase64,
         pdfName,
         senderName: DC_COMPANY.name||'Dong Choi Pty Ltd',
