@@ -1215,9 +1215,14 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 드라이버별 뷰 -->
   <div id="wage-view-single">
     <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;">
-      <select id="wage-driver-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
-      <select id="wage-week-sel" class="profit-sel" style="flex:1;" onchange="renderWage()"></select>
+      <select id="wage-driver-sel" class="profit-sel" style="flex:1;" onchange="_wageWeekIdx=0;rWage()"></select>
       <button class="btn brd sm" onclick="deleteWageWeek()" style="padding:0 10px;" title="주간 삭제">🗑</button>
+    </div>
+    <!-- 주간 네비게이션 -->
+    <div id="wage-week-nav" style="padding:8px 14px 0;display:flex;justify-content:space-between;align-items:center;">
+      <button onclick="_wageWeekIdx++;initWageWeeks();" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;color:var(--t2);">\u25C0 \uC774\uC804</button>
+      <div id="wage-week-label" style="text-align:center;font-weight:700;font-size:13px;color:var(--t1);"></div>
+      <button onclick="_wageWeekIdx--;initWageWeeks();" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;color:var(--t2);">\uB2E4\uC74C \u25B6</button>
     </div>
     <div id="wage-summary" style="padding:10px 14px 0;"></div>
     <div id="wage-list" style="padding:0 14px;"></div>
@@ -11252,6 +11257,9 @@ async function getEarnedFromSheets(driverName, weekStart) {
 }
 
 async function selectWageDriver(drv){setWageTab('single');ST.wageDriver=drv;await rWage();}
+let _wageWeekIdx = 0; // 0 = latest week
+let _wageWeeksList = []; // sorted weeks (newest first)
+
 async function rWage(){
   // DB.D가 아직 로드 안됐으면 잠시 후 재시도
   if(!DB.D || DB.D.length === 0) {
@@ -11266,7 +11274,6 @@ async function rWage(){
   dSel.innerHTML = drivers.map(d=>'<option value="'+escH(d.name)+'">'+escH(d.name)+'</option>').join('');
   if(!ST.wageDriver && drivers.length>0) ST.wageDriver = drivers[0].name;
   if(ST.wageDriver) dSel.value = ST.wageDriver;
-  dSel.onchange = function(){ ST.wageDriver=this.value; initWageWeeks(); };
   initWageWeeks();
 }
 
@@ -11294,20 +11301,25 @@ function initWageWeeks(){
       }
     });
   }
-  const weeks = [...weekSet].sort((a,b)=>b.localeCompare(a));
-  const wSel = document.getElementById('wage-week-sel');
-  if(!wSel) return;
-  wSel.innerHTML = '<option value="ALL">📊 전체 기간</option>' +
-    weeks.map(w=>'<option value="'+w+'">'+getWeekLabel(w)+'</option>').join('');
-  if(!ST.wageWeek || (ST.wageWeek!=='ALL' && !drvWages[ST.wageWeek])) ST.wageWeek = weeks[0];
-  wSel.value = ST.wageWeek;
-  wSel.onchange = function(){ ST.wageWeek=this.value; ST.wageWeek==='ALL'?renderWageAll():renderWage(); };
-  ST.wageWeek==='ALL' ? renderWageAll() : renderWage();
+  _wageWeeksList = [...weekSet].sort((a,b)=>b.localeCompare(a));
+  // Clamp index
+  if(_wageWeekIdx < 0) _wageWeekIdx = 0;
+  if(_wageWeekIdx >= _wageWeeksList.length) _wageWeekIdx = _wageWeeksList.length - 1;
+  if(_wageWeeksList.length > 0) {
+    ST.wageWeek = _wageWeeksList[_wageWeekIdx];
+  }
+  // Update week label
+  const labelEl = document.getElementById('wage-week-label');
+  if(labelEl && ST.wageWeek) {
+    const lbl = getWeekLabel(ST.wageWeek);
+    const pos = (_wageWeeksList.length - _wageWeekIdx) + '/' + _wageWeeksList.length;
+    labelEl.innerHTML = '\uD83D\uDCC5 ' + lbl + '<div style="font-size:10px;color:var(--t3);font-weight:400;">' + pos + '</div>';
+  }
+  renderWage();
 }
 
 async function renderWage(){
   ST.wageDriver = document.getElementById('wage-driver-sel')?.value || ST.wageDriver;
-  ST.wageWeek   = document.getElementById('wage-week-sel')?.value   || ST.wageWeek;
   if(!ST.wageDriver || !ST.wageWeek) return;
 
   const wages   = getWages();
