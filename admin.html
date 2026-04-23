@@ -6095,14 +6095,36 @@ function _buildWageTxns(){
 
   // ③ Wages (실 지급) = CR
   // admin_wages 구조: { driverName: { weekStart: { entries: [{date, amount, method, note}] } } }
+  // ★ CR의 매칭 기준일(date)은 지급일이 아닌 "근무 주차(WeekStart)"를 사용
+  //    → 주간요약/잔액 탭이 "해당 주 발생 DR"과 "해당 주 지급 CR"을 올바르게 상계
+  //    예: 4/12(일) 운행 $280, 4/17(금) 지급 $280 → 4/6~4/12 주간요약에서 정상 매칭
+  //    실제 지급일은 paidDate로 별도 보존 (상세 화면용)
   const wages = safeGetLocal('admin_wages', {});
   if(wages && typeof wages === 'object' && !Array.isArray(wages)){
     Object.entries(wages).forEach(([drv, weeks])=>{
       if(!weeks || typeof weeks !== 'object') return;
       Object.entries(weeks).forEach(([ws, wk])=>{
+        // WeekStart 정규화: 월요일 기준 ISO(YYYY-MM-DD)로 맞춤
+        let weekMon = ws;
+        try {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(ws)) {
+            const d = new Date(ws + 'T00:00:00');
+            const dow = (d.getDay() + 6) % 7; // 0=Mon
+            d.setDate(d.getDate() - dow);
+            weekMon = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+          }
+        } catch(e) {}
         (wk.entries||[]).forEach(e=>{
           if(!e.amount) return;
-          txns.push({type:'CR', driver:drv, date:e.date||ws, desc:e.note||e.method||'급여 지급', amount:Number(e.amount)||0, source:'wage'});
+          txns.push({
+            type: 'CR',
+            driver: drv,
+            date: weekMon,                 // ★ 주차 매칭용 (해당 주 월요일)
+            paidDate: e.date || weekMon,   // 실제 지급일 (상세 표시용)
+            desc: e.note || e.method || '급여 지급',
+            amount: Number(e.amount)||0,
+            source: 'wage'
+          });
         });
       });
     });
