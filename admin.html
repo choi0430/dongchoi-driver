@@ -11171,7 +11171,8 @@ async function renderWageAllDrivers() {
       const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
       const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
       const weekRows = rows.filter(r => matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
-      earned = weekRows.reduce((s,r) => s+(parseFloat(r.DR_Cost)||0), 0);
+      // ★ _calcDRFromReport 사용: 야경 회사납입(Night_Owner) 등 자동 차감 → 급여 single 탭·잔액 탭과 일치
+      earned = weekRows.reduce((s,r) => s+_calcDRFromReport(r), 0);
       const week = drvWages[mon] || {entries:[]};
       paid = (week.entries||[]).reduce((s,e) => s+(e.amount||0), 0);
     } else {
@@ -11183,7 +11184,7 @@ async function renderWageAllDrivers() {
         const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
         const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
         return matchNames.has(String(r.Driver||'').trim());
-      }).reduce((s,r) => s+(parseFloat(r.DR_Cost)||0), 0);
+      }).reduce((s,r) => s+_calcDRFromReport(r), 0);
     }
 
     if (earned > 0 || paid > 0) {
@@ -11801,9 +11802,8 @@ async function getEarnedFromSheets(driverName, weekStart) {
   rows.forEach(r => {
     if (!matchNames.has(String(r.Driver||'').trim())) return;
     if (r._isoDate >= mon && r._isoDate <= sun) {
-      // ★ DR_Cost 없는 경우 항목 합산으로 재계산 (calcDRFromReport는 renderWage 안에 있으므로 여기서 직접 계산)
-      const drCost = parseFloat(r.DR_Cost);
-      total += (drCost > 0 ? drCost : 0);
+      // ★ _calcDRFromReport 사용: 야경 회사납입(Night_Owner) 자동 차감 → 다른 화면과 일치
+      total += _calcDRFromReport(r);
     }
   });
   return total;
