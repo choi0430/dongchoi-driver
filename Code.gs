@@ -91,7 +91,9 @@ const MASTER_HEADERS = {
   // ── 인보이스 공제 항목 ──
   'Invoice_Deductions': ['ID','Agency','Period','Type','Amount','Note'],
   // ── 인보이스 수동 항목 ──
-  'Invoice_Manual_Items': ['ID','Agency','Period','Date','Rego','Tour','Seats','TourCode','Note','Amount','OT','Hotel','Dist','Trailer','Toll','Start','End','Driver','Guide','Pickup','Dropoff']
+  'Invoice_Manual_Items': ['ID','Agency','Period','Date','Rego','Tour','Seats','TourCode','Note','Amount','OT','Hotel','Dist','Trailer','Toll','Start','End','Driver','Guide','Pickup','Dropoff'],
+  // ── 인증 토큰 (세션 관리) ──
+  'Active_Tokens': ['Token','User','Role','IssuedAt','ExpiresAt','LastUsed','UserAgent']
 };
 
 // ── Tab Colors ──
@@ -106,7 +108,8 @@ const TAB_COLORS = {
   'M_NightRates':'#8b5cf6','M_Attractions':'#14b8a6',
   'Defect_Reports':'#dc2626','Bus_Damage':'#ea580c',
   'Maint_Records':'#059669','Invoice_Overrides':'#7c3aed','Company_Profile':'#0284c7',
-  'Invoice_Deductions':'#db2777','Invoice_Manual_Items':'#9333ea'
+  'Invoice_Deductions':'#db2777','Invoice_Manual_Items':'#9333ea',
+  'Active_Tokens':'#374151'
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -117,6 +120,299 @@ function cors(data) {
   return ContentService
     .createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTHENTICATION MODULE (토큰 기반 인증)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 흐름:
+//   1) action=login: 이름 + PIN → 서버에서 M_Drivers 조회 → 검증 → 토큰 발급
+//   2) 이후 모든 요청: token 파라미터 필수 (login, ping, get_company_profile_public 제외)
+//   3) 관리자 전용 action은 role='admin' 토큰만 허용
+//   4) 만료된 토큰은 자동 삭제
+//
+// 유효기간:
+//   - 드라이버: 7일
+//   - 관리자:  24시간
+//
+// M_Drivers의 PIN은 절대로 클라이언트에 응답으로 나가지 않음 (strip_pin_from_master)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 관리자 계정 이름 (M_Drivers의 Name_KR 또는 Name_EN와 일치)
+const ADMIN_NAMES = ['Branden Choi', 'Branden', '최동철', 'Dong Cheol Choi'];
+
+const TOKEN_TTL_DRIVER_MS = 7 * 24 * 60 * 60 * 1000;   // 7일
+const TOKEN_TTL_ADMIN_MS  = 1 * 24 * 60 * 60 * 1000;   // 24시간
+
+// 인증 없이 호출 가능한 액션 (로그인 및 공개 메타데이터)
+const PUBLIC_ACTIONS = ['ping', 'login', 'logout'];
+
+// 관리자 전용 액션 (드라이버 토큰 거부)
+const ADMIN_ONLY_ACTIONS = [
+  'update_report', 'delete_report',
+  'add_master', 'update_master', 'delete_master', 'replace_master',
+  'bulk_update_guide_phones', 'init_masters',
+  'send_invoice_email', 'save_invoice', 'update_invoice_status', 'delete_invoice',
+  'replace_sub_rates', 'replace_price_sub',
+  'add_ledger', 'update_ledger', 'delete_ledger', 'replace_ledger',
+  'add_wage', 'update_wage', 'delete_wage', 'replace_wages',
+  'add_agency_txn', 'update_agency_txn', 'delete_agency_txn',
+  'add_sub_txn', 'update_sub_txn', 'delete_sub_txn',
+  'save_notices',
+  'update_driver_info',
+  'update_defect_status',
+  'review_leave_request', 'update_roster_cell',
+  'save_hvis_booking', 'delete_hvis_booking',
+  'save_maint_record', 'delete_maint_record',
+  'save_invoice_override', 'delete_invoice_override', 'bulk_save_invoice_overrides',
+  'save_company_profile',
+  // 관리자가 주로 쓰지만 드라이버도 가끔 필요할 수 있는 조회는 제외:
+  // get_invoices, get_agency_txn, get_sub_txn 등은 일단 드라이버도 허용
+  // 추후 엄격하게 할 수 있음
+];
+
+// 관리자 전용 GET 액션
+const ADMIN_ONLY_GET_ACTIONS = [
+  'get_agency_txn', 'get_sub_txn', 'get_agency_balances',
+  'get_invoices', 'get_all_leave_requests', 'get_roster',
+  'get_ledger', 'get_defect_reports'
+];
+
+function _getAuthSheet() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  return ensureSheet(ss, 'Active_Tokens');
+}
+
+function _generateToken() {
+  // 256-bit 랜덤 문자열 (base64 url-safe)
+  const bytes = new Array(32);
+  for (let i = 0; i < 32; i++) bytes[i] = Math.floor(Math.random() * 256);
+  // Apps Script 에서 byte array → base64
+  const blob = Utilities.newBlob(bytes);
+  return Utilities.base64EncodeWebSafe(blob.getBytes()).replace(/=+$/, '');
+}
+
+function _loginAction(payload) {
+  try {
+    const nameInput = String(payload.name || '').trim();
+    const pinInput  = String(payload.pin || '').trim();
+    const userAgent = String(payload.ua || '').slice(0, 100);
+    if (!nameInput || !pinInput) {
+      return {ok: false, error: 'name and pin required'};
+    }
+
+    // M_Drivers에서 사용자 찾기 (Name_KR 또는 Name_EN 매칭)
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('M_Drivers');
+    if (!sheet) return {ok: false, error: 'M_Drivers not found'};
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return {ok: false, error: 'no drivers'};
+    const headers = data[0].map(String);
+    const nameKrIdx = headers.indexOf('Name_KR');
+    const nameEnIdx = headers.indexOf('Name_EN');
+    const pinIdx    = headers.indexOf('PIN');
+    const activeIdx = headers.indexOf('Active');
+    if (pinIdx === -1) return {ok: false, error: 'PIN column missing'};
+
+    let matched = null;
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const nameKr = String(row[nameKrIdx] || '').trim();
+      const nameEn = String(row[nameEnIdx] || '').trim();
+      const active = activeIdx >= 0 ? String(row[activeIdx] || '').toUpperCase() : 'Y';
+      if (active && active !== 'Y' && active !== '') continue;
+      if (nameKr === nameInput || nameEn === nameInput) {
+        const storedPin = String(row[pinIdx] || '').trim();
+        if (storedPin && storedPin === pinInput) {
+          matched = { nameKr, nameEn };
+          break;
+        }
+      }
+    }
+
+    if (!matched) {
+      // 실패는 구체적 사유 노출 안 함 (사용자 열거 방지)
+      return {ok: false, error: 'invalid credentials'};
+    }
+
+    // 관리자 여부 판정
+    const isAdmin = ADMIN_NAMES.some(n => matched.nameKr.indexOf(n) >= 0 || matched.nameEn.indexOf(n) >= 0);
+    const role = isAdmin ? 'admin' : 'driver';
+    const ttl = isAdmin ? TOKEN_TTL_ADMIN_MS : TOKEN_TTL_DRIVER_MS;
+    const now = new Date();
+    const exp = new Date(now.getTime() + ttl);
+
+    const token = _generateToken();
+    const tokenSheet = _getAuthSheet();
+    tokenSheet.appendRow([
+      token,
+      matched.nameKr || matched.nameEn,
+      role,
+      now.toISOString(),
+      exp.toISOString(),
+      now.toISOString(),
+      userAgent
+    ]);
+
+    // 만료 토큰 정리 (확률적으로 실행 - 너무 잦은 정리 방지)
+    if (Math.random() < 0.05) _cleanupExpiredTokens();
+
+    return {
+      ok: true,
+      token: token,
+      role: role,
+      displayName: matched.nameKr || matched.nameEn,
+      expiresAt: exp.toISOString()
+    };
+  } catch (err) {
+    return {ok: false, error: 'login error: ' + err.toString()};
+  }
+}
+
+function _logoutAction(payload, tokenParam) {
+  try {
+    const token = tokenParam || payload.token;
+    if (!token) return {ok: true}; // 토큰 없어도 OK
+    const sheet = _getAuthSheet();
+    const data = sheet.getDataRange().getValues();
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]) === token) {
+        sheet.deleteRow(i + 1);
+        break;
+      }
+    }
+    return {ok: true};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+function _validateToken(token) {
+  // 반환: { valid: bool, role, user, reason }
+  if (!token) return {valid: false, reason: 'no_token'};
+  try {
+    const sheet = _getAuthSheet();
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return {valid: false, reason: 'empty'};
+    const now = new Date();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === token) {
+        const expStr = String(data[i][4] || '');
+        const exp = new Date(expStr);
+        if (isNaN(exp.getTime()) || exp <= now) {
+          // 만료됨 — 삭제
+          try { sheet.deleteRow(i + 1); } catch(e) {}
+          return {valid: false, reason: 'expired'};
+        }
+        // LastUsed 갱신 (성능 고려해서 하루에 한 번 정도만)
+        try {
+          const lastUsedStr = String(data[i][5] || '');
+          const lastUsed = new Date(lastUsedStr);
+          if (isNaN(lastUsed.getTime()) || (now - lastUsed) > 3600000) {
+            sheet.getRange(i + 1, 6).setValue(now.toISOString());
+          }
+        } catch(e) {}
+        return {
+          valid: true,
+          role: String(data[i][2] || 'driver'),
+          user: String(data[i][1] || '')
+        };
+      }
+    }
+    return {valid: false, reason: 'not_found'};
+  } catch (err) {
+    return {valid: false, reason: 'error: ' + err.toString()};
+  }
+}
+
+function _cleanupExpiredTokens() {
+  try {
+    const sheet = _getAuthSheet();
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return;
+    const now = new Date();
+    // 뒤에서부터 삭제 (인덱스 안 꼬이게)
+    for (let i = data.length - 1; i >= 1; i--) {
+      const expStr = String(data[i][4] || '');
+      const exp = new Date(expStr);
+      if (isNaN(exp.getTime()) || exp <= now) {
+        try { sheet.deleteRow(i + 1); } catch(e) {}
+      }
+    }
+  } catch (err) {
+    Logger.log('cleanup error: ' + err.toString());
+  }
+}
+
+// 로그인용: 드라이버 이름 목록 (PIN 등 민감 정보 제외)
+function _getLoginNames() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('M_Drivers');
+    if (!sheet) return {ok: false, error: 'M_Drivers not found'};
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return {ok: true, rows: []};
+    const headers = data[0].map(String);
+    const nameKrIdx = headers.indexOf('Name_KR');
+    const nameEnIdx = headers.indexOf('Name_EN');
+    const initIdx   = headers.indexOf('Initials');
+    const activeIdx = headers.indexOf('Active');
+    const rows = [];
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const active = activeIdx >= 0 ? String(row[activeIdx] || '').toUpperCase() : 'Y';
+      if (active && active !== 'Y' && active !== '') continue;
+      const nameKr = String(row[nameKrIdx] || '').trim();
+      const nameEn = String(row[nameEnIdx] || '').trim();
+      if (!nameKr && !nameEn) continue;
+      rows.push({
+        Name_KR: nameKr,
+        Name_EN: nameEn,
+        Initials: initIdx >= 0 ? String(row[initIdx] || '') : ''
+      });
+    }
+    return {ok: true, rows: rows};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// M_Drivers 응답에서 PIN 컬럼 제거 (get_master/get_all_masters 경유 시 사용)
+function _stripPinFromDrivers(result) {
+  try {
+    if (!result || !result.rows) return result;
+    const cleanRows = result.rows.map(r => {
+      if (!r || typeof r !== 'object') return r;
+      const copy = {};
+      Object.keys(r).forEach(k => { if (k !== 'PIN') copy[k] = r[k]; });
+      return copy;
+    });
+    return Object.assign({}, result, {rows: cleanRows});
+  } catch (err) {
+    return result;
+  }
+}
+
+// 요청 인증 검사 (메인 게이트)
+// 반환: { allow: true } 또는 { allow: false, response: <json> }
+function _authGate(action, role, tokenValid) {
+  // PUBLIC: 무조건 통과
+  if (PUBLIC_ACTIONS.indexOf(action) >= 0) return {allow: true};
+
+  // 토큰 없으면 거부
+  if (!tokenValid.valid) {
+    return {allow: false, response: {ok: false, error: 'unauthorized', reason: tokenValid.reason || 'no_token', authRequired: true}};
+  }
+
+  // 관리자 전용 액션 검사
+  if (role === 'driver') {
+    if (ADMIN_ONLY_ACTIONS.indexOf(action) >= 0 || ADMIN_ONLY_GET_ACTIONS.indexOf(action) >= 0) {
+      return {allow: false, response: {ok: false, error: 'forbidden', reason: 'admin_only'}};
+    }
+  }
+
+  return {allow: true};
 }
 
 function formatDateForSheet(date) {
@@ -164,26 +460,65 @@ function ensureSheet(ss, sheetName) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CONSOLIDATED GET Handler
+// CONSOLIDATED GET Handler (with token auth gate)
 // ═══════════════════════════════════════════════════════════════════════════
 function doGet(e) {
   try {
     const action = e.parameter.action || 'ping';
     const sheet = e.parameter.sheet || '';
     const driver = e.parameter.driver || '';
+    const token = e.parameter.token || '';
+
+    // ── 인증 게이트 ──
+    const tokenValid = _validateToken(token);
+    const gate = _authGate(action, tokenValid.role, tokenValid);
+    if (!gate.allow) return cors(gate.response);
+
+    // 로그인된 드라이버가 다른 드라이버의 데이터를 조회하는 걸 막음
+    // (관리자는 모든 드라이버 조회 가능)
+    let effectiveDriver = driver;
+    if (tokenValid.valid && tokenValid.role === 'driver') {
+      // 드라이버 토큰이면 driver 파라미터를 본인으로 강제
+      effectiveDriver = tokenValid.user;
+    }
 
     switch (action) {
       case 'ping':
         return cors({ok: true, msg: 'DC Fleet API ready', ts: new Date().toISOString()});
 
+      // ── 인증 ──
+      case 'login': {
+        // GET 방식 login은 URL 로그에 PIN이 남을 수 있어 권장하지 않지만 지원
+        return cors(_loginAction({
+          name: e.parameter.name || '',
+          pin: e.parameter.pin || '',
+          ua: e.parameter.ua || ''
+        }));
+      }
+      case 'logout':
+        return cors(_logoutAction({token: token}, token));
+      case 'get_login_names':
+        return cors(_getLoginNames());
+
       case 'get_reports':
-        return cors(getReports(sheet, driver));
+        return cors(getReports(sheet, effectiveDriver));
 
-      case 'get_master':
-        return cors(getMaster(sheet));
+      case 'get_master': {
+        const result = getMaster(sheet);
+        // M_Drivers 조회 시 PIN 컬럼 제거 (관리자든 드라이버든 무조건)
+        if (sheet === 'M_Drivers') return cors(_stripPinFromDrivers(result));
+        return cors(result);
+      }
 
-      case 'get_all_masters':
-        return cors(getAllMasters());
+      case 'get_all_masters': {
+        const result = getAllMasters();
+        // M_Drivers 포함 시 PIN 제거
+        if (result && result.data && result.data.M_Drivers) {
+          const stripped = _stripPinFromDrivers({rows: result.data.M_Drivers});
+          result.data.M_Drivers = stripped.rows;
+        }
+        return cors(result);
+      }
 
       case 'get_sub_rates':
         return cors(getSubRatesSheet());
@@ -195,10 +530,10 @@ function doGet(e) {
         return cors(getLedgerSheet());
 
       case 'get_wages':
-        return cors(getWagesSheet(driver));
+        return cors(getWagesSheet(effectiveDriver));
 
       case 'get_mot_reports':
-        return cors(getReports('MOT_Report', driver));
+        return cors(getReports('MOT_Report', effectiveDriver));
 
       case 'get_notices':
         return cors(getNoticesSheet());
@@ -210,7 +545,7 @@ function doGet(e) {
         return cors(getActiveRegos());
 
       case 'get_my_shifts':
-        return cors(getMyShifts(driver));
+        return cors(getMyShifts(effectiveDriver));
 
       case 'get_max_km':
         return cors(getMaxKMPerRego());
@@ -219,7 +554,7 @@ function doGet(e) {
         return cors(getSheetRows('Agency_Txn'));
 
       case 'get_agency_balances': {
-        const agencyParam = params.agency ? params.agency[0] : '';
+        const agencyParam = e.parameter.agency || '';
         return cors(getAgencyBalances(agencyParam));
       }
 
@@ -227,12 +562,12 @@ function doGet(e) {
         return cors(getSheetRows('SUB_Txn'));
 
       case 'get_defect_reports': {
-        const defDriver = params.driver ? params.driver[0] : '';
+        const defDriver = e.parameter.driver || '';
         return cors(getDefectReports(defDriver));
       }
 
       case 'get_bus_damage': {
-        const dmgRego = params.rego ? params.rego[0] : '';
+        const dmgRego = e.parameter.rego || '';
         return cors(getBusDamage(dmgRego));
       }
 
@@ -241,11 +576,11 @@ function doGet(e) {
         return cors(getFatigueComplianceCheck());
 
       case 'get_last_eos':
-        return cors(getLastEndOfShift(driver));
+        return cors(getLastEndOfShift(effectiveDriver));
 
       // ── Leave Requests (GET) ──
       case 'get_my_leave_requests':
-        return cors(getMyLeaveRequests(driver));
+        return cors(getMyLeaveRequests(effectiveDriver));
 
       case 'get_all_leave_requests':
         return cors(getAllLeaveRequests(e.parameter.filter));
@@ -262,15 +597,41 @@ function doGet(e) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CONSOLIDATED POST Handler
+// CONSOLIDATED POST Handler (with token auth gate)
 // ═══════════════════════════════════════════════════════════════════════════
 function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
     const action = payload.action;
-    const _user  = payload._user || 'unknown';
+    const token  = payload.token || '';
+    let _user  = payload._user || 'unknown';
+
+    // ── 인증 게이트 ──
+    const tokenValid = _validateToken(token);
+    const gate = _authGate(action, tokenValid.role, tokenValid);
+    if (!gate.allow) return cors(gate.response);
+
+    // 드라이버 토큰이면 _user를 토큰 소유자로 강제 (spoofing 방지)
+    if (tokenValid.valid && tokenValid.role === 'driver') {
+      _user = tokenValid.user;
+      // driver 필드가 payload나 data에 있으면 토큰 소유자로 강제
+      if (payload.driver) payload.driver = tokenValid.user;
+      if (payload.data && typeof payload.data === 'object' && payload.data.Driver) {
+        payload.data.Driver = tokenValid.user;
+      }
+    }
 
     switch (action) {
+      // ── 인증 (POST) ──
+      case 'login':
+        return cors(_loginAction({
+          name: payload.name || '',
+          pin: payload.pin || '',
+          ua: payload.ua || ''
+        }));
+      case 'logout':
+        return cors(_logoutAction(payload, token));
+
       // ── Report Operations ──
       case 'save_report':
         return cors(saveReport('Daily_Report', payload.data));
@@ -463,8 +824,13 @@ function doPost(e) {
         return cors(replaceNotices(payload.rows));
 
       // ── Driver Info ──
-      case 'update_driver_pin':
+      case 'update_driver_pin': {
+        // 드라이버는 자기 PIN만 변경 가능, 관리자는 누구든 가능
+        if (tokenValid.role === 'driver' && payload.driverName !== tokenValid.user) {
+          return cors({ok: false, error: 'forbidden', reason: 'can_only_change_own_pin'});
+        }
         return cors(updateDriverPin(payload.driverName, payload.pin));
+      }
 
       case 'update_driver_info':
         return cors(updateDriverInfo(payload.driverName, payload.data));
