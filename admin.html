@@ -13931,23 +13931,33 @@ async function syncSub(){
   });
   // 3) 양방향 동기화: M_PriceSub(DB.PS)에만 있고 M_SUB에 없는 업체 → 자동 등록
   //    대소문자/공백 무시 비교로 중복 방지
-  const subNamesNorm = new Set(subs.map(s=>(s.SubName||'').trim().toUpperCase()));
-  const newFromPS = Object.keys(DB.PS).filter(k => !subNamesNorm.has(k.trim().toUpperCase()));
-  if(newFromPS.length){
-    console.log('[syncSub] 요금표에서 발견된 미등록 업체 자동 등록:', newFromPS);
-    const promises = newFromPS.map(name =>
-      fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-        body: JSON.stringify({action:'add_master', sheet:'M_SUB',
-          data:{SubName:name, ABN:'', Contact:'', Email:'', Phone:'', PriceType:'cost', MarginRate:'0', OwnerDriver:'', Active:'Y'}
-        })
-      }).then(r=>r.json()).then(j=>{
-        if(j.ok){
-          _subCompanies.push({SubName:name, ABN:'', Contact:'', Email:'', Phone:'', PriceType:'cost', MarginRate:'0', OwnerDriver:'', Active:'Y', _rowIndex:j.row||null});
-        }
-      }).catch(e=>console.warn('M_SUB 자동 등록 실패:', name, e))
-    );
-    await Promise.all(promises);
-    if(newFromPS.length) toast('📋 요금표에서 '+newFromPS.length+'개 신규 업체가 자동 등록되었습니다','ok');
+  //    ★ M_SUB 로드 실패 시 (subs가 비어있으면) 자동 등록 건너뛰기 — 중복 생성 방지
+  if(!subs || subs.length === 0){
+    console.warn('[syncSub] M_SUB 데이터가 비어있어 자동 등록 건너뜁니다 (중복 방지)');
+  } else {
+    const subNamesNorm = new Set(subs.map(s=>(s.SubName||'').trim().toUpperCase()));
+    // DC_OWNERS와 빈 키는 제외
+    const dcNorm = new Set((typeof DC_OWNERS!=='undefined'?DC_OWNERS:[]).map(o=>(o||'').trim().toUpperCase()));
+    const newFromPS = Object.keys(DB.PS).filter(k => {
+      const norm = k.trim().toUpperCase();
+      return norm && !subNamesNorm.has(norm) && !dcNorm.has(norm);
+    });
+    if(newFromPS.length){
+      console.log('[syncSub] 요금표에서 발견된 미등록 업체 자동 등록:', newFromPS);
+      const promises = newFromPS.map(name =>
+        fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+          body: JSON.stringify({action:'add_master', sheet:'M_SUB',
+            data:{SubName:name, ABN:'', Contact:'', Email:'', Phone:'', PriceType:'cost', MarginRate:'0', OwnerDriver:'', Active:'Y'}
+          })
+        }).then(r=>r.json()).then(j=>{
+          if(j.ok){
+            _subCompanies.push({SubName:name, ABN:'', Contact:'', Email:'', Phone:'', PriceType:'cost', MarginRate:'0', OwnerDriver:'', Active:'Y', _rowIndex:j.row||null});
+          }
+        }).catch(e=>console.warn('M_SUB 자동 등록 실패:', name, e))
+      );
+      await Promise.all(promises);
+      if(newFromPS.length) toast('📋 요금표에서 '+newFromPS.length+'개 신규 업체가 자동 등록되었습니다','ok');
+    }
   }
 }
 
