@@ -2447,74 +2447,83 @@ async function loadMasterData() {
   function setBar(pct) { if(bar) bar.style.width = pct + '%'; }
   function setMsg(t)   { if(msg) msg.textContent = t; }
 
-  // ① 캐시 우선 적용 (즉시 UI 반응)
+  // ★ 로그인 전: PIN 없이 이름 목록만 로드 (인증 불필요)
+  //    전체 마스터 데이터는 로그인 성공 후 loadFullMasterData()가 로드
+  setMsg('드라이버 목록 로드 중...');
+  setBar(15);
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_login_names');
+    const json = await res.json();
+    if (json.ok && Array.isArray(json.rows)) {
+      MASTER.drivers = json.rows.map(r => ({
+        Name_KR: r.Name_KR || '',
+        Name_EN: r.Name_EN || '',
+        Initials: r.Initials || '',
+        Active: 'Y'
+      }));
+      try { localStorage.setItem('dc_drivers_names', JSON.stringify(MASTER.drivers)); } catch(e){}
+      _masterReady = true;
+      buildLoginSelect();
+      setBar(100);
+    } else {
+      throw new Error('login names 응답 실패');
+    }
+  } catch(e) {
+    console.warn('login names load failed:', e);
+    // 폴백: 이전에 저장된 이름 캐시
+    try {
+      const cached = JSON.parse(localStorage.getItem('dc_drivers_names') || '[]');
+      if (cached.length > 0) {
+        MASTER.drivers = cached;
+        _masterReady = true;
+        buildLoginSelect();
+        setMsg('⚠️ 오프라인 모드 — 캐시 사용 중');
+      } else {
+        useFallbackMaster();
+        _masterReady = true;
+        buildLoginSelect();
+        showMasterRetryBtn();
+      }
+    } catch(e2) {
+      useFallbackMaster();
+      _masterReady = true;
+      buildLoginSelect();
+    }
+  }
+
+  await new Promise(r => setTimeout(r, 200));
+  const overlay = document.getElementById('master-loading');
+  if(overlay) { overlay.style.opacity='0'; overlay.style.transition='opacity 0.4s'; setTimeout(()=>overlay.remove(),400); }
+}
+
+// 로그인 성공 후 전체 마스터 데이터 로드 (토큰 자동 첨부됨)
+async function loadFullMasterData() {
+  // 캐시 즉시 적용
   const cached = loadMasterCache();
   if (cached) {
     try {
       applyMasterData(cached);
-      setMsg('캐시 데이터 적용 중...');
-      setBar(40);
       populateMasterSelects();
       populateContacts();
     } catch(cacheErr) { console.warn('캐시 적용 실패:', cacheErr); }
-    _masterReady = true;
-    buildLoginSelect(); // ← MASTER 로드 후 드라이버 목록 갱신
   }
-
-  // ② 백그라운드 최신 데이터 조회
   try {
-    setMsg(cached ? '최신 데이터 확인 중...' : 'Google Sheets 연결 중...');
-    if (!cached) setBar(20);
-
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000); // 30초 타임아웃 (GAS 콜드스타트 대비)
-    const res  = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters', { signal: controller.signal });
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters', { signal: controller.signal });
     clearTimeout(timeout);
     const data = await res.json();
-    setBar(80);
-
     if (data.ok && data.data) {
       try {
         applyMasterData(data.data);
-        saveMasterCache(data.data);           // 캐시 저장
-        setMsg('✅ 데이터 로드 완료 (가이드 ' + MASTER.guides.length + '명)');
+        saveMasterCache(data.data);
         populateMasterSelects();
         populateContacts();
-      } catch(applyErr) { console.warn('데이터 적용 실패:', applyErr); setMsg('⚠️ 데이터 적용 오류'); }
-      _masterReady = true;
-      buildLoginSelect(); // ← MASTER 최신 데이터로 드라이버 목록 갱신
-    } else {
-      if (!cached) { setMsg('⚠️ 시트 연결 실패 — 기본 데이터 사용'); useFallbackMaster(); }
-      else { setMsg('⚠️ 최신 데이터 조회 실패 — 캐시 사용 중'); }
-      _masterReady = true;
-      buildLoginSelect();
+      } catch(applyErr) { console.warn('데이터 적용 실패:', applyErr); }
     }
   } catch(e) {
-    console.warn('마스터 로드 실패:', e.name, e.message);
-    // 자동 재시도 (최대 2회)
-    if(!window._masterRetryCount) window._masterRetryCount = 0;
-    if(window._masterRetryCount < 2) {
-      window._masterRetryCount++;
-      setMsg('⏳ 서버 응답 지연 — 재시도 중 (' + window._masterRetryCount + '/2)...');
-      setBar(10);
-      await new Promise(r => setTimeout(r, 2000));
-      return loadMasterData(); // 재귀 재시도
-    }
-    if (!cached) {
-      useFallbackMaster();
-      showMasterRetryBtn();
-    } else {
-      setMsg('⚠️ 서버 연결 실패 — 캐시 데이터 사용 중 (기능 정상)');
-    }
-    _masterReady = true;
-    buildLoginSelect();
+    console.warn('전체 마스터 로드 실패 (캐시 사용):', e.message);
   }
-
-  window._masterRetryCount = 0; // 성공 시 리셋
-  setBar(100);
-  await new Promise(r => setTimeout(r, cached ? 200 : 500));
-  const overlay = document.getElementById('master-loading');
-  if(overlay) { overlay.style.opacity='0'; overlay.style.transition='opacity 0.4s'; setTimeout(()=>overlay.remove(),400); }
 }
 
 // 전화번호 0 보정 헬퍼 (Google Sheets 숫자 형식 → 앞 0 복원)
@@ -3061,6 +3070,90 @@ function calcDuration(start, end) {
 }
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTH TOKEN & FETCH INTERCEPTOR (driver app)
+// PIN 로그인 후 발급받은 토큰을 모든 GAS 호출에 자동 첨부
+// ═══════════════════════════════════════════════════════════════════════════
+function getAuthToken(){ try { return localStorage.getItem('dc_token') || ''; } catch(e){ return ''; } }
+function setAuthToken(t){ try { localStorage.setItem('dc_token', t||''); } catch(e){} }
+function clearAuthToken(){
+  try {
+    localStorage.removeItem('dc_token');
+    localStorage.removeItem('dc_token_exp');
+    localStorage.removeItem('dc_token_user');
+    localStorage.removeItem('dc_token_role');
+  } catch(e){}
+}
+
+function _onAuthFailure(reason){
+  console.warn('[AUTH] 세션 만료/무효:', reason);
+  clearAuthToken();
+  try {
+    const loginScreen = document.getElementById('login-screen');
+    const appScreen = document.getElementById('app');
+    if (loginScreen) loginScreen.style.display = '';
+    if (appScreen) appScreen.style.display = 'none';
+    const lastDrv = localStorage.getItem('dc_last_driver') || '';
+    const name = (lastDrv.split('|')[0] || '').trim();
+    if (name) { try { localStorage.removeItem('dc_session_' + name); } catch(e){} }
+  } catch(e){}
+  const msg = reason === 'expired' ? '세션이 만료되었습니다. PIN을 다시 입력해주세요.' : '인증이 필요합니다. 다시 로그인해주세요.';
+  try { if(typeof showToast==='function') showToast(msg,'error'); else alert(msg); } catch(e){ try{alert(msg);}catch(e2){} }
+}
+
+// APPS_SCRIPT_URL 로 가는 모든 요청에 토큰 자동 주입
+(function installFetchInterceptor(){
+  if (window.__gasFetchIntercepted) return;
+  window.__gasFetchIntercepted = true;
+  const GAS_URL = APPS_SCRIPT_URL;
+  const _originalFetch = window.fetch.bind(window);
+
+  window.fetch = function(input, init){
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url);
+      if (url && url.indexOf(GAS_URL) === 0) {
+        const token = getAuthToken();
+        if (!init || !init.method || String(init.method).toUpperCase() === 'GET') {
+          if (token && !/[?&]token=/.test(url)) {
+            const sep = url.indexOf('?') >= 0 ? '&' : '?';
+            input = url + sep + 'token=' + encodeURIComponent(token);
+          }
+        } else if (init && init.body && typeof init.body === 'string' && token) {
+          try {
+            const parsed = JSON.parse(init.body);
+            if (parsed && typeof parsed === 'object' && !parsed.token) {
+              parsed.token = token;
+              init = Object.assign({}, init, {body: JSON.stringify(parsed)});
+            }
+          } catch(e) {}
+        }
+      }
+    } catch(e){}
+
+    const p = _originalFetch(input, init);
+    return p.then(res => {
+      try {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (url.indexOf(GAS_URL) === 0 && res && res.ok) {
+          const clone = res.clone();
+          clone.text().then(txt => {
+            try {
+              const j = JSON.parse(txt);
+              if (j && j.authRequired) {
+                const body = (init && init.body) || '';
+                const isPublic = /"action"\s*:\s*"(login|ping|logout|get_login_names)"/.test(body)
+                  || /action=(login|ping|logout|get_login_names)/.test(url);
+                if (!isPublic) _onAuthFailure(j.reason || 'unauthorized');
+              }
+            } catch(e){}
+          }).catch(()=>{});
+        }
+      } catch(e){}
+      return res;
+    });
+  };
+})();
+
 async function submitToSheets(action, data) {
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
@@ -3408,19 +3501,19 @@ function pinKeydown(el, idx, e) {
 }
 
 function getDriverPin(name) {
-  // 구글 시트 MASTER에서 PIN 읽기 (없으면 1234)
-  const d = MASTER.drivers?.find(d => d.Name_KR === name || d.Name_EN === name);
-  return (d?.PIN && String(d.PIN).trim()) ? String(d.PIN).trim() : '1234';
+  // DEPRECATED — PIN은 이제 서버에서만 검증 (action=login)
+  // 호환성을 위해 남겨두지만 실제 검증엔 쓰이지 않음
+  return '';
 }
 
-function doLogin() {
+async function doLogin() {
   const sel = document.getElementById('login-driver-select').value;
   if(!sel){ showLoginError('Please select a driver (드라이버를 선택하세요)'); return; }
   const [name, initials, englishName] = sel.split('|');
   const pin = [0,1,2,3].map(i => document.getElementById('pin-'+i).value).join('');
   if(pin.length < 4){ showLoginError('PIN 4자리를 입력하세요'); return; }
 
-  // MASTER 데이터 아직 로드 중이면 최대 5초 대기 후 재시도 (1회만)
+  // 이름 목록 아직 로드 중이면 최대 5초 대기 (1회만)
   if(!_masterReady && !window._loginRetried) {
     window._loginRetried = true;
     const loginBtn = document.querySelector('#login-screen button[onclick="doLogin()"]');
@@ -3440,8 +3533,45 @@ function doLogin() {
   }
   window._loginRetried = false;
 
-  const correctPin = getDriverPin(name);
-  if(pin !== correctPin){ showLoginError('Incorrect PIN (PIN 번호가 틀렸습니다)'); return; }
+  // 로그인 버튼 잠시 비활성화
+  const loginBtn = document.querySelector('#login-screen button[onclick="doLogin()"]');
+  const prevLabel = loginBtn ? loginBtn.textContent : '';
+  if(loginBtn) { loginBtn.disabled = true; loginBtn.textContent = '🔐 인증 중...'; }
+
+  // ── 서버 PIN 검증 + 토큰 발급 ──
+  let loginRes;
+  try {
+    const ua = (navigator.userAgent||'').slice(0,80);
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'login', name: name, pin: pin, ua: ua})
+    });
+    loginRes = await res.json();
+  } catch(e) {
+    if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = prevLabel || '🔐 로그인'; }
+    showLoginError('Network error — 네트워크 오류');
+    return;
+  }
+
+  if(!loginRes || !loginRes.ok || !loginRes.token) {
+    if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = prevLabel || '🔐 로그인'; }
+    showLoginError('Incorrect PIN (PIN 번호가 틀렸습니다)');
+    return;
+  }
+
+  // 토큰 저장
+  setAuthToken(loginRes.token);
+  try {
+    localStorage.setItem('dc_token_exp', loginRes.expiresAt||'');
+    localStorage.setItem('dc_token_user', loginRes.displayName||name);
+    localStorage.setItem('dc_token_role', loginRes.role||'driver');
+  } catch(e){}
+
+  if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = prevLabel || '🔐 로그인'; }
+
+  // ── 인증 성공 후 전체 마스터 데이터 로드 ──
+  try { await loadFullMasterData(); } catch(e) { console.warn('master load:', e); }
 
   // MASTER에서 전체 드라이버 정보 병합
   const _masterDrv = MASTER.drivers?.find(d => d.Name_KR === name || d.Name_EN === name) || {};
@@ -3614,6 +3744,15 @@ function requestCorrection() {
 }
 
 function doLogout() {
+  // 서버 토큰 폐기
+  try {
+    const tk = getAuthToken();
+    if (tk) {
+      fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'logout', token: tk})});
+    }
+  } catch(e){}
+  clearAuthToken();
   // 로그아웃 전 현재 드라이버 데이터 저장
   if(currentDriver?.name) {
     localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
@@ -3984,6 +4123,18 @@ function autoRestoreSession() {
   const lastSel = localStorage.getItem('dc_last_driver');
   if (!lastSel) return;
 
+  // ★ 토큰 사전 검사 — 없거나 만료됐으면 복원 안 함
+  const token = getAuthToken();
+  if (!token) return;
+  const expStr = localStorage.getItem('dc_token_exp') || '';
+  if (expStr) {
+    const exp = new Date(expStr);
+    if (isNaN(exp.getTime()) || exp <= new Date()) {
+      clearAuthToken();
+      return;
+    }
+  }
+
   function tryRestore() {
     if (!_masterReady) { setTimeout(tryRestore, 150); return; }
     const [name, initials, englishName] = lastSel.split('|');
@@ -3999,6 +4150,9 @@ function autoRestoreSession() {
       const found = [...sel.options].find(o => o.value === lastSel);
       if (found) sel.value = lastSel;
     }
+
+    // ★ 전체 마스터 데이터 로드 (비동기, 실패해도 진행)
+    loadFullMasterData().catch(e => console.warn('full master load:', e));
 
     const _masterDrvAuto = MASTER.drivers?.find(d => d.Name_KR === name || d.Name_EN === name) || {};
     currentDriver = { name, initials: initials||'??', englishName: englishName||name, ..._masterDrvAuto };
@@ -5056,7 +5210,7 @@ function initMyInfoPage() {
   }
 }
 
-function changePin() {
+async function changePin() {
   const current = document.getElementById('pin-current').value;
   const newPin  = document.getElementById('pin-new').value;
   const confirm = document.getElementById('pin-confirm').value;
@@ -5070,19 +5224,51 @@ function changePin() {
   if(newPin !== confirm){ errEl.textContent = '새 PIN이 일치하지 않습니다.';   errEl.style.display='block'; return; }
   if(!/^\d{4}$/.test(newPin)){ errEl.textContent = 'PIN은 숫자 4자리여야 합니다.'; errEl.style.display='block'; return; }
 
-  const correct = getDriverPin(currentDriver.name);
-  if(current !== correct){ errEl.textContent = '현재 PIN이 틀렸습니다.'; errEl.style.display='block'; return; }
+  // ── 현재 PIN 서버 검증 (login 시도 → 즉시 폐기) ──
+  try {
+    const verifyRes = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'login', name: currentDriver.name, pin: current, ua:'pin-change-verify'})
+    });
+    const verifyJson = await verifyRes.json();
+    if(!verifyJson.ok || !verifyJson.token){
+      errEl.textContent = '현재 PIN이 틀렸습니다.';
+      errEl.style.display = 'block';
+      return;
+    }
+    // 검증용 토큰 즉시 폐기 (원래 세션 토큰 유지)
+    try {
+      fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'logout', token: verifyJson.token})});
+    } catch(e){}
+  } catch(e) {
+    errEl.textContent = '네트워크 오류. 다시 시도해주세요.';
+    errEl.style.display = 'block';
+    return;
+  }
 
-  // MASTER 로컬 업데이트
+  // ── 새 PIN 저장 (세션 토큰은 fetch interceptor가 자동 첨부) ──
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({action:'update_driver_pin', driverName: currentDriver.name, pin: newPin})
+    });
+    const json = await res.json();
+    if (!json.ok) {
+      errEl.textContent = json.error || 'PIN 저장 실패';
+      errEl.style.display = 'block';
+      return;
+    }
+  } catch(e) {
+    errEl.textContent = '네트워크 오류. 다시 시도해주세요.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  // MASTER 로컬에는 PIN 실제 값을 저장하지 않음 (서버만 알고 있음)
   const driverObj = MASTER.drivers?.find(d => d.Name_KR === currentDriver.name || d.Name_EN === currentDriver.name);
-  if(driverObj) driverObj.PIN = newPin;
-
-  // 구글 시트에 저장
-  fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: {'Content-Type': 'text/plain'},
-    body: JSON.stringify({action:'update_driver_pin', driverName: currentDriver.name, pin: newPin})
-  }).catch(()=>{});
+  if(driverObj) delete driverObj.PIN;
 
   document.getElementById('pin-current').value = '';
   document.getElementById('pin-new').value = '';
