@@ -4781,7 +4781,8 @@ let _subCompanies = []; // M_SUB rows from sheet
 async function loadSubCompanies(force=false){
   if(_subCompanies.length && !force) return _subCompanies;
   try{
-    const res = await fetch(APPS_SCRIPT_URL+'?action=get_subs');
+    // get_master&sheet=M_SUB 사용 (get_subs action은 GAS에 존재하지 않음)
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_master&sheet=M_SUB');
     const json = await res.json();
     _subCompanies = (json.rows||json.data||json||[]).filter(r=>r.SubName);
   }catch(e){ console.warn('M_SUB 로드 실패:',e); }
@@ -9417,6 +9418,7 @@ async function loadInvHistory(forceReload) {
   }
 
   renderInvHistory();
+  renderSubInvHistory(); // ★ SUB 인보이스 이력도 함께 갱신
 }
 
 function renderInvHistory() {
@@ -10945,6 +10947,9 @@ async function generateInvoice() {
   const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false, invNumOverride:invNum});
   _showDocModal(html, {invNumber:invNum, agency, from, to}, invNum + '_' + agency.replace(/[^a-zA-Z0-9가-힣 ]/g,'_').replace(/\s+/g,'_'));
   setTimeout(() => { _downloadInvPdf(); }, 600);
+
+  // ★ 발행 후 인보이스 이력 즉시 갱신
+  loadInvHistory(true);
 }
 
 // ═══════════════════════════════════════
@@ -14054,6 +14059,12 @@ async function loadAllFromSheets(){
           '50':{base:r.seats_50_base,ot:r.seats_50_ot}
         };
       });
+    }
+
+    // M_SUB → _subCompanies (서브 업체 목록)
+    if(d.M_SUB?.length){
+      _subCompanies = d.M_SUB.filter(r=>r.SubName);
+      console.log('[loadAllFromSheets] M_SUB loaded:', _subCompanies.length, 'companies');
     }
 
     // HVIS_Bookings → window._hvisBookings (서버 동기화)
