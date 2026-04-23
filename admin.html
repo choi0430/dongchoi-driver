@@ -3004,6 +3004,7 @@ function calcSubReport(r) {
   const veh = DB.V.find(v=>v.Rego===rego);
   const owner = (veh?.Owner||'').trim();
   const isSub = !!rego && !!veh && !DC_OWNERS.includes(owner);
+  const isPrivate = r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE';
   const capNum = parseInt((r.Seats||'25').replace(/[^0-9]/g,''))||25;
   const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
   const attraction = (r.Attraction||'').trim();
@@ -3013,11 +3014,11 @@ function calcSubReport(r) {
   // ── TA 금액 (여행사 청구) ──
   const taAmount = calcAgencyTA(r);
 
-  if(!isSub) {
+  if(!isSub || isPrivate) {
     const drCost = parseFloat(r.DR_Cost||r.SVC_Charge)||0;
-    return { isSub:false, subOwner:'', rego, capKey, attraction, agency, driver,
-      taAmount, subCost:{base:0,ot:0,hotel:0,dist:0,trailer:0,night:0,total:0},
-      drCost, profit: taAmount - drCost };
+    return { isSub: isSub && !isPrivate, isPrivate, subOwner: isPrivate ? owner : '', rego, capKey, attraction, agency, driver,
+      taAmount: isPrivate ? 0 : taAmount, subCost:{base:0,ot:0,hotel:0,dist:0,trailer:0,night:0,total:0},
+      drCost: isPrivate ? 0 : drCost, profit: isPrivate ? 0 : taAmount - drCost };
   }
 
   // ── SUB 비용 (M_PriceSub / Sub_Rates) ──
@@ -3072,6 +3073,8 @@ async function getSubReportData(from, to) {
     .filter(r => {
       const d = parseToISO(r.Date||'');
       if(!d || d < from || d > to) return false;
+      // Private 운행 제외
+      if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return false;
       const rego = (r.Rego||'').trim();
       const veh = DB.V.find(v=>v.Rego===rego);
       return !!veh && !DC_OWNERS.includes((veh.Owner||'').trim());
@@ -3525,6 +3528,7 @@ function calcAgencyTA(r){
 // 정산 대시보드 (리포트 기반 자동 집계)
 // ═══════════════════════════════════════
 let _settleData = null; // 집계된 SUB 리포트 데이터
+let _settleSubInvoices = []; // SUB 제출 인보이스 (Source=SUB_DRIVER)
 
 function initSettleDashboard() {
   const from = document.getElementById('settle-from');
@@ -3553,6 +3557,16 @@ async function loadSettleDashboard() {
   if(bdEl) bdEl.innerHTML = '';
 
   _settleData = await getSubReportData(from, to);
+
+  // SUB 제출 인보이스 로드 (Source=SUB_DRIVER)
+  try {
+    const invRes = await fetch(APPS_SCRIPT_URL+'?action=get_invoices');
+    const invJson = await invRes.json();
+    _settleSubInvoices = (invJson.rows||invJson.data||[]).filter(inv=>
+      inv.Source==='SUB_DRIVER' &&
+      ((inv.PeriodFrom||'') <= to) && ((inv.PeriodTo||'') >= from)
+    );
+  } catch(e) { _settleSubInvoices = []; }
 
   // SUB 필터 드롭다운 업데이트
   const filterEl = document.getElementById('settle-sub-filter');
@@ -3673,6 +3687,22 @@ function renderSettleDashboard() {
       </div>
 
       <!-- 드라이버별 breakdown -->
+      <!-- SUB 제출 인보이스 매칭 -->
+      ${(()=>{
+        const subInvs = (_settleSubInvoices||[]).filter(inv=>inv.SubCompany===sub);
+        if(!subInvs.length) return '';
+        return subInvs.map(inv=>{
+          const st = (inv.Status||'').toLowerCase();
+          const stColor = st==='paid'?'var(--gn)':st==='submitted'?'#f59e0b':'var(--ac)';
+          return `<div style="padding:8px 14px;background:var(--sf2,#f0f4ff);border-bottom:1px solid var(--bd,#eee);display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:11px;font-weight:700;color:var(--ac);">🧾 ${inv.InvNumber||''} <span style="color:${stColor};font-size:10px;font-weight:800;">[${inv.Status||''}]</span></div>
+              <div style="font-size:10px;color:var(--t3);">${inv.PeriodFrom||''}~${inv.PeriodTo||''} | ${inv.IssuedDate||''}</div>
+            </div>
+            <div style="font-size:14px;font-weight:800;color:var(--ac);">$${Number(inv.GrandTotal||0).toLocaleString()}</div>
+          </div>`;
+        }).join('');
+      })()}
       ${Object.keys(driverMap).sort().map(dName => {
         const dd = driverMap[dName];
         return `<div style="border-bottom:1px solid var(--bd,#eee);">

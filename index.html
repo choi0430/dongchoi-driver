@@ -624,12 +624,23 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
     <!-- AUTO-FILL INFO BANNER -->
     <div id="autofill-info-banner" style="display:none;margin:0 12px 10px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:11px 14px;font-size:12px;color:#166534;line-height:1.65;"></div>
 
+    <!-- Private(자체운행) 토글 — SUB 차량일 때만 표시 -->
+    <div id="private-toggle-wrap" style="display:none;margin:0 12px 10px;">
+      <label style="display:flex;align-items:center;gap:10px;background:#fffbeb;border:1.5px solid #f59e0b;border-radius:12px;padding:10px 14px;cursor:pointer;">
+        <input type="checkbox" id="dr-private" onchange="togglePrivateMode()" style="width:20px;height:20px;accent-color:#f59e0b;">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#92400e;">🏷️ 자체 운행 (Private)</div>
+          <div style="font-size:11px;color:#b45309;">DC 관련 없는 운행 — 정산 제외, 어크레디테이션 기록만 유지</div>
+        </div>
+      </label>
+    </div>
+
     <div class="card">
       <div class="card-head"><span class="card-title">📋 Daily Report (일일 리포트)</span></div>
       <div class="card-body">
         <div class="form-row mb14">
           <div class="form-group">
-            <label class="form-label">Agency (여행사)<span class="req">*</span></label>
+            <label class="form-label">Agency (여행사)<span id="agency-req" class="req">*</span></label>
             <div class="sdd-wrap" id="sdd-agency-wrap">
               <input class="sdd-input" id="dr-agency" placeholder="Search agency (여행사 검색)" autocomplete="off"
                 oninput="sddFilter('agency')" onfocus="sddOpen('agency')" onblur="sddBlur('agency')">
@@ -1840,6 +1851,67 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 
 <!-- ★ SUB 인보이스 페이지 (오너드라이버용) -->
 <div class="page" id="page-subinv">
+  <!-- ── 탭 전환: 간편입력 / 인보이스 ── -->
+  <div style="display:flex;border-bottom:2px solid var(--border);margin:0 14px;">
+    <button id="si-tab-report" onclick="switchSubTab('report')" style="flex:1;padding:10px;border:none;background:none;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid var(--accent);color:var(--accent);">📝 간편 리포트</button>
+    <button id="si-tab-invoice" onclick="switchSubTab('invoice')" style="flex:1;padding:10px;border:none;background:none;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;color:var(--muted);">🧾 인보이스</button>
+  </div>
+
+  <!-- ── 간편 리포트 입력 섹션 ── -->
+  <div id="si-section-report" style="padding:12px 14px;">
+    <div style="font-size:14px;font-weight:800;margin-bottom:4px;">📝 간편 리포트 입력</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">드라이버가 앱을 사용하지 않는 경우, 운행 기록을 직접 입력하세요</div>
+
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">날짜 *</label><input type="date" id="sr-date" class="form-control" style="font-size:13px;"></div>
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">차량 *</label>
+          <select id="sr-rego" class="form-control" style="font-size:13px;" onchange="updateSrSeatsHint()">
+            <option value="">선택</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">드라이버</label><input id="sr-driver" class="form-control" style="font-size:13px;" placeholder="드라이버 이름"></div>
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">인승 *</label>
+          <select id="sr-seats" class="form-control" style="font-size:13px;">
+            <option value="">선택</option>
+            <option value="21S">21S</option><option value="25S">25S</option>
+            <option value="40S">40S</option><option value="50S">50S</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">여행사</label><input id="sr-agency" class="form-control" style="font-size:13px;" placeholder="Agency"></div>
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">코스 *</label><input id="sr-course" class="form-control" style="font-size:13px;" placeholder="Attraction"></div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">투어코드</label><input id="sr-tourcode" class="form-control" style="font-size:13px;" placeholder="Tour Code"></div>
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">KM 시작</label><input type="number" id="sr-km-start" class="form-control" style="font-size:13px;"></div>
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">KM 종료</label><input type="number" id="sr-km-end" class="form-control" style="font-size:13px;"></div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">출발 시간</label><input type="time" id="sr-time-start" class="form-control" style="font-size:13px;"></div>
+        <div style="flex:1;"><label style="font-size:10px;font-weight:700;color:var(--muted);">종료 시간</label><input type="time" id="sr-time-end" class="form-control" style="font-size:13px;"></div>
+      </div>
+      <!-- Private 운행 토글 -->
+      <label style="display:flex;align-items:center;gap:8px;background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:8px 10px;cursor:pointer;">
+        <input type="checkbox" id="sr-private" style="width:18px;height:18px;accent-color:#f59e0b;">
+        <span style="font-size:12px;font-weight:700;color:#92400e;">🏷️ 자체 운행 (Private) — DC 정산 제외</span>
+      </label>
+      <div id="sr-dup-warn" style="display:none;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:8px 10px;font-size:11px;color:#991b1b;"></div>
+      <button class="btn-accent" onclick="submitSubReport()" style="padding:10px;border-radius:10px;font-size:14px;font-weight:700;width:100%;">📋 리포트 저장</button>
+    </div>
+
+    <!-- 최근 입력 이력 -->
+    <div style="margin-top:16px;">
+      <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px;">📜 최근 입력 이력</div>
+      <div id="sr-history" style="font-size:12px;color:var(--muted);">로딩 중...</div>
+    </div>
+  </div>
+
+  <!-- ── 인보이스 섹션 (기존) ── -->
+  <div id="si-section-invoice" style="display:none;">
   <div style="padding:16px 14px 8px;">
     <div style="font-size:18px;font-weight:800;">🧾 인보이스 발행</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">완료된 리포트를 기반으로 인보이스를 생성합니다</div>
@@ -1869,6 +1941,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
     <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px;">📜 발행 이력</div>
     <div id="si-history" style="font-size:12px;color:var(--muted);">로딩 중...</div>
   </div>
+  </div><!-- /si-section-invoice -->
 </div>
 
 <!-- BOTTOM NAV -->
@@ -2273,6 +2346,7 @@ function applyMasterData(data) {
   } catch(e) {}
   MASTER.priceClient = (data.M_PriceClient || []);
   MASTER.priceDriver = (data.M_PriceDriver || []);
+  MASTER.priceSub    = (data.M_PriceSub || []);
   MASTER.subs        = (data.M_SUB || []);
 
   // ★ 서비스 요금 옵션 (M_SvcOptions → SVC_OPTIONS 오버라이드)
@@ -4341,6 +4415,11 @@ function addDailyReport(shiftId){
       updateOTHint(true);
     }, 100);
   }
+  // Private 토글 표시 여부 (SUB 차량인 경우만)
+  showPrivateToggleIfSub();
+  // Private 초기화
+  const pvtChk = document.getElementById('dr-private');
+  if(pvtChk && pvtChk.checked){ pvtChk.checked=false; togglePrivateMode(); }
 }
 
 function startEndShift(shiftId){
@@ -4445,12 +4524,14 @@ function submitDailyReport(){
   const att = document.getElementById('dr-attraction').value;
   const _nightType = document.getElementById('f-night-type')?.value || 'none';
   const _isPrivateNight = _nightType.startsWith('private_');
-  // 개인 야경(Private Night Tour)은 여행사/관광지/인승 필수 아님
-  if(!_isPrivateNight && !agency){ showToast('⚠️ 여행사를 입력하세요','error'); return; }
-  if(!_isPrivateNight && !att){ showToast('⚠️ 관광지를 선택하세요','error'); return; }
+  const _isPrivateRun = document.getElementById('dr-private')?.checked || false;
+  // 개인 야경(Private Night Tour) 또는 자체운행(Private)은 여행사/관광지/인승 필수 아님
+  const _skipValidation = _isPrivateNight || _isPrivateRun;
+  if(!_skipValidation && !agency){ showToast('⚠️ 여행사를 입력하세요','error'); return; }
+  if(!_skipValidation && !att){ showToast('⚠️ 관광지를 선택하세요','error'); return; }
   /* ── 개선: 인승 미선택 경고 ── */
   const _seatsVal = document.getElementById('dr-seats')?.value;
-  if(!_isPrivateNight && !_seatsVal){ showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
+  if(!_skipValidation && !_seatsVal){ showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
   const _drBtn = document.querySelector('button[onclick="submitDailyReport()"]');
   if(_drBtn){ _drBtn.disabled=true; _drBtn.textContent='⏳ 저장 중...'; }
   const shift = activeShifts.find(s=>s.id===editingShiftId);
@@ -4519,6 +4600,7 @@ function submitDailyReport(){
     manualBonus: (()=>{ const rg=document.getElementById('pre-rego')?.value||''; const vh=MASTER.vehicles?.find(v=>v.Rego===rg); const isM=vh?.Transmission==='Manual'; const sv=getSvcValue(); return (isM&&sv>=250)?20:0; })(),
     remarks: document.getElementById('dr-remarks').value,
     svcMismatch: window._svcMismatch ? JSON.stringify(window._svcMismatch) : '',
+    private: _isPrivateRun ? 'Y' : '',
   };
   if(report.seats) shift.seats = report.seats; // 마지막 인승 저장 (다음 리포트 초기값)
   shift.dailyReports.push(report);
@@ -4571,7 +4653,8 @@ function submitDailyReport(){
     Total_TA: report.svcCharge,   // ★ M_PriceDriver base (= SVC_Charge) 저장 — 에이전시 TA는 admin에서 실시간 계산
     DR_Cost: report.dr,
     Toll_Detail: report.tollDetail || '',
-    Remarks: report.remarks
+    Remarks: report.remarks,
+    Private: report.private || ''
   });
   renderTodayReports();
   renderStep2SavedReports();
@@ -5674,6 +5757,47 @@ function openShiftHistoryPdfFromGAS(gasIdx) {
 
 function redownloadLastShiftPDF() {
   openShiftHistoryPdf(0);
+}
+
+// ═══════════════════════════════════════
+// PRIVATE(자체운행) 토글
+// ═══════════════════════════════════════
+function togglePrivateMode(){
+  const isPrivate = document.getElementById('dr-private')?.checked;
+  const agencyInput = document.getElementById('dr-agency');
+  const agencyReq = document.getElementById('agency-req');
+  const attInput = document.getElementById('dr-attraction');
+  // Private 모드: 여행사/관광지 optional, 여행사 자동 입력
+  if(isPrivate){
+    if(agencyInput) agencyInput.value = 'PRIVATE';
+    if(agencyReq) agencyReq.style.display = 'none';
+    // 배경색 변경으로 시각적 구분
+    const card = agencyInput?.closest('.card');
+    if(card) card.style.borderColor = '#f59e0b';
+  } else {
+    if(agencyInput && agencyInput.value === 'PRIVATE') agencyInput.value = '';
+    if(agencyReq) agencyReq.style.display = '';
+    const card = agencyInput?.closest('.card');
+    if(card) card.style.borderColor = '';
+  }
+}
+
+function showPrivateToggleIfSub(){
+  // 현재 선택된 차량이 SUB 차량인지 확인
+  const wrap = document.getElementById('private-toggle-wrap');
+  if(!wrap) return;
+  const shift = activeShifts.find(s=>s.id===editingShiftId);
+  if(!shift || !shift.rego){ wrap.style.display='none'; return; }
+  const veh = (MASTER.vehicles||[]).find(v=>v.Rego===shift.rego);
+  const ownerRaw = (veh?.Owner||'').trim().toUpperCase();
+  const isDC = !ownerRaw || ownerRaw === 'DONG CHOI PTY LTD';
+  const isSub = veh && !isDC;
+  wrap.style.display = isSub ? '' : 'none';
+  // SUB가 아니면 Private 해제
+  if(!isSub){
+    const chk = document.getElementById('dr-private');
+    if(chk && chk.checked){ chk.checked=false; togglePrivateMode(); }
+  }
 }
 
 // ═══════════════════════════════════════
@@ -9994,6 +10118,8 @@ function checkSubDriverAccess(){
 
 function initDriverSubInv(){
   if(!_subDriverInfo) return;
+  // 간편 리포트 탭을 기본으로 표시
+  switchSubTab('report');
   // 기간 기본값: 이번 달
   const now = new Date();
   document.getElementById('si-from').value = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-01';
@@ -10002,40 +10128,71 @@ function initDriverSubInv(){
   renderSubInvDriverHistory();
 }
 
+// SUB 비용 계산 (M_PriceSub 기준)
+function calcSubCostFromReport(r, subName){
+  const seats = (r.Seats||'25').replace(/[^0-9]/g,'');
+  const capKey = parseInt(seats)>=50?'50':parseInt(seats)>=40?'40':parseInt(seats)>=25?'25':'21';
+  const course = (r.Attraction||'').trim();
+  // M_PriceSub에서 해당 SUB 오너 + 코스 + 인승 요금 찾기
+  const ps = (MASTER.priceSub||[]).find(p=>p.SubCo===subName && p.Course===course);
+  const base = parseFloat(ps?.['seats_'+capKey+'_rate'])||0;
+  const otRate = parseFloat(ps?.['seats_'+capKey+'_ot'])||0;
+  // OT 시간 계산: DR OT금액 / PriceDriver OT rate → 시간 → × PriceSub OT rate
+  const otDR = parseFloat(r.OT)||0;
+  const pdRow = (MASTER.priceDriver||[]).find(p=>p.Course===course);
+  const pdOTRate = parseFloat(pdRow?.['seats_'+capKey+'_ot'])||0;
+  const otHours = pdOTRate>0 ? otDR/pdOTRate : 0;
+  const otSub = Math.round(otHours * (otRate||pdOTRate));
+  // Hotel/Dist/Trailer — 드라이버 지급 금액 그대로
+  const hotel = parseFloat(r.Hotel_Surcharge)||0;
+  const dist = parseFloat(r.Dist_Surcharge)||0;
+  const trailer = parseFloat(r.Trailer)||0;
+  const nightOwner = parseFloat(r.Night_Owner)||0;
+  const total = base + otSub + hotel + dist + trailer;
+  return { base, ot:otSub, hotel, dist, trailer, nightOwner, total };
+}
+
 async function loadSubInvReports(){
   const from = document.getElementById('si-from').value;
   const to = document.getElementById('si-to').value;
   if(!from || !to){ showToast('기간을 선택하세요','error'); return; }
   const listEl = document.getElementById('si-report-list');
   listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">로딩 중...</div>';
-  // 서버에서 내 리포트 가져오기
+  const subName = _subDriverInfo?.SubName||'';
+  // SUB 오너의 차량 목록
+  const myVehs = (MASTER.vehicles||[]).filter(v=>(v.Owner||'').trim()===subName).map(v=>v.Rego);
   try{
-    const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report&driver='+encodeURIComponent(currentDriver?.name||''));
+    // 전체 리포트에서 내 차량 필터
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report&driver=');
     const json = await res.json();
     const rows = json.rows || json.data || [];
-    // 기간 필터
+    // 기간 + 내 차량 + Private 제외
     const filtered = rows.filter(r=>{
       const d = parseToISO(r.Date);
-      return d && d >= from && d <= to;
+      if(!d || d < from || d > to) return false;
+      if(!myVehs.includes(r.Rego||'')) return false;
+      if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return false;
+      return true;
     });
     if(!filtered.length){
       listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">해당 기간에 리포트가 없습니다.</div>';
       return;
     }
-    // 체크박스 리스트 렌더
+    // M_PriceSub 기준 금액 계산하여 렌더
     listEl.innerHTML = filtered.map((r,i)=>{
       const d = parseToISO(r.Date)||r.Date||'';
-      const drCost = Number(r.DR_Cost||0);
-      const nightOwner = Number(r.Night_Owner||0);
-      // DR_Cost 기반 — SUB에게는 드라이버 지급 금액만 표시
-      const total = drCost;
+      const cost = calcSubCostFromReport(r, subName);
       return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;">
-        <input type="checkbox" class="si-chk" data-idx="${i}" data-total="${total}" data-date="${d}" data-rego="${r.Rego||''}" data-tour="${r.Attraction||''}" data-seats="${r.Seats||''}" data-tc="${r.Tour_Code||''}" data-dr="${drCost}" data-nightowner="${nightOwner}" checked onchange="calcSubInvDriverTotal()" style="margin-top:3px;">
+        <input type="checkbox" class="si-chk" data-idx="${i}" data-total="${cost.total}" data-date="${d}" data-rego="${r.Rego||''}" data-tour="${r.Attraction||''}" data-seats="${r.Seats||''}" data-tc="${r.Tour_Code||''}" data-base="${cost.base}" data-ot="${cost.ot}" data-hotel="${cost.hotel}" data-nightowner="${cost.nightOwner}" checked onchange="calcSubInvDriverTotal()" style="margin-top:3px;">
         <div style="flex:1;">
           <div style="font-size:12px;font-weight:700;">${d} — ${r.Agency||''}</div>
-          <div style="font-size:11px;color:var(--muted);">${r.Attraction||''} | ${r.Rego||''} | ${r.Seats||''}</div>
+          <div style="font-size:11px;color:var(--muted);">${r.Attraction||''} | ${r.Rego||''} | ${r.Seats||''} | 🚗${r.Driver||''}</div>
+          ${cost.ot>0?'<div style="font-size:10px;color:#f59e0b;">OT +$'+cost.ot+'</div>':''}
         </div>
-        <div style="font-size:13px;font-weight:700;color:var(--accent);">$${total}</div>
+        <div style="text-align:right;">
+          <div style="font-size:13px;font-weight:700;color:var(--accent);">$${cost.total}</div>
+          ${cost.base>0?'<div style="font-size:9px;color:var(--muted);">기본 $'+cost.base+'</div>':''}
+        </div>
       </label>`;
     }).join('');
     calcSubInvDriverTotal();
@@ -10057,13 +10214,15 @@ async function generateSubInvFromDriver(){
   if(!checked.length){ showToast('항목을 선택하세요','error'); return; }
   const subName = _subDriverInfo?.SubName || '';
   if(!subName){ showToast('SUB 정보가 없습니다','error'); return; }
-  // 항목 수집
+  // 항목 수집 (M_PriceSub 기준)
   const items = [];
   checked.forEach(chk=>{
     items.push({
       date: chk.dataset.date, rego: chk.dataset.rego, tour: chk.dataset.tour,
       seats: chk.dataset.seats, tourCode: chk.dataset.tc,
-      amount: Number(chk.dataset.dr||0),
+      base: Number(chk.dataset.base||0),
+      ot: Number(chk.dataset.ot||0),
+      hotel: Number(chk.dataset.hotel||0),
       nightOwner: Number(chk.dataset.nightowner||0),
       total: Number(chk.dataset.total||0)
     });
@@ -10100,23 +10259,17 @@ async function generateSubInvFromDriver(){
       <thead><tr style="background:#4f46e5;color:white;">
         <th style="padding:6px 8px;font-size:10px;">Date</th>
         <th style="padding:6px 8px;font-size:10px;">Rego</th>
-        <th style="padding:6px 8px;font-size:10px;">Tour Code</th>
-        <th style="padding:6px 8px;font-size:10px;">Course</th>
-        <th style="padding:6px 8px;font-size:10px;">Seats</th>
-        <th style="padding:6px 8px;font-size:10px;text-align:right;">DR Payment</th>
-        <th style="padding:6px 8px;font-size:10px;text-align:right;">Night Fee</th>
-        <th style="padding:6px 8px;font-size:10px;text-align:right;">Total</th>
+        <th style="padding:6px 8px;font-size:10px;">Service / Tour</th>
+        <th style="padding:6px 8px;font-size:10px;text-align:right;">Amount</th>
       </tr></thead>
-      <tbody>${items.map(i=>`<tr>
-        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">${i.date}</td>
-        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">${i.rego}</td>
-        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">${i.tourCode}</td>
-        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">${i.tour}</td>
-        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:center;">${i.seats}</td>
-        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;">$${i.amount}</td>
-        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;">${i.nightOwner>0?'+$'+i.nightOwner:'—'}</td>
-        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;font-weight:700;">$${i.total}</td>
-      </tr>`).join('')}</tbody>
+      <tbody>${items.map(i=>{
+        const details = [i.ot>0?'OT +$'+i.ot:'', i.hotel>0?'Hotel +$'+i.hotel:''].filter(Boolean).join(' | ');
+        return \`<tr>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">\${i.date}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">\${i.rego}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;">\${i.tour} (\${i.seats})\${details?'<div style="font-size:9px;color:#666;">'+details+'</div>':''}</td>
+        <td style="padding:5px 8px;border:1px solid #ddd;font-size:10px;text-align:right;font-weight:700;">$\${i.total}</td>
+      </tr>\`;}).join('')}</tbody>
     </table>
     <div style="text-align:right;">
       <div style="font-size:12px;">Subtotal (Ex GST): <strong>$${exGst.toFixed(2)}</strong></div>
@@ -10165,6 +10318,165 @@ async function renderSubInvDriverHistory(){
           <div style="font-size:13px;font-weight:700;">$${inv.GrandTotal||0}</div>
           <div style="font-size:10px;font-weight:700;color:${color};">${inv.Status||''}</div>
         </div>
+      </div>`;
+    }).join('');
+  }catch(e){ el.innerHTML='<div style="color:#ef4444;">로드 실패</div>'; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SUB 간편 리포트 입력 / 탭 전환
+// ═══════════════════════════════════════════════════════════════════
+function switchSubTab(tab){
+  const rTab = document.getElementById('si-tab-report');
+  const iTab = document.getElementById('si-tab-invoice');
+  const rSec = document.getElementById('si-section-report');
+  const iSec = document.getElementById('si-section-invoice');
+  if(tab==='report'){
+    if(rTab){ rTab.style.borderBottomColor='var(--accent)'; rTab.style.color='var(--accent)'; }
+    if(iTab){ iTab.style.borderBottomColor='transparent'; iTab.style.color='var(--muted)'; }
+    if(rSec) rSec.style.display='';
+    if(iSec) iSec.style.display='none';
+    initSubReportForm();
+  } else {
+    if(iTab){ iTab.style.borderBottomColor='var(--accent)'; iTab.style.color='var(--accent)'; }
+    if(rTab){ rTab.style.borderBottomColor='transparent'; rTab.style.color='var(--muted)'; }
+    if(iSec) iSec.style.display='';
+    if(rSec) rSec.style.display='none';
+  }
+}
+
+function initSubReportForm(){
+  // SUB 오너의 차량 목록 채우기
+  const sel = document.getElementById('sr-rego');
+  if(!sel) return;
+  const subName = _subDriverInfo?.SubName||'';
+  const vehs = (MASTER.vehicles||[]).filter(v=>{
+    const owner = (v.Owner||'').trim();
+    return owner === subName;
+  });
+  sel.innerHTML = '<option value="">선택</option>' + vehs.map(v=>`<option value="${v.Rego}">${v.Rego} (${v.Seats||'?'}인승)</option>`).join('');
+  // 날짜 기본값: 오늘
+  const dateEl = document.getElementById('sr-date');
+  if(dateEl && !dateEl.value){
+    const now = new Date();
+    dateEl.value = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  }
+  loadSubReportHistory();
+}
+
+function updateSrSeatsHint(){
+  const rego = document.getElementById('sr-rego')?.value;
+  if(!rego) return;
+  const v = (MASTER.vehicles||[]).find(vh=>vh.Rego===rego);
+  const seatsEl = document.getElementById('sr-seats');
+  // 차량 인승에 맞게 자동 선택
+  if(v && v.Seats && seatsEl){
+    const cap = parseInt(v.Seats);
+    if(cap <= 21) seatsEl.value = '21S';
+    else if(cap <= 25) seatsEl.value = '25S';
+    else if(cap <= 40) seatsEl.value = '40S';
+    else seatsEl.value = '50S';
+  }
+}
+
+async function submitSubReport(){
+  const date = document.getElementById('sr-date')?.value;
+  const rego = document.getElementById('sr-rego')?.value;
+  const seats = document.getElementById('sr-seats')?.value;
+  const course = document.getElementById('sr-course')?.value?.trim();
+  const isPrivate = document.getElementById('sr-private')?.checked;
+  if(!date){ showToast('날짜를 선택하세요','error'); return; }
+  if(!rego){ showToast('차량을 선택하세요','error'); return; }
+  if(!seats){ showToast('인승을 선택하세요','error'); return; }
+  if(!isPrivate && !course){ showToast('코스를 입력하세요','error'); return; }
+
+  // 중복 체크 (같은 날짜+차량)
+  const dupWarn = document.getElementById('sr-dup-warn');
+  try{
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report&driver=');
+    const json = await res.json();
+    const rows = json.rows||json.data||[];
+    const dup = rows.find(r=> parseToISO(r.Date)===date && (r.Rego||'')===rego);
+    if(dup){
+      if(dupWarn){
+        dupWarn.style.display='';
+        dupWarn.textContent = `⚠️ ${date} / ${rego} 리포트가 이미 존재합니다 (${dup.Driver||''}). 중복 저장됩니다.`;
+      }
+      if(!confirm(`${date} / ${rego} 리포트가 이미 존재합니다.\n드라이버: ${dup.Driver||''}\n\n그래도 저장하시겠습니까?`)) return;
+    }
+  }catch(e){ /* 중복 체크 실패 시 그냥 진행 */ }
+
+  const agency = isPrivate ? 'PRIVATE' : (document.getElementById('sr-agency')?.value?.trim()||'');
+  const driver = document.getElementById('sr-driver')?.value?.trim()||'';
+  const tourCode = document.getElementById('sr-tourcode')?.value?.trim()||'';
+  const kmStart = document.getElementById('sr-km-start')?.value||'';
+  const kmEnd = document.getElementById('sr-km-end')?.value||'';
+  const timeStart = document.getElementById('sr-time-start')?.value||'';
+  const timeEnd = document.getElementById('sr-time-end')?.value||'';
+
+  const reportData = {
+    Driver: driver || currentDriver?.name || '',
+    Date: date,
+    Rego: rego,
+    Seats: seats,
+    Agency: agency,
+    Attraction: isPrivate ? (course||'PRIVATE') : course,
+    Pickup: '', Dropoff: '',
+    KM_Start: kmStart, KM_End: kmEnd,
+    Time_Start: timeStart, Time_End: timeEnd,
+    Guide: '', Tour_Code: tourCode,
+    SVC_Label: '', SVC_Charge: 0,
+    Hotel_Surcharge: 0, Dist_Surcharge: 0,
+    OT: 0, Trailer: 0, Toll: 0, Toll_Personal: '',
+    Fuel: 0, Fuel_Personal: '', Early: 0,
+    Night_DR: 0, Night_Type: 'none', Night_Owner: 0,
+    Wash: 0, Meal: 0, Tip: 0, Etc: 0, Etc_Desc: '',
+    SVC_Mismatch: '', Manual_Bonus: 0,
+    Total_TA: 0, DR_Cost: 0,
+    Toll_Detail: '', Remarks: 'SUB 담당자 간편 입력',
+    Private: isPrivate ? 'Y' : '',
+    Source: 'SUB_OWNER'
+  };
+
+  try{
+    showToast('📋 리포트 저장 중...','info');
+    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'save_report', ...reportData, _user:currentDriver?.name||''})});
+    const json = await res.json();
+    if(json.ok){
+      showToast('✅ 리포트 저장 완료','success');
+      // 폼 리셋 (날짜+차량 유지)
+      ['sr-driver','sr-agency','sr-course','sr-tourcode','sr-km-start','sr-km-end','sr-time-start','sr-time-end'].forEach(id=>{
+        const el=document.getElementById(id); if(el) el.value='';
+      });
+      const pvt=document.getElementById('sr-private'); if(pvt) pvt.checked=false;
+      if(dupWarn) dupWarn.style.display='none';
+      loadSubReportHistory();
+    } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
+  }catch(e){ showToast('❌ 네트워크 오류: '+e.message,'error'); }
+}
+
+async function loadSubReportHistory(){
+  const el = document.getElementById('sr-history');
+  if(!el) return;
+  try{
+    const subName = _subDriverInfo?.SubName||'';
+    const vehs = (MASTER.vehicles||[]).filter(v=>(v.Owner||'').trim()===subName).map(v=>v.Rego);
+    if(!vehs.length){ el.innerHTML='<div style="color:var(--muted);">등록된 차량이 없습니다.</div>'; return; }
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report&driver=');
+    const json = await res.json();
+    const rows = (json.rows||json.data||[]).filter(r=>vehs.includes(r.Rego));
+    // 최근 20건
+    const recent = rows.sort((a,b)=>(parseToISO(b.Date)||'').localeCompare(parseToISO(a.Date)||'')).slice(0,20);
+    if(!recent.length){ el.innerHTML='<div style="color:var(--muted);">운행 기록이 없습니다.</div>'; return; }
+    el.innerHTML = recent.map(r=>{
+      const isP = (r.Private||r.Agency||'')==='PRIVATE' || r.Private==='Y';
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:11px;font-weight:700;">${parseToISO(r.Date)||r.Date||''} — ${r.Rego||''} ${isP?'<span style="color:#f59e0b;font-size:9px;">🏷️PRIVATE</span>':''}</div>
+          <div style="font-size:10px;color:var(--muted);">${r.Agency||''} | ${r.Attraction||''} | ${r.Driver||''}</div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);">${r.Source==='SUB_OWNER'?'📝직접':'📱앱'}</div>
       </div>`;
     }).join('');
   }catch(e){ el.innerHTML='<div style="color:#ef4444;">로드 실패</div>'; }
