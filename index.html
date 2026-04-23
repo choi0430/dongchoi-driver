@@ -7600,6 +7600,12 @@ function calcTotal(){
     ) || clientRows.find(r => r.Course && r.Course.trim().toLowerCase() === 'airport transfer');
     const airportTA = atRow ? (Number(atRow[rateCol]) || 0) : 0;
     earlyTA = Math.round(airportTA * 0.3);
+    // Tour Hojuro / Plus Australia: 21/25인승 Early = $80 고정
+    const _isHojuroEarly = /호주로|hojuro|plus\s*australia/i.test(agency);
+    const _seatNumEarly = parseInt((seats||'25').replace(/\D/g,''))||25;
+    if (_isHojuroEarly && _seatNumEarly < 40) {
+      earlyTA = 80;
+    }
   }
   // ── TA 기본 요금: M_PriceClient 여행사별 코스 요금 우선, 없으면 SVC 값 사용 ──
   const _agTA = document.getElementById('dr-agency')?.value || '';
