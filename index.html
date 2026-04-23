@@ -2699,9 +2699,7 @@ function saveCustomHotel(name){
     localStorage.setItem('custom_hotels',JSON.stringify(l));
     // Sheets에도 저장
     if(MASTER.hotels) MASTER.hotels.push({Hotel_Name:name,Phone:'',Address:'',Surcharge_Area:''});
-    fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'add_master',sheet:'M_Hotels',data:{Hotel_Name:name,Phone:'',Address:'',Surcharge_Area:''}})
-    }).catch(()=>{});
+    _addMasterWithRetry('M_Hotels',{Hotel_Name:name,Phone:'',Address:'',Surcharge_Area:''});
   }
 }
 function saveCustomGuide(name){
@@ -2712,10 +2710,39 @@ function saveCustomGuide(name){
     // Sheets에도 저장
     const guideId='SG'+(Date.now().toString().slice(-4));
     if(MASTER.guides) MASTER.guides.push({GuideID:guideId,Guide_Name:name,Mobile:'',Agency:'',Email:'',Remarks:''});
-    fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'add_master',sheet:'M_Guides',data:{GuideID:guideId,Guide_Name:name,Mobile:'',Agency:'',Email:'',Remarks:''}})
-    }).catch(()=>{});
+    _addMasterWithRetry('M_Guides',{GuideID:guideId,Guide_Name:name,Mobile:'',Agency:'',Email:'',Remarks:''});
   }
+}
+
+// ★ add_master 공통 함수 — redirect 처리 + 에러 로깅 + 실패 시 재시도
+async function _addMasterWithRetry(sheet, data, retries=2){
+  for(let i=0;i<=retries;i++){
+    try{
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({action:'add_master', sheet, data, _user:currentDriver?.name||''})
+      });
+      const txt = await res.text();
+      let json; try{ json=JSON.parse(txt); }catch(e){ json={ok:false,error:'parse error'}; }
+      if(json.ok){
+        console.log('[addMaster] ✅', sheet, data);
+        return json;
+      } else {
+        console.warn('[addMaster] ❌ attempt', i+1, sheet, json.error||'unknown');
+      }
+    }catch(e){
+      console.warn('[addMaster] network error attempt', i+1, sheet, e.message);
+    }
+    if(i<retries) await new Promise(r=>setTimeout(r,1000)); // 1초 후 재시도
+  }
+  // 모든 재시도 실패 — 로컬 큐에 저장 (다음 앱 시작 시 재시도)
+  try{
+    const q = JSON.parse(localStorage.getItem('_addMasterQueue')||'[]');
+    q.push({sheet,data,ts:Date.now()});
+    localStorage.setItem('_addMasterQueue',JSON.stringify(q));
+    console.warn('[addMaster] queued for retry:', sheet, data);
+  }catch(e){}
+  return {ok:false};
 }
 
 // ─── Searchable Dropdown ───
@@ -2889,9 +2916,7 @@ function sddAddNew(key, value) {
   else if(cfg.type==='rego'||cfg.type==='prerego') {
     if(!MASTER.vehicles.find(x=>x.Rego===v)){
       MASTER.vehicles.push({Rego:v,Seats:'',Owner:'',Active:'Y'});
-      fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-        body:JSON.stringify({action:'add_master',sheet:'M_Vehicles',data:{Rego:v,Seats:'',Owner:'',Active:'Y'}})
-      }).catch(()=>{});
+      _addMasterWithRetry('M_Vehicles',{Rego:v,Seats:'',Owner:'',Active:'Y'});
     }
   } else if(cfg.type==='agency') {
     if(!MASTER.agencies.find(x=>x.Name===v)){
@@ -2902,23 +2927,18 @@ function sddAddNew(key, value) {
         const raw = localStorage.getItem(MASTER_CACHE_KEY);
         if(raw){
           const cached = JSON.parse(raw);
-          // 캐시 구조에 따라 agencies 업데이트
           if(cached.data){
             if(!cached.data.M_Clients) cached.data.M_Clients = [];
             if(!cached.data.M_Clients.find(x=>x.Name===v)) cached.data.M_Clients.push(newAgency);
             if(!cached.data.agencies) cached.data.agencies = [];
             if(!cached.data.agencies.find(x=>x.Name===v)) cached.data.agencies.push(newAgency);
           }
-          // syncMaster 형식도 처리
           if(!cached.agencies) cached.agencies = [];
           if(!cached.agencies.find(x=>x.Name===v)) cached.agencies.push(newAgency);
           localStorage.setItem(MASTER_CACHE_KEY, JSON.stringify(cached));
         }
       } catch(e){}
-      // GAS Sheets에도 저장
-      fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-        body:JSON.stringify({action:'add_master',sheet:'M_Clients',data:newAgency})
-      }).catch(()=>{});
+      _addMasterWithRetry('M_Clients', newAgency);
       // M_PriceClient에 기존 Course 목록 기준으로 빈 요금표 행 자동 생성
       const pcRows = (MASTER.priceClient||[]);
       const allCourses = [...new Set(pcRows.map(r=>r.Course).filter(Boolean))];
@@ -2930,9 +2950,9 @@ function sddAddNew(key, value) {
           seats_40_rate:0, seats_40_ot:0,
           seats_50_rate:0, seats_50_ot:0,
         }));
-        fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},
           body:JSON.stringify({action:'add_price_client_agency',agency:v,rows:priceRows})
-        }).catch(()=>{});
+        }).catch(e=>console.warn('[addPriceClient] error:', e));
       }
     }
   } else if(cfg.type==='attraction') {
@@ -9045,6 +9065,24 @@ async function syncMaster(){
       buildLoginSelect();
     }
   }catch(e){ console.warn('syncMaster 실패:', e.message); }
+  // ★ 실패 큐 재시도
+  _retryAddMasterQueue();
+}
+
+// ★ 실패한 add_master 큐 재시도
+async function _retryAddMasterQueue(){
+  try{
+    const q = JSON.parse(localStorage.getItem('_addMasterQueue')||'[]');
+    if(!q.length) return;
+    console.log('[addMaster] retrying', q.length, 'queued items');
+    const remaining = [];
+    for(const item of q){
+      const res = await _addMasterWithRetry(item.sheet, item.data, 1);
+      if(!res.ok) remaining.push(item);
+    }
+    if(remaining.length) localStorage.setItem('_addMasterQueue', JSON.stringify(remaining));
+    else localStorage.removeItem('_addMasterQueue');
+  }catch(e){ console.warn('[addMaster] queue retry error:', e); }
 }
 
 // 공지사항 GAS 로드

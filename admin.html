@@ -64,6 +64,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .tab-badge{position:absolute;top:2px;right:4px;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#ef4444;color:#fff;font-size:9px;font-weight:800;font-family:var(--fd);text-align:center;padding:0 4px;box-shadow:0 1px 3px rgba(239,68,68,.4);pointer-events:none;display:none}
 .tab-badge.on{display:block}
 .tab-badge.dot{min-width:8px;height:8px;padding:0;top:4px;right:12px}
+@keyframes newPulse{0%,100%{opacity:1}50%{opacity:.6}}
 .nil{font-size:9px;font-weight:700;font-family:var(--fd);letter-spacing:.3px;white-space:nowrap}
 .cont{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
 .pg{display:none;padding:12px;padding-bottom:calc(120px + var(--sb))}
@@ -2917,7 +2918,7 @@ async function rV(q=''){
     const i=DB.V.indexOf(v);
     return`<div class="mrow">
       <div class="mav" style="color:var(--ac);font-size:10px">${v.Rego}</div>
-      <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}</div>
+      <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}${newBadgeHtml('nveh',v.Rego)}</div>
         <div class="msb">${(v.Manufacture_Date||v['Manufacture Date'])?((v.Manufacture_Date||v['Manufacture Date'])+'년 · '):''}${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
         <div class="mtg">${(()=>{
           if(isDCAccredited(v)){
@@ -2946,7 +2947,7 @@ async function rV(q=''){
           return `<span class="tag ${col}">${lbl}</span>`;
         })()}</div>
       </div>
-      <div class="mac"><button class="btn bac xs" onclick="openView('V',${i})">보기</button><button class="btn bgh xs" onclick="openM('V',${i})">Edit (수정)</button><button class="btn brd xs" onclick="cDel('V',${i},'${esc(v.Rego)}')">Delete (삭제)</button></div>
+      <div class="mac"><button class="btn bac xs" onclick="dismissNewItem('nveh','${esc(v.Rego)}');openView('V',${i})">보기</button><button class="btn bgh xs" onclick="dismissNewItem('nveh','${esc(v.Rego)}');openM('V',${i})">Edit (수정)</button><button class="btn brd xs" onclick="cDel('V',${i},'${esc(v.Rego)}')">Delete (삭제)</button></div>
     </div>`}).join('')||nores();
 }
 
@@ -2964,11 +2965,11 @@ async function rD(q=''){
     const i=DB.D.indexOf(d);
     return`<div class="mrow">
       <div class="mav" style="color:var(--or)">${ini(d.Name_EN)}</div>
-      <div class="min"><div class="mnm">${d.Name_KR||''} <span style="color:var(--t3);font-size:12px">${d.Name_EN}</span></div>
+      <div class="min"><div class="mnm">${d.Name_KR||''} <span style="color:var(--t3);font-size:12px">${d.Name_EN}</span>${newBadgeHtml('ndrv',d.Name_EN||d.DriverID||'')}</div>
         <div class="msb">${d.Phone||d.Mobile_1||'—'} · ${d.License_Class||'—'}</div>
         <div class="mtg">${etag(d.License_Expiry,'면허')}${etag(d.Authority_Expiry,'인가')}</div>
       </div>
-      <div class="mac"><button class="btn bac xs" onclick="openView('D',${i})">보기</button><button class="btn bgh xs" onclick="openM('D',${i})">Edit (수정)</button><button class="btn brd xs" onclick="cDel('D',${i},'${esc(d.Name_EN)}')">Delete (삭제)</button></div>
+      <div class="mac"><button class="btn bac xs" onclick="dismissNewItem('ndrv','${esc(d.Name_EN||d.DriverID||'')}');openView('D',${i})">보기</button><button class="btn bgh xs" onclick="dismissNewItem('ndrv','${esc(d.Name_EN||d.DriverID||'')}');openM('D',${i})">Edit (수정)</button><button class="btn brd xs" onclick="cDel('D',${i},'${esc(d.Name_EN)}')">Delete (삭제)</button></div>
     </div>`}).join('')||nores();
 }
 
@@ -2987,14 +2988,14 @@ async function rC(q=''){
     const hasPrc=!!DB.PC[c.Name];
     return`<div class="mrow">
       <div class="mav" style="color:var(--gn);font-size:10px">${c.Name?.slice(0,2).toUpperCase()||'??'}</div>
-      <div class="min"><div class="mnm">${c.Name||'(이름없음)'}</div>
+      <div class="min"><div class="mnm">${c.Name||'(이름없음)'}${newBadgeHtml('ncli',c.Name)}</div>
         <div class="msb">ID: ${c.ClientID}${(c.Phone||c.Mobile)?' · '+(c.Phone||c.Mobile):''}</div>
         ${hasPrc?'<span class="tag tg" style="margin-top:4px;display:inline-flex">요금표 있음</span>':'<span class="tag ty" style="margin-top:4px;display:inline-flex">요금표 없음</span>'}
       </div>
       <div class="mac">
         <button class="btn bac xs" onclick="nv('pprc','nprc');rP();selAg('${esc(c.Name)}')" style="font-size:9px">요금</button>
-        <button class="btn" onclick="openView('C',${i})" style="font-size:11px;padding:2px 8px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;">보기</button>
-        <button class="btn bgh xs" onclick="openM('C',${i})">Edit (수정)</button>
+        <button class="btn" onclick="dismissNewItem('ncli','${esc(c.Name)}');openView('C',${i})" style="font-size:11px;padding:2px 8px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;">보기</button>
+        <button class="btn bgh xs" onclick="dismissNewItem('ncli','${esc(c.Name)}');openM('C',${i})">Edit (수정)</button>
         <button class="btn brd xs" onclick="cDel('C',${i},'${esc(c.Name)}')">Delete (삭제)</button>
       </div>
     </div>`}).join('')||nores();
@@ -3011,10 +3012,10 @@ async function rG(q=''){
     const i=DB.G.indexOf(g);
     return`<div class="mrow">
       <div class="mav" style="color:var(--pu);font-size:10px">${(g.Name||g.Guide_Name||'')?.slice(0,2).toUpperCase()||'??'}</div>
-      <div class="min"><div class="mnm">${g.Name||g.Guide_Name||''}</div>
+      <div class="min"><div class="mnm">${g.Name||g.Guide_Name||''}${newBadgeHtml('ngui',g.Guide_Name||g.GuideID||'')}</div>
         <div class="msb">${g.GuideID} · ${g.Phone||g.Mobile||'—'}${g.Agency?' · '+g.Agency:''}</div>
       </div>
-      <div class="mac"><button class="btn bac xs" onclick="openView('G',${i})">보기</button><button class="btn bgh xs" onclick="openM('G',${i})">Edit (수정)</button><button class="btn brd xs" onclick="cDel('G',${i},'${esc(g.Name||g.Guide_Name||'')}')">Delete (삭제)</button></div>
+      <div class="mac"><button class="btn bac xs" onclick="dismissNewItem('ngui','${esc(g.Guide_Name||g.GuideID||'')}');openView('G',${i})">보기</button><button class="btn bgh xs" onclick="dismissNewItem('ngui','${esc(g.Guide_Name||g.GuideID||'')}');openM('G',${i})">Edit (수정)</button><button class="btn brd xs" onclick="cDel('G',${i},'${esc(g.Name||g.Guide_Name||'')}')">Delete (삭제)</button></div>
     </div>`}).join('')||nores();
 }
 
@@ -3123,11 +3124,11 @@ async function rH(q=''){
     const i=DB.H.indexOf(h);
     return`<div class="mrow">
       <div class="mav" style="color:var(--yl)">🏨</div>
-      <div class="min"><div class="mnm">${h.Hotel_Name}</div>
+      <div class="min"><div class="mnm">${h.Hotel_Name}${newBadgeHtml('nhtl',h.Hotel_Name)}</div>
         <div class="msb">${fixPhone(h.Phone)||'전화없음'}${h.Address?' · '+h.Address.slice(0,42):''}</div>
         ${h.Surcharge_Area?'<span class="tag ty" style="margin-top:4px;display:inline-flex">Surcharge Area</span>':''}
       </div>
-      <div class="mac"><button class="btn bgh xs" onclick="openM('H',${i})">Edit (수정)</button><button class="btn brd xs" onclick="cDel('H',${i},'${esc(h.Hotel_Name)}')">Delete (삭제)</button></div>
+      <div class="mac"><button class="btn bgh xs" onclick="dismissNewItem('nhtl','${esc(h.Hotel_Name)}');openM('H',${i})">Edit (수정)</button><button class="btn brd xs" onclick="cDel('H',${i},'${esc(h.Hotel_Name)}')">Delete (삭제)</button></div>
     </div>`}).join('')||nores();
 }
 
@@ -15712,45 +15713,152 @@ function _getTabCounts(){
   };
 }
 
-// ★ localStorage 기반 baseline 저장 (새로고침 후에도 유지)
-const _BADGE_STORAGE_KEY = 'dc_tab_badge_seen';
-let _tabSeenCounts = {};
+// ★ NEW 아이템 추적 시스템 — ID 기반 비교
+const _NEW_ITEMS_KEY = 'dc_known_ids';    // localStorage에 확인된 ID 저장
+const _NEW_DISMISS_KEY = 'dc_new_dismissed'; // 개별 확인된 NEW 항목
+let _knownIds = {};      // { nveh: Set, ndrv: Set, ... }
+let _newItemIds = {};    // 현재 세션에서 감지된 신규 ID
+let _dismissedIds = {};  // 사용자가 개별 확인한 ID
 let _tabBadgeInited = false;
 
-function _loadSeenCounts(){
-  try {
-    const raw = localStorage.getItem(_BADGE_STORAGE_KEY);
-    if(raw) return JSON.parse(raw);
-  } catch(e){}
-  return {};
+// 각 탭별 현재 ID 목록 추출
+function _getTabItemIds(){
+  return {
+    nveh: (DB.V||[]).map(v=>v.Rego).filter(Boolean),
+    ndrv: (DB.D||[]).map(d=>d.Name_EN||d.DriverID||'').filter(Boolean),
+    ncli: (DB.C||[]).map(c=>c.Name).filter(Boolean),
+    ngui: (DB.G||[]).map(g=>g.Guide_Name||g.GuideID||'').filter(Boolean),
+    nhtl: (DB.H||[]).map(h=>h.Hotel_Name).filter(Boolean),
+  };
 }
-function _saveSeenCounts(){
-  try { localStorage.setItem(_BADGE_STORAGE_KEY, JSON.stringify(_tabSeenCounts)); } catch(e){}
+
+function _loadKnownIds(){
+  try{ const raw=localStorage.getItem(_NEW_ITEMS_KEY); return raw?JSON.parse(raw):{}; }catch(e){ return {}; }
+}
+function _saveKnownIds(){
+  const obj = {};
+  Object.keys(_knownIds).forEach(k=>{ obj[k] = [...(_knownIds[k]||[])]; });
+  try{ localStorage.setItem(_NEW_ITEMS_KEY, JSON.stringify(obj)); }catch(e){}
+}
+function _loadDismissed(){
+  try{ const raw=localStorage.getItem(_NEW_DISMISS_KEY); return raw?JSON.parse(raw):{}; }catch(e){ return {}; }
+}
+function _saveDismissed(){
+  try{ localStorage.setItem(_NEW_DISMISS_KEY, JSON.stringify(_dismissedIds)); }catch(e){}
+}
+
+// 마스터 아이템이 NEW인지 확인
+function isNewItem(tabKey, itemId){
+  if(!itemId) return false;
+  const newSet = _newItemIds[tabKey];
+  if(!newSet || !newSet.has(itemId)) return false;
+  // 개별 확인된 항목이면 NEW 아님
+  const dismissed = _dismissedIds[tabKey];
+  if(dismissed && dismissed.has(itemId)) return false;
+  return true;
+}
+
+// NEW 배지 HTML 생성 (목록 항목용)
+function newBadgeHtml(tabKey, itemId){
+  if(!isNewItem(tabKey, itemId)) return '';
+  return ' <span class="new-badge" style="display:inline-block;background:#ef4444;color:#fff;font-size:9px;font-weight:800;border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:middle;animation:newPulse 2s ease-in-out infinite;">NEW</span>';
+}
+
+// 개별 항목 NEW 해제
+function dismissNewItem(tabKey, itemId){
+  if(!_dismissedIds[tabKey]) _dismissedIds[tabKey] = new Set();
+  _dismissedIds[tabKey].add(itemId);
+  _saveDismissed();
+  // 해당 탭의 남은 NEW 수로 뱃지 업데이트
+  updateTabBadges();
+}
+
+// 탭 진입 시 해당 탭의 모든 NEW를 known으로 확정 (다음 새로고침에는 NEW 아님)
+function acknowledgeTabItems(tabKey){
+  const curIds = _getTabItemIds()[tabKey];
+  if(curIds){
+    _knownIds[tabKey] = new Set(curIds);
+    _saveKnownIds();
+  }
+  // dismissed도 해당 탭 초기화
+  if(_dismissedIds[tabKey]) delete _dismissedIds[tabKey];
+  _saveDismissed();
+  _newItemIds[tabKey] = new Set(); // 현재 세션에서도 초기화
 }
 
 function initTabBadges(){
-  // localStorage에서 이전 확인 카운트 로드
-  const saved = _loadSeenCounts();
-  const cur = _getTabCounts();
-  // 저장된 값이 있으면 사용, 없으면 현재값을 baseline으로 (첫 방문)
-  _tabSeenCounts = {};
-  Object.keys(cur).forEach(k => {
-    _tabSeenCounts[k] = (saved[k] !== undefined) ? saved[k] : cur[k];
+  // localStorage에서 이전에 확인한 ID 목록 로드
+  const savedKnown = _loadKnownIds();
+  const savedDismissed = _loadDismissed();
+  const curIds = _getTabItemIds();
+
+  _knownIds = {};
+  _newItemIds = {};
+  _dismissedIds = {};
+
+  Object.keys(curIds).forEach(k => {
+    const curSet = new Set(curIds[k]);
+    const knownArr = savedKnown[k] || [];
+    const knownSet = new Set(knownArr);
+
+    if(knownArr.length === 0){
+      // 첫 방문 — 모든 현재 항목을 known으로 설정 (NEW 없음)
+      _knownIds[k] = curSet;
+      _newItemIds[k] = new Set();
+    } else {
+      _knownIds[k] = knownSet;
+      // 현재 있지만 known에 없는 항목 = NEW
+      const newSet = new Set();
+      curIds[k].forEach(id => { if(!knownSet.has(id)) newSet.add(id); });
+      _newItemIds[k] = newSet;
+    }
+    // dismissed 복원
+    if(savedDismissed[k]){
+      _dismissedIds[k] = new Set(savedDismissed[k]);
+    }
   });
-  _saveSeenCounts();
+
+  _saveKnownIds();
   _tabBadgeInited = true;
   updateTabBadges();
 }
 
 function updateTabBadges(){
   if(!_tabBadgeInited) return;
-  const cur = _getTabCounts();
   const activeNav = document.querySelector('.ni.on')?.id || 'ndash';
-  Object.keys(cur).forEach(navId => {
+
+  // ID 기반 탭: 실제 신규 항목 수만 표시
+  const idTabs = _getTabItemIds();
+  Object.keys(idTabs).forEach(navId => {
     const badge = document.getElementById('badge-'+navId);
     if(!badge) return;
-    const seen = _tabSeenCounts[navId] || 0;
-    const diff = cur[navId] - seen;
+    const newSet = _newItemIds[navId] || new Set();
+    const dismissed = _dismissedIds[navId] || new Set();
+    const remaining = [...newSet].filter(id => !dismissed.has(id)).length;
+    if(remaining > 0 && navId !== activeNav){
+      badge.textContent = remaining > 99 ? '99+' : String(remaining);
+      badge.classList.add('on');
+      badge.classList.remove('dot');
+    } else {
+      badge.classList.remove('on');
+    }
+  });
+
+  // 비-ID 탭 (리포트, MOT, 인보이스 등) — 기존 count 방식 유지
+  const countTabs = {
+    ndr:    (_drCache||[]).length,
+    nshift: (window._shiftReportsCache||[]).length,
+    nmot:   (window._motCache||[]).length,
+    ninv:   (_invHistoryCache||[]).length,
+    nnotice:(window._adminNotices||[]).length,
+    ninc:   (window._incidentCache||[]).length,
+  };
+  if(!window._countTabSeen) window._countTabSeen = {};
+  Object.keys(countTabs).forEach(navId => {
+    const badge = document.getElementById('badge-'+navId);
+    if(!badge) return;
+    const seen = window._countTabSeen[navId] || 0;
+    const diff = countTabs[navId] - seen;
     if(diff > 0 && navId !== activeNav){
       badge.textContent = diff > 99 ? '99+' : String(diff);
       badge.classList.add('on');
@@ -15762,10 +15870,19 @@ function updateTabBadges(){
 }
 
 function clearTabBadge(navId){
-  const cur = _getTabCounts();
-  if(cur[navId] !== undefined) {
-    _tabSeenCounts[navId] = cur[navId];
-    _saveSeenCounts(); // ★ localStorage에 저장하여 새로고침 후에도 유지
+  // ID 기반 탭이면 항목 acknowledge
+  const idTabs = ['nveh','ndrv','ncli','ngui','nhtl'];
+  if(idTabs.includes(navId)){
+    acknowledgeTabItems(navId);
+  } else {
+    // count 기반 탭
+    const countTabs = {
+      ndr: (_drCache||[]).length, nshift: (window._shiftReportsCache||[]).length,
+      nmot: (window._motCache||[]).length, ninv: (_invHistoryCache||[]).length,
+      nnotice: (window._adminNotices||[]).length, ninc: (window._incidentCache||[]).length,
+    };
+    if(!window._countTabSeen) window._countTabSeen = {};
+    if(countTabs[navId] !== undefined) window._countTabSeen[navId] = countTabs[navId];
   }
   const badge = document.getElementById('badge-'+navId);
   if(badge) badge.classList.remove('on');
