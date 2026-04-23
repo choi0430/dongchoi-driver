@@ -1598,6 +1598,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div id="bal-view-weekly" style="display:none;">
     <div id="bal-weekly-summary" style="padding:10px 14px 0;"></div>
     <div id="bal-weekly-list" style="padding:8px 14px 80px;"></div>
+    <div style="padding:0 14px 80px;">
+      <button class="btn bgh sm" style="width:100%;font-size:10px;color:var(--t3);" onclick="_diagWageData()">🔧 급여 데이터 진단 (개발자용)</button>
+    </div>
   </div>
 </div>
 
@@ -6099,28 +6102,24 @@ function _buildWageTxns(){
   //    → 주간요약/잔액 탭이 "해당 주 발생 DR"과 "해당 주 지급 CR"을 올바르게 상계
   //    예: 4/12(일) 운행 $280, 4/17(금) 지급 $280 → 4/6~4/12 주간요약에서 정상 매칭
   //    실제 지급일은 paidDate로 별도 보존 (상세 화면용)
+  // ★ ws 정규화: ISO timestamp, dd/mm/yyyy 등 모든 형식을 월요일 YYYY-MM-DD로 변환
   const wages = safeGetLocal('admin_wages', {});
   if(wages && typeof wages === 'object' && !Array.isArray(wages)){
     Object.entries(wages).forEach(([drv, weeks])=>{
       if(!weeks || typeof weeks !== 'object') return;
       Object.entries(weeks).forEach(([ws, wk])=>{
-        // WeekStart 정규화: 월요일 기준 ISO(YYYY-MM-DD)로 맞춤
-        let weekMon = ws;
-        try {
-          if (/^\d{4}-\d{2}-\d{2}$/.test(ws)) {
-            const d = new Date(ws + 'T00:00:00');
-            const dow = (d.getDay() + 6) % 7; // 0=Mon
-            d.setDate(d.getDate() - dow);
-            weekMon = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-          }
-        } catch(e) {}
+        // 기존 헬퍼 함수로 안전하게 월요일 ISO로 변환 (timezone-aware)
+        const isoDate = parseToISO(ws) || ws;
+        const weekMon = getMondayOfDate(isoDate) || isoDate;
         (wk.entries||[]).forEach(e=>{
           if(!e.amount) return;
+          // entry.date도 정규화 (paidDate용)
+          const paidIso = parseToISO(e.date) || e.date || weekMon;
           txns.push({
             type: 'CR',
             driver: drv,
             date: weekMon,                 // ★ 주차 매칭용 (해당 주 월요일)
-            paidDate: e.date || weekMon,   // 실제 지급일 (상세 표시용)
+            paidDate: paidIso,             // 실제 지급일 (상세 표시용)
             desc: e.note || e.method || '급여 지급',
             amount: Number(e.amount)||0,
             source: 'wage'
@@ -6535,6 +6534,66 @@ function _buildCashFlowForWeek(targetMonISO) {
     totalIn, totalSubOut, totalWageOut, totalWageEarned, totalWagePaid,
     netCashFlow: roundMoney(totalIn - totalSubOut - totalWageOut)
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 진단: 급여 데이터 상태를 화면에 표시 (개발자용)
+// ═══════════════════════════════════════════════════════════════════════════
+function _diagWageData() {
+  const wages = safeGetLocal('admin_wages', {});
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';
+  const now = new Date();
+  let html = '<div style="font-family:monospace;font-size:11px;white-space:pre-wrap;line-height:1.5;padding:12px;background:var(--sf2);border-radius:8px;max-height:70vh;overflow:auto;">';
+  html += `🕒 브라우저 시간대: ${tz}\n`;
+  html += `📍 현재: ${now.toISOString()} (로컬: ${now.toLocaleString()})\n`;
+  html += `시드니 offset: ${getSydneyOffsetMs(now)/3600000}h\n\n`;
+
+  html += '═══ admin_wages (localStorage) ═══\n';
+  Object.entries(wages).forEach(([drv, weeks]) => {
+    html += `\n▶ ${drv}:\n`;
+    Object.entries(weeks).sort().forEach(([ws, wk]) => {
+      const isoFromWs = parseToISO(ws) || ws;
+      const monFromWs = getMondayOfDate(isoFromWs) || isoFromWs;
+      const dayOfWeek = (() => {
+        try {
+          const d = new Date(isoFromWs + 'T00:00:00');
+          return ['일','월','화','수','목','금','토'][d.getDay()];
+        } catch(e) { return '?'; }
+      })();
+      const entries = wk.entries || [];
+      const total = entries.reduce((s,e) => s + (Number(e.amount)||0), 0);
+      html += `  ws="${ws}" → parseToISO="${isoFromWs}"(${dayOfWeek}) → Monday="${monFromWs}" [${entries.length}건, $${total}]\n`;
+      entries.forEach(e => {
+        html += `      date="${e.date}" $${e.amount} ${e.method||''} ${e.note||''}\n`;
+      });
+    });
+  });
+
+  html += '\n═══ _balWageTxns (매칭용 재구축 상태) ═══\n';
+  _buildWageTxns();
+  const crTxns = (_balWageTxns||[]).filter(t => t.type === 'CR');
+  const byDrv = {};
+  crTxns.forEach(t => {
+    byDrv[t.driver] = byDrv[t.driver] || {};
+    byDrv[t.driver][t.date] = (byDrv[t.driver][t.date]||0) + (Number(t.amount)||0);
+  });
+  Object.entries(byDrv).forEach(([drv, byDate]) => {
+    html += `\n▶ ${drv}:\n`;
+    Object.entries(byDate).sort().forEach(([d, amt]) => {
+      html += `  CR date="${d}" $${amt}\n`;
+    });
+  });
+
+  html += '</div><div style="padding:12px;"><button class="btn bac" onclick="document.getElementById(\'diag-overlay\').remove()" style="width:100%;">닫기</button></div>';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'diag-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--sf);border-radius:12px;max-width:700px;width:100%;max-height:90vh;overflow:auto;';
+  modal.innerHTML = html;
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
 }
 
 function renderBalWeeklySummary() {
