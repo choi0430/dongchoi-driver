@@ -5908,6 +5908,8 @@ async function syncBalanceData(force){
 
     // Driver wage: derive from Daily_Report DR_Cost + wages
     _buildWageTxns();
+    // ★ 자동 정합성 검사: 급여 탭 vs 잔액 탭 불일치 감지 → 콘솔 경고
+    try { _wageConsistencyCheck(); } catch(e) { console.warn('wage consistency check:', e); }
     _balLoaded = true;
     if(force) toast('잔액 데이터 동기화 완료','ok');
   } catch(e){
@@ -6067,20 +6069,46 @@ async function _syncSubInvoicesToSubTxn(){
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 드라이버 급여 계산 표준 API
+// ═══════════════════════════════════════════════════════════════════════════
+// 모든 화면(급여 탭 / 잔액 탭 / 주간요약 / 주급 보기 / 대시보드)이 이 함수를 통해
+// 드라이버 수당을 계산해야 합니다. 직접 parseFloat(r.DR_Cost)를 쓰지 마세요.
+//
+// 계약:
+//   calcDriverNetPay(r)   → 순 드라이버 수령액 (Night_Owner 차감 후, 마이너스 허용)
+//                           개인 야경(base=0, owner>0)은 net=-owner 반환
+//   getReportWeekKey(r)   → 리포트 운행일이 속한 주의 월요일 ISO (YYYY-MM-DD)
+//   getPaymentWeekKey(ws) → 지급 기록의 WeekStart를 월요일 ISO로 정규화
+//                           (dd/mm/yyyy, ISO timestamp, YYYY-MM-DD 모두 지원)
+//
+// ⚠️ 신규 기능 추가 시:
+//   - 드라이버 발생 수당 집계 → calcDriverNetPay(r) 로 합산
+//   - 주별 필터링 → getReportWeekKey 또는 getPaymentWeekKey 로 주 비교
+//   - if(earned <= 0) return 같은 필터 금지 (개인 야경 납입이 음수로 들어옴)
+// ═══════════════════════════════════════════════════════════════════════════
+function calcDriverNetPay(r){ return _calcDRFromReport(r); }
+function getReportWeekKey(r){
+  const iso = r._isoDate || parseToISO(r.Date||'');
+  return getMondayOfDate(iso) || iso;
+}
+function getPaymentWeekKey(ws){
+  const iso = parseToISO(ws) || ws;
+  return getMondayOfDate(iso) || iso;
+}
+
 function _buildWageTxns(){
   // Combine: Daily_Report DR_Cost = DR (earned), Wages entries = CR (paid)
   const txns = [];
 
-  // ① Daily_Report 기반 드라이버 발생 수당 (급여 페이지와 동일한 데이터 소스)
-  // ★ _calcDRFromReport 사용: gross/net 자동 감지하여 항상 net(회사 납입 차감 후) 반환
-  //    → 잔액/급여/리포트 모든 화면이 동일한 실지급 금액 기준
-  //    ★ 마이너스 허용: 개인 야경(base=0, owner>0)은 net=-owner → 납입금 차감으로 DR 감소
+  // ① Daily_Report 기반 드라이버 발생 수당 (표준 API 사용)
+  //    ★ 마이너스(개인 야경 납입) 포함 — 집계 시 자동으로 차감 효과
   const drRows = _reportsCache || [];
   drRows.forEach(r=>{
     const driver = String(r.Driver||'').trim();
     if(!driver) return;
-    const earned = _calcDRFromReport(r);
-    if(earned === 0) return;  // 0이면 건너뜀 (마이너스는 포함)
+    const earned = calcDriverNetPay(r);
+    if(earned === 0) return;  // 0은 건너뜀, 음수는 포함 (납입 차감)
     const isoDate = r._isoDate || parseToISO(r.Date||'');
     txns.push({type:'DR', driver, date:isoDate, desc:(r.Attraction||r.Tour_Code||r.Agency||'운행'), amount:earned, source:'dr_report'});
   });
@@ -6097,30 +6125,25 @@ function _buildWageTxns(){
     });
   });
 
-  // ③ Wages (실 지급) = CR
-  // admin_wages 구조: { driverName: { weekStart: { entries: [{date, amount, method, note}] } } }
-  // ★ CR의 매칭 기준일(date)은 지급일이 아닌 "근무 주차(WeekStart)"를 사용
-  //    → 주간요약/잔액 탭이 "해당 주 발생 DR"과 "해당 주 지급 CR"을 올바르게 상계
-  //    예: 4/12(일) 운행 $280, 4/17(금) 지급 $280 → 4/6~4/12 주간요약에서 정상 매칭
-  //    실제 지급일은 paidDate로 별도 보존 (상세 화면용)
-  // ★ ws 정규화: ISO timestamp, dd/mm/yyyy 등 모든 형식을 월요일 YYYY-MM-DD로 변환
+  // ③ Wages (실 지급) = CR (표준 API 사용)
+  //    ★ CR의 매칭 기준일은 "근무 주차(WeekStart)"를 사용 (실제 지급일 아님)
+  //      → 주간요약/잔액 탭이 해당 주 발생 DR과 지급 CR을 올바르게 상계
+  //      예: 4/12(일) 운행 $280, 4/17(금) 지급 $280 → 4/6~4/12 주에서 정상 매칭
+  //      실제 지급일은 paidDate로 별도 보존
   const wages = safeGetLocal('admin_wages', {});
   if(wages && typeof wages === 'object' && !Array.isArray(wages)){
     Object.entries(wages).forEach(([drv, weeks])=>{
       if(!weeks || typeof weeks !== 'object') return;
       Object.entries(weeks).forEach(([ws, wk])=>{
-        // 기존 헬퍼 함수로 안전하게 월요일 ISO로 변환 (timezone-aware)
-        const isoDate = parseToISO(ws) || ws;
-        const weekMon = getMondayOfDate(isoDate) || isoDate;
+        const weekMon = getPaymentWeekKey(ws);
         (wk.entries||[]).forEach(e=>{
           if(!e.amount) return;
-          // entry.date도 정규화 (paidDate용)
           const paidIso = parseToISO(e.date) || e.date || weekMon;
           txns.push({
             type: 'CR',
             driver: drv,
-            date: weekMon,                 // ★ 주차 매칭용 (해당 주 월요일)
-            paidDate: paidIso,             // 실제 지급일 (상세 표시용)
+            date: weekMon,      // 주차 매칭용 (월요일 ISO)
+            paidDate: paidIso,  // 실제 지급일
             desc: e.note || e.method || '급여 지급',
             amount: Number(e.amount)||0,
             source: 'wage'
@@ -6540,6 +6563,60 @@ function _buildCashFlowForWeek(targetMonISO) {
 // ═══════════════════════════════════════════════════════════════════════════
 // 진단: 급여 데이터 상태를 화면에 표시 (개발자용)
 // ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// 자동 정합성 검사 — 급여 탭(수당 계산 기준)과 잔액 탭(DR 거래 기준)이
+// 같은 드라이버/주에 대해 다른 금액을 내놓는지 체크. 불일치 시 콘솔 경고.
+// syncBalanceData 완료 직후 자동 호출됨.
+// 수동 확인은 _diagWageData() (잔액 탭 주간요약 하단 회색 버튼)
+// ═══════════════════════════════════════════════════════════════════════════
+function _wageConsistencyCheck() {
+  const rows = _reportsCache || [];
+  if (!rows.length || !(DB.D||[]).length) return;
+
+  const driverNames = new Set();
+  (DB.D||[]).forEach(d => { if(d.Name_KR) driverNames.add(d.Name_KR); if(d.Name_EN) driverNames.add(d.Name_EN); });
+  rows.forEach(r => { const n = String(r.Driver||'').trim(); if(n) driverNames.add(n); });
+
+  const weekSet = new Set();
+  rows.forEach(r => { const wk = getReportWeekKey(r); if(wk) weekSet.add(wk); });
+
+  const _vehs = DB.V || [];
+  const subMap = {};
+  _vehs.forEach(v => { const so = (v.SubOwner||'').trim(); if(so) subMap[v.Rego] = so; });
+
+  const mismatches = [];
+  [...weekSet].forEach(mon => {
+    const sunD = new Date(mon+'T00:00:00'); sunD.setDate(sunD.getDate()+6);
+    const sun = sunD.getFullYear()+'-'+String(sunD.getMonth()+1).padStart(2,'0')+'-'+String(sunD.getDate()).padStart(2,'0');
+
+    driverNames.forEach(drv => {
+      const drRow = (DB.D||[]).find(d => (d.Name_KR||'')===drv || (d.Name_EN||'')===drv);
+      const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+      const weekRows = rows.filter(r => matchNames.has(String(r.Driver||'').trim())
+        && r._isoDate >= mon && r._isoDate <= sun);
+      const ownRows = weekRows.filter(r => !subMap[(r.Rego||'').trim()]);
+      const wageTabEarned = ownRows.reduce((s,r) => s + calcDriverNetPay(r), 0);
+
+      const balTabEarned = (_balWageTxns||[])
+        .filter(t => t.type==='DR' && t.driver === drv && t.date >= mon && t.date <= sun)
+        .reduce((s,t) => s + (Number(t.amount)||0), 0);
+
+      if (wageTabEarned === 0 && balTabEarned === 0) return;
+      const diff = Math.round((wageTabEarned - balTabEarned) * 100) / 100;
+      if (Math.abs(diff) > 0.5) {
+        mismatches.push({ mon, drv, wageTab: wageTabEarned, balTab: balTabEarned, diff });
+      }
+    });
+  });
+
+  if (mismatches.length > 0) {
+    console.warn('[정합성 경고] 급여 탭과 잔액 탭 수당 집계 불일치:', mismatches);
+    console.warn('→ 개발자용 진단: 잔액 탭 → 주간요약 → 하단 "🔧 급여 데이터 진단" 버튼');
+  } else {
+    console.log('[정합성] 급여↔잔액 탭 OK');
+  }
+}
+
 function _diagWageData() {
   const wages = safeGetLocal('admin_wages', {});
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';
@@ -6548,6 +6625,69 @@ function _diagWageData() {
   html += `🕒 브라우저 시간대: ${tz}\n`;
   html += `📍 현재: ${now.toISOString()} (로컬: ${now.toLocaleString()})\n`;
   html += `시드니 offset: ${getSydneyOffsetMs(now)/3600000}h\n\n`;
+
+  // ═══════════════════════════════════════════════════════════════
+  // 🔍 자동 정합성 검사: 급여 single 탭 계산 vs 잔액 탭 계산 비교
+  //    두 화면이 같은 드라이버/같은 주에 다른 금액을 보이면 경고
+  // ═══════════════════════════════════════════════════════════════
+  html += '═══ 🔍 정합성 검사 (급여 탭 vs 잔액 탭) ═══\n';
+  _buildWageTxns();
+  const rows = _reportsCache || [];
+  const driverNames = new Set();
+  (DB.D||[]).forEach(d => { if(d.Name_KR) driverNames.add(d.Name_KR); if(d.Name_EN) driverNames.add(d.Name_EN); });
+  rows.forEach(r => { const n = String(r.Driver||'').trim(); if(n) driverNames.add(n); });
+
+  const weekSet = new Set();
+  rows.forEach(r => { const wk = getReportWeekKey(r); if(wk) weekSet.add(wk); });
+  (_balWageTxns||[]).forEach(t => { if(t.date) weekSet.add(t.date); });
+
+  let mismatchCount = 0;
+  let checkedCount = 0;
+  const mismatches = [];
+
+  // SUB 매핑 (급여 탭은 SUB 차량 제외함)
+  const _vehs = DB.V || [];
+  const subMap = {};
+  _vehs.forEach(v => { const so = (v.SubOwner||'').trim(); if(so) subMap[v.Rego] = so; });
+
+  [...weekSet].sort().forEach(wk => {
+    const mon = wk;
+    const sunD = new Date(mon+'T00:00:00'); sunD.setDate(sunD.getDate()+6);
+    const sun = sunD.getFullYear()+'-'+String(sunD.getMonth()+1).padStart(2,'0')+'-'+String(sunD.getDate()).padStart(2,'0');
+
+    driverNames.forEach(drv => {
+      // 급여 single 탭 방식: weekRows 필터 → SUB 제외 → calcDriverNetPay 합산
+      const drRow = (DB.D||[]).find(d => (d.Name_KR||'')===drv || (d.Name_EN||'')===drv);
+      const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+      const weekRows = rows.filter(r => matchNames.has(String(r.Driver||'').trim())
+        && r._isoDate >= mon && r._isoDate <= sun);
+      const ownRows = weekRows.filter(r => !subMap[(r.Rego||'').trim()]);
+      const wageTabEarned = ownRows.reduce((s,r) => s + calcDriverNetPay(r), 0);
+
+      // 잔액 탭 방식: _balWageTxns 필터 → DR 합산
+      const balTabEarned = (_balWageTxns||[])
+        .filter(t => t.type==='DR' && t.driver === drv && t.date >= mon && t.date <= sun)
+        .reduce((s,t) => s + (Number(t.amount)||0), 0);
+
+      if (wageTabEarned === 0 && balTabEarned === 0) return;
+      checkedCount++;
+      const diff = Math.round((wageTabEarned - balTabEarned) * 100) / 100;
+      if (Math.abs(diff) > 0.5) {
+        mismatchCount++;
+        mismatches.push({ wk, drv, wageTab: wageTabEarned, balTab: balTabEarned, diff });
+      }
+    });
+  });
+
+  if (mismatchCount === 0) {
+    html += `✅ ${checkedCount}개 (드라이버×주) 케이스 모두 일치\n\n`;
+  } else {
+    html += `❌ 불일치 ${mismatchCount}건 (총 ${checkedCount}건 중):\n`;
+    mismatches.forEach(m => {
+      html += `  ⚠️ ${m.wk} ${m.drv}: 급여탭=$${m.wageTab} / 잔액탭=$${m.balTab} (차이 $${m.diff})\n`;
+    });
+    html += '\n';
+  }
 
   html += '═══ admin_wages (localStorage) ═══\n';
   Object.entries(wages).forEach(([drv, weeks]) => {
@@ -6571,7 +6711,6 @@ function _diagWageData() {
   });
 
   html += '\n═══ _balWageTxns (매칭용 재구축 상태) ═══\n';
-  _buildWageTxns();
   const crTxns = (_balWageTxns||[]).filter(t => t.type === 'CR');
   const byDrv = {};
   crTxns.forEach(t => {
