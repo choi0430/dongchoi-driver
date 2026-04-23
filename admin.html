@@ -6074,12 +6074,13 @@ function _buildWageTxns(){
   // ① Daily_Report 기반 드라이버 발생 수당 (급여 페이지와 동일한 데이터 소스)
   // ★ _calcDRFromReport 사용: gross/net 자동 감지하여 항상 net(회사 납입 차감 후) 반환
   //    → 잔액/급여/리포트 모든 화면이 동일한 실지급 금액 기준
+  //    ★ 마이너스 허용: 개인 야경(base=0, owner>0)은 net=-owner → 납입금 차감으로 DR 감소
   const drRows = _reportsCache || [];
   drRows.forEach(r=>{
     const driver = String(r.Driver||'').trim();
     if(!driver) return;
     const earned = _calcDRFromReport(r);
-    if(earned <= 0) return;
+    if(earned === 0) return;  // 0이면 건너뜀 (마이너스는 포함)
     const isoDate = r._isoDate || parseToISO(r.Date||'');
     txns.push({type:'DR', driver, date:isoDate, desc:(r.Attraction||r.Tour_Code||r.Agency||'운행'), amount:earned, source:'dr_report'});
   });
