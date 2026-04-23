@@ -146,7 +146,7 @@ const TOKEN_TTL_DRIVER_MS = 7 * 24 * 60 * 60 * 1000;   // 7일
 const TOKEN_TTL_ADMIN_MS  = 1 * 24 * 60 * 60 * 1000;   // 24시간
 
 // 인증 없이 호출 가능한 액션 (로그인 및 공개 메타데이터)
-const PUBLIC_ACTIONS = ['ping', 'login', 'logout'];
+const PUBLIC_ACTIONS = ['ping', 'login', 'logout', 'get_login_names'];
 
 // 관리자 전용 액션 (드라이버 토큰 거부)
 const ADMIN_ONLY_ACTIONS = [
