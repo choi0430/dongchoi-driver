@@ -10497,6 +10497,12 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
   let _prevRowDate = null; // 날짜 구분선용
   let _tourGroupGuide = null; // 투어그룹 모드 시 현재 가이드 추적
   const _fmtAmt = v => '$'+v.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+  // ── 공통 투어코드/가이드 분석: 모든 행이 동일하면 상단에 한 번만 표시 ──
+  const _allTourCodes = rows.map(r => (r.Tour_Code||'').trim()).filter(Boolean);
+  const _allGuides    = rows.map(r => (r.Guide||'').trim()).filter(Boolean);
+  const _commonTC    = (_allTourCodes.length > 0 && new Set(_allTourCodes).size === 1) ? _allTourCodes[0] : null;
+  const _commonGuide = (_allGuides.length > 0 && new Set(_allGuides).size === 1) ? _allGuides[0] : null;
   function _makeTableRow(r, opts={}) {
     const c   = calcInvRow(r);
     const ri  = rows.indexOf(r);
@@ -10571,12 +10577,16 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
         if (curGuide) svcHtml += '<div style="font-size:10px;color:#b45309;margin-top:2px;">🔄 👤 '+escH(curGuide)+'</div>';
       }
     } else {
-      // 비그룹 모드: 투어코드 + 가이드 표시
+      // 비그룹 모드: 투어코드 + 가이드 — 공통값이면 상단에서 이미 표시하므로 생략
       const displayTourCode = r.Tour_Code || r.Attraction || '';
-      if (displayTourCode && displayTourCode !== (r.Attraction||'')) {
+      const tcDiff = displayTourCode && displayTourCode !== (r.Attraction||'') && displayTourCode !== _commonTC;
+      if (tcDiff) {
         svcHtml += '<div style="font-size:10px;color:#64748b;margin-top:2px;">🗺 '+escH(displayTourCode)+'</div>';
       }
-      if (r.Guide) svcHtml += '<div style="font-size:10px;color:#059669;margin-top:2px;">👤 '+escH(r.Guide)+'</div>';
+      const guideVal = (r.Guide||'').trim();
+      if (guideVal && guideVal !== _commonGuide) {
+        svcHtml += '<div style="font-size:10px;color:#059669;margin-top:2px;">👤 '+escH(guideVal)+'</div>';
+      }
     }
 
     // ★ 날짜 변경 시 구분선 추가
@@ -10701,7 +10711,13 @@ ${(() => {
   const isoDates = rows.map(r => r._iso).filter(Boolean).sort();
   const actualFrom = isoDates.length > 0 ? fd(isoDates[0]) : fd(from);
   const actualTo   = isoDates.length > 0 ? fd(isoDates[isoDates.length - 1]) : fd(to);
-  return `<div style="font-size:11px;color:#64748b;margin-bottom:14px;">Service Period: ${actualFrom} — ${actualTo}</div>`;
+  const tcGuideInfo = (_commonTC || _commonGuide)
+    ? '<div style="font-size:11px;color:#475569;margin-top:4px;">'
+      + (_commonTC ? '🗺 <strong>'+escH(_commonTC)+'</strong>' : '')
+      + (_commonTC && _commonGuide ? ' &nbsp;·&nbsp; ' : '')
+      + (_commonGuide ? '👤 '+escH(_commonGuide) : '')
+      + '</div>' : '';
+  return `<div style="font-size:11px;color:#64748b;margin-bottom:14px;">Service Period: ${actualFrom} — ${actualTo}${tcGuideInfo}</div>`;
 })()}
 <table class="inv-table">
   <thead>
