@@ -244,28 +244,25 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 </div>
 <script>
 (function(){
-  // ── 로그인 드라이버 목록 (서버에서 로드) ──
+  // ── 로그인 드라이버 목록 (서버에서 로드, PIN 없이) ──
   window._loginDrivers = [];
 
-  // 서버에서 M_Drivers 로드하여 로그인 셀렉트 구성
   var _LOGIN_GAS_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
   function _loadLoginDrivers(){
     var sel = document.getElementById('la');
     var status = document.getElementById('login-status');
     if(status) status.textContent = '📡 드라이버 목록 로딩 중...';
-    fetch(_LOGIN_GAS_URL + '?action=get_master&sheet=M_Drivers')
+    // ★ 이름 목록만 로드 (PIN은 서버에서만 검증 — 클라이언트에 PIN 노출 안 함)
+    fetch(_LOGIN_GAS_URL + '?action=get_login_names')
       .then(function(r){ return r.json(); })
       .then(function(json){
         if(!json.ok || !json.rows) throw new Error('로드 실패');
-        window._loginDrivers = json.rows.filter(function(d){
-          return !d.Active || String(d.Active).toUpperCase() === 'Y';
-        });
+        window._loginDrivers = json.rows; // PIN 없는 이름 목록
         _buildLoginSelect();
         if(status) status.textContent = '';
       })
       .catch(function(e){
         console.warn('Login driver load failed:', e);
-        // localStorage 캐시 폴백
         try {
           var cached = JSON.parse(localStorage.getItem('dc_admin_drivers') || '[]');
           if(cached.length > 0) { window._loginDrivers = cached; _buildLoginSelect(); }
@@ -295,11 +292,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       opt.textContent = display;
       sel.appendChild(opt);
     });
-    // 관리자가 1명이면 자동 선택
     if(sel.options.length === 2) sel.selectedIndex = 1;
-    // localStorage에 캐시 (다음 오프라인 접속용)
+    // PIN 없이 이름/이니셜만 캐시
     try { localStorage.setItem('dc_admin_drivers', JSON.stringify(window._loginDrivers)); } catch(e){}
-    // 마지막 계정 자동 선택
     var last = localStorage.getItem('dc_admin_session');
     if(last){
       var found = Array.prototype.find.call(sel.options, function(o){ return o.value.split('|')[0] === last; });
@@ -307,37 +302,81 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     }
   }
 
-  // ── PIN 관리 ──
-  function _getDriverPin(name){
-    var d = window._loginDrivers.find(function(dr){ return dr.Name_KR === name || dr.Name_EN === name; });
-    return (d && d.PIN && String(d.PIN).trim()) ? String(d.PIN).trim() : '1234';
-  }
-
+  // ── PIN 입력 (서버에서 검증) ──
   var _pin = '';
   function _upDots(){for(var i=0;i<4;i++)document.getElementById('p'+i).classList.toggle('on',i<_pin.length);}
+
   function _doLogin(){
     var selVal = document.getElementById('la').value;
     if(!selVal){alert('계정을 선택해주세요');return;}
     var parts = selVal.split('|');
     var acctName = parts[0]; // Name_KR
-    var correctPin = _getDriverPin(acctName);
-    if(_pin!==correctPin){_pin='';_upDots();alert('PIN이 틀렸습니다.');return;}
-    document.getElementById('sl').classList.remove('on');
-    document.getElementById('sm').classList.add('on');
-    var n=new Date();var dd=String(n.getDate()).padStart(2,'0');var mm=String(n.getMonth()+1).padStart(2,'0');
-    var days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    var ddate=document.getElementById('ddate');
-    if(ddate)ddate.textContent=dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')';
-    sessionStorage.setItem('adminAuthenticated','true');
-    localStorage.setItem('dc_admin_session', acctName);
-    if(typeof toast==='function')toast('데이터 로딩 중...','ok');
-    if(typeof loadAllFromSheets==='function')loadAllFromSheets();
+    if(_pin.length < 4) return;
+
+    var status = document.getElementById('login-status');
+    if(status) status.textContent = '🔐 인증 중...';
+
+    fetch(_LOGIN_GAS_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action: 'login',
+        name: acctName,
+        pin: _pin,
+        ua: (navigator.userAgent||'').slice(0,80)
+      })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(json){
+      if(!json.ok || !json.token){
+        _pin=''; _upDots();
+        if(status) status.textContent = '';
+        alert('PIN이 틀렸거나 인증에 실패했습니다.');
+        return;
+      }
+      if(json.role !== 'admin'){
+        _pin=''; _upDots();
+        if(status) status.textContent = '';
+        alert('관리자 권한이 없습니다.');
+        // 드라이버 토큰은 여기서 폐기
+        try {
+          fetch(_LOGIN_GAS_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+            body: JSON.stringify({action:'logout', token: json.token})});
+        } catch(e){}
+        return;
+      }
+      // 토큰 저장
+      try {
+        localStorage.setItem('dc_token', json.token);
+        localStorage.setItem('dc_token_exp', json.expiresAt||'');
+        localStorage.setItem('dc_token_user', json.displayName||acctName);
+        localStorage.setItem('dc_token_role', json.role);
+      } catch(e){}
+
+      document.getElementById('sl').classList.remove('on');
+      document.getElementById('sm').classList.add('on');
+      var n=new Date();var dd=String(n.getDate()).padStart(2,'0');var mm=String(n.getMonth()+1).padStart(2,'0');
+      var days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      var ddate=document.getElementById('ddate');
+      if(ddate)ddate.textContent=dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')';
+      sessionStorage.setItem('adminAuthenticated','true');
+      localStorage.setItem('dc_admin_session', acctName);
+      if(status) status.textContent = '';
+      if(typeof toast==='function')toast('데이터 로딩 중...','ok');
+      if(typeof loadAllFromSheets==='function')loadAllFromSheets();
+    })
+    .catch(function(err){
+      console.error('Login error:', err);
+      _pin=''; _upDots();
+      if(status) status.textContent = '';
+      alert('네트워크 오류. 다시 시도해주세요.');
+    });
   }
   function _pp(n){if(_pin.length>=4)return;_pin+=n;_upDots();if(_pin.length===4)setTimeout(_doLogin,200);}
   function _ppd(){_pin=_pin.slice(0,-1);_upDots();}
   // 전역 노출
   window.PP=_pp; window.PPD=_ppd; window.doLogin=_doLogin;
-  window._getAdminDriverPin = _getDriverPin;
+  window._getAdminDriverPin = function(){ return ''; }; // deprecated — 서버에서 검증
   // 버튼 생성
   var pad=document.getElementById('pinpad');
   var keys=['1','2','3','4','5','6','7','8','9','','0','⌫'];
@@ -351,7 +390,6 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     pad.appendChild(b);
   });
   document.getElementById('login-btn').addEventListener('click',_doLogin);
-  // 페이지 로드 시 드라이버 목록 로드
   _loadLoginDrivers();
 })();
 </script>
@@ -1859,6 +1897,99 @@ function parseSheetTime(ts) {
 }
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTH TOKEN MANAGEMENT (admin app)
+// ═══════════════════════════════════════════════════════════════════════════
+// PIN 로그인 후 발급받은 토큰을 localStorage에 보관.
+// fetch interceptor가 GAS로 가는 모든 요청에 자동 첨부.
+// 인증 실패(401) 시 로그인 화면으로 돌려보냄.
+// ═══════════════════════════════════════════════════════════════════════════
+function getAuthToken(){ try { return localStorage.getItem('dc_token') || ''; } catch(e){ return ''; } }
+function setAuthToken(t){ try { localStorage.setItem('dc_token', t||''); } catch(e){} }
+function clearAuthToken(){
+  try {
+    localStorage.removeItem('dc_token');
+    localStorage.removeItem('dc_token_exp');
+    localStorage.removeItem('dc_token_user');
+    localStorage.removeItem('dc_token_role');
+  } catch(e){}
+}
+
+function _onAuthFailure(reason){
+  console.warn('[AUTH] 인증 실패:', reason);
+  clearAuthToken();
+  try {
+    localStorage.removeItem('dc_admin_session');
+    sessionStorage.removeItem('adminAuthenticated');
+  } catch(e){}
+  const msg = reason === 'expired' ? '세션이 만료되었습니다. 다시 로그인해주세요.' : '인증이 필요합니다. 다시 로그인해주세요.';
+  try { if(typeof toast==='function') toast(msg,'er'); else alert(msg); } catch(e){ try{alert(msg);}catch(e2){} }
+  setTimeout(()=>{
+    try {
+      document.getElementById('sm')?.classList.remove('on');
+      document.getElementById('sl')?.classList.add('on');
+    } catch(e){ location.reload(); }
+  }, 300);
+}
+
+// 모든 APPS_SCRIPT_URL 요청을 가로채서 토큰 자동 주입
+(function installFetchInterceptor(){
+  if (window.__gasFetchIntercepted) return;
+  window.__gasFetchIntercepted = true;
+  const GAS_URL = APPS_SCRIPT_URL;
+  const _originalFetch = window.fetch.bind(window);
+
+  window.fetch = function(input, init){
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url);
+      if (url && url.indexOf(GAS_URL) === 0) {
+        const token = getAuthToken();
+        // GET: URL 쿼리에 token 추가
+        if (!init || !init.method || String(init.method).toUpperCase() === 'GET') {
+          if (token && !/[?&]token=/.test(url)) {
+            const sep = url.indexOf('?') >= 0 ? '&' : '?';
+            input = url + sep + 'token=' + encodeURIComponent(token);
+          }
+        }
+        // POST: body JSON에 token 주입
+        else if (init && init.body && typeof init.body === 'string' && token) {
+          try {
+            const parsed = JSON.parse(init.body);
+            if (parsed && typeof parsed === 'object' && !parsed.token) {
+              parsed.token = token;
+              init = Object.assign({}, init, {body: JSON.stringify(parsed)});
+            }
+          } catch(e) { /* body가 JSON이 아니면 건드리지 않음 */ }
+        }
+      }
+    } catch(e){ console.warn('[fetch interceptor]', e); }
+
+    const p = _originalFetch(input, init);
+    return p.then(res => {
+      try {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (url.indexOf(GAS_URL) === 0 && res && res.ok) {
+          const clone = res.clone();
+          clone.text().then(txt => {
+            try {
+              const j = JSON.parse(txt);
+              if (j && j.authRequired) {
+                const body = (init && init.body) || '';
+                const isPublic = /"action"\s*:\s*"(login|ping|logout|get_login_names)"/.test(body)
+                  || /action=(login|ping|logout|get_login_names)/.test(url);
+                if (!isPublic && typeof _onAuthFailure === 'function') {
+                  _onAuthFailure(j.reason || 'unauthorized');
+                }
+              }
+            } catch(e){}
+          }).catch(()=>{});
+        }
+      } catch(e){}
+      return res;
+    });
+  };
+})();
+
 // ===== GAS POST 안전 호출 헬퍼 =====
 async function gasPost(bodyObj){
   const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'}, body:JSON.stringify(bodyObj)});
@@ -1918,6 +2049,15 @@ let _adminReady = false; // 데이터 준비 완료 플래그
 // ═══════════════════════════════════════
 
 function doAdminLogout(){
+  // 서버 토큰 폐기
+  try {
+    const tk = localStorage.getItem('dc_token') || '';
+    if (tk) {
+      fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'logout', token: tk})});
+    }
+  } catch(e){}
+  clearAuthToken();
   localStorage.removeItem('dc_admin_session');
   sessionStorage.removeItem('adminAuthenticated');
   ST.pin=''; if(typeof upP==='function') upP();
@@ -1927,8 +2067,19 @@ function doAdminLogout(){
 
 function autoRestoreAdminSession(){
   const acct = localStorage.getItem('dc_admin_session');
-  if(!acct) return;
-  // 세션이 있으면 PIN 없이 바로 복원 (같은 브라우저에서 이미 인증됨)
+  const token = localStorage.getItem('dc_token');
+  const expStr = localStorage.getItem('dc_token_exp');
+  if(!acct || !token) return;
+  // 토큰 만료 사전 검사 (실제 검증은 서버가 수행)
+  if(expStr){
+    const exp = new Date(expStr);
+    if(isNaN(exp.getTime()) || exp <= new Date()){
+      clearAuthToken();
+      localStorage.removeItem('dc_admin_session');
+      return;
+    }
+  }
+  // 세션 유효 — 복원
   document.getElementById('sl').classList.remove('on');
   document.getElementById('sm').classList.add('on');
   document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
@@ -13388,28 +13539,35 @@ async function saveAdminPin(){
   const cur  = document.getElementById('pin-current').value.trim();
   const nw   = document.getElementById('pin-new').value.trim();
   const conf = document.getElementById('pin-confirm').value.trim();
-  // 현재 로그인된 관리자 이름으로 서버 PIN 검증
   const adminName = localStorage.getItem('dc_admin_session') || '';
   if(!adminName){ toast('로그인 상태가 아닙니다','er'); return; }
-  const correctPin = window._getAdminDriverPin ? window._getAdminDriverPin(adminName) : '1234';
-  if(cur!==correctPin){toast('현재 PIN이 올바르지 않습니다','er');return}
   if(nw.length < 4 || !/^\d{4,}$/.test(nw)){toast('새 PIN은 최소 4자리 이상의 숫자여야 합니다','er');return}
   if(nw!==conf){toast('새 PIN이 일치하지 않습니다','er');return}
-  // M_Drivers 시트에 PIN 업데이트 (서버)
+
+  // 현재 PIN 서버 검증 (action=login 시도 → 성공 시 토큰 즉시 폐기, 현재 세션 유지)
   try {
+    const verifyRes = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'login', name:adminName, pin:cur, ua:'pin-change-verify'})});
+    const verifyJson = await verifyRes.json();
+    if(!verifyJson.ok || !verifyJson.token){
+      toast('현재 PIN이 올바르지 않습니다','er');
+      return;
+    }
+    // 검증용 토큰 폐기 (원래 세션 토큰 유지)
+    try {
+      fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'logout', token: verifyJson.token})});
+    } catch(e){}
+
+    // PIN 변경 (세션 토큰은 fetch interceptor가 자동 첨부)
     const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'update_driver_pin', driverName:adminName, pin:nw})});
     const json = await res.json();
     if(!json.ok) throw new Error(json.error||'저장 실패');
-    // 로컬 캐시도 업데이트
-    if(window._loginDrivers){
-      const d = window._loginDrivers.find(dr => dr.Name_KR===adminName || dr.Name_EN===adminName);
-      if(d) d.PIN = nw;
-    }
-    // DB.D 캐시도 업데이트
+    // DB.D 로컬 캐시는 마스킹만 (실제 PIN은 저장하지 않음)
     if(DB && DB.D){
       const dd = DB.D.find(dr => dr.Name_KR===adminName || dr.Name_EN===adminName);
-      if(dd) dd.PIN = nw;
+      if(dd) dd.PIN = '••••';
     }
     closePinModal();
     toast('✅ PIN이 변경되었습니다 (서버 저장 완료)','ok');
