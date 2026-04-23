@@ -5799,7 +5799,7 @@ function _fmtSubInvDate(v){
 function renderSubInvHistory(){
   const el = document.getElementById('sub-inv-history');
   if(!el) return;
-  const invs = (_invHistoryCache||[]).filter(inv=>inv.Source==='SUB');
+  const invs = (_invHistoryCache||[]).filter(inv=>inv.Source==='SUB' || _isSubInvNumber(inv.InvNumber||''));
   if(!invs.length){ el.innerHTML='<div style="text-align:center;padding:10px;color:var(--t3);font-size:12px;">SUB 인보이스 이력이 없습니다.</div>'; return; }
   el.innerHTML = invs.sort((a,b)=>(b.InvNumber||'').localeCompare(a.InvNumber||'')).slice(0,20).map(inv=>{
     const paid = (inv.Status||'').toLowerCase()==='paid';
@@ -5813,10 +5813,10 @@ function renderSubInvHistory(){
     const itemsTotal = itms.reduce((s,i)=>s+Number(i.total||0),0);
     const displayTotal = itemsTotal > 0 ? itemsTotal : Number(inv.GrandTotal||0);
     const invIdx = inv.InvNumber||'';
-    return `<div class="crd" style="padding:8px 10px;margin-bottom:6px;cursor:pointer;" onclick="_showSubInvDetail('${invIdx.replace(/'/g,"\\'")}')">
+    return `<div class="crd" style="padding:8px 10px;margin-bottom:6px;cursor:pointer;" onclick="dismissNewItem('nsub_inv','${invIdx.replace(/'/g,"\\'")}');_showSubInvDetail('${invIdx.replace(/'/g,"\\'")}')">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <span style="font-size:12px;font-weight:700;color:var(--ac);">${inv.InvNumber}</span>
+          <span style="font-size:12px;font-weight:700;color:var(--ac);">${inv.InvNumber}${newBadgeHtml('nsub_inv',inv.InvNumber||'')}</span>
           <span style="font-size:11px;font-weight:600;margin-left:6px;">${inv.SubCompany||inv.Agency||''}</span>
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
@@ -9527,7 +9527,7 @@ function _renderInvHistPage() {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap;">
-            <span style="font-size:12px;font-weight:800;color:var(--t1);">${escH(inv.InvNumber||'—')}</span>
+            <span style="font-size:12px;font-weight:800;color:var(--t1);">${escH(inv.InvNumber||'—')}${newBadgeHtml('ninv',inv.InvNumber||'')}</span>
             <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${isPartial?'#fef3c7':st.bg};color:${isPartial?'#92400e':st.color};font-weight:700;">${isPartial?'💰 부분결제':st.icon+' '+st.label}</span>
             ${inv.EmailSentDate ? '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:#dcfce7;color:#166534;font-weight:700;">✉️ 발송완료</span>' : `<span onclick="markAsSent('${escH(inv.InvNumber)}')" style="font-size:10px;padding:2px 7px;border-radius:10px;background:#fef3c7;color:#92400e;font-weight:700;cursor:pointer;" title="클릭하면 발송완료로 표시">📭 미발송</span>`}
             ${isPaidFull ? '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:#d1fae5;color:#065f46;font-weight:700;">💰 결제완료</span>' : ''}
@@ -9541,7 +9541,7 @@ function _renderInvHistPage() {
         <div style="text-align:right;flex-shrink:0;margin-left:8px;">
           <div style="font-size:15px;font-weight:800;color:var(--gn);">$${amt.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
           <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap;">
-            <button onclick="previewIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">👁미리보기</button>
+            <button onclick="dismissNewItem('ninv','${escH(inv.InvNumber)}');previewIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">👁미리보기</button>
             <button onclick="editIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #a78bfa;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">✏️수정</button>
             ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="openPartialPayment('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}',${amt},${effectivePaid})" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fbbf24;background:#fffbeb;color:#92400e;cursor:pointer;font-weight:600;">💰수금</button>`:''}
             ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','paid','PaidDate')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #86efac;background:#f0fdf4;color:#166534;cursor:pointer;font-weight:600;">✅전액결제</button>`:''}
@@ -11440,11 +11440,11 @@ function renderAdminNotices() {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
         <div style="flex:1;min-width:0;">
           <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800;background:${s.badge};color:white;margin-bottom:5px;">${s.label}</span>
-          <div style="font-size:13px;font-weight:700;color:var(--t1);margin-bottom:3px;">${escH(n.title)}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--t1);margin-bottom:3px;">${escH(n.title)}${newBadgeHtml('nnotice',String(n.id))}</div>
           <div style="font-size:11px;color:var(--t3);">${fmtDate(n.date)||n.date||''}</div>
         </div>
         <div style="display:flex;gap:6px;margin-left:10px;flex-shrink:0;">
-          <button onclick="openNoticeModal('${n.id}')" style="padding:5px 10px;border-radius:8px;border:1px solid var(--bd);background:var(--sf);font-size:11px;font-weight:700;cursor:pointer;color:var(--ac);">✏️ 편집</button>
+          <button onclick="dismissNewItem('nnotice','${n.id}');openNoticeModal('${n.id}')" style="padding:5px 10px;border-radius:8px;border:1px solid var(--bd);background:var(--sf);font-size:11px;font-weight:700;cursor:pointer;color:var(--ac);">✏️ 편집</button>
           <button onclick="deleteNotice('${n.id}')" style="padding:5px 10px;border-radius:8px;border:1px solid #fecaca;background:#fef2f2;font-size:11px;font-weight:700;cursor:pointer;color:#ef4444;">🗑</button>
         </div>
       </div>
@@ -11518,7 +11518,7 @@ function renderMotAdmin() {
       return '<div style="background:var(--sf2);border-radius:12px;padding:12px 14px;margin-bottom:8px;">' +
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">' +
           '<div>' +
-            '<div style="font-size:13px;font-weight:800;color:var(--t1);">' + escH(r.Driver||'') + ' · ' + escH(r.Rego||'') + '</div>' +
+            '<div style="font-size:13px;font-weight:800;color:var(--t1);">' + escH(r.Driver||'') + ' · ' + escH(r.Rego||'') + newBadgeHtml('nmot',String(r._rowIndex||r.ID||'')) + '</div>' +
             '<div style="font-size:11px;color:var(--t3);margin-top:2px;">' + escH(String(r.Date||'')) + ' ' + escH(r.Time||'') +
               (r.Location ? ' · ' + escH(r.Location) : '') + '</div>' +
           '</div>' +
@@ -11953,8 +11953,8 @@ function renderDR(){
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
 
-          <!-- 날짜 · 드라이버 · 차량 + SUB 배지 -->
-          <div style="font-size:12px;font-weight:800;color:var(--t1);">${escH(fmtDate(r.Date))}
+          <!-- 날짜 · 드라이버 · 차량 + SUB 배지 + NEW 배지 -->
+          <div style="font-size:12px;font-weight:800;color:var(--t1);">${escH(fmtDate(r.Date))}${newBadgeHtml('ndr',String(rowIdx))}
             <span style="color:var(--t3);font-weight:400;">&nbsp;${escH(r.Driver||'')} · ${escH(r.Rego||'')}${r.Seats?' · <span style="background:var(--sf2);border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;">'+escH(r.Seats)+'</span>':''}</span>
             ${(()=>{ const _sv=(DB.V||[]).find(v=>v.Rego===(r.Rego||'').trim()); const _sn=_sv&&(_sv.SubOwner||'').trim(); return _sn?'<span style="display:inline-block;background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;margin-left:4px;">SUB·'+escH(_sn)+'</span>':''; })()}
           </div>
@@ -12006,7 +12006,7 @@ function renderDR(){
           <div style="font-size:15px;font-weight:800;color:var(--t1);">$${total.toFixed(2)}</div>
           ${nightOwner>0 ? `<div style="font-size:9px;color:#7c3aed;margin-top:1px;">SVC $${svc} − 납입 $${nightOwner}</div>` : ''}
           <div style="display:flex;gap:4px;margin-top:6px;">
-            <button onclick="openDREdit(${rowIdx})" style="padding:4px 10px;border-radius:8px;border:1px solid var(--bd);background:var(--sf);font-size:11px;font-weight:700;cursor:pointer;color:var(--ac);">✏️</button>
+            <button onclick="dismissNewItem('ndr',String(${rowIdx}));openDREdit(${rowIdx})" style="padding:4px 10px;border-radius:8px;border:1px solid var(--bd);background:var(--sf);font-size:11px;font-weight:700;cursor:pointer;color:var(--ac);">✏️</button>
             <button onclick="deleteDR(${rowIdx})" style="padding:4px 10px;border-radius:8px;border:1px solid #fecaca;background:#fef2f2;font-size:11px;font-weight:700;cursor:pointer;color:#ef4444;">🗑</button>
           </div>
         </div>
@@ -14594,7 +14594,7 @@ function renderShiftTab() {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:3px;">
-            <span style="font-size:13px;font-weight:700;color:var(--t1);">${escH(r.Driver||'—')}</span>
+            <span style="font-size:13px;font-weight:700;color:var(--t1);">${escH(r.Driver||'—')}${newBadgeHtml('nshift', isPre?String(ri):'eos_'+String(ri))}</span>
             <span style="color:var(--ac);font-size:13px;font-weight:700;">· ${escH(r.Rego||'—')}</span>
             ${(()=>{ const _sv=(DB.V||[]).find(v=>v.Rego===(r.Rego||'').trim()); const _sn=_sv&&(_sv.SubOwner||'').trim(); return _sn?'<span style="background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;">SUB·'+escH(_sn)+'</span>':''; })()}
             ${checkBadge}
@@ -14606,7 +14606,7 @@ function renderShiftTab() {
           ${r.Remarks&&!String(r.Remarks).trim().startsWith('[{')?`<div style="font-size:11px;color:var(--t3);margin-top:3px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">💬 ${escH(r.Remarks)}</div>`:''}
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
-          <button class="btn bac sm" onclick="viewShiftPdfAdmin(${ri},'${tab}')" style="font-size:11px;padding:5px 9px;white-space:nowrap;">👁 보기</button>
+          <button class="btn bac sm" onclick="dismissNewItem('nshift','${isPre?String(ri):'eos_'+String(ri)}');viewShiftPdfAdmin(${ri},'${tab}')" style="font-size:11px;padding:5px 9px;white-space:nowrap;">👁 보기</button>
           <button class="btn bgh sm" onclick="openShiftEdit(${ri},'${tab}')" style="font-size:11px;padding:5px 9px;white-space:nowrap;">✏️ 수정</button>
           <button class="btn brd sm" onclick="deleteShiftReport(${ri},'${tab}')" style="font-size:11px;padding:5px 9px;white-space:nowrap;">🗑 삭제</button>
         </div>
@@ -15723,13 +15723,32 @@ let _tabBadgeInited = false;
 
 // 각 탭별 현재 ID 목록 추출
 function _getTabItemIds(){
-  return {
+  // 마스터 탭
+  const ids = {
     nveh: (DB.V||[]).map(v=>v.Rego).filter(Boolean),
     ndrv: (DB.D||[]).map(d=>d.Name_EN||d.DriverID||'').filter(Boolean),
     ncli: (DB.C||[]).map(c=>c.Name).filter(Boolean),
     ngui: (DB.G||[]).map(g=>g.Guide_Name||g.GuideID||'').filter(Boolean),
     nhtl: (DB.H||[]).map(h=>h.Hotel_Name).filter(Boolean),
   };
+  // 리포트 탭 — _rowIndex 기준
+  ids.ndr = (_drCache||[]).map(r=>String(r._rowIndex||'')).filter(Boolean);
+  // 인보이스 탭 — InvNumber 기준 (SUB 제외)
+  ids.ninv = (_invHistoryCache||[]).filter(inv=>!(inv.Source==='SUB'||_isSubInvNumber(inv.InvNumber||''))).map(inv=>inv.InvNumber||'').filter(Boolean);
+  // SUB 인보이스 — InvNumber 기준
+  ids.nsub_inv = (_invHistoryCache||[]).filter(inv=>inv.Source==='SUB'||_isSubInvNumber(inv.InvNumber||'')).map(inv=>inv.InvNumber||'').filter(Boolean);
+  // 공지 탭 — id 기준
+  const notices = getAdminNotices();
+  ids.nnotice = (notices||[]).map(n=>String(n.id||'')).filter(Boolean);
+  // Shift Logs — _rowIndex 기준
+  const preShifts = (window._shiftCache?.pre||[]).map(r=>String(r._rowIndex||'')).filter(Boolean);
+  const eosShifts = (window._shiftCache?.eos||[]).map(r=>String(r._rowIndex||'')).filter(Boolean);
+  ids.nshift = [...preShifts, ...eosShifts.map(id=>'eos_'+id)]; // pre/eos 구분
+  // 사고보고 — ID 기준
+  ids.ninc = (window._incidentCache||[]).map(i=>i.ID||'').filter(Boolean);
+  // MOT — _rowIndex 기준
+  ids.nmot = (window._motCache||[]).map(r=>String(r._rowIndex||r.ID||'')).filter(Boolean);
+  return ids;
 }
 
 function _loadKnownIds(){
@@ -15784,6 +15803,20 @@ function acknowledgeTabItems(tabKey){
   if(_dismissedIds[tabKey]) delete _dismissedIds[tabKey];
   _saveDismissed();
   _newItemIds[tabKey] = new Set(); // 현재 세션에서도 초기화
+}
+
+// 데이터 갱신 후 NEW 아이템 재계산 (initTabBadges는 첫 로드용, 이건 갱신용)
+function _refreshNewItemIds(){
+  if(!_tabBadgeInited) return;
+  const curIds = _getTabItemIds();
+  Object.keys(curIds).forEach(k => {
+    const knownSet = _knownIds[k] || new Set();
+    if(knownSet.size === 0 && !_tabBadgeInited) return; // 첫 방문
+    const newSet = new Set();
+    curIds[k].forEach(id => { if(!knownSet.has(id)) newSet.add(id); });
+    _newItemIds[k] = newSet;
+  });
+  updateTabBadges();
 }
 
 function initTabBadges(){
@@ -15844,45 +15877,34 @@ function updateTabBadges(){
     }
   });
 
-  // 비-ID 탭 (리포트, MOT, 인보이스 등) — 기존 count 방식 유지
-  const countTabs = {
-    ndr:    (_drCache||[]).length,
-    nshift: (window._shiftReportsCache||[]).length,
-    nmot:   (window._motCache||[]).length,
-    ninv:   (_invHistoryCache||[]).length,
-    nnotice:(window._adminNotices||[]).length,
-    ninc:   (window._incidentCache||[]).length,
-  };
-  if(!window._countTabSeen) window._countTabSeen = {};
-  Object.keys(countTabs).forEach(navId => {
-    const badge = document.getElementById('badge-'+navId);
-    if(!badge) return;
-    const seen = window._countTabSeen[navId] || 0;
-    const diff = countTabs[navId] - seen;
-    if(diff > 0 && navId !== activeNav){
-      badge.textContent = diff > 99 ? '99+' : String(diff);
-      badge.classList.add('on');
-      badge.classList.remove('dot');
-    } else {
-      badge.classList.remove('on');
+  // nsub_inv NEW 수를 nsub 탭 뱃지에 합산 표시
+  {
+    const subInvNew = _newItemIds['nsub_inv'] || new Set();
+    const subInvDismissed = _dismissedIds['nsub_inv'] || new Set();
+    const subInvRemaining = [...subInvNew].filter(id => !subInvDismissed.has(id)).length;
+    const nsubBadge = document.getElementById('badge-nsub');
+    if(nsubBadge){
+      if(subInvRemaining > 0 && 'nsub' !== activeNav){
+        nsubBadge.textContent = subInvRemaining > 99 ? '99+' : String(subInvRemaining);
+        nsubBadge.classList.add('on');
+        nsubBadge.classList.remove('dot');
+      } else {
+        nsubBadge.classList.remove('on');
+      }
     }
-  });
+  }
+
 }
 
 function clearTabBadge(navId){
   // ID 기반 탭이면 항목 acknowledge
-  const idTabs = ['nveh','ndrv','ncli','ngui','nhtl'];
+  const idTabs = ['nveh','ndrv','ncli','ngui','nhtl','ndr','ninv','nnotice','nsub_inv','nshift','ninc','nmot'];
   if(idTabs.includes(navId)){
     acknowledgeTabItems(navId);
-  } else {
-    // count 기반 탭
-    const countTabs = {
-      ndr: (_drCache||[]).length, nshift: (window._shiftReportsCache||[]).length,
-      nmot: (window._motCache||[]).length, ninv: (_invHistoryCache||[]).length,
-      nnotice: (window._adminNotices||[]).length, ninc: (window._incidentCache||[]).length,
-    };
-    if(!window._countTabSeen) window._countTabSeen = {};
-    if(countTabs[navId] !== undefined) window._countTabSeen[navId] = countTabs[navId];
+  }
+  // nsub 탭 진입 시 SUB 인보이스(nsub_inv)도 함께 acknowledge
+  if(navId === 'nsub'){
+    acknowledgeTabItems('nsub_inv');
   }
   const badge = document.getElementById('badge-'+navId);
   if(badge) badge.classList.remove('on');
@@ -15997,8 +16019,8 @@ async function runAdminSync(silent=true){
 
     _adminLastSync = Date.now();
     setAdminSyncBadge('ok');
-    // ★ 동기화 완료 후 탭 뱃지 업데이트
-    updateTabBadges();
+    // ★ 동기화 완료 후 NEW 항목 재계산 + 탭 뱃지 업데이트
+    _refreshNewItemIds();
   }catch(e){ setAdminSyncBadge('error'); }
   finally { _adminSyncRunning = false; }
 }
@@ -16925,9 +16947,9 @@ function renderAdminIncidents(){
 
   el.innerHTML = list.map(inc=>{
     const sc = sevColor(inc.Severity);
-    return `<div class="crd" style="border-left:4px solid ${sc};margin-bottom:8px;padding:12px 14px;cursor:pointer;" onclick="showIncidentDetail('${inc.ID}')">
+    return `<div class="crd" style="border-left:4px solid ${sc};margin-bottom:8px;padding:12px 14px;cursor:pointer;" onclick="dismissNewItem('ninc','${inc.ID}');showIncidentDetail('${inc.ID}')">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <div style="font-size:13px;font-weight:800;color:var(--t1);">${statIcon(inc.Status)} ${inc.Type||'N/A'}</div>
+        <div style="font-size:13px;font-weight:800;color:var(--t1);">${statIcon(inc.Status)} ${inc.Type||'N/A'}${newBadgeHtml('ninc',inc.ID||'')}</div>
         <div style="display:flex;gap:4px;align-items:center;">
           <span style="font-size:10px;font-weight:700;color:#fff;background:${sc};padding:2px 8px;border-radius:10px;">${inc.Severity||'N/A'}</span>
           <span style="font-size:10px;font-weight:600;color:var(--t3);background:${statBg(inc.Status)};padding:2px 8px;border-radius:10px;border:1px solid ${sc}33;">${inc.Status||'Open'}</span>

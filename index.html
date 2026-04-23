@@ -70,6 +70,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 .notice-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;font-family:'DM Mono',monospace;margin-bottom:6px;}
 .badge-urgent{background:#fff5f5;color:var(--red);}
 .badge-info{background:#f0fdf4;color:var(--green);}
+@keyframes newPulse{0%,100%{opacity:1}50%{opacity:.6}}
 .badge-general{background:#eff4ff;color:var(--accent);}
 
 /* SHIFT STATUS CARD */
@@ -4269,6 +4270,8 @@ function showPage(id){
   if(id === 'pay') renderPay();
   // Pre Departure 화면 진입 시 운행 중 차량 목록 갱신 (드롭다운 비활성화용)
   if(id === 'report') refreshActiveRegosForPre();
+  // 공지 페이지 진입 시 모두 읽음 처리
+  if(id === 'notices') _markNoticesSeen();
 }
 
 function startReport(){
@@ -7876,6 +7879,27 @@ function getAdminNotices(){
   try { return JSON.parse(localStorage.getItem('admin_notices') || 'null') || []; } catch(e) { return []; }
 }
 
+// ★ 새 공지 감지 시스템
+const _KNOWN_NOTICE_KEY = 'dc_known_notice_ids';
+function _getKnownNoticeIds(){
+  try{ return new Set(JSON.parse(localStorage.getItem(_KNOWN_NOTICE_KEY)||'[]')); }catch(e){ return new Set(); }
+}
+function _saveKnownNoticeIds(ids){
+  try{ localStorage.setItem(_KNOWN_NOTICE_KEY, JSON.stringify([...ids])); }catch(e){}
+}
+function _isNewNotice(noticeId){
+  const known = _getKnownNoticeIds();
+  return known.size > 0 && !known.has(String(noticeId));
+}
+function _markNoticesSeen(){
+  const notices = getAdminNotices();
+  const ids = new Set(notices.map(n=>String(n.id)));
+  _saveKnownNoticeIds(ids);
+  // 알림 dot 업데이트
+  const dot = document.getElementById('notif-dot');
+  if(dot) dot.style.display='none';
+}
+
 function renderNotices(){
   const el=document.getElementById('notice-list');
   // Admin 앱에서 등록한 공지만 표시 (하드코딩 제거됨)
@@ -7888,15 +7912,29 @@ function renderNotices(){
     return;
   }
 
-  el.innerHTML=notices.map(n=>`
-    <div class="notice-item ${n.type}">
+  // 첫 방문이면 모든 공지를 known으로 저장 (NEW 없음)
+  const known = _getKnownNoticeIds();
+  if(known.size === 0){
+    _saveKnownNoticeIds(new Set(notices.map(n=>String(n.id))));
+  }
+
+  const newCount = notices.filter(n=>_isNewNotice(n.id)).length;
+
+  el.innerHTML=notices.map(n=>{
+    const isNew = _isNewNotice(n.id);
+    const newBadge = isNew ? ' <span style="display:inline-block;background:#ef4444;color:#fff;font-size:9px;font-weight:800;border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:middle;animation:newPulse 2s ease-in-out infinite;">NEW</span>' : '';
+    return `<div class="notice-item ${n.type}" onclick="_markNoticesSeen();this.querySelector('.new-badge-drv')?.remove();">
       <div class="notice-badge badge-${n.type==='urgent'?'urgent':n.type==='info'?'info':'general'}">${n.type==='urgent'?'Urgent (긴급)':n.type==='info'?'Info (안내)':'Notice (공지)'}</div>
       <div class="notice-date">${fmtDate(n.date)||n.date||''}</div>
-      <div class="notice-title">${n.title||''}</div>
+      <div class="notice-title">${n.title||''}${isNew?'<span class="new-badge-drv" style="display:inline-block;background:#ef4444;color:#fff;font-size:9px;font-weight:800;border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:middle;animation:newPulse 2s ease-in-out infinite;">NEW</span>':''}</div>
       <div class="notice-body">${n.body||''}</div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+
+  // 새 공지가 있거나 긴급 공지가 있으면 알림 dot 표시
   const hasUrgent=notices.some(n=>n.type==='urgent');
-  document.getElementById('notif-dot').style.display=hasUrgent?'block':'none';
+  const dot = document.getElementById('notif-dot');
+  if(dot) dot.style.display=(newCount > 0 || hasUrgent)?'block':'none';
   renderHomeBanner(notices);
 }
 
