@@ -6151,6 +6151,7 @@ async function _syncLedgerToSubTxn(){
           SubCompany: subCompany,
           Category: 'Outsourcing',
           Date: e.date || '',
+          FinishDate: e.date || '',  // ★ Ledger는 Date = 작업일이므로 FinishDate도 동일
           InvoiceNo: '',
           Description: ledgerKey,
           DR: drAmount,
@@ -6218,6 +6219,10 @@ async function _syncSubInvoicesToSubTxn(){
       const issuedDate = (inv.IssuedDate||'').slice(0,10);
       const periodFrom = _fmtSubInvDate(inv.PeriodFrom||'');
       const periodTo = _fmtSubInvDate(inv.PeriodTo||'');
+      // ★ FinishDate: PeriodTo를 ISO로 변환 (예정일 계산용)
+      let finishISO = parseToISO(inv.PeriodTo||'');
+      if(!finishISO) finishISO = parseToISO(inv.PeriodFrom||'');
+      if(!finishISO) finishISO = issuedDate;
 
       newTxns.push({
         SubCompany: subCompany,
@@ -6227,6 +6232,7 @@ async function _syncSubInvoicesToSubTxn(){
         Description: key,
         DR: total,
         CR: 0,
+        FinishDate: finishISO,
         Remark: invNum + ' (' + periodFrom + '~' + periodTo + ')'
       });
     });
@@ -6680,16 +6686,18 @@ function _buildCashFlowForWeek(targetMonISO) {
     });
   });
 
-  // ── 2. Sub Payables (Date + 14 days in target week, or DueDate) ──
+  // ── 2. Sub Payables (FinishDate + 14 days in target week) ──
   (_balSubTxns || []).forEach(tx => {
     const dr = Number(tx.DR) || 0;
     if (dr <= 0) return;
 
+    // ★ DueDate 우선, 없으면 FinishDate + 14, 그래도 없으면 Date + 14
     let dueISO = _tryParseDate(tx.DueDate);
     if (!dueISO) {
-      const dateISO = _tryParseDate(tx.Date);
-      if (dateISO) {
-        const dd = new Date(dateISO + 'T00:00:00');
+      let baseDate = _tryParseDate(tx.FinishDate);
+      if (!baseDate) baseDate = _tryParseDate(tx.Date);
+      if (baseDate) {
+        const dd = new Date(baseDate + 'T00:00:00');
         dd.setDate(dd.getDate() + 14);
         dueISO = _localISO(dd);
       }
@@ -7011,7 +7019,7 @@ function renderBalWeeklySummary() {
       html += '<div style="font-size:12px;font-weight:700;color:var(--or);margin-bottom:8px;">\uD83D\uDE8C \uC11C\uBE0C \uC9C0\uAE09 \uC608\uC815</div>';
       cf.subPayables.sort((a,b) => b.amount - a.amount).forEach(s => {
         html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">';
-        html += '<span style="color:var(--t2);">' + escH(s.company) + (s.invoiceNo ? ' <span style="color:var(--t3);font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + '</span>';
+        html += '<span style="color:var(--t2);">' + escH(s.company) + (s.invoiceNo ? ' <span style="color:var(--t3);font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="color:var(--t3);font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + '</span>';
         html += '<span style="font-weight:600;font-family:var(--fn);color:var(--or);">' + $f(s.amount) + '</span></div>';
       });
       html += '</div>';
