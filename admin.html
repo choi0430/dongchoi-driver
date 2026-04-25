@@ -3981,20 +3981,30 @@ const PeriodNav = (function(){
       console.warn('[PeriodNav] from/to inputs not found for prefix:', prefix);
       return;
     }
-    // 컨테이너 찾기 (없으면 from input 의 부모 영역에 prepend)
-    let barEl = document.getElementById(prefix+'-period-bar');
-    if(!barEl){
-      barEl = document.createElement('div');
-      barEl.id = prefix+'-period-bar';
-      // ★ 부모 flex 영향 차단을 위해 명시적 block + 전체 width
-      barEl.style.cssText = 'display:block;width:100%;flex:none;grid-column:1/-1;margin-bottom:10px;';
-      const dateRow = fromEl.closest('div[style*="flex"]') || fromEl.parentElement.parentElement;
-      if(dateRow && dateRow.parentElement){
-        dateRow.parentElement.insertBefore(barEl, dateRow);
-      }
-    } else {
-      barEl.style.cssText = 'display:block;width:100%;flex:none;grid-column:1/-1;margin-bottom:10px;';
+
+    // ★ 기존 PeriodNav 마크업 제거 (중복 방지)
+    document.querySelectorAll('#'+prefix+'-period-bar').forEach(el => el.remove());
+    // ★ 직접 박힌 구식 마크업도 제거 (settle-mode-btn 같은 클래스)
+    document.querySelectorAll('.settle-mode-btn, #settle-quick-chips, #settle-period-nav').forEach(el => {
+      // 이미 PeriodNav가 그릴 새 요소들과 ID 충돌하니 구식 마크업 제거
+      // 단 settle 외 다른 prefix가 동일 클래스 쓰지 않으니 안전
+      if(el.closest('#'+prefix+'-period-bar')) return; // 새로 그린 건 건드리지 말기
+      el.remove();
+    });
+
+    // ★ from input 의 가장 바깥 row 찾기 (flex 부모를 벗어남)
+    let dateRow = fromEl.closest('div[style*="flex"]');
+    if(!dateRow) dateRow = fromEl.parentElement?.parentElement;
+    if(!dateRow || !dateRow.parentElement){
+      console.warn('[PeriodNav] cannot find anchor row for prefix:', prefix);
+      return;
     }
+
+    // ★ 새 컨테이너 생성 — flex/grid 자식이 안 되도록 강력하게 격리
+    const barEl = document.createElement('div');
+    barEl.id = prefix+'-period-bar';
+    barEl.style.cssText = 'display:block !important;width:100% !important;flex:none !important;grid-column:1/-1 !important;margin-bottom:10px;box-sizing:border-box;';
+    dateRow.parentElement.insertBefore(barEl, dateRow);
 
     // 마크업 — 깔끔한 카드 디자인
     barEl.innerHTML = `
