@@ -4003,7 +4003,7 @@ function renderSettleDashboard() {
                   <td style="padding:3px 6px;text-align:right;color:var(--rd);">$${sc.total.toLocaleString()}</td>
                   <td style="padding:3px 6px;text-align:right;">$${it.drCost.toLocaleString()}</td>
                   <td style="padding:3px 6px;text-align:right;font-weight:700;color:${it.profit>=0?'var(--gn)':'var(--rd)'};">${it.profit>=0?'+':''}$${it.profit.toLocaleString()}</td>
-                  <td style="padding:3px 6px;text-align:center;"><button class="btn bgh xs" style="padding:2px 6px;font-size:10px;" onclick="event.stopPropagation();editSubRateForRow('${esc(it.subOwner||sub)}','${esc(it.attraction)}')" title="SUB 요금 수정">✏️</button></td>
+                  <td style="padding:3px 6px;text-align:center;"><button class="btn bgh xs" style="padding:2px 6px;font-size:10px;" onclick="event.stopPropagation();editDailyReportRow(${it._raw?._rowIndex||0})" title="이 운행 기록 수정">✏️</button></td>
                 </tr>`;
               }).join('')}</tbody>
             </table>
@@ -5152,7 +5152,8 @@ async function loadSubDriverPay(){
       drCost: d.drCost, ta: d.taAmount, nightOwner: d.subCost.night,
       subTotal: d.subCost.total,
       ot: d.subCost.ot, hotel: d.subCost.hotel,
-      dist: d.subCost.dist, trailer: d.subCost.trailer
+      dist: d.subCost.dist, trailer: d.subCost.trailer,
+      _rowIndex: d._raw?._rowIndex || 0
     });
   });
   _sdpData = grouped;
@@ -5238,7 +5239,7 @@ function renderSubDriverPay(){
               <td style="padding:3px 6px;text-align:right;color:var(--rd);">$${it.subTotal||0}</td>
               <td style="padding:3px 6px;text-align:right;font-weight:700;color:var(--ac);">$${it.drCost}</td>
               <td style="padding:3px 6px;text-align:right;${it.nightOwner>0?'font-weight:700;color:#7c3aed;':'color:var(--t3);'}">${it.nightOwner>0?'+$'+it.nightOwner:'—'}</td>
-              <td style="padding:3px 6px;text-align:center;"><button class="btn bgh xs" style="padding:2px 6px;font-size:10px;" onclick="event.stopPropagation();editSubRateForRow('${esc(sub)}','${esc(it.attraction)}')" title="${escH(sub)}의 ${escH(it.attraction)} SUB 요금 수정">✏️</button></td>
+              <td style="padding:3px 6px;text-align:center;"><button class="btn bgh xs" style="padding:2px 6px;font-size:10px;" onclick="event.stopPropagation();editDailyReportRow(${it._rowIndex||0})" title="이 운행 기록 수정">✏️</button></td>
             </tr>`).join('')}
             <tr style="background:var(--sf2,#f8f9fa);font-weight:700;">
               <td colspan="4" style="padding:4px 6px;">합계</td>
@@ -5272,19 +5273,212 @@ function renderSubDriverPay(){
   resEl.innerHTML = html;
 }
 
-// ─── SUB 정산 행에서 바로 SUB 요금 수정 모달 열기 ───
-// 정산 페이지에서 잘못된 SUB비를 발견했을 때 한 번에 마스터 시트로 점프
+// ─── SUB 정산 행에서 Daily Report 원본 수정 모달 ───
+// 행을 직접 수정하면 인보이스/정산/급여 모두 자동 반영됨
+async function editDailyReportRow(rowIndex){
+  if(!rowIndex || rowIndex < 2){
+    toast('수정할 행을 찾을 수 없습니다','er');
+    return;
+  }
+  // _drCache에서 해당 행 찾기
+  if(!_drCache){
+    toast('Daily Report 캐시가 없습니다. 페이지를 새로고침 해주세요.','er');
+    return;
+  }
+  const row = _drCache.find(r => r._rowIndex === rowIndex);
+  if(!row){
+    toast('해당 행을 찾을 수 없습니다 (이미 삭제됐거나 캐시 오래됨)','er');
+    return;
+  }
+
+  // 모달 HTML 생성
+  const driversOpts = (DB.D||[]).map(d=>{
+    const n = d.Name_KR||d.Name_EN||'';
+    return `<option value="${escH(n)}"${row.Driver===n?' selected':''}>${escH(n)}</option>`;
+  }).join('');
+  const vehOpts = (DB.V||[]).map(v=>`<option value="${escH(v.Rego)}"${row.Rego===v.Rego?' selected':''}>${escH(v.Rego)} (${v.Capacity}석)</option>`).join('');
+  const agencyOpts = (DB.C||[]).map(c=>`<option value="${escH(c.Name)}"${row.Agency===c.Name?' selected':''}>${escH(c.Name)}</option>`).join('');
+  const guideOpts = (DB.G||[]).map(g=>{
+    const gn = g.Guide_Name||'';
+    return `<option value="${escH(gn)}"${row.Guide===gn?' selected':''}>${escH(gn)}</option>`;
+  }).join('');
+  // 모든 코스 (PriceClient + PriceDriver)
+  const coursesSet = new Set();
+  Object.values(DB.PC||{}).forEach(pc=>Object.keys(pc).forEach(c=>coursesSet.add(c)));
+  Object.keys(DB.PD||{}).forEach(c=>coursesSet.add(c));
+  if(row.Attraction) coursesSet.add(row.Attraction);
+  const courseOpts = [...coursesSet].sort().map(c=>`<option value="${escH(c)}"${row.Attraction===c?' selected':''}>${escH(c)}</option>`).join('');
+
+  const seatsVal = row.Seats || '';
+  const seatsOpts = ['21S','25S','40S','50S'].map(s=>`<option value="${s}"${seatsVal===s?' selected':''}>${s}</option>`).join('');
+
+  const _v = (k) => row[k] !== undefined && row[k] !== null ? row[k] : '';
+  const _yn = (k) => row[k]==='Y' ? 'Y' : 'N';
+
+  // 야경 옵션: NIGHT_RATES 키 + 'none'
+  const nightTypes = ['none', ...Object.keys(NIGHT_RATES||{})];
+  const nightOpts = nightTypes.map(n=>`<option value="${n==='none'?'':n}"${(row.Night_Type||'')===(n==='none'?'':n)?' selected':''}>${n}</option>`).join('');
+
+  const html = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:10px;" id="dr-edit-mask" onclick="if(event.target.id==='dr-edit-mask')closeDailyReportEdit()">
+      <div style="background:var(--sf,#fff);border-radius:14px;max-width:720px;width:100%;max-height:90vh;overflow-y:auto;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:1px solid var(--bd);padding-bottom:10px;">
+          <div>
+            <div style="font-size:16px;font-weight:800;">✏️ Daily Report 수정</div>
+            <div style="font-size:11px;color:var(--t3);margin-top:2px;">행 번호: ${rowIndex} · 날짜: ${escH(_v('Date'))}</div>
+          </div>
+          <button class="btn brd sm" onclick="closeDailyReportEdit()" style="padding:4px 10px;">✕</button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px;">
+          <div><label class="fl">날짜</label><input class="fi" id="dre-Date" value="${escH(_v('Date'))}" placeholder="YYYY-MM-DD"></div>
+          <div><label class="fl">드라이버</label><select class="fs" id="dre-Driver">${driversOpts}</select></div>
+
+          <div><label class="fl">차량 (Rego)</label><select class="fs" id="dre-Rego">${vehOpts}</select></div>
+          <div><label class="fl">좌석수 (Seats)</label><select class="fs" id="dre-Seats">${seatsOpts}</select></div>
+
+          <div><label class="fl">여행사 (Agency)</label><select class="fs" id="dre-Agency">${agencyOpts}</select></div>
+          <div><label class="fl">코스 (Attraction)</label><select class="fs" id="dre-Attraction">${courseOpts}</select></div>
+
+          <div><label class="fl">가이드 (Guide)</label><select class="fs" id="dre-Guide"><option value="">—</option>${guideOpts}</select></div>
+          <div><label class="fl">투어 코드</label><input class="fi" id="dre-Tour_Code" value="${escH(_v('Tour_Code'))}"></div>
+
+          <div><label class="fl">픽업 (Pickup)</label><input class="fi" id="dre-Pickup" value="${escH(_v('Pickup'))}"></div>
+          <div><label class="fl">드롭 (Dropoff)</label><input class="fi" id="dre-Dropoff" value="${escH(_v('Dropoff'))}"></div>
+
+          <div><label class="fl">시작 시간</label><input class="fi" id="dre-Time_Start" value="${escH(_v('Time_Start'))}" placeholder="HH:MM"></div>
+          <div><label class="fl">종료 시간</label><input class="fi" id="dre-Time_End" value="${escH(_v('Time_End'))}" placeholder="HH:MM"></div>
+
+          <div><label class="fl">시작 KM</label><input class="fi" type="number" id="dre-KM_Start" value="${escH(_v('KM_Start'))}"></div>
+          <div><label class="fl">종료 KM</label><input class="fi" type="number" id="dre-KM_End" value="${escH(_v('KM_End'))}"></div>
+        </div>
+
+        <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--bd);">
+          <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--ac);">💰 금액 (DR 기준)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:12px;">
+            <div><label class="fl">SVC 라벨</label><input class="fi" id="dre-SVC_Label" value="${escH(_v('SVC_Label'))}"></div>
+            <div><label class="fl">SVC ($)</label><input class="fi" type="number" id="dre-SVC_Charge" value="${escH(_v('SVC_Charge'))}"></div>
+            <div><label class="fl">DR 비용 합계 ($)</label><input class="fi" type="number" id="dre-DR_Cost" value="${escH(_v('DR_Cost'))}"></div>
+
+            <div><label class="fl">OT ($)</label><input class="fi" type="number" id="dre-OT" value="${escH(_v('OT'))}"></div>
+            <div><label class="fl">Hotel ($)</label><input class="fi" type="number" id="dre-Hotel_Surcharge" value="${escH(_v('Hotel_Surcharge'))}"></div>
+            <div><label class="fl">Dist ($)</label><input class="fi" type="number" id="dre-Dist_Surcharge" value="${escH(_v('Dist_Surcharge'))}"></div>
+
+            <div><label class="fl">Trailer ($)</label><input class="fi" type="number" id="dre-Trailer" value="${escH(_v('Trailer'))}"></div>
+            <div><label class="fl">Early ($)</label><input class="fi" type="number" id="dre-Early" value="${escH(_v('Early'))}"></div>
+            <div><label class="fl">Toll ($)</label><input class="fi" type="number" id="dre-Toll" value="${escH(_v('Toll'))}"></div>
+
+            <div><label class="fl">Toll 개인 (Y/N)</label><select class="fs" id="dre-Toll_Personal"><option value="N"${_yn('Toll_Personal')==='N'?' selected':''}>N</option><option value="Y"${_yn('Toll_Personal')==='Y'?' selected':''}>Y</option></select></div>
+            <div><label class="fl">Fuel ($)</label><input class="fi" type="number" id="dre-Fuel" value="${escH(_v('Fuel'))}"></div>
+            <div><label class="fl">Fuel 개인 (Y/N)</label><select class="fs" id="dre-Fuel_Personal"><option value="N"${_yn('Fuel_Personal')==='N'?' selected':''}>N</option><option value="Y"${_yn('Fuel_Personal')==='Y'?' selected':''}>Y</option></select></div>
+
+            <div><label class="fl">야경 타입</label><select class="fs" id="dre-Night_Type">${nightOpts}</select></div>
+            <div><label class="fl">Night DR ($)</label><input class="fi" type="number" id="dre-Night_DR" value="${escH(_v('Night_DR'))}"></div>
+            <div><label class="fl">Night Owner ($)</label><input class="fi" type="number" id="dre-Night_Owner" value="${escH(_v('Night_Owner'))}"></div>
+
+            <div><label class="fl">Wash ($)</label><input class="fi" type="number" id="dre-Wash" value="${escH(_v('Wash'))}"></div>
+            <div><label class="fl">Meal ($)</label><input class="fi" type="number" id="dre-Meal" value="${escH(_v('Meal'))}"></div>
+            <div><label class="fl">Tip ($)</label><input class="fi" type="number" id="dre-Tip" value="${escH(_v('Tip'))}"></div>
+
+            <div><label class="fl">Etc ($)</label><input class="fi" type="number" id="dre-Etc" value="${escH(_v('Etc'))}"></div>
+            <div style="grid-column:span 2;"><label class="fl">Etc 설명</label><input class="fi" id="dre-Etc_Desc" value="${escH(_v('Etc_Desc'))}"></div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <label class="fl">비고 (Remarks)</label>
+          <textarea class="fi" id="dre-Remarks" rows="2" style="width:100%;resize:vertical;font-family:inherit;font-size:12px;">${escH(_v('Remarks'))}</textarea>
+        </div>
+
+        <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--bd);padding-top:12px;">
+          <button class="btn brd" onclick="closeDailyReportEdit()" style="padding:8px 18px;">취소</button>
+          <button class="btn bac" onclick="saveDailyReportEdit(${rowIndex})" style="padding:8px 18px;font-weight:700;">💾 저장</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const wrap = document.createElement('div');
+  wrap.id = 'dr-edit-wrap';
+  wrap.innerHTML = html;
+  document.body.appendChild(wrap);
+}
+
+function closeDailyReportEdit(){
+  const w = document.getElementById('dr-edit-wrap');
+  if(w) w.remove();
+}
+
+async function saveDailyReportEdit(rowIndex){
+  if(!rowIndex || rowIndex < 2){ toast('rowIndex 오류','er'); return; }
+  // 폼 값 수집
+  const fields = [
+    'Date','Driver','Rego','Seats','Agency','Attraction','Guide','Tour_Code',
+    'Pickup','Dropoff','Time_Start','Time_End','KM_Start','KM_End',
+    'SVC_Label','SVC_Charge','DR_Cost',
+    'OT','Hotel_Surcharge','Dist_Surcharge','Trailer','Early',
+    'Toll','Toll_Personal','Fuel','Fuel_Personal',
+    'Night_Type','Night_DR','Night_Owner',
+    'Wash','Meal','Tip','Etc','Etc_Desc','Remarks'
+  ];
+  const data = {};
+  fields.forEach(f => {
+    const el = document.getElementById('dre-'+f);
+    if(el) data[f] = el.value;
+  });
+
+  // 저장 버튼 비활성화
+  const btn = document.querySelector('#dr-edit-wrap button.btn.bac');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 저장 중...'; }
+
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action: 'update_report',
+        sheet: 'Daily_Report',
+        rowIndex: rowIndex,
+        data: data
+      })
+    });
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error || json.msg || '저장 실패');
+
+    toast('✅ 저장 완료 — 모든 페이지 재계산','ok');
+
+    // 모든 캐시 무효화 → 인보이스/정산/급여 모두 새 데이터 사용
+    _drCache = null;
+    _settleData = null;
+    _sdpData = null;
+    if(window._wagesCache) window._wagesCache = null;
+    window._wagesLastSync = 0;
+
+    closeDailyReportEdit();
+
+    // 현재 페이지 재로드
+    if(typeof loadSettleDashboard === 'function' && document.getElementById('settle-summary')){
+      try { await loadSettleDashboard(); } catch(e){}
+    }
+    if(typeof loadSubDriverPay === 'function' && document.getElementById('sdp-result')){
+      try { await loadSubDriverPay(); } catch(e){}
+    }
+  } catch(e){
+    toast('❌ 저장 실패: ' + e.message, 'er');
+    if(btn){ btn.disabled = false; btn.textContent = '💾 저장'; }
+  }
+}
+
+// ─── (구) SUB 요금표 수정 헬퍼 — 호환 유지용 ───
 async function editSubRateForRow(subOwner, attraction){
   if(!subOwner || !attraction){
     toast('SUB 회사 또는 코스 정보가 없습니다','er');
     return;
   }
-  // DB.PS에 해당 회사가 있는지 확인
   if(!DB.PS[subOwner]){
     if(!confirm(`"${subOwner}" 회사의 요금표가 아직 없습니다.\n새로 만들까요?`)) return;
     DB.PS[subOwner] = {};
   }
-  // 해당 코스가 없으면 빈 행으로 추가 (모달에서 입력 가능하도록)
   if(!DB.PS[subOwner][attraction]){
     DB.PS[subOwner][attraction] = {
       max_hours: '',
@@ -5292,12 +5486,9 @@ async function editSubRateForRow(subOwner, attraction){
       '40': {rate:0, ot:0}, '50': {rate:0, ot:0}
     };
   }
-  // ST.curSub 세팅 (openM('PS', ...) 가 이걸 사용)
   ST.curSub = subOwner;
-  // SUB 페이지로 이동 + 요금표 탭 활성화 (백그라운드에서 — 사용자가 모달 닫은 뒤 보임)
   if(typeof nv === 'function') nv('psub','nsub');
   if(typeof showSubTab === 'function') showSubTab('rates');
-  // 작은 지연 후 모달 열기 (탭 전환이 먼저 완료되도록)
   setTimeout(() => {
     if(typeof openM === 'function') openM('PS', attraction);
   }, 50);
