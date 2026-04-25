@@ -1451,6 +1451,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
           <input type="date" id="settle-to" class="profit-finp" style="width:100%;box-sizing:border-box;">
         </div>
         <button class="btn bac sm" onclick="loadSettleDashboard()" style="white-space:nowrap;">조회</button>
+        <button class="btn brd sm" onclick="forceRecalcSettle()" style="white-space:nowrap;" title="캐시 모두 비우고 재계산">🔄 재계산</button>
       </div>
       <!-- SUB 필터 -->
       <select id="settle-sub-filter" class="profit-sel" style="width:100%;margin-bottom:10px;" onchange="renderSettleDashboard()">
@@ -3797,6 +3798,21 @@ function initSettleDashboard() {
     to.value = now.toISOString().slice(0,10);
   }
   loadSettleDashboard();
+}
+
+// ★ 강제 재계산: 모든 캐시 비우고 처음부터 다시 로드
+async function forceRecalcSettle(){
+  toast('🔄 캐시 비우는 중...','ok');
+  _drCache = null;
+  _settleData = null;
+  _sdpData = null;
+  if(window._wagesCache) window._wagesCache = null;
+  window._wagesLastSync = 0;
+  // 정산 페이지 다시 로드
+  if(typeof loadSettleDashboard === 'function'){
+    await loadSettleDashboard();
+  }
+  toast('✅ 재계산 완료','ok');
 }
 
 async function loadSettleDashboard() {
