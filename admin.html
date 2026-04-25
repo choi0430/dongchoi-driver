@@ -3224,30 +3224,54 @@ function calcSubReport(r) {
       drCost: isPrivate ? 0 : drCost, profit: isPrivate ? 0 : taAmount - drCost };
   }
 
-  // ── SUB 비용 (M_PriceSub / Sub_Rates) ──
+  // ── SUB 비용 (옵션 B: base는 SUB 요금표, 모든 서차지는 TA값과 동일) ──
+  // SUB 서차지 = TA 서차지 (Hotel/Dist/OT/Early/Parking/Toll/Trailer 모두 포함)
+  // 즉, SUB 총액 = SUB base + (TA 총액 - TA base)
   const subRates = getSubRates();
   const psRate = DB.PS[owner]?.[attraction]?.[capKey]?.rate||0;
   const subBase = parseFloat(subRates[owner]?.[attraction]?.[capKey]) || psRate;
 
-  // OT: DR 금액 → 시간 역산 → SUB OT rate 적용
-  const otDR = parseFloat(r.OT)||0;
-  const pdOTRate = DB.PD[attraction]?.[capKey]?.ot || (capNum>=40?40:30);
-  const otHours = pdOTRate>0 ? otDR/pdOTRate : 0;
-  const subOTRate = parseFloat(subRates[owner]?.[attraction]?.['ot_'+capKey]) || pdOTRate;
-  const subOT = Math.round(otHours * subOTRate);
+  // TA base 계산 (M_PriceClient에서 같은 방식으로)
+  const agPC = DB.PC[agency];
+  const _findCourse = (pc, cn) => {
+    if(!pc || !cn) return null;
+    let e = pc[cn];
+    if(!e){
+      const lc = cn.toLowerCase();
+      const k = Object.keys(pc).find(x=>x.toLowerCase()===lc);
+      if(k) e = pc[k];
+    }
+    return e || null;
+  };
+  const ce = agPC ? _findCourse(agPC, attraction) : null;
+  let taBase = 0;
+  if(ce){ const sd = ce[capKey] || ce['21']; taBase = parseFloat(sd?.rate)||0; }
+  if(taBase === 0) taBase = parseFloat(r.SVC_Charge)||0;
 
-  // Hotel / Dist / Trailer — SUB 서차지 = TA 서차지 (드라이버 지급액 ≠ SUB/TA 청구액)
-  // DR 입력값을 TA값으로 역산 (calcInvRow와 동일 매핑)
+  // TA 서차지 합계 = taAmount - taBase
+  const taSurchargeTotal = taAmount - taBase;
+
+  // SUB 총액 = SUB base + TA 서차지 합계
+  const subTotal = subBase + taSurchargeTotal;
+
+  // 표시용 breakdown (UI에서 분해해 보여주기 위해)
+  // Hotel/Dist/Trailer는 헬퍼로 다시 계산 (TA값과 동일)
   const hotelDR = parseFloat(r.Hotel_Surcharge)||0;
   const distDR = parseFloat(r.Dist_Surcharge)||0;
   const trailerDR_raw = parseFloat(r.Trailer)||0;
-  const hotelSub = _hotelDRtoTA(hotelDR, capNum);  // SUB 서차지 = TA 서차지
+  const hotelSub = _hotelDRtoTA(hotelDR, capNum);
   const distSub  = _distDRtoTA(distDR, capNum);
-  const trailerSub = _trailerDRtoTA(trailerDR_raw, capNum);  // 21/25S DR $30→TA/SUB $80
+  const trailerSub = _trailerDRtoTA(trailerDR_raw, capNum);
+  // OT TA값
+  const otDR = parseFloat(r.OT)||0;
+  const otRateTA = capNum>=50?160:capNum>=40?150:80;
+  const otRateDR = capNum>=40?40:30;
+  const _isHojuroOT = /호주로|hojuro/i.test(agency);
+  const subOT = _isHojuroOT
+    ? Math.round((otDR / (otRateDR/2)) * (otRateTA/2))
+    : Math.round((otRateDR>0 ? otDR/otRateDR : 0) * otRateTA);
   // Night_Owner (야경 차주 납입금)
   const nightOwner = parseFloat(r.Night_Owner)||0;
-
-  const subTotal = subBase + subOT + hotelSub + distSub + trailerSub;
 
   // ── 드라이버 비용 (M_PriceDriver 기준 — SUB 오너가 지급) ──
   const drCost = parseFloat(r.DR_Cost)||0;
@@ -3716,9 +3740,20 @@ function calcAgencyTA(r){
   const otHrs    = _isHojuroOT ? (ot / (otRateDR/2)) * 0.5 : (otRateDR>0 ? ot/otRateDR : 0);
   const otTA     = _isHojuroOT ? Math.round((ot / (otRateDR/2)) * (otRateTA/2)) : Math.round(otHrs * otRateTA);
 
-  // Early TA: Airport Transfer rate × 0.3
+  // Early TA:
+  // - Tour Hojuro / Plus Australia 21/25S: $80 고정
+  // - 그 외: Airport Transfer rate × 0.3
   let erlTA = 0;
-  if(erl>0){ let atE=agPC?findCourse(agPC,'Airport Transfer'):null; if(!atE){for(const ag of Object.keys(DB.PC||{})){atE=findCourse(DB.PC[ag],'Airport Transfer');if(atE)break;}} if(atE){const sd2=atE[capKey]||atE['21']; erlTA=Math.round((parseFloat(sd2?.rate)||0)*0.3);} }
+  if(erl>0){
+    const _isHojuroEarly = /호주로|hojuro|plus\s*australia/i.test(agency);
+    if(_isHojuroEarly && capNum < 40){
+      erlTA = 80;
+    } else {
+      let atE=agPC?findCourse(agPC,'Airport Transfer'):null;
+      if(!atE){for(const ag of Object.keys(DB.PC||{})){atE=findCourse(DB.PC[ag],'Airport Transfer');if(atE)break;}}
+      if(atE){const sd2=atE[capKey]||atE['21']; erlTA=Math.round((parseFloat(sd2?.rate)||0)*0.3);}
+    }
+  }
 
   // Parking (공항 픽업) — 호주로(Tour Hojuro), Plus Australia 21/25S 제외
   const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
@@ -3728,7 +3763,11 @@ function calcAgencyTA(r){
   // Toll (대형 버스만 TA)
   const tollTA = isLarge ? toll : 0;
 
-  return taBase + otTA + htlTA + dstTA + erlTA + parking + tollTA;
+  // Trailer TA: 21/25S DR $30→TA $80 (글로벌 헬퍼 사용)
+  const trl = parseFloat(r.Trailer||0);
+  const trlTA = _trailerDRtoTA(trl, capNum);
+
+  return taBase + otTA + htlTA + dstTA + erlTA + parking + tollTA + trlTA;
 }
 
 // ═══════════════════════════════════════
@@ -4735,21 +4774,31 @@ async function importFromReports(){
     // ── 서브 비용 계산 ──
     let subTotal = 0;
     if(isSub){
+      // ── 옵션 B: SUB 총액 = SUB base + (TA 총액 - TA base) ──
+      // base만 SUB 요금표에서 가져오고, 나머지 모든 서차지는 TA값과 동일
       const subRates = getSubRates();
-      const subOwner = vehOwner; // 이미 vehOwner = Owner에서 가져옴
+      const subOwner = vehOwner;
       const psRate = DB.PS[subOwner]?.[attraction]?.[capKey]?.rate||0;
       const baseRate = parseFloat(subRates[subOwner]?.[attraction]?.[capKey]) || psRate;
-      // OT: 드라이버 OT금액(otAmt)을 드라이버 요율로 역산해 시간 구한 뒤 서브 요율 적용
-      const pdOTRate  = DB.PD[attraction]?.[capKey]?.ot || (capNum>=40?40:30);
-      const otHours   = pdOTRate>0 ? otAmt/pdOTRate : 0;
-      // 서브 요율표에 별도 OT율이 없으면 드라이버 OT금액 그대로 사용
-      const subOTRate = parseFloat(subRates[subOwner]?.[attraction]?.['ot_'+capKey]) || pdOTRate;
-      const subOT     = otHours * subOTRate;
-      // ★ SUB 서차지 = TA 서차지 (DR값이 아님) - hotel/dist/trailer는 DR→TA 역산
-      const hotelSub = _hotelDRtoTA(hotelAmt, capNum);
-      const distSub  = _distDRtoTA(distAmt, capNum);
-      const trailerSub = _trailerDRtoTA(trailerAmt, capNum);
-      subTotal = baseRate + subOT + trailerSub + hotelSub + distSub;
+      // TA base 계산 (M_PriceClient 동일 방식)
+      const _agPC = DB.PC[agency];
+      const _findCourse2 = (pc, cn) => {
+        if(!pc || !cn) return null;
+        let e = pc[cn];
+        if(!e){
+          const lc = cn.toLowerCase();
+          const k = Object.keys(pc).find(x=>x.toLowerCase()===lc);
+          if(k) e = pc[k];
+        }
+        return e || null;
+      };
+      const _ce = _agPC ? _findCourse2(_agPC, attraction) : null;
+      let taBaseLedger = 0;
+      if(_ce){ const _sd = _ce[capKey] || _ce['21']; taBaseLedger = parseFloat(_sd?.rate)||0; }
+      if(taBaseLedger === 0) taBaseLedger = parseFloat(r.SVC_Charge)||0;
+      // TA 서차지 합계 = totalTA - taBaseLedger
+      const taSurchargeTotal = totalTA - taBaseLedger;
+      subTotal = baseRate + taSurchargeTotal;
       if(baseRate===0){
         errors.push(isoDate+' '+attraction+' ('+rego+') — 서브 요금표 없음 (직접 입력 필요)');
       }
