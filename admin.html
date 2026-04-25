@@ -3178,6 +3178,29 @@ function getSubVehicles(){
 // SUB 통합 비용 계산 — 리포트 행 기반
 // 모든 SUB 관련 기능(정산, 드라이버 지급, 인보이스)의 기초 함수
 // ═══════════════════════════════════════
+// ── 전역 DR → TA 서차지 변환 헬퍼 ──
+// SUB 서차지 = TA 서차지 (드라이버 지급액 ≠ SUB/TA 청구액)
+// Hotel: 21/25S DR $10→TA $40, $20→$80, 40S DR $15→$75, $30→$150, 50S $15→$80, $30→$160
+function _hotelDRtoTA(dr, sn){
+  if(!dr || dr===0) return 0;
+  if(sn>=50) return dr===15?80:dr===30?160:dr*4;
+  if(sn>=40) return dr===15?75:dr===30?150:dr*4;
+  return dr===10?40:dr===20?80:dr*4;
+}
+// Dist: 21/25S DR $30→TA $80, 40S $40→$150, 50S $40→$160
+function _distDRtoTA(dr, sn){
+  if(!dr || dr===0) return 0;
+  if(sn>=50) return dr===40?160:dr*4;
+  if(sn>=40) return dr===40?150:Math.round(dr*3.75);
+  return dr===30?80:Math.round(dr*2.67);
+}
+// Trailer: 21/25S DR $30→TA $80, 40S+는 트레일러 청구 없음
+function _trailerDRtoTA(dr, sn){
+  if(!dr || dr===0) return 0;
+  if(sn>=40) return 0;
+  return dr===30?80:Math.round(dr*2.67);
+}
+
 // 리포트 행 → { isSub, subOwner, rego, capKey, taAmount, subCost:{base,ot,hotel,dist,trailer,total}, drCost, profit }
 function calcSubReport(r) {
   const rego = (r.Rego||'').trim();
@@ -3213,14 +3236,18 @@ function calcSubReport(r) {
   const subOTRate = parseFloat(subRates[owner]?.[attraction]?.['ot_'+capKey]) || pdOTRate;
   const subOT = Math.round(otHours * subOTRate);
 
-  // Hotel / Dist / Trailer — DR 금액 그대로 (SUB에게도 동일 지급)
+  // Hotel / Dist / Trailer — SUB 서차지 = TA 서차지 (드라이버 지급액 ≠ SUB/TA 청구액)
+  // DR 입력값을 TA값으로 역산 (calcInvRow와 동일 매핑)
   const hotelDR = parseFloat(r.Hotel_Surcharge)||0;
   const distDR = parseFloat(r.Dist_Surcharge)||0;
-  const trailerDR = parseFloat(r.Trailer)||0;
+  const trailerDR_raw = parseFloat(r.Trailer)||0;
+  const hotelSub = _hotelDRtoTA(hotelDR, capNum);  // SUB 서차지 = TA 서차지
+  const distSub  = _distDRtoTA(distDR, capNum);
+  const trailerSub = _trailerDRtoTA(trailerDR_raw, capNum);  // 21/25S DR $30→TA/SUB $80
   // Night_Owner (야경 차주 납입금)
   const nightOwner = parseFloat(r.Night_Owner)||0;
 
-  const subTotal = subBase + subOT + hotelDR + distDR + trailerDR;
+  const subTotal = subBase + subOT + hotelSub + distSub + trailerSub;
 
   // ── 드라이버 비용 (M_PriceDriver 기준 — SUB 오너가 지급) ──
   const drCost = parseFloat(r.DR_Cost)||0;
@@ -3231,7 +3258,7 @@ function calcSubReport(r) {
   return {
     isSub: true, subOwner: owner, rego, capKey, attraction, agency, driver,
     taAmount,
-    subCost: { base: subBase, ot: subOT, hotel: hotelDR, dist: distDR, trailer: trailerDR, night: nightOwner, total: subTotal },
+    subCost: { base: subBase, ot: subOT, hotel: hotelSub, dist: distSub, trailer: trailerSub, night: nightOwner, total: subTotal },
     drCost,
     profit
   };
@@ -4718,7 +4745,11 @@ async function importFromReports(){
       // 서브 요율표에 별도 OT율이 없으면 드라이버 OT금액 그대로 사용
       const subOTRate = parseFloat(subRates[subOwner]?.[attraction]?.['ot_'+capKey]) || pdOTRate;
       const subOT     = otHours * subOTRate;
-      subTotal = baseRate + subOT + trailerAmt + hotelAmt + distAmt;
+      // ★ SUB 서차지 = TA 서차지 (DR값이 아님) - hotel/dist/trailer는 DR→TA 역산
+      const hotelSub = _hotelDRtoTA(hotelAmt, capNum);
+      const distSub  = _distDRtoTA(distAmt, capNum);
+      const trailerSub = _trailerDRtoTA(trailerAmt, capNum);
+      subTotal = baseRate + subOT + trailerSub + hotelSub + distSub;
       if(baseRate===0){
         errors.push(isoDate+' '+attraction+' ('+rego+') — 서브 요금표 없음 (직접 입력 필요)');
       }
@@ -8452,29 +8483,31 @@ function calcInvRow(r) {
     baseRate = parseFloat(r.SVC_Charge) || 0;
   }
 
-  // ── Early/Late Surcharge TA = Airport Transfer 요금 × 30% ──
-  // Early 필드가 0보다 크면 (드라이버가 early surcharge 적용한 경우)
+  // ── Early/Late Surcharge TA ──
+  // - Tour Hojuro / Plus Australia 21/25S: $80 고정
+  // - 그 외: Airport Transfer 요금 × 30%
   let earlyTA = 0;
   if (earlyDR > 0) {
-    // 해당 여행사의 Airport Transfer 요금 조회 (없으면 모든 여행사에서 fallback)
-    const allPC = DB.PC;
-    let atEntry = agPC ? findCourse(agPC, 'Airport Transfer') : null;
-    if (!atEntry) {
-      // 어떤 여행사든 Airport Transfer 요금이 있으면 사용
-      for (const ag of Object.keys(allPC)) {
-        atEntry = findCourse(allPC[ag], 'Airport Transfer');
-        if (atEntry) break;
-      }
-    }
-    if (atEntry) {
-      const seatData = atEntry[seatKey] || atEntry['21'];
-      const airportRate = parseFloat(seatData?.rate) || 0;
-      earlyTA = Math.round(airportRate * 0.3);
-    }
-    // Tour Hojuro / Plus Australia: 21/25인승 Early = $80 고정
+    // 1) Tour Hojuro / Plus Australia 21/25S 우선 체크 → $80 고정
     const _isHojuroEarly = /호주로|hojuro|plus\s*australia/i.test(agency);
     if (_isHojuroEarly && seatNum < 40) {
       earlyTA = 80;
+    } else {
+      // 2) 기본: 해당 여행사의 Airport Transfer 요금 × 30%
+      const allPC = DB.PC;
+      let atEntry = agPC ? findCourse(agPC, 'Airport Transfer') : null;
+      if (!atEntry) {
+        // 어떤 여행사든 Airport Transfer 요금이 있으면 사용
+        for (const ag of Object.keys(allPC)) {
+          atEntry = findCourse(allPC[ag], 'Airport Transfer');
+          if (atEntry) break;
+        }
+      }
+      if (atEntry) {
+        const seatData = atEntry[seatKey] || atEntry['21'];
+        const airportRate = parseFloat(seatData?.rate) || 0;
+        earlyTA = Math.round(airportRate * 0.3);
+      }
     }
   }
 
