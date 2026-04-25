@@ -5511,9 +5511,10 @@ async function loadSubDriverPay(){
     const sub = d.subOwner;
     const driver = d.driver||'—';
     if(!grouped[sub]) grouped[sub]={};
-    if(!grouped[sub][driver]) grouped[sub][driver]={total:0, taTotal:0, nightOwnerTotal:0, count:0, items:[]};
+    if(!grouped[sub][driver]) grouped[sub][driver]={total:0, taTotal:0, subPayTotal:0, nightOwnerTotal:0, count:0, items:[]};
     grouped[sub][driver].total += d.drCost;
     grouped[sub][driver].taTotal += d.taAmount;
+    grouped[sub][driver].subPayTotal += d.subCost.total;  // ★ Dong Choi → SUB 지급액
     grouped[sub][driver].nightOwnerTotal += d.subCost.night;
     grouped[sub][driver].count++;
     grouped[sub][driver].items.push({
@@ -5552,25 +5553,46 @@ function renderSubDriverPay(){
     const driverNames = Object.keys(drivers).sort();
     const subTotal = driverNames.reduce((s,d)=>s+drivers[d].total,0);
     const subTATotal = driverNames.reduce((s,d)=>s+drivers[d].taTotal,0);
+    const subPayTotal = driverNames.reduce((s,d)=>s+drivers[d].subPayTotal,0);  // Dong Choi → SUB
     const subNightOwner = driverNames.reduce((s,d)=>s+drivers[d].nightOwnerTotal,0);
     const subCount = driverNames.reduce((s,d)=>s+drivers[d].count,0);
+    // ★ 수익 계산
+    const dongChoiProfit = subTATotal - subPayTotal;       // Dong Choi 수익 = TA - SUB 지급
+    const subCompanyRevenue = subPayTotal - subTotal + subNightOwner; // SUB 회사 수익 = SUB 받음 - 드라이버 지급 + 야경납입
     html += `<div class="crd" style="padding:0;margin-bottom:12px;overflow:hidden;">
-      <div style="background:linear-gradient(135deg,#6d28d9,#4f46e5);padding:12px 14px;color:white;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div style="background:linear-gradient(135deg,#6d28d9,#4f46e5);padding:14px;color:white;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
           <div>
             <div style="font-size:15px;font-weight:800;">🏢 ${sub}</div>
             <div style="font-size:11px;opacity:.8;">${subCount}건 | 드라이버 ${driverNames.length}명</div>
           </div>
           <div style="text-align:right;">
-            <div style="font-size:10px;opacity:.7;">여행사 청구 (TA)</div>
-            <div style="font-size:14px;font-weight:700;">$${subTATotal.toLocaleString()}</div>
-            <div style="font-size:10px;opacity:.7;margin-top:2px;">드라이버 지급 합계</div>
-            <div style="font-size:18px;font-weight:800;">$${subTotal.toLocaleString()}</div>
+            <div style="font-size:10px;opacity:.7;">💰 ${sub} 수익</div>
+            <div style="font-size:20px;font-weight:800;color:${subCompanyRevenue>=0?'#86efac':'#fca5a5'};">${subCompanyRevenue>=0?'+':''}$${subCompanyRevenue.toLocaleString()}</div>
           </div>
         </div>
-        ${subNightOwner > 0 ? `<div style="border-top:1px solid rgba(255,255,255,.2);margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;align-items:center;">
-          <div style="font-size:11px;opacity:.8;">🌃 야경 차주 납입금 (SUB 수익)</div>
-          <div style="font-size:14px;font-weight:800;color:#fcd34d;">+$${subNightOwner.toLocaleString()}</div>
+        <!-- 4가지 수치 그리드 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-top:8px;">
+          <div style="background:rgba(255,255,255,.1);border-radius:6px;padding:6px 8px;text-align:center;">
+            <div style="font-size:9px;opacity:.7;">여행사 청구 (TA)</div>
+            <div style="font-size:13px;font-weight:700;">$${subTATotal.toLocaleString()}</div>
+          </div>
+          <div style="background:rgba(255,255,255,.1);border-radius:6px;padding:6px 8px;text-align:center;">
+            <div style="font-size:9px;opacity:.7;">SUB 지급 (Dong Choi → ${sub})</div>
+            <div style="font-size:13px;font-weight:700;color:#fcd34d;">$${subPayTotal.toLocaleString()}</div>
+          </div>
+          <div style="background:rgba(255,255,255,.1);border-radius:6px;padding:6px 8px;text-align:center;">
+            <div style="font-size:9px;opacity:.7;">드라이버 지급</div>
+            <div style="font-size:13px;font-weight:700;">$${subTotal.toLocaleString()}</div>
+          </div>
+          <div style="background:rgba(255,255,255,.15);border-radius:6px;padding:6px 8px;text-align:center;">
+            <div style="font-size:9px;opacity:.7;">Dong Choi 수익</div>
+            <div style="font-size:13px;font-weight:700;color:${dongChoiProfit>=0?'#86efac':'#fca5a5'};">${dongChoiProfit>=0?'+':''}$${dongChoiProfit.toLocaleString()}</div>
+          </div>
+        </div>
+        ${subNightOwner > 0 ? `<div style="border-top:1px solid rgba(255,255,255,.2);margin-top:8px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-size:11px;opacity:.8;">🌃 야경 차주 납입금 (SUB 추가 수익)</div>
+          <div style="font-size:13px;font-weight:800;color:#fcd34d;">+$${subNightOwner.toLocaleString()}</div>
         </div>` : ''}
       </div>`;
     // 드라이버별 breakdown
@@ -5628,17 +5650,22 @@ function renderSubDriverPay(){
   // 전체 합계
   const grandDR = subs.reduce((s,sub)=>s+Object.values(_sdpData[sub]).reduce((ss,d)=>ss+d.total,0),0);
   const grandTA = subs.reduce((s,sub)=>s+Object.values(_sdpData[sub]).reduce((ss,d)=>ss+d.taTotal,0),0);
+  const grandSubPay = subs.reduce((s,sub)=>s+Object.values(_sdpData[sub]).reduce((ss,d)=>ss+d.subPayTotal,0),0);
   const grandNO = subs.reduce((s,sub)=>s+Object.values(_sdpData[sub]).reduce((ss,d)=>ss+d.nightOwnerTotal,0),0);
-  html = `<div style="background:var(--sf2);border-radius:10px;padding:10px 14px;margin-bottom:12px;">
-    <div style="display:flex;justify-content:space-around;text-align:center;">
-      <div><div style="font-size:10px;color:var(--t3);">여행사 청구 합계</div><div style="font-size:16px;font-weight:800;">$${grandTA.toLocaleString()}</div></div>
+  // 수익 계산
+  const dongChoiTotalProfit = grandTA - grandSubPay;        // Dong Choi 수익 = TA - SUB 지급
+  const subTotalRevenue = grandSubPay - grandDR + grandNO;  // 모든 SUB 회사 수익 합 = SUB 받음 - 드라이버 지급 + 야경납입
+  html = `<div style="background:var(--sf2);border-radius:10px;padding:12px 14px;margin-bottom:12px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;text-align:center;">
+      <div><div style="font-size:10px;color:var(--t3);">여행사 청구 (TA)</div><div style="font-size:16px;font-weight:800;color:var(--t1);">$${grandTA.toLocaleString()}</div></div>
+      <div><div style="font-size:10px;color:var(--t3);">SUB 지급 (Dong Choi → SUB)</div><div style="font-size:16px;font-weight:800;color:#f59e0b;">$${grandSubPay.toLocaleString()}</div></div>
       <div><div style="font-size:10px;color:var(--t3);">드라이버 지급 합계</div><div style="font-size:16px;font-weight:800;color:var(--ac);">$${grandDR.toLocaleString()}</div></div>
-      <div><div style="font-size:10px;color:var(--t3);">차액 (수익)</div><div style="font-size:16px;font-weight:800;color:var(--gn);">$${(grandTA-grandDR).toLocaleString()}</div></div>
+      <div style="background:var(--sf3);border-radius:8px;padding:4px;"><div style="font-size:10px;color:var(--t3);">Dong Choi 수익</div><div style="font-size:16px;font-weight:800;color:${dongChoiTotalProfit>=0?'var(--gn)':'var(--rd)'};">${dongChoiTotalProfit>=0?'+':''}$${dongChoiTotalProfit.toLocaleString()}</div></div>
     </div>
-    ${grandNO > 0 ? `<div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:8px;display:flex;justify-content:center;gap:20px;text-align:center;">
-      <div><div style="font-size:10px;color:#7c3aed;font-weight:700;">🌃 야경 차주 납입 합계</div><div style="font-size:16px;font-weight:800;color:#7c3aed;">+$${grandNO.toLocaleString()}</div></div>
-      <div><div style="font-size:10px;color:var(--t3);">실질 수익 (차액+납입)</div><div style="font-size:16px;font-weight:800;color:var(--gn);">$${(grandTA-grandDR+grandNO).toLocaleString()}</div></div>
-    </div>` : ''}
+    <div style="border-top:1px solid var(--bd);margin-top:10px;padding-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center;">
+      <div><div style="font-size:10px;color:var(--t3);">SUB 회사 수익 합계 ${grandNO>0?'(+ 야경납입 $'+grandNO.toLocaleString()+')':''}</div><div style="font-size:14px;font-weight:800;color:#7c3aed;">${subTotalRevenue>=0?'+':''}$${subTotalRevenue.toLocaleString()}</div></div>
+      <div><div style="font-size:10px;color:var(--t3);">전체 비용 흐름 (TA = Dong Choi 수익 + SUB 받음)</div><div style="font-size:13px;color:var(--t2);">$${grandTA.toLocaleString()} = $${dongChoiTotalProfit.toLocaleString()} + $${grandSubPay.toLocaleString()}</div></div>
+    </div>
   </div>` + html;
   resEl.innerHTML = html;
 }
