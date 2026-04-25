@@ -1440,15 +1440,41 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div id="sub-view-ledger" style="display:none;">
     <div style="padding:12px 14px 0;">
       <div style="font-size:12px;color:var(--t3);margin-bottom:8px;">리포트 기반 SUB 자동 정산 — 비용 흐름: 여행사→Dong Choi→SUB 오너→드라이버</div>
-      <!-- 기간 필터 -->
+
+      <!-- 기간 모드 선택 -->
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <div style="font-size:10px;font-weight:700;color:var(--t3);">기간 모드:</div>
+        <button class="btn bgh xs settle-mode-btn" data-mode="week" onclick="setSettlePeriodMode('week')" style="padding:4px 10px;font-size:11px;">📅 주별</button>
+        <button class="btn bgh xs settle-mode-btn" data-mode="month" onclick="setSettlePeriodMode('month')" style="padding:4px 10px;font-size:11px;">📅 월별</button>
+        <button class="btn bgh xs settle-mode-btn" data-mode="quarter" onclick="setSettlePeriodMode('quarter')" style="padding:4px 10px;font-size:11px;">📅 분기별</button>
+        <button class="btn bgh xs settle-mode-btn" data-mode="custom" onclick="setSettlePeriodMode('custom')" style="padding:4px 10px;font-size:11px;">⚙️ 사용자 지정</button>
+      </div>
+
+      <!-- 빠른 기간 선택 칩 -->
+      <div id="settle-quick-chips" style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <button class="btn bgh xs" onclick="setSettleQuickPeriod('this')" style="padding:4px 10px;font-size:11px;">이번 <span class="qc-mode-label">주</span></button>
+        <button class="btn bgh xs" onclick="setSettleQuickPeriod('last')" style="padding:4px 10px;font-size:11px;">지난 <span class="qc-mode-label">주</span></button>
+        <button class="btn bgh xs" onclick="setSettleQuickPeriod('thisMonth')" style="padding:4px 10px;font-size:11px;">이번 달</button>
+        <button class="btn bgh xs" onclick="setSettleQuickPeriod('lastMonth')" style="padding:4px 10px;font-size:11px;">지난 달</button>
+        <button class="btn bgh xs" onclick="setSettleQuickPeriod('thisQuarter')" style="padding:4px 10px;font-size:11px;">이번 분기</button>
+      </div>
+
+      <!-- 화살표 네비게이션 + 현재 기간 라벨 -->
+      <div id="settle-period-nav" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+        <button class="btn brd sm" onclick="navSettlePeriod(-1)" style="padding:6px 12px;font-weight:700;" title="이전">◀</button>
+        <div id="settle-period-label" style="flex:1;text-align:center;font-size:13px;font-weight:700;background:var(--sf2);border-radius:8px;padding:8px 12px;color:var(--t1);">—</div>
+        <button class="btn brd sm" onclick="navSettlePeriod(1)" style="padding:6px 12px;font-weight:700;" title="다음">▶</button>
+      </div>
+
+      <!-- 시작일/종료일 직접 입력 (사용자 지정 모드에서 활성화) -->
       <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;">
         <div style="flex:1;">
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">시작일</div>
-          <input type="date" id="settle-from" class="profit-finp" style="width:100%;box-sizing:border-box;">
+          <input type="date" id="settle-from" class="profit-finp" style="width:100%;box-sizing:border-box;" onchange="onSettleDateManualChange()">
         </div>
         <div style="flex:1;">
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">종료일</div>
-          <input type="date" id="settle-to" class="profit-finp" style="width:100%;box-sizing:border-box;">
+          <input type="date" id="settle-to" class="profit-finp" style="width:100%;box-sizing:border-box;" onchange="onSettleDateManualChange()">
         </div>
         <button class="btn bac sm" onclick="loadSettleDashboard()" style="white-space:nowrap;">조회</button>
         <button class="btn brd sm" onclick="forceRecalcSettle()" style="white-space:nowrap;" title="캐시 모두 비우고 재계산">🔄 재계산</button>
@@ -3787,17 +3813,161 @@ function calcAgencyTA(r){
 let _settleData = null; // 집계된 SUB 리포트 데이터
 let _settleSubInvoices = []; // SUB 제출 인보이스 (Source=SUB_DRIVER)
 
-function initSettleDashboard() {
-  const from = document.getElementById('settle-from');
-  const to = document.getElementById('settle-to');
-  if (from && !from.value) {
-    // 기본값: 이번 달 1일 ~ 오늘
-    const now = new Date();
-    const y = now.getFullYear(), m = String(now.getMonth()+1).padStart(2,'0');
-    from.value = `${y}-${m}-01`;
-    to.value = now.toISOString().slice(0,10);
+// ═══════════════════════════════════════════════════════════════
+// 정산 대시보드 — 기간 모드 관리 (주별/월별/분기별/사용자 지정)
+// ═══════════════════════════════════════════════════════════════
+let _settlePeriodMode = 'month'; // 'week' | 'month' | 'quarter' | 'custom'
+let _settlePeriodAnchor = null;  // 현재 기간의 기준 Date
+
+// 날짜 → 'YYYY-MM-DD' 문자열
+function _isoDate(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+
+// 주의 시작 (월요일)
+function _weekStart(d){
+  const dt = new Date(d);
+  const day = dt.getDay(); // 0=일 ~ 6=토
+  const diff = day === 0 ? -6 : 1 - day; // 월요일까지의 offset
+  dt.setDate(dt.getDate() + diff);
+  dt.setHours(0,0,0,0);
+  return dt;
+}
+function _weekEnd(d){
+  const ws = _weekStart(d);
+  const we = new Date(ws);
+  we.setDate(we.getDate() + 6);
+  return we;
+}
+function _monthStart(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
+function _monthEnd(d){ return new Date(d.getFullYear(), d.getMonth()+1, 0); }
+function _quarterStart(d){
+  const q = Math.floor(d.getMonth()/3);
+  return new Date(d.getFullYear(), q*3, 1);
+}
+function _quarterEnd(d){
+  const q = Math.floor(d.getMonth()/3);
+  return new Date(d.getFullYear(), q*3+3, 0);
+}
+function _quarterNum(d){ return Math.floor(d.getMonth()/3)+1; }
+
+// 현재 기간 모드에 따라 [from, to] 계산
+function _periodRange(mode, anchor){
+  const a = anchor || new Date();
+  if(mode === 'week') return [_weekStart(a), _weekEnd(a)];
+  if(mode === 'month') return [_monthStart(a), _monthEnd(a)];
+  if(mode === 'quarter') return [_quarterStart(a), _quarterEnd(a)];
+  return null; // custom 은 직접 입력
+}
+
+// 기간 라벨 텍스트 만들기
+function _periodLabel(mode, anchor){
+  const a = anchor || new Date();
+  if(mode === 'week'){
+    const ws = _weekStart(a), we = _weekEnd(a);
+    return `📅 ${_isoDate(ws)} ~ ${_isoDate(we)} (주)`;
   }
+  if(mode === 'month') return `📅 ${a.getFullYear()}년 ${a.getMonth()+1}월`;
+  if(mode === 'quarter') return `📅 ${a.getFullYear()}년 ${_quarterNum(a)}분기`;
+  // custom
+  const f = document.getElementById('settle-from')?.value || '';
+  const t = document.getElementById('settle-to')?.value || '';
+  return `⚙️ ${f} ~ ${t}`;
+}
+
+function setSettlePeriodMode(mode){
+  _settlePeriodMode = mode;
+  // 모드 버튼 활성화 표시
+  document.querySelectorAll('.settle-mode-btn').forEach(b => {
+    b.classList.toggle('on', b.dataset.mode === mode);
+    b.style.background = b.dataset.mode === mode ? 'var(--ac)' : '';
+    b.style.color = b.dataset.mode === mode ? '#fff' : '';
+  });
+  // 빠른 칩 라벨 업데이트 (이번 주/이번 달 등)
+  document.querySelectorAll('.qc-mode-label').forEach(s => {
+    s.textContent = mode === 'week' ? '주' : mode === 'month' ? '달' : mode === 'quarter' ? '분기' : '주';
+  });
+  // 화살표 네비 표시 여부
+  const navEl = document.getElementById('settle-period-nav');
+  if(navEl) navEl.style.display = mode === 'custom' ? 'none' : '';
+  // 현재 기준이 없으면 오늘로
+  if(!_settlePeriodAnchor) _settlePeriodAnchor = new Date();
+  if(mode !== 'custom') _applySettlePeriodToInputs();
   loadSettleDashboard();
+}
+
+function setSettleQuickPeriod(which){
+  const now = new Date();
+  // which: 'this'(이번 모드 단위), 'last'(지난 모드 단위), 'thisMonth', 'lastMonth', 'thisQuarter'
+  if(which === 'this'){
+    _settlePeriodAnchor = now;
+  } else if(which === 'last'){
+    const a = new Date(now);
+    if(_settlePeriodMode === 'week') a.setDate(a.getDate() - 7);
+    else if(_settlePeriodMode === 'month') a.setMonth(a.getMonth() - 1);
+    else if(_settlePeriodMode === 'quarter') a.setMonth(a.getMonth() - 3);
+    _settlePeriodAnchor = a;
+  } else if(which === 'thisMonth'){
+    if(_settlePeriodMode !== 'month') setSettlePeriodMode('month');
+    _settlePeriodAnchor = now;
+  } else if(which === 'lastMonth'){
+    if(_settlePeriodMode !== 'month') setSettlePeriodMode('month');
+    const a = new Date(now); a.setMonth(a.getMonth() - 1);
+    _settlePeriodAnchor = a;
+  } else if(which === 'thisQuarter'){
+    if(_settlePeriodMode !== 'quarter') setSettlePeriodMode('quarter');
+    _settlePeriodAnchor = now;
+  }
+  _applySettlePeriodToInputs();
+  loadSettleDashboard();
+}
+
+function navSettlePeriod(dir){
+  if(!_settlePeriodAnchor) _settlePeriodAnchor = new Date();
+  const a = new Date(_settlePeriodAnchor);
+  if(_settlePeriodMode === 'week') a.setDate(a.getDate() + 7*dir);
+  else if(_settlePeriodMode === 'month') a.setMonth(a.getMonth() + dir);
+  else if(_settlePeriodMode === 'quarter') a.setMonth(a.getMonth() + 3*dir);
+  _settlePeriodAnchor = a;
+  _applySettlePeriodToInputs();
+  loadSettleDashboard();
+}
+
+// 현재 모드/앵커를 시작일·종료일 input에 반영
+function _applySettlePeriodToInputs(){
+  if(_settlePeriodMode === 'custom') return;
+  const range = _periodRange(_settlePeriodMode, _settlePeriodAnchor);
+  if(!range) return;
+  const fromEl = document.getElementById('settle-from');
+  const toEl = document.getElementById('settle-to');
+  if(fromEl) fromEl.value = _isoDate(range[0]);
+  if(toEl) toEl.value = _isoDate(range[1]);
+  // 라벨 갱신
+  const lblEl = document.getElementById('settle-period-label');
+  if(lblEl) lblEl.textContent = _periodLabel(_settlePeriodMode, _settlePeriodAnchor);
+}
+
+// 사용자가 시작일/종료일을 직접 수정한 경우 → custom 모드로 전환
+function onSettleDateManualChange(){
+  _settlePeriodMode = 'custom';
+  document.querySelectorAll('.settle-mode-btn').forEach(b => {
+    b.classList.toggle('on', b.dataset.mode === 'custom');
+    b.style.background = b.dataset.mode === 'custom' ? 'var(--ac)' : '';
+    b.style.color = b.dataset.mode === 'custom' ? '#fff' : '';
+  });
+  const lblEl = document.getElementById('settle-period-label');
+  if(lblEl) lblEl.textContent = _periodLabel('custom', null);
+  const navEl = document.getElementById('settle-period-nav');
+  if(navEl) navEl.style.display = 'none';
+}
+
+function initSettleDashboard() {
+  // 기본 모드: 이번 달
+  if(!_settlePeriodAnchor) _settlePeriodAnchor = new Date();
+  setSettlePeriodMode(_settlePeriodMode || 'month');
 }
 
 // ★ 강제 재계산: 모든 캐시 비우고 처음부터 다시 로드
