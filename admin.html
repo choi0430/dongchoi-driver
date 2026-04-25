@@ -14593,7 +14593,21 @@ async function loadAllFromSheets(){
     document.getElementById('sm').classList.add('on');
     document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
     rDash();
-    // 자동 재시도 (최대 2회)
+    // ★ 핫픽스: 네트워크/HTTP 에러만 재시도. UI/파싱 에러는 재시도해도 같은 결과
+    const isNetworkError = e.name === 'AbortError' ||
+                           (e.message || '').indexOf('Failed to fetch') >= 0 ||
+                           (e.message || '').indexOf('NetworkError') >= 0 ||
+                           (e.message || '').indexOf('HTTP error') >= 0;
+    // 데이터는 이미 메모리에 적용됐을 수 있으므로 토스트만 표시하고 재시도 안 함
+    if(!isNetworkError){
+      console.warn('[loadAllFromSheets] non-network error, skipping retry:', e);
+      const _syncEl = document.getElementById('sync-status');
+      if(_syncEl) _syncEl.textContent = '⚠️ Partial Load (부분 로드) — Some Features May Be Limited';
+      // 데이터는 받았으니 새로고침 안내 대신 "일부 기능 제한" 정도로
+      toast('⚠️ 일부 기능 초기화 실패 — 데이터는 로드됨','er');
+      return;
+    }
+    // 자동 재시도 (최대 2회) — 네트워크 에러만
     if(!window._loadRetryCount) window._loadRetryCount = 0;
     if(window._loadRetryCount < 2){
       window._loadRetryCount++;
@@ -16157,8 +16171,11 @@ function initTabBadges(){
   _dismissedIds = {};
 
   Object.keys(curIds).forEach(k => {
-    const curSet = new Set(curIds[k]);
-    const knownArr = savedKnown[k] || [];
+    // ★ 방어: curIds[k]는 항상 배열이어야 함 (안 그러면 new Set에서 throw)
+    const curArr = Array.isArray(curIds[k]) ? curIds[k] : [];
+    const curSet = new Set(curArr);
+    // ★ 방어: savedKnown[k]가 배열이 아닐 수 있음 (구버전 데이터, 손상된 JSON 등)
+    const knownArr = Array.isArray(savedKnown[k]) ? savedKnown[k] : [];
     const knownSet = new Set(knownArr);
 
     if(knownArr.length === 0){
@@ -16169,12 +16186,13 @@ function initTabBadges(){
       _knownIds[k] = knownSet;
       // 현재 있지만 known에 없는 항목 = NEW
       const newSet = new Set();
-      curIds[k].forEach(id => { if(!knownSet.has(id)) newSet.add(id); });
+      curArr.forEach(id => { if(!knownSet.has(id)) newSet.add(id); });
       _newItemIds[k] = newSet;
     }
     // dismissed 복원
     if(savedDismissed[k]){
-      _dismissedIds[k] = new Set(savedDismissed[k]);
+      const dismArr = Array.isArray(savedDismissed[k]) ? savedDismissed[k] : [];
+      _dismissedIds[k] = new Set(dismArr);
     }
   });
 
