@@ -14537,7 +14537,8 @@ async function loadAllFromSheets(){
     document.getElementById('sl').classList.remove('on');
     document.getElementById('sm').classList.add('on');
     document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
-    await loadPSFromSheets();
+    // ★ 핫픽스: loadPSFromSheets는 await하지 않고 백그라운드 실행 (UI 전환 우선)
+    loadPSFromSheets().catch(e=>console.warn('loadPSFromSheets failed:', e));
     // DB.PC에 있는 여행사가 DB.C에 없으면 자동 추가
     Object.keys(DB.PC).forEach(ag=>{
       if(!DB.C.find(c=>c.Name===ag))
@@ -14566,24 +14567,26 @@ async function loadAllFromSheets(){
       const _mm = String(_d.getMinutes()).padStart(2,'0');
       _syncEl.textContent = '✅ Last Sync (마지막 동기화): ' + _hh + ':' + _mm;
     }
-    // ★ 서비스 KM 데이터 로드 (대시보드 알림용)
-    try { await loadRegoMaxKM(); } catch(e) { console.warn('Initial KM load failed', e); }
+    // ★ 핫픽스: 후속 호출들 모두 백그라운드 (UI 차단 방지)
     rDash();
-    // 데이터 로드 완료 후 급여 탭이 열려있으면 즉시 렌더
     rWage();
     toast('✅ 데이터 로드 완료','ok');
     startAdminAutoSync();
-    await loadNoticesFromGAS();
-    await initNoticesIfEmpty();
-    // ★ Leave + Fatigue 데이터 병렬 로드 (대시보드 알림용)
-    await Promise.allSettled([
-      loadAdminLeaves().catch(e=>console.warn('Leave load failed',e)),
-      loadFatigueAlerts().catch(e=>console.warn('Fatigue check failed',e))
-    ]);
-    console.log('[Dashboard] Leave alerts:', window._adminLeaves?.length||0, 'Fatigue alerts:', window._fatigueAlerts?.length||0);
-    rDash();
-    // ★ 탭 뱃지 baseline 초기화 (첫 로드 완료 시점)
-    initTabBadges();
+    // ── 백그라운드 후속 작업 (UI 표시 후 실행) ──
+    (async function bgPostLoad(){
+      try { await loadRegoMaxKM(); rDash(); } catch(e) { console.warn('KM load failed', e); }
+      try { await loadNoticesFromGAS(); } catch(e){ console.warn('Notices load failed', e); }
+      try { await initNoticesIfEmpty(); } catch(e){ console.warn('initNoticesIfEmpty failed', e); }
+      try {
+        await Promise.allSettled([
+          loadAdminLeaves().catch(e=>console.warn('Leave load failed',e)),
+          loadFatigueAlerts().catch(e=>console.warn('Fatigue check failed',e))
+        ]);
+      } catch(e){}
+      console.log('[Dashboard] Leave alerts:', window._adminLeaves?.length||0, 'Fatigue alerts:', window._fatigueAlerts?.length||0);
+      try { rDash(); } catch(e){}
+      try { initTabBadges(); } catch(e){}
+    })();
   } catch(e){
     console.error('loadAllFromSheets error:', e);
     document.getElementById('sl').classList.remove('on');
