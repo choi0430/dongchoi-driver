@@ -3964,6 +3964,188 @@ function onSettleDateManualChange(){
   if(navEl) navEl.style.display = 'none';
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 통합 기간 네비게이션 모듈 (PeriodNav)
+// 모든 날짜 기반 페이지에서 재사용
+// 사용법: PeriodNav.attach('inv', { onChange: () => loadXxx() })
+// ═══════════════════════════════════════════════════════════════
+const PeriodNav = (function(){
+  // 페이지별 상태 저장
+  const _state = {}; // { prefix: { mode, anchor, onChange } }
+
+  function _getRange(mode, anchor){
+    const a = anchor || new Date();
+    if(mode === 'week') return [_weekStart(a), _weekEnd(a)];
+    if(mode === 'month') return [_monthStart(a), _monthEnd(a)];
+    if(mode === 'quarter') return [_quarterStart(a), _quarterEnd(a)];
+    return null;
+  }
+  function _label(mode, anchor, fromEl, toEl){
+    const a = anchor || new Date();
+    if(mode === 'week'){
+      const ws = _weekStart(a), we = _weekEnd(a);
+      return `📅 ${_isoDate(ws)} ~ ${_isoDate(we)} (주)`;
+    }
+    if(mode === 'month') return `📅 ${a.getFullYear()}년 ${a.getMonth()+1}월`;
+    if(mode === 'quarter') return `📅 ${a.getFullYear()}년 ${_quarterNum(a)}분기`;
+    return `⚙️ ${fromEl?.value||''} ~ ${toEl?.value||''}`;
+  }
+
+  function attach(prefix, opts){
+    opts = opts || {};
+    const fromEl = document.getElementById(prefix+'-from');
+    const toEl = document.getElementById(prefix+'-to');
+    if(!fromEl || !toEl){
+      console.warn('[PeriodNav] from/to inputs not found for prefix:', prefix);
+      return;
+    }
+    // 컨테이너 찾기 (없으면 from input 의 부모 영역에 prepend)
+    let barEl = document.getElementById(prefix+'-period-bar');
+    if(!barEl){
+      // from input 의 가까운 wrapper 찾기 (display flex 또는 grid 의 부모 위)
+      let wrap = fromEl.closest('div');
+      while(wrap && !wrap.parentElement?.matches('[id$="-view-ledger"], [id$="-view-drpay"], [id$="-view-invoice"], #pinv, [id$="-view-content"], #app, body')){
+        if(wrap.parentElement && wrap.parentElement.children.length > 1) break;
+        wrap = wrap.parentElement;
+      }
+      barEl = document.createElement('div');
+      barEl.id = prefix+'-period-bar';
+      const dateRow = fromEl.closest('div[style*="flex"]') || fromEl.parentElement.parentElement;
+      if(dateRow && dateRow.parentElement){
+        dateRow.parentElement.insertBefore(barEl, dateRow);
+      }
+    }
+
+    // 마크업 그리기
+    barEl.innerHTML = `
+      <!-- 기간 모드 버튼 -->
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <div style="font-size:10px;font-weight:700;color:var(--t3);">기간 모드:</div>
+        <button class="btn bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="week" onclick="PeriodNav.setMode('${prefix}','week')" style="padding:4px 10px;font-size:11px;">📅 주별</button>
+        <button class="btn bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="month" onclick="PeriodNav.setMode('${prefix}','month')" style="padding:4px 10px;font-size:11px;">📅 월별</button>
+        <button class="btn bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="quarter" onclick="PeriodNav.setMode('${prefix}','quarter')" style="padding:4px 10px;font-size:11px;">📅 분기별</button>
+        <button class="btn bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="custom" onclick="PeriodNav.setMode('${prefix}','custom')" style="padding:4px 10px;font-size:11px;">⚙️ 사용자 지정</button>
+      </div>
+      <!-- 빠른 칩 -->
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <button class="btn bgh xs" onclick="PeriodNav.setQuick('${prefix}','this')" style="padding:4px 10px;font-size:11px;">이번 <span data-prefix="${prefix}" class="pn-mode-label">달</span></button>
+        <button class="btn bgh xs" onclick="PeriodNav.setQuick('${prefix}','last')" style="padding:4px 10px;font-size:11px;">지난 <span data-prefix="${prefix}" class="pn-mode-label">달</span></button>
+        <button class="btn bgh xs" onclick="PeriodNav.setQuick('${prefix}','thisMonth')" style="padding:4px 10px;font-size:11px;">이번 달</button>
+        <button class="btn bgh xs" onclick="PeriodNav.setQuick('${prefix}','lastMonth')" style="padding:4px 10px;font-size:11px;">지난 달</button>
+        <button class="btn bgh xs" onclick="PeriodNav.setQuick('${prefix}','thisQuarter')" style="padding:4px 10px;font-size:11px;">이번 분기</button>
+      </div>
+      <!-- 화살표 + 라벨 -->
+      <div id="${prefix}-period-nav" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+        <button class="btn brd sm" onclick="PeriodNav.nav('${prefix}',-1)" style="padding:6px 12px;font-weight:700;" title="이전">◀</button>
+        <div id="${prefix}-period-label" style="flex:1;text-align:center;font-size:13px;font-weight:700;background:var(--sf2);border-radius:8px;padding:8px 12px;color:var(--t1);">—</div>
+        <button class="btn brd sm" onclick="PeriodNav.nav('${prefix}',1)" style="padding:6px 12px;font-weight:700;" title="다음">▶</button>
+      </div>
+    `;
+
+    // from/to manual change → custom 모드로 자동 전환
+    const wrapManual = (origHandler) => function(e){
+      _state[prefix].mode = 'custom';
+      _refreshUI(prefix);
+      if(typeof origHandler === 'function') origHandler.call(this, e);
+      if(_state[prefix].onChange) _state[prefix].onChange();
+    };
+    fromEl.addEventListener('change', wrapManual());
+    toEl.addEventListener('change', wrapManual());
+
+    // 초기 상태
+    _state[prefix] = {
+      mode: opts.defaultMode || 'month',
+      anchor: new Date(),
+      onChange: opts.onChange || (() => {}),
+    };
+    setMode(prefix, _state[prefix].mode);
+  }
+
+  function _refreshUI(prefix){
+    const st = _state[prefix];
+    if(!st) return;
+    // 모드 버튼 활성화
+    document.querySelectorAll('.pn-mode-btn[data-prefix="'+prefix+'"]').forEach(b => {
+      const on = b.dataset.mode === st.mode;
+      b.style.background = on ? 'var(--ac)' : '';
+      b.style.color = on ? '#fff' : '';
+    });
+    // 빠른 칩 라벨
+    document.querySelectorAll('.pn-mode-label[data-prefix="'+prefix+'"]').forEach(s => {
+      s.textContent = st.mode === 'week' ? '주' : st.mode === 'quarter' ? '분기' : '달';
+    });
+    // 네비 표시 여부
+    const navEl = document.getElementById(prefix+'-period-nav');
+    if(navEl) navEl.style.display = st.mode === 'custom' ? 'none' : '';
+    // 라벨 갱신
+    const fromEl = document.getElementById(prefix+'-from');
+    const toEl = document.getElementById(prefix+'-to');
+    const lblEl = document.getElementById(prefix+'-period-label');
+    if(lblEl) lblEl.textContent = _label(st.mode, st.anchor, fromEl, toEl);
+  }
+
+  function _applyToInputs(prefix){
+    const st = _state[prefix];
+    if(!st || st.mode === 'custom') return;
+    const range = _getRange(st.mode, st.anchor);
+    if(!range) return;
+    const fromEl = document.getElementById(prefix+'-from');
+    const toEl = document.getElementById(prefix+'-to');
+    if(fromEl) fromEl.value = _isoDate(range[0]);
+    if(toEl) toEl.value = _isoDate(range[1]);
+  }
+
+  function setMode(prefix, mode){
+    if(!_state[prefix]) return;
+    _state[prefix].mode = mode;
+    if(mode !== 'custom') _applyToInputs(prefix);
+    _refreshUI(prefix);
+    if(_state[prefix].onChange) _state[prefix].onChange();
+  }
+
+  function setQuick(prefix, which){
+    const st = _state[prefix];
+    if(!st) return;
+    const now = new Date();
+    if(which === 'this') st.anchor = now;
+    else if(which === 'last'){
+      const a = new Date(now);
+      if(st.mode === 'week') a.setDate(a.getDate() - 7);
+      else if(st.mode === 'month') a.setMonth(a.getMonth() - 1);
+      else if(st.mode === 'quarter') a.setMonth(a.getMonth() - 3);
+      st.anchor = a;
+    } else if(which === 'thisMonth'){
+      if(st.mode !== 'month') st.mode = 'month';
+      st.anchor = now;
+    } else if(which === 'lastMonth'){
+      if(st.mode !== 'month') st.mode = 'month';
+      const a = new Date(now); a.setMonth(a.getMonth() - 1);
+      st.anchor = a;
+    } else if(which === 'thisQuarter'){
+      if(st.mode !== 'quarter') st.mode = 'quarter';
+      st.anchor = now;
+    }
+    _applyToInputs(prefix);
+    _refreshUI(prefix);
+    if(st.onChange) st.onChange();
+  }
+
+  function nav(prefix, dir){
+    const st = _state[prefix];
+    if(!st) return;
+    const a = new Date(st.anchor || new Date());
+    if(st.mode === 'week') a.setDate(a.getDate() + 7*dir);
+    else if(st.mode === 'month') a.setMonth(a.getMonth() + dir);
+    else if(st.mode === 'quarter') a.setMonth(a.getMonth() + 3*dir);
+    st.anchor = a;
+    _applyToInputs(prefix);
+    _refreshUI(prefix);
+    if(st.onChange) st.onChange();
+  }
+
+  return { attach, setMode, setQuick, nav };
+})();
+
 function initSettleDashboard() {
   // 기본 모드: 이번 달
   if(!_settlePeriodAnchor) _settlePeriodAnchor = new Date();
@@ -5309,6 +5491,15 @@ function initSubDriverPay(){
     filterSel.innerHTML = '<option value="">전체 SUB 업체</option>' + subNames.map(s=>`<option value="${s}">${s}</option>`).join('');
   }
   if(!_sdpData) loadSubDriverPay();
+  // ★ PeriodNav 부착 (한 번만)
+  if(!window._sdpPeriodNavAttached){
+    setTimeout(() => {
+      try {
+        PeriodNav.attach('sdp', { defaultMode: 'month', onChange: () => loadSubDriverPay() });
+        window._sdpPeriodNavAttached = true;
+      } catch(e){ console.warn('PeriodNav attach failed (sdp):', e); }
+    }, 50);
+  }
 }
 
 async function loadSubDriverPay(){
@@ -5827,6 +6018,15 @@ async function initSubInvoice(){
   const now = new Date();
   document.getElementById('sub-inv-from').value = toLocalISO(new Date(now.getFullYear(), now.getMonth(), 1));
   document.getElementById('sub-inv-to').value = toLocalISO(now);
+  // ★ PeriodNav 부착 (한 번만, onChange 없음 — 사용자가 직접 조회 버튼 누름)
+  if(!window._subInvPeriodNavAttached){
+    setTimeout(() => {
+      try {
+        PeriodNav.attach('sub-inv', { defaultMode: 'month' });
+        window._subInvPeriodNavAttached = true;
+      } catch(e){ console.warn('PeriodNav attach failed (sub-inv):', e); }
+    }, 50);
+  }
   // 항목 초기화
   if(!document.getElementById('sub-inv-items').children.length) addSubInvRow();
   // 리포트 데이터 로드 (투어코드 검색용)
@@ -9036,6 +9236,16 @@ async function initInvoice(forceReload) {
   // ★ 이력 로드: 캐시가 있으면 렌더만, 없을 때만 서버 호출
   // (forceReload는 수금/삭제 등 데이터 변경 시에만 true)
   loadInvHistory(false);
+
+  // ★ PeriodNav 부착 (한 번만)
+  if(!window._invPeriodNavAttached){
+    setTimeout(() => {
+      try {
+        PeriodNav.attach('inv', { defaultMode: 'month', onChange: () => onInvDateChange() });
+        window._invPeriodNavAttached = true;
+      } catch(e){ console.warn('PeriodNav attach failed:', e); }
+    }, 50);
+  }
 }
 
 async function populateInvAgency() {
