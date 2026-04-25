@@ -8225,6 +8225,201 @@ function toLocalISO(d){
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+dd;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// 통합 기간 네비게이션 모듈 (PeriodNav)
+// admin.html과 동일 로직 — 주별/월별/분기별/사용자 지정
+// ═══════════════════════════════════════════════════════════════
+function _isoDate(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+function _weekStart(d){
+  const dt = new Date(d);
+  const day = dt.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  dt.setDate(dt.getDate() + diff);
+  dt.setHours(0,0,0,0);
+  return dt;
+}
+function _weekEnd(d){
+  const ws = _weekStart(d);
+  const we = new Date(ws);
+  we.setDate(we.getDate() + 6);
+  return we;
+}
+function _monthStart(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
+function _monthEnd(d){ return new Date(d.getFullYear(), d.getMonth()+1, 0); }
+function _quarterStart(d){
+  const q = Math.floor(d.getMonth()/3);
+  return new Date(d.getFullYear(), q*3, 1);
+}
+function _quarterEnd(d){
+  const q = Math.floor(d.getMonth()/3);
+  return new Date(d.getFullYear(), q*3+3, 0);
+}
+function _quarterNum(d){ return Math.floor(d.getMonth()/3)+1; }
+
+const PeriodNav = (function(){
+  const _state = {};
+
+  function _getRange(mode, anchor){
+    const a = anchor || new Date();
+    if(mode === 'week') return [_weekStart(a), _weekEnd(a)];
+    if(mode === 'month') return [_monthStart(a), _monthEnd(a)];
+    if(mode === 'quarter') return [_quarterStart(a), _quarterEnd(a)];
+    return null;
+  }
+  function _label(mode, anchor, fromEl, toEl){
+    const a = anchor || new Date();
+    if(mode === 'week'){
+      const ws = _weekStart(a), we = _weekEnd(a);
+      return `📅 ${_isoDate(ws)} ~ ${_isoDate(we)} (주)`;
+    }
+    if(mode === 'month') return `📅 ${a.getFullYear()}년 ${a.getMonth()+1}월`;
+    if(mode === 'quarter') return `📅 ${a.getFullYear()}년 ${_quarterNum(a)}분기`;
+    return `⚙️ ${fromEl?.value||''} ~ ${toEl?.value||''}`;
+  }
+
+  function attach(prefix, opts){
+    opts = opts || {};
+    const fromEl = document.getElementById(prefix+'-from');
+    const toEl = document.getElementById(prefix+'-to');
+    if(!fromEl || !toEl){
+      console.warn('[PeriodNav] from/to inputs not found for prefix:', prefix);
+      return;
+    }
+    let barEl = document.getElementById(prefix+'-period-bar');
+    if(!barEl){
+      barEl = document.createElement('div');
+      barEl.id = prefix+'-period-bar';
+      barEl.style.padding = '0 14px';
+      const dateRow = fromEl.closest('div[style*="flex"]') || fromEl.parentElement.parentElement;
+      if(dateRow && dateRow.parentElement){
+        dateRow.parentElement.insertBefore(barEl, dateRow);
+      }
+    }
+
+    barEl.innerHTML = `
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);">기간 모드:</div>
+        <button class="btn-bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="week" onclick="PeriodNav.setMode('${prefix}','week')" style="padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);">📅 주별</button>
+        <button class="btn-bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="month" onclick="PeriodNav.setMode('${prefix}','month')" style="padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);">📅 월별</button>
+        <button class="btn-bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="quarter" onclick="PeriodNav.setMode('${prefix}','quarter')" style="padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);">📅 분기별</button>
+        <button class="btn-bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="custom" onclick="PeriodNav.setMode('${prefix}','custom')" style="padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);">⚙️ 지정</button>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <button onclick="PeriodNav.setQuick('${prefix}','this')" style="padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);">이번 <span data-prefix="${prefix}" class="pn-mode-label">달</span></button>
+        <button onclick="PeriodNav.setQuick('${prefix}','last')" style="padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);">지난 <span data-prefix="${prefix}" class="pn-mode-label">달</span></button>
+        <button onclick="PeriodNav.setQuick('${prefix}','thisMonth')" style="padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);">이번 달</button>
+        <button onclick="PeriodNav.setQuick('${prefix}','lastMonth')" style="padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);">지난 달</button>
+        <button onclick="PeriodNav.setQuick('${prefix}','thisQuarter')" style="padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);">이번 분기</button>
+      </div>
+      <div id="${prefix}-period-nav" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+        <button onclick="PeriodNav.nav('${prefix}',-1)" style="padding:6px 12px;font-weight:700;border:1px solid var(--border);border-radius:8px;background:var(--surface);" title="이전">◀</button>
+        <div id="${prefix}-period-label" style="flex:1;text-align:center;font-size:13px;font-weight:700;background:var(--surface2);border-radius:8px;padding:8px 12px;color:var(--text);">—</div>
+        <button onclick="PeriodNav.nav('${prefix}',1)" style="padding:6px 12px;font-weight:700;border:1px solid var(--border);border-radius:8px;background:var(--surface);" title="다음">▶</button>
+      </div>
+    `;
+
+    const wrapManual = () => function(e){
+      _state[prefix].mode = 'custom';
+      _refreshUI(prefix);
+      if(_state[prefix].onChange) _state[prefix].onChange();
+    };
+    fromEl.addEventListener('change', wrapManual());
+    toEl.addEventListener('change', wrapManual());
+
+    _state[prefix] = {
+      mode: opts.defaultMode || 'month',
+      anchor: new Date(),
+      onChange: opts.onChange || (() => {}),
+    };
+    setMode(prefix, _state[prefix].mode);
+  }
+
+  function _refreshUI(prefix){
+    const st = _state[prefix];
+    if(!st) return;
+    document.querySelectorAll('.pn-mode-btn[data-prefix="'+prefix+'"]').forEach(b => {
+      const on = b.dataset.mode === st.mode;
+      b.style.background = on ? 'var(--accent)' : 'var(--surface2)';
+      b.style.color = on ? '#fff' : '';
+    });
+    document.querySelectorAll('.pn-mode-label[data-prefix="'+prefix+'"]').forEach(s => {
+      s.textContent = st.mode === 'week' ? '주' : st.mode === 'quarter' ? '분기' : '달';
+    });
+    const navEl = document.getElementById(prefix+'-period-nav');
+    if(navEl) navEl.style.display = st.mode === 'custom' ? 'none' : '';
+    const fromEl = document.getElementById(prefix+'-from');
+    const toEl = document.getElementById(prefix+'-to');
+    const lblEl = document.getElementById(prefix+'-period-label');
+    if(lblEl) lblEl.textContent = _label(st.mode, st.anchor, fromEl, toEl);
+  }
+
+  function _applyToInputs(prefix){
+    const st = _state[prefix];
+    if(!st || st.mode === 'custom') return;
+    const range = _getRange(st.mode, st.anchor);
+    if(!range) return;
+    const fromEl = document.getElementById(prefix+'-from');
+    const toEl = document.getElementById(prefix+'-to');
+    if(fromEl) fromEl.value = _isoDate(range[0]);
+    if(toEl) toEl.value = _isoDate(range[1]);
+  }
+
+  function setMode(prefix, mode){
+    if(!_state[prefix]) return;
+    _state[prefix].mode = mode;
+    if(mode !== 'custom') _applyToInputs(prefix);
+    _refreshUI(prefix);
+    if(_state[prefix].onChange) _state[prefix].onChange();
+  }
+
+  function setQuick(prefix, which){
+    const st = _state[prefix];
+    if(!st) return;
+    const now = new Date();
+    if(which === 'this') st.anchor = now;
+    else if(which === 'last'){
+      const a = new Date(now);
+      if(st.mode === 'week') a.setDate(a.getDate() - 7);
+      else if(st.mode === 'month') a.setMonth(a.getMonth() - 1);
+      else if(st.mode === 'quarter') a.setMonth(a.getMonth() - 3);
+      st.anchor = a;
+    } else if(which === 'thisMonth'){
+      if(st.mode !== 'month') st.mode = 'month';
+      st.anchor = now;
+    } else if(which === 'lastMonth'){
+      if(st.mode !== 'month') st.mode = 'month';
+      const a = new Date(now); a.setMonth(a.getMonth() - 1);
+      st.anchor = a;
+    } else if(which === 'thisQuarter'){
+      if(st.mode !== 'quarter') st.mode = 'quarter';
+      st.anchor = now;
+    }
+    _applyToInputs(prefix);
+    _refreshUI(prefix);
+    if(st.onChange) st.onChange();
+  }
+
+  function nav(prefix, dir){
+    const st = _state[prefix];
+    if(!st) return;
+    const a = new Date(st.anchor || new Date());
+    if(st.mode === 'week') a.setDate(a.getDate() + 7*dir);
+    else if(st.mode === 'month') a.setMonth(a.getMonth() + dir);
+    else if(st.mode === 'quarter') a.setMonth(a.getMonth() + 3*dir);
+    st.anchor = a;
+    _applyToInputs(prefix);
+    _refreshUI(prefix);
+    if(st.onChange) st.onChange();
+  }
+
+  return { attach, setMode, setQuick, nav };
+})();
 // ── SUB 차량 판별 헬퍼 ──
 function getSubOwnerForRego(rego){
   if(!rego) return '';
@@ -10462,6 +10657,15 @@ function initDriverSubInv(){
   document.getElementById('si-from').value = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-01';
   const last = new Date(now.getFullYear(), now.getMonth()+1, 0);
   document.getElementById('si-to').value = last.getFullYear()+'-'+String(last.getMonth()+1).padStart(2,'0')+'-'+String(last.getDate()).padStart(2,'0');
+  // ★ PeriodNav 부착 (한 번만)
+  if(!window._siPeriodNavAttached){
+    setTimeout(() => {
+      try {
+        PeriodNav.attach('si', { defaultMode: 'month' });
+        window._siPeriodNavAttached = true;
+      } catch(e){ console.warn('PeriodNav attach failed (si):', e); }
+    }, 50);
+  }
   renderSubInvDriverHistory();
 }
 
