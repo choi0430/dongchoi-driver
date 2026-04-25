@@ -5135,6 +5135,7 @@ function renderSubDriverPay(){
               <th style="padding:4px 6px;text-align:right;">SUB비</th>
               <th style="padding:4px 6px;text-align:right;">DR지급</th>
               <th style="padding:4px 6px;text-align:right;">야경납입</th>
+              <th style="padding:4px 6px;text-align:center;width:32px;">✏️</th>
             </tr></thead>
             <tbody>${d.items.sort((a,b)=>a.date.localeCompare(b.date)).map(it=>`<tr style="border-bottom:1px solid #f0f0f0;">
               <td style="padding:3px 6px;">${it.date}</td>
@@ -5145,6 +5146,7 @@ function renderSubDriverPay(){
               <td style="padding:3px 6px;text-align:right;color:var(--rd);">$${it.subTotal||0}</td>
               <td style="padding:3px 6px;text-align:right;font-weight:700;color:var(--ac);">$${it.drCost}</td>
               <td style="padding:3px 6px;text-align:right;${it.nightOwner>0?'font-weight:700;color:#7c3aed;':'color:var(--t3);'}">${it.nightOwner>0?'+$'+it.nightOwner:'—'}</td>
+              <td style="padding:3px 6px;text-align:center;"><button class="btn bgh xs" style="padding:2px 6px;font-size:10px;" onclick="event.stopPropagation();editSubRateForRow('${esc(sub)}','${esc(it.attraction)}')" title="${escH(sub)}의 ${escH(it.attraction)} SUB 요금 수정">✏️</button></td>
             </tr>`).join('')}
             <tr style="background:var(--sf2,#f8f9fa);font-weight:700;">
               <td colspan="4" style="padding:4px 6px;">합계</td>
@@ -5152,6 +5154,7 @@ function renderSubDriverPay(){
               <td style="padding:4px 6px;text-align:right;color:var(--rd);">$${d.items.reduce((s,x)=>s+(x.subTotal||0),0).toLocaleString()}</td>
               <td style="padding:4px 6px;text-align:right;color:var(--ac);">$${d.total.toLocaleString()}</td>
               <td style="padding:4px 6px;text-align:right;color:#7c3aed;">${d.nightOwnerTotal>0?'+$'+d.nightOwnerTotal.toLocaleString():'—'}</td>
+              <td style="padding:4px 6px;"></td>
             </tr></tbody>
           </table>
         </div>
@@ -5175,6 +5178,37 @@ function renderSubDriverPay(){
     </div>` : ''}
   </div>` + html;
   resEl.innerHTML = html;
+}
+
+// ─── SUB 정산 행에서 바로 SUB 요금 수정 모달 열기 ───
+// 정산 페이지에서 잘못된 SUB비를 발견했을 때 한 번에 마스터 시트로 점프
+async function editSubRateForRow(subOwner, attraction){
+  if(!subOwner || !attraction){
+    toast('SUB 회사 또는 코스 정보가 없습니다','er');
+    return;
+  }
+  // DB.PS에 해당 회사가 있는지 확인
+  if(!DB.PS[subOwner]){
+    if(!confirm(`"${subOwner}" 회사의 요금표가 아직 없습니다.\n새로 만들까요?`)) return;
+    DB.PS[subOwner] = {};
+  }
+  // 해당 코스가 없으면 빈 행으로 추가 (모달에서 입력 가능하도록)
+  if(!DB.PS[subOwner][attraction]){
+    DB.PS[subOwner][attraction] = {
+      max_hours: '',
+      '21': {rate:0, ot:0}, '25': {rate:0, ot:0},
+      '40': {rate:0, ot:0}, '50': {rate:0, ot:0}
+    };
+  }
+  // ST.curSub 세팅 (openM('PS', ...) 가 이걸 사용)
+  ST.curSub = subOwner;
+  // SUB 페이지로 이동 + 요금표 탭 활성화 (백그라운드에서 — 사용자가 모달 닫은 뒤 보임)
+  if(typeof nv === 'function') nv('psub','nsub');
+  if(typeof showSubTab === 'function') showSubTab('rates');
+  // 작은 지연 후 모달 열기 (탭 전환이 먼저 완료되도록)
+  setTimeout(() => {
+    if(typeof openM === 'function') openM('PS', attraction);
+  }, 50);
 }
 
 // ═══════════════════════════════════════════════════════════════════
