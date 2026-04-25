@@ -3007,6 +3007,10 @@ function tcOpen() {
   const input = document.getElementById('dr-tourcode');
   const drop = document.getElementById('tc-dropdown');
   if(!input||!drop) return;
+  // 백그라운드에서 캐시 채우기 (이미 있으면 즉시 반환)
+  if(typeof fetchDRCache === 'function'){
+    fetchDRCache().then(() => tcFilter()).catch(() => {});
+  }
   tcFilter();
   drop.classList.add('open');
 }
@@ -3016,17 +3020,86 @@ function tcBlur() {
     if(el) { el.classList.remove('open'); el.style.display=''; }
   }, 200);
 }
+
+// ★ GAS Daily_Report 캐시에서 투어코드별 컨텍스트 빌드
+// 같은 투어코드가 여러 행에 있으면 가장 최근 사용 데이터로 표시
+function _buildTcContextFromCache(){
+  const ctxMap = {}; // { TOURCODE: { date, guide, agency, attraction, count } }
+  const cache = (typeof _drReportsCache !== 'undefined' && _drReportsCache) ? _drReportsCache : [];
+  cache.forEach(r => {
+    const tc = String(r.Tour_Code||'').trim().toUpperCase();
+    if(!tc) return;
+    const date = r._isoDate || parseToISO(r.Date||'') || r.Date || '';
+    if(!ctxMap[tc]){
+      ctxMap[tc] = { code:tc, date, guide:r.Guide||'', agency:r.Agency||'', attraction:r.Attraction||'', count:1 };
+    } else {
+      ctxMap[tc].count++;
+      // 더 최근 날짜로 업데이트
+      if(date > ctxMap[tc].date){
+        ctxMap[tc].date = date;
+        ctxMap[tc].guide = r.Guide || ctxMap[tc].guide;
+        ctxMap[tc].agency = r.Agency || ctxMap[tc].agency;
+        ctxMap[tc].attraction = r.Attraction || ctxMap[tc].attraction;
+      }
+    }
+  });
+  return ctxMap;
+}
+
 function tcFilter() {
   const input = document.getElementById('dr-tourcode');
   const drop = document.getElementById('tc-dropdown');
   if(!input||!drop) return;
   const q = input.value.trim().toUpperCase();
-  let codes = _getTcRecent();
-  if(q) codes = codes.filter(c=>c.includes(q));
-  if(codes.length===0){ drop.innerHTML='<div class="sdd-empty" style="padding:10px 14px;font-size:12px;color:var(--muted);">최근 사용 코드 없음</div>'; drop.classList.add('open'); return; }
-  drop.innerHTML = codes.map(c =>
-    `<div class="sdd-item" onmousedown="event.preventDefault();tcSelect('${c}')">${c}</div>`
-  ).join('');
+
+  // 1) GAS 캐시에서 컨텍스트 정보 빌드
+  const ctxMap = _buildTcContextFromCache();
+  // 2) localStorage 최근 사용 코드도 합치기 (캐시에 없는 경우 대비)
+  const recent = _getTcRecent();
+  recent.forEach(c => {
+    const cu = c.toUpperCase();
+    if(!ctxMap[cu]) ctxMap[cu] = { code:cu, date:'', guide:'', agency:'', attraction:'', count:0 };
+  });
+
+  // 3) 검색: 코드 / 가이드 / 여행사 / 코스 어디든 매칭
+  let entries = Object.values(ctxMap);
+  if(q){
+    entries = entries.filter(e =>
+      e.code.includes(q) ||
+      e.guide.toUpperCase().includes(q) ||
+      e.agency.toUpperCase().includes(q) ||
+      e.attraction.toUpperCase().includes(q)
+    );
+  }
+
+  // 4) 정렬: 최근 날짜 먼저, 다음으로 사용 빈도
+  entries.sort((a,b) => {
+    if(b.date !== a.date) return b.date.localeCompare(a.date);
+    return b.count - a.count;
+  });
+
+  // 5) 최대 30개로 자르기
+  entries = entries.slice(0, 30);
+
+  if(entries.length===0){
+    drop.innerHTML='<div class="sdd-empty" style="padding:10px 14px;font-size:12px;color:var(--muted);">검색 결과 없음 (직접 입력하세요)</div>';
+    drop.classList.add('open');
+    return;
+  }
+
+  drop.innerHTML = entries.map(e => {
+    const codeEsc = e.code.replace(/'/g,"\\'");
+    const subParts = [];
+    if(e.date) subParts.push(`<span style="color:var(--accent);font-weight:600;">📅 ${e.date}</span>`);
+    if(e.guide) subParts.push(`<span>👤 ${e.guide}</span>`);
+    if(e.agency) subParts.push(`<span style="color:var(--muted);">${e.agency.length>20?e.agency.slice(0,20)+'…':e.agency}</span>`);
+    if(e.attraction) subParts.push(`<span style="color:var(--muted);">${e.attraction}</span>`);
+    const subLine = subParts.length ? `<div style="font-size:10px;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;">${subParts.join('')}</div>` : '';
+    return `<div class="sdd-item" style="padding:8px 12px;border-bottom:1px solid var(--border-light, #f0f0f0);" onmousedown="event.preventDefault();tcSelect('${codeEsc}')">
+      <div style="font-family:monospace;font-size:13px;font-weight:700;">${e.code}</div>
+      ${subLine}
+    </div>`;
+  }).join('');
   drop.classList.add('open');
 }
 function tcSelect(val) {
