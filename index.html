@@ -2498,33 +2498,55 @@ async function loadMasterData() {
 }
 
 // 로그인 성공 후 전체 마스터 데이터 로드 (토큰 자동 첨부됨)
-async function loadFullMasterData() {
-  // 캐시 즉시 적용
+// ★ 마스터 데이터 로드 — 캐시 우선 + 백그라운드 갱신
+// 반환: { fromCache: boolean, refreshPromise: Promise }
+//   - 캐시 적중: fromCache=true, refreshPromise는 백그라운드 갱신 (await 불필요)
+//   - 캐시 없음: fromCache=false, refreshPromise는 await 필요 (첫 로그인용)
+function loadFullMasterData() {
+  // 1) 캐시 즉시 적용
   const cached = loadMasterCache();
+  let cacheApplied = false;
   if (cached) {
     try {
       applyMasterData(cached);
       populateMasterSelects();
       populateContacts();
+      cacheApplied = true;
     } catch(cacheErr) { console.warn('캐시 적용 실패:', cacheErr); }
   }
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
-    const res = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters', { signal: controller.signal });
-    clearTimeout(timeout);
-    const data = await res.json();
-    if (data.ok && data.data) {
-      try {
-        applyMasterData(data.data);
-        saveMasterCache(data.data);
-        populateMasterSelects();
-        populateContacts();
-      } catch(applyErr) { console.warn('데이터 적용 실패:', applyErr); }
+
+  // 2) 서버 갱신 (Promise 반환 — 호출자가 await할지 결정)
+  const refreshPromise = (async () => {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_all_masters', { signal: controller.signal });
+      clearTimeout(timeout);
+      const data = await res.json();
+      if (data.ok && data.data) {
+        try {
+          applyMasterData(data.data);
+          saveMasterCache(data.data);
+          populateMasterSelects();
+          populateContacts();
+          // ★ 캐시로 띄운 상태에서 갱신됐으면 화면 다시 그리기
+          if (cacheApplied && currentDriver) {
+            try { renderShiftSection(); } catch(e){}
+            try { renderTodayReports(); } catch(e){}
+            try { renderSalary(); } catch(e){}
+            try { renderExpiryAlerts(); } catch(e){}
+          }
+          return true;
+        } catch(applyErr) { console.warn('데이터 적용 실패:', applyErr); }
+      }
+      return false;
+    } catch(e) {
+      console.warn('전체 마스터 로드 실패 (캐시 사용):', e.message);
+      return false;
     }
-  } catch(e) {
-    console.warn('전체 마스터 로드 실패 (캐시 사용):', e.message);
-  }
+  })();
+
+  return { fromCache: cacheApplied, refreshPromise };
 }
 
 // 전화번호 0 보정 헬퍼 (Google Sheets 숫자 형식 → 앞 0 복원)
@@ -3323,6 +3345,34 @@ function buildLoginSelect() {
     const found = [...sel.options].find(o => o.value === lastLogin);
     if (found) sel.value = lastLogin;
   }
+
+  // ★ GAS 워밍업: 이름 선택 시 백그라운드에서 ping 호출 (콜드 스타트 제거)
+  // 사용자가 PIN 입력하는 ~3초 동안 GAS가 깨어나서 이후 요청이 빨라짐
+  if (!sel._warmupAttached) {
+    sel._warmupAttached = true;
+    sel.addEventListener('change', () => {
+      if (sel.value) warmupGAS();
+    });
+    // 마지막 로그인 자동선택된 경우에도 즉시 워밍업
+    if (sel.value) warmupGAS();
+  }
+}
+
+// ★ GAS 워밍업: ping action으로 콜드 스타트 제거
+// - 30초 내 재호출 방지 (스팸 방지)
+// - 응답 무시 (fire-and-forget)
+let _lastWarmup = 0;
+function warmupGAS() {
+  const now = Date.now();
+  if (now - _lastWarmup < 30000) return; // 30초 내 중복 호출 방지
+  _lastWarmup = now;
+  try {
+    // ping은 PUBLIC_ACTION이라 토큰 없이 호출 가능
+    fetch(APPS_SCRIPT_URL + '?action=ping', {
+      method: 'GET',
+      cache: 'no-store'
+    }).catch(() => {});
+  } catch(e) {}
 }
 
 // ★ ATTRACTIONS: GAS M_Attractions 시트에서 오버라이드됨 (아래는 폴백 기본값)
@@ -3600,8 +3650,18 @@ async function doLogin() {
 
   if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = prevLabel || '🔐 로그인'; }
 
-  // ── 인증 성공 후 전체 마스터 데이터 로드 ──
-  try { await loadFullMasterData(); } catch(e) { console.warn('master load:', e); }
+  // ── 인증 성공 후 마스터 데이터 (캐시 우선 + 백그라운드 갱신) ──
+  // 캐시 있음 → 즉시 진행 (백그라운드에서 서버 갱신)
+  // 캐시 없음 → 첫 로그인이므로 await (서버 응답 후 진행)
+  let _masterRefreshPromise = null;
+  try {
+    const masterResult = loadFullMasterData();
+    _masterRefreshPromise = masterResult.refreshPromise;
+    if (!masterResult.fromCache) {
+      // 캐시 없으면 서버 응답 기다림 (첫 로그인)
+      await _masterRefreshPromise;
+    }
+  } catch(e) { console.warn('master load:', e); }
 
   // MASTER에서 전체 드라이버 정보 병합
   const _masterDrv = MASTER.drivers?.find(d => d.Name_KR === name || d.Name_EN === name) || {};
@@ -3651,7 +3711,8 @@ async function doLogin() {
   // ── 서버에서 미완료 shift 동기화 (비동기) ──
   syncShiftsFromServer(name);
   // ── GAS 전체 동기화 + 자동 폴링 시작 (오늘 리포트, 마스터 최신화) ──
-  runSync(false);
+  // ★ 마스터는 loadFullMasterData()가 이미 처리 (또는 백그라운드에서 진행 중) → skipMaster
+  runSync(false, {skipMaster: true});
   startAutoSync();
 }
 
@@ -9166,22 +9227,21 @@ async function syncSalary(){
 }
 
 // ── 전체 동기화 실행
-async function runSync(silent=true){
+async function runSync(silent=true, opts){
   // ★ 중복 실행 방지
   if(_syncRunning) { console.log('[Sync] 이미 실행 중 — 스킵'); return; }
   _syncRunning = true;
+  const skipMaster = !!(opts && opts.skipMaster);
   try {
     await flushRetryQueue(); // 미전송 큐 먼저 처리
     if(!currentDriver) return;
     if(!silent) setSyncBadge('syncing');
+    // ★ skipMaster가 true면 syncMaster 제외 (방금 마스터 로드한 직후 중복 호출 방지)
+    const tasks = skipMaster
+      ? [syncNotices(), syncDRReports(), loadDriverWagesFromGAS(currentDriver.name), syncDefectReportsFromGAS()]
+      : [syncMaster(), syncNotices(), syncDRReports(), loadDriverWagesFromGAS(currentDriver.name), syncDefectReportsFromGAS()];
     // allSettled: 하나 실패해도 나머지는 계속 진행
-    const results = await Promise.allSettled([
-      syncMaster(),
-      syncNotices(),
-      syncDRReports(),
-      loadDriverWagesFromGAS(currentDriver.name),
-      syncDefectReportsFromGAS()
-    ]);
+    const results = await Promise.allSettled(tasks);
     const failCount = results.filter(r=>r.status==='rejected').length;
     // 현재 열린 탭에 따라 재렌더링
     const activePage = document.querySelector('.page.active')?.id;
