@@ -3577,7 +3577,16 @@ async function doLogin() {
 
   if(!loginRes || !loginRes.ok || !loginRes.token) {
     if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = prevLabel || '🔐 로그인'; }
-    showLoginError('Incorrect PIN (PIN 번호가 틀렸습니다)');
+    // 서버 락아웃/시도제한 메시지 우선 표시
+    if (loginRes && loginRes.reason === 'too_many_attempts') {
+      showLoginError((loginRes.message || ('Too many attempts. Try again in ' + (loginRes.lockMinutes||15) + ' min')));
+    } else if (loginRes && loginRes.reason === 'now_locked') {
+      showLoginError(loginRes.message || 'Account locked. Try again later');
+    } else if (loginRes && loginRes.warning === 'attempts_remaining') {
+      showLoginError('Incorrect PIN — ' + (loginRes.attemptsLeft||0) + ' attempts left');
+    } else {
+      showLoginError('Incorrect PIN (PIN 번호가 틀렸습니다)');
+    }
     return;
   }
 
