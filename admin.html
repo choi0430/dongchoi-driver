@@ -301,6 +301,23 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       var found = Array.prototype.find.call(sel.options, function(o){ return o.value.split('|')[0] === last; });
       if(found) sel.value = found.value;
     }
+    // ★ GAS 워밍업: 계정 선택 시 백그라운드 ping (콜드 스타트 제거)
+    if(!sel._warmupAttached){
+      sel._warmupAttached = true;
+      sel.addEventListener('change', function(){ if(sel.value) _warmupGAS(); });
+      if(sel.value) _warmupGAS(); // 자동선택된 경우에도 즉시 워밍업
+    }
+  }
+
+  // ★ GAS 워밍업 (30초 내 중복 호출 방지, fire-and-forget)
+  var _lastWarmup = 0;
+  function _warmupGAS(){
+    var now = Date.now();
+    if(now - _lastWarmup < 30000) return;
+    _lastWarmup = now;
+    try {
+      fetch(_LOGIN_GAS_URL + '?action=ping', {method:'GET', cache:'no-store'}).catch(function(){});
+    } catch(e){}
   }
 
   // ── PIN 입력 (서버에서 검증) ──
@@ -372,7 +389,41 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       localStorage.setItem('dc_admin_session', acctName);
       if(status) status.textContent = '';
       if(typeof toast==='function')toast('데이터 로딩 중...','ok');
-      if(typeof loadAllFromSheets==='function')loadAllFromSheets();
+      // ★ 새 통합 번들 로더 (캐시 우선 + 백그라운드 갱신)
+      // 캐시 있으면 즉시 화면 표시, 없으면 await
+      if(typeof loadAdminBundle==='function'){
+        (async function(){
+          try {
+            const r = loadAdminBundle({initial: true});
+            if(!r.fromCache){
+              await r.refreshPromise; // 캐시 없으면 첫 응답 기다림
+            }
+            // 후속 작업: 캐시 적용된 직후에도 무조건 한 번 실행 (지연 데이터)
+            if(typeof loadPSFromSheets==='function'){ try { await loadPSFromSheets(); } catch(e){} }
+            if(typeof loadNoticesFromGAS==='function'){ try { await loadNoticesFromGAS(); } catch(e){} }
+            if(typeof initNoticesIfEmpty==='function'){ try { await initNoticesIfEmpty(); } catch(e){} }
+            // Leave + Fatigue (병렬)
+            try {
+              await Promise.allSettled([
+                (typeof loadAdminLeaves==='function' ? loadAdminLeaves() : Promise.resolve()),
+                (typeof loadFatigueAlerts==='function' ? loadFatigueAlerts() : Promise.resolve())
+              ]);
+            } catch(e){}
+            try { rDash(); } catch(e){}
+            try { if(typeof initTabBadges==='function') initTabBadges(); } catch(e){}
+            try { if(typeof startAdminAutoSync==='function') startAdminAutoSync(); } catch(e){}
+            // ✅ 데이터 로드 완료
+            if(typeof toast==='function') toast('✅ 데이터 로드 완료','ok');
+          } catch(e){
+            console.error('loadAdminBundle 흐름 실패, 폴백:', e);
+            // 실패 시 기존 방식 폴백
+            if(typeof loadAllFromSheets==='function') loadAllFromSheets();
+          }
+        })();
+      } else {
+        // 폴백 (이전 코드와 호환)
+        if(typeof loadAllFromSheets==='function') loadAllFromSheets();
+      }
     })
     .catch(function(err){
       console.error('Login error:', err);
@@ -2092,7 +2143,31 @@ function autoRestoreAdminSession(){
   document.getElementById('sl').classList.remove('on');
   document.getElementById('sm').classList.add('on');
   document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
-  loadAllFromSheets();
+  // ★ 통합 번들 로더 사용 (캐시 즉시 적용 + 백그라운드 갱신)
+  if(typeof loadAdminBundle==='function'){
+    (async function(){
+      try {
+        const r = loadAdminBundle({initial: true});
+        if(!r.fromCache){ await r.refreshPromise; }
+        if(typeof loadPSFromSheets==='function'){ try { await loadPSFromSheets(); } catch(e){} }
+        if(typeof loadNoticesFromGAS==='function'){ try { await loadNoticesFromGAS(); } catch(e){} }
+        try {
+          await Promise.allSettled([
+            (typeof loadAdminLeaves==='function' ? loadAdminLeaves() : Promise.resolve()),
+            (typeof loadFatigueAlerts==='function' ? loadFatigueAlerts() : Promise.resolve())
+          ]);
+        } catch(e){}
+        try { rDash(); } catch(e){}
+        try { if(typeof initTabBadges==='function') initTabBadges(); } catch(e){}
+        try { if(typeof startAdminAutoSync==='function') startAdminAutoSync(); } catch(e){}
+      } catch(e){
+        console.error('Session restore bundle 실패, 폴백:', e);
+        loadAllFromSheets();
+      }
+    })();
+  } else {
+    loadAllFromSheets();
+  }
 }
 
 // ═══════════════════════════════════════
@@ -13961,6 +14036,289 @@ async function syncSub(){
   if(unregistered.length){
     console.log('[syncSub] M_SUB에 미등록 업체 (수동 등록 필요):', unregistered);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ★ 관리자 앱 통합 번들 로더 — 캐시 우선 + 백그라운드 갱신
+// 기존 loadAllFromSheets는 6개 endpoint 시퀀셜 호출로 5-15초 소요
+// 새 방식: 단일 get_admin_bundle 호출 + localStorage 캐시
+// ═══════════════════════════════════════════════════════════════════════════
+const ADMIN_CACHE_KEY = 'dc_admin_bundle';
+const ADMIN_CACHE_TTL = 30 * 60 * 1000; // 30분 (자주 변경되는 데이터 많음)
+
+function _saveAdminCache(bundle){
+  try {
+    localStorage.setItem(ADMIN_CACHE_KEY, JSON.stringify({ts: Date.now(), bundle}));
+  } catch(e){ /* 용량 초과 무시 */ }
+}
+
+function _loadAdminCache(){
+  try {
+    const raw = localStorage.getItem(ADMIN_CACHE_KEY);
+    if(!raw) return null;
+    const {ts, bundle} = JSON.parse(raw);
+    if(Date.now() - ts > ADMIN_CACHE_TTL) return null;
+    // 날짜 경계 체크 (Wages 캐시 무효화 — 주차 전환)
+    const cachedDate = new Date(ts).toLocaleDateString('en-AU', {timeZone:'Australia/Sydney'});
+    const todayDate = new Date().toLocaleDateString('en-AU', {timeZone:'Australia/Sydney'});
+    if(cachedDate !== todayDate) return null;
+    return bundle;
+  } catch(e){ return null; }
+}
+
+// 통합 번들 데이터를 admin 앱의 메모리 구조로 적용
+async function _applyAdminBundle(bundle){
+  if(!bundle || !bundle.data) return;
+  const d = bundle.data.masters || {};
+
+  // ── M_Vehicles → DB.V ──
+  if(d.M_Vehicles?.length) {
+    const _rf=(r,...keys)=>{for(const k of keys){if(r[k]!==undefined&&r[k]!=='')return r[k];}return '';};
+    DB.V = d.M_Vehicles.map(r=>({
+      _rowIndex: r._rowIndex||null,
+      Rego:r.Rego||'', Current_Status:r.Current_Status||'', Make:r.Make||'', Model:r.Model||'',
+      Manufacture_Date: _rf(r,'Manufacture_Date','Manufacture Date'),
+      Capacity:r.Capacity||0, Owner:r.Owner||'',
+      Rego_Date:fmtDate(r.Rego_Date||''), HVIS_Date:fmtDate(r.HVIS_Date||''),
+      Current_KM:r.Current_KM||0, Next_Service_KM:r.Next_Service_KM||0,
+      VIN:r.VIN||'',
+      Engine_Number: _rf(r,'Engine_Number','Engine Number'),
+      Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
+    }));
+  }
+  // ── M_Drivers → DB.D ──
+  if(d.M_Drivers?.length) {
+    const _rf2=(r,...keys)=>{for(const k of keys){if(r[k]!==undefined&&r[k]!=='')return r[k];}return '';};
+    DB.D = d.M_Drivers.map(r=>{
+      const ph = getPhoneFromRow(r);
+      return {
+      _rowIndex: r._rowIndex||null,
+      Name_EN:_rf2(r,'Name_EN','Name EN')||'', Name_KR:_rf2(r,'Name_KR','Name KR')||'', DriverID:_rf2(r,'DriverID','Driver ID')||'',
+      Phone:ph, Mobile_1:ph,
+      NEXT_OF_KIN: _rf2(r,'NEXT_OF_KIN','NEXT OF KIN','Next_of_Kin'),
+      Moblie_2: fixPhone(_rf2(r,'Moblie_2','Moblie 2','Mobile_2','Mobile 2')),
+      License_Class:_rf2(r,'License_Class','License Class')||'',
+      License_No: _rf2(r,'License_No','License_#','License #'),
+      License_Expiry:fmtDate(_rf2(r,'License_Expiry','License Expiry')||''),
+      Authority_No: _rf2(r,'Authority_No','Authority_#','Authority #'),
+      Authority_Expiry:fmtDate(_rf2(r,'Authority_Expiry','Authority Expiry')||''),
+      WWC_No: _rf2(r,'WWC_No','WWC_#','WWC No'),
+      WWC_Expiry: fmtDate(_rf2(r,'WWC_Expiry','WWC Expiry')||''),
+      Address:r.Address||'', Suburb:r.Suburb||'',
+      Bank_Name:_rf2(r,'Bank_Name','Bank Name')||'', BSB:r.BSB||'', Account_Number:_rf2(r,'Account_Number','Account Number')||'',
+      PIN:r.PIN?String(r.PIN):''
+    };});
+  }
+  // ── M_Clients → DB.C ──
+  if(d.M_Clients?.length) DB.C = d.M_Clients.map(r=>{
+    const ph = getPhoneFromRow(r);
+    return {
+    Name:r.Name||'', ClientID:r.ClientID||'', ABN:r.ABN||'', Mobile:ph, Phone:ph, Email:r.Email||'',
+    Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||''
+  };});
+  // ── M_Guides → DB.G ──
+  if(d.M_Guides?.length) DB.G = d.M_Guides.map(r=>{
+    const ph = getPhoneFromRow(r);
+    return {
+    _rowIndex: r._rowIndex||null,
+    GuideID:r.GuideID||r['Guide ID']||'', Guide_Name:r.Guide_Name||r['Guide Name']||r.Name||'',
+    Mobile:ph, Phone:ph, Agency:r.Agency||'', Email:r.Email||'', Remarks:r.Remarks||''
+  };});
+  // ── M_Hotels → DB.H ──
+  if(d.M_Hotels?.length) DB.H = d.M_Hotels.map(r=>({
+    Hotel_Name:r.Hotel_Name,Phone:fixPhone(r.Phone),Address:r.Address,Surcharge_Area:r.Surcharge_Area
+  }));
+  // ── M_PriceClient → DB.PC ──
+  if(d.M_PriceClient?.length){
+    DB.PC={};
+    d.M_PriceClient.forEach(r=>{
+      const ag = String(r.Agency||'').trim();
+      const co = String(r.Course||'').trim();
+      if(!ag || !co) return;
+      if(!DB.PC[ag])DB.PC[ag]={};
+      DB.PC[ag][co]={
+        max_hours:r.max_hours,
+        '21':{rate:r.seats_21_rate,ot:r.seats_21_ot},
+        '25':{rate:r.seats_25_rate,ot:r.seats_25_ot},
+        '40':{rate:r.seats_40_rate,ot:r.seats_40_ot},
+        '50':{rate:r.seats_50_rate,ot:r.seats_50_ot}
+      };
+    });
+  }
+  // ── M_NightRates → NIGHT_RATES ──
+  if(d.M_NightRates?.length){
+    d.M_NightRates.forEach(r => {
+      const type = r.NightType, cat = r.VehicleCategory;
+      if(!NIGHT_RATES[type]) NIGHT_RATES[type] = {};
+      NIGHT_RATES[type][cat] = { ta: Number(r.TA)||0, dr: Number(r.DR)||0, owner: Number(r.Owner)||0 };
+    });
+  }
+  // ── M_PriceDriver → DB.PD ──
+  if(d.M_PriceDriver?.length){
+    DB.PD={};
+    d.M_PriceDriver.forEach(r=>{
+      DB.PD[r.Course]={
+        max_hours:r.max_hours,
+        '21':{base:r.seats_21_base,ot:r.seats_21_ot},
+        '25':{base:r.seats_25_base,ot:r.seats_25_ot},
+        '40':{base:r.seats_40_base,ot:r.seats_40_ot},
+        '50':{base:r.seats_50_base,ot:r.seats_50_ot}
+      };
+    });
+  }
+  // ── M_SUB ──
+  if(d.M_SUB?.length){ _subCompanies = d.M_SUB.filter(r=>r.SubName); }
+  // ── HVIS_Bookings ──
+  if(d.HVIS_Bookings?.length) {
+    setHvisBookingsCache(d.HVIS_Bookings.map(r=>({
+      id: r.ID||'', rego: r.Rego||'', inspDate: r.InspDate||'', inspTime: r.InspTime||'',
+      location: r.Location||'', customerNo: r.CustomerNo||'', bookingNo: r.BookingNo||'',
+      vehicleType: r.VehicleType||'', ownerName: r.OwnerName||'', bookingDate: r.BookingDate||'',
+      status: r.Status||''
+    })));
+  } else { setHvisBookingsCache([]); }
+  // ── Maint_Records ──
+  if(d.Maint_Records?.length) {
+    setMaintRecordsCache(d.Maint_Records.map(r=>({
+      id: r.ID||'', rego: r.Rego||'', date: r.Date||'', km: Number(r.KM)||null,
+      type: r.Type||'', description: r.Description||'', workshop: r.Workshop||'',
+      cost: Number(r.Cost)||0, nextServiceKM: Number(r.NextServiceKM)||null
+    })));
+  } else { setMaintRecordsCache([]); }
+  // ── Invoice_Overrides ──
+  window._invoiceOverrides = {};
+  if(d.Invoice_Overrides?.length) {
+    d.Invoice_Overrides.forEach(r => {
+      if(r.RowKey) window._invoiceOverrides[r.RowKey] = r.Value;
+    });
+  }
+  // ── Company_Profile → DC_COMPANY ──
+  if(d.Company_Profile?.length) {
+    const _cpMap = {};
+    d.Company_Profile.forEach(r => { if(r.Key) _cpMap[r.Key] = r.Value||''; });
+    if(_cpMap.name)    DC_COMPANY.name    = _cpMap.name;
+    if(_cpMap.abn)     DC_COMPANY.abn     = String(_cpMap.abn);
+    if(_cpMap.phone)   DC_COMPANY.phone   = String(_cpMap.phone);
+    if(_cpMap.email)   DC_COMPANY.email   = _cpMap.email;
+    if(_cpMap.address) DC_COMPANY.address = _cpMap.address;
+    if(_cpMap.bank !== undefined)    DC_COMPANY.bank    = _cpMap.bank;
+    if(_cpMap.bsb !== undefined)     DC_COMPANY.bsb     = String(_cpMap.bsb);
+    if(_cpMap.acc !== undefined)     DC_COMPANY.acc     = String(_cpMap.acc);
+    if(_cpMap.accname !== undefined) DC_COMPANY.accname = _cpMap.accname;
+  }
+  // ── Invoice_Deductions ──
+  window._invoiceDeductionsServer = {};
+  if(d.Invoice_Deductions?.length) {
+    d.Invoice_Deductions.forEach(r => {
+      const key = (r.Agency||'') + '_' + (r.Period||'');
+      if(!window._invoiceDeductionsServer[key]) window._invoiceDeductionsServer[key] = [];
+      window._invoiceDeductionsServer[key].push({
+        id: r.ID||'', type: r.Type||'prepaid', amount: Number(r.Amount)||0, note: r.Note||''
+      });
+    });
+  }
+  // ── Invoice_Manual_Items ──
+  window._invoiceManualServer = {};
+  if(d.Invoice_Manual_Items?.length) {
+    d.Invoice_Manual_Items.forEach(r => {
+      const key = (r.Agency||'') + '_' + (r.Period||'');
+      if(!window._invoiceManualServer[key]) window._invoiceManualServer[key] = [];
+      window._invoiceManualServer[key].push({
+        id: r.ID||'', date: r.Date||'', rego: r.Rego||'', tour: r.Tour||'',
+        seats: r.Seats||'', tourcode: r.TourCode||'', note: r.Note||'',
+        amount: Number(r.Amount)||0, ot: Number(r.OT)||0, hotel: Number(r.Hotel)||0,
+        dist: Number(r.Dist)||0, trailer: Number(r.Trailer)||0, toll: Number(r.Toll)||0,
+        start: r.Start||'', end: r.End||'', driver: r.Driver||'',
+        guide: r.Guide||'', pickup: r.Pickup||'', dropoff: r.Dropoff||''
+      });
+    });
+  }
+
+  // ── Wages ──
+  if(bundle.data.wages?.length){
+    try {
+      // 기존 loadWagesFromSheet 패턴과 호환되도록 _wagesCache 직접 설정
+      window._wagesCache = bundle.data.wages;
+      window._wagesLastSync = Date.now();
+    } catch(e){}
+  }
+  // ── Notices ──
+  if(bundle.data.notices?.length){
+    try { window._noticesCache = bundle.data.notices; } catch(e){}
+  }
+  // ── kmMap → window._regoMaxKM ──
+  if(bundle.data.kmMap){
+    try { window._regoMaxKM = bundle.data.kmMap; } catch(e){}
+  }
+
+  // ── 자동 보정 (PC↔C 양방향, PS↔V) ──
+  Object.keys(DB.PC).forEach(ag=>{
+    if(!DB.C.find(c=>c.Name===ag))
+      DB.C.push({Name:ag,ClientID:Date.now().toString(16).slice(-8),ABN:'',Mobile:'',Address:'',Bank_Name:'',BSB:'',Account_Number:''});
+  });
+  DB.C.forEach(client=>{
+    if(client.Name && !DB.PC[client.Name]) DB.PC[client.Name]={};
+  });
+}
+
+// ★ 새 통합 로더 — 캐시 우선 + 백그라운드 갱신
+async function loadAdminBundle(opts){
+  const isInitialLoad = !!(opts && opts.initial);
+  const cached = _loadAdminCache();
+  let cacheApplied = false;
+  if(cached){
+    try {
+      await _applyAdminBundle(cached);
+      cacheApplied = true;
+    } catch(e){ console.warn('admin cache apply failed:', e); }
+  }
+
+  // 캐시 적용했으면 즉시 UI 표시
+  if(cacheApplied && isInitialLoad){
+    document.getElementById('sl').classList.remove('on');
+    document.getElementById('sm').classList.add('on');
+    document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
+    try { rDash(); } catch(e){}
+    try { rWage(); } catch(e){}
+    toast('📡 캐시 적용 — 백그라운드 갱신 중...','ok');
+  }
+
+  // 서버 갱신 (Promise 반환 — 호출자가 await할지 결정)
+  const refreshPromise = (async () => {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(()=>controller.abort(), 45000);
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_admin_bundle', {signal: controller.signal});
+      clearTimeout(timeout);
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      if(!json.ok) throw new Error(json.error || 'bundle failed');
+      await _applyAdminBundle(json);
+      _saveAdminCache(json);
+
+      // 동기화 시각 표시
+      const _now = Date.now();
+      window._tabLastSync = { pveh:_now, pdrv:_now, pcli:_now, pgui:_now, phtl:_now, pprc:_now, psub:_now, pbal:0 };
+      window._psLastSync = _now;
+      window._wagesLastSync = _now;
+      const _syncEl = document.getElementById('sync-status');
+      if(_syncEl){
+        const _d = new Date();
+        _syncEl.textContent = '✅ Last Sync (마지막 동기화): ' +
+          String(_d.getHours()).padStart(2,'0') + ':' + String(_d.getMinutes()).padStart(2,'0');
+      }
+
+      // UI 재렌더
+      try { rDash(); } catch(e){}
+      try { rWage(); } catch(e){}
+      return true;
+    } catch(e){
+      console.warn('loadAdminBundle 서버 호출 실패:', e.message);
+      return false;
+    }
+  })();
+
+  return { fromCache: cacheApplied, refreshPromise };
 }
 
 async function loadAllFromSheets(){
