@@ -8291,18 +8291,20 @@ const PeriodNav = (function(){
       console.warn('[PeriodNav] from/to inputs not found for prefix:', prefix);
       return;
     }
-    let barEl = document.getElementById(prefix+'-period-bar');
-    if(!barEl){
-      barEl = document.createElement('div');
-      barEl.id = prefix+'-period-bar';
-      barEl.style.cssText = 'display:block;width:100%;flex:none;grid-column:1/-1;padding:0 14px;margin-bottom:10px;box-sizing:border-box;';
-      const dateRow = fromEl.closest('div[style*="flex"]') || fromEl.parentElement.parentElement;
-      if(dateRow && dateRow.parentElement){
-        dateRow.parentElement.insertBefore(barEl, dateRow);
-      }
-    } else {
-      barEl.style.cssText = 'display:block;width:100%;flex:none;grid-column:1/-1;padding:0 14px;margin-bottom:10px;box-sizing:border-box;';
+    // ★ 기존 PeriodNav 마크업 제거 (중복 방지)
+    document.querySelectorAll('#'+prefix+'-period-bar').forEach(el => el.remove());
+
+    let dateRow = fromEl.closest('div[style*="flex"]');
+    if(!dateRow) dateRow = fromEl.parentElement?.parentElement;
+    if(!dateRow || !dateRow.parentElement){
+      console.warn('[PeriodNav] cannot find anchor row for prefix:', prefix);
+      return;
     }
+
+    const barEl = document.createElement('div');
+    barEl.id = prefix+'-period-bar';
+    barEl.style.cssText = 'display:block !important;width:100% !important;flex:none !important;grid-column:1/-1 !important;padding:0 14px;margin-bottom:10px;box-sizing:border-box;';
+    dateRow.parentElement.insertBefore(barEl, dateRow);
 
     barEl.innerHTML = `
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;">
