@@ -1272,6 +1272,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <button class="btn bac sm" onclick="_openWageAddSmart()">+ Add Payment (지급 추가)</button>
     </div>
   </div>
+  <!-- 통합 기간 선택 (모든 서브탭 공통) -->
+  <div style="padding:10px 14px 0;">
+    <input type="date" id="wage-from" style="display:none;">
+    <input type="date" id="wage-to" style="display:none;">
+  </div>
+  <!-- 기간별 요약 카드 -->
+  <div id="wage-period-summary" style="padding:0 14px 4px;"></div>
   <!-- 탭: 드라이버별 / 전체 -->
   <div style="display:flex;gap:0;padding:10px 14px 0;">
     <button id="wage-tab-single" class="btn bac sm on" style="border-radius:8px 0 0 8px;border-right:none;" onclick="setWageTab('single')">👤 드라이버별</button>
@@ -1441,40 +1448,15 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div style="padding:12px 14px 0;">
       <div style="font-size:12px;color:var(--t3);margin-bottom:8px;">리포트 기반 SUB 자동 정산 — 비용 흐름: 여행사→Dong Choi→SUB 오너→드라이버</div>
 
-      <!-- 기간 모드 선택 -->
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-        <div style="font-size:10px;font-weight:700;color:var(--t3);">기간 모드:</div>
-        <button class="btn bgh xs settle-mode-btn" data-mode="week" onclick="setSettlePeriodMode('week')" style="padding:4px 10px;font-size:11px;">📅 주별</button>
-        <button class="btn bgh xs settle-mode-btn" data-mode="month" onclick="setSettlePeriodMode('month')" style="padding:4px 10px;font-size:11px;">📅 월별</button>
-        <button class="btn bgh xs settle-mode-btn" data-mode="quarter" onclick="setSettlePeriodMode('quarter')" style="padding:4px 10px;font-size:11px;">📅 분기별</button>
-        <button class="btn bgh xs settle-mode-btn" data-mode="custom" onclick="setSettlePeriodMode('custom')" style="padding:4px 10px;font-size:11px;">⚙️ 사용자 지정</button>
-      </div>
-
-      <!-- 빠른 기간 선택 칩 -->
-      <div id="settle-quick-chips" style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-        <button class="btn bgh xs" onclick="setSettleQuickPeriod('this')" style="padding:4px 10px;font-size:11px;">이번 <span class="qc-mode-label">주</span></button>
-        <button class="btn bgh xs" onclick="setSettleQuickPeriod('last')" style="padding:4px 10px;font-size:11px;">지난 <span class="qc-mode-label">주</span></button>
-        <button class="btn bgh xs" onclick="setSettleQuickPeriod('thisMonth')" style="padding:4px 10px;font-size:11px;">이번 달</button>
-        <button class="btn bgh xs" onclick="setSettleQuickPeriod('lastMonth')" style="padding:4px 10px;font-size:11px;">지난 달</button>
-        <button class="btn bgh xs" onclick="setSettleQuickPeriod('thisQuarter')" style="padding:4px 10px;font-size:11px;">이번 분기</button>
-      </div>
-
-      <!-- 화살표 네비게이션 + 현재 기간 라벨 -->
-      <div id="settle-period-nav" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-        <button class="btn brd sm" onclick="navSettlePeriod(-1)" style="padding:6px 12px;font-weight:700;" title="이전">◀</button>
-        <div id="settle-period-label" style="flex:1;text-align:center;font-size:13px;font-weight:700;background:var(--sf2);border-radius:8px;padding:8px 12px;color:var(--t1);">—</div>
-        <button class="btn brd sm" onclick="navSettlePeriod(1)" style="padding:6px 12px;font-weight:700;" title="다음">▶</button>
-      </div>
-
-      <!-- 시작일/종료일 직접 입력 (사용자 지정 모드에서 활성화) -->
+      <!-- 시작일/종료일 + 조회 버튼 (PeriodNav가 위에 자동 부착) -->
       <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;">
         <div style="flex:1;">
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">시작일</div>
-          <input type="date" id="settle-from" class="profit-finp" style="width:100%;box-sizing:border-box;" onchange="onSettleDateManualChange()">
+          <input type="date" id="settle-from" class="profit-finp" style="width:100%;box-sizing:border-box;">
         </div>
         <div style="flex:1;">
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">종료일</div>
-          <input type="date" id="settle-to" class="profit-finp" style="width:100%;box-sizing:border-box;" onchange="onSettleDateManualChange()">
+          <input type="date" id="settle-to" class="profit-finp" style="width:100%;box-sizing:border-box;">
         </div>
         <button class="btn bac sm" onclick="loadSettleDashboard()" style="white-space:nowrap;">조회</button>
         <button class="btn brd sm" onclick="forceRecalcSettle()" style="white-space:nowrap;" title="캐시 모두 비우고 재계산">🔄 재계산</button>
@@ -4002,43 +3984,38 @@ const PeriodNav = (function(){
     // 컨테이너 찾기 (없으면 from input 의 부모 영역에 prepend)
     let barEl = document.getElementById(prefix+'-period-bar');
     if(!barEl){
-      // from input 의 가까운 wrapper 찾기 (display flex 또는 grid 의 부모 위)
-      let wrap = fromEl.closest('div');
-      while(wrap && !wrap.parentElement?.matches('[id$="-view-ledger"], [id$="-view-drpay"], [id$="-view-invoice"], #pinv, [id$="-view-content"], #app, body')){
-        if(wrap.parentElement && wrap.parentElement.children.length > 1) break;
-        wrap = wrap.parentElement;
-      }
       barEl = document.createElement('div');
       barEl.id = prefix+'-period-bar';
+      // ★ 부모 flex 영향 차단을 위해 명시적 block + 전체 width
+      barEl.style.cssText = 'display:block;width:100%;flex:none;grid-column:1/-1;margin-bottom:10px;';
       const dateRow = fromEl.closest('div[style*="flex"]') || fromEl.parentElement.parentElement;
       if(dateRow && dateRow.parentElement){
         dateRow.parentElement.insertBefore(barEl, dateRow);
       }
+    } else {
+      barEl.style.cssText = 'display:block;width:100%;flex:none;grid-column:1/-1;margin-bottom:10px;';
     }
 
-    // 마크업 그리기
+    // 마크업 — 깔끔한 카드 디자인
     barEl.innerHTML = `
-      <!-- 기간 모드 버튼 -->
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-        <div style="font-size:10px;font-weight:700;color:var(--t3);">기간 모드:</div>
-        <button class="btn bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="week" onclick="PeriodNav.setMode('${prefix}','week')" style="padding:4px 10px;font-size:11px;">📅 주별</button>
-        <button class="btn bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="month" onclick="PeriodNav.setMode('${prefix}','month')" style="padding:4px 10px;font-size:11px;">📅 월별</button>
-        <button class="btn bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="quarter" onclick="PeriodNav.setMode('${prefix}','quarter')" style="padding:4px 10px;font-size:11px;">📅 분기별</button>
-        <button class="btn bgh xs pn-mode-btn" data-prefix="${prefix}" data-mode="custom" onclick="PeriodNav.setMode('${prefix}','custom')" style="padding:4px 10px;font-size:11px;">⚙️ 사용자 지정</button>
-      </div>
-      <!-- 빠른 칩 -->
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-        <button class="btn bgh xs" onclick="PeriodNav.setQuick('${prefix}','this')" style="padding:4px 10px;font-size:11px;">이번 <span data-prefix="${prefix}" class="pn-mode-label">달</span></button>
-        <button class="btn bgh xs" onclick="PeriodNav.setQuick('${prefix}','last')" style="padding:4px 10px;font-size:11px;">지난 <span data-prefix="${prefix}" class="pn-mode-label">달</span></button>
-        <button class="btn bgh xs" onclick="PeriodNav.setQuick('${prefix}','thisMonth')" style="padding:4px 10px;font-size:11px;">이번 달</button>
-        <button class="btn bgh xs" onclick="PeriodNav.setQuick('${prefix}','lastMonth')" style="padding:4px 10px;font-size:11px;">지난 달</button>
-        <button class="btn bgh xs" onclick="PeriodNav.setQuick('${prefix}','thisQuarter')" style="padding:4px 10px;font-size:11px;">이번 분기</button>
-      </div>
-      <!-- 화살표 + 라벨 -->
-      <div id="${prefix}-period-nav" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-        <button class="btn brd sm" onclick="PeriodNav.nav('${prefix}',-1)" style="padding:6px 12px;font-weight:700;" title="이전">◀</button>
-        <div id="${prefix}-period-label" style="flex:1;text-align:center;font-size:13px;font-weight:700;background:var(--sf2);border-radius:8px;padding:8px 12px;color:var(--t1);">—</div>
-        <button class="btn brd sm" onclick="PeriodNav.nav('${prefix}',1)" style="padding:6px 12px;font-weight:700;" title="다음">▶</button>
+      <div style="background:var(--sf2);border:1px solid var(--bd);border-radius:12px;padding:10px 12px;">
+        <!-- 1행: 라벨 + 모드 버튼 -->
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+          <div style="font-size:11px;font-weight:700;color:var(--t3);min-width:48px;">📅 기간</div>
+          <button class="pn-mode-btn" data-prefix="${prefix}" data-mode="week" onclick="PeriodNav.setMode('${prefix}','week')" style="padding:5px 12px;font-size:11px;font-weight:700;border:1px solid var(--bd);border-radius:6px;background:var(--sf);color:var(--t2);cursor:pointer;">주별</button>
+          <button class="pn-mode-btn" data-prefix="${prefix}" data-mode="month" onclick="PeriodNav.setMode('${prefix}','month')" style="padding:5px 12px;font-size:11px;font-weight:700;border:1px solid var(--bd);border-radius:6px;background:var(--sf);color:var(--t2);cursor:pointer;">월별</button>
+          <button class="pn-mode-btn" data-prefix="${prefix}" data-mode="quarter" onclick="PeriodNav.setMode('${prefix}','quarter')" style="padding:5px 12px;font-size:11px;font-weight:700;border:1px solid var(--bd);border-radius:6px;background:var(--sf);color:var(--t2);cursor:pointer;">분기별</button>
+          <button class="pn-mode-btn" data-prefix="${prefix}" data-mode="custom" onclick="PeriodNav.setMode('${prefix}','custom')" style="padding:5px 12px;font-size:11px;font-weight:700;border:1px solid var(--bd);border-radius:6px;background:var(--sf);color:var(--t2);cursor:pointer;">사용자 지정</button>
+          <div style="flex:1;"></div>
+          <button onclick="PeriodNav.setQuick('${prefix}','this')" style="padding:5px 10px;font-size:11px;border:1px solid var(--bd);border-radius:6px;background:var(--sf);color:var(--t2);cursor:pointer;">이번</button>
+          <button onclick="PeriodNav.setQuick('${prefix}','last')" style="padding:5px 10px;font-size:11px;border:1px solid var(--bd);border-radius:6px;background:var(--sf);color:var(--t2);cursor:pointer;">지난</button>
+        </div>
+        <!-- 2행: 화살표 + 현재 기간 라벨 -->
+        <div id="${prefix}-period-nav" style="display:flex;gap:8px;align-items:center;">
+          <button onclick="PeriodNav.nav('${prefix}',-1)" style="padding:8px 14px;font-weight:700;font-size:14px;border:1px solid var(--bd);border-radius:8px;background:var(--sf);color:var(--t1);cursor:pointer;flex:none;" title="이전">◀</button>
+          <div id="${prefix}-period-label" style="flex:1;text-align:center;font-size:14px;font-weight:800;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:8px 12px;color:var(--t1);">—</div>
+          <button onclick="PeriodNav.nav('${prefix}',1)" style="padding:8px 14px;font-weight:700;font-size:14px;border:1px solid var(--bd);border-radius:8px;background:var(--sf);color:var(--t1);cursor:pointer;flex:none;" title="다음">▶</button>
+        </div>
       </div>
     `;
 
@@ -4064,19 +4041,16 @@ const PeriodNav = (function(){
   function _refreshUI(prefix){
     const st = _state[prefix];
     if(!st) return;
-    // 모드 버튼 활성화
+    // 모드 버튼 활성화 (새 디자인)
     document.querySelectorAll('.pn-mode-btn[data-prefix="'+prefix+'"]').forEach(b => {
       const on = b.dataset.mode === st.mode;
-      b.style.background = on ? 'var(--ac)' : '';
-      b.style.color = on ? '#fff' : '';
+      b.style.background = on ? 'var(--ac)' : 'var(--sf)';
+      b.style.color = on ? '#fff' : 'var(--t2)';
+      b.style.borderColor = on ? 'var(--ac)' : 'var(--bd)';
     });
-    // 빠른 칩 라벨
-    document.querySelectorAll('.pn-mode-label[data-prefix="'+prefix+'"]').forEach(s => {
-      s.textContent = st.mode === 'week' ? '주' : st.mode === 'quarter' ? '분기' : '달';
-    });
-    // 네비 표시 여부
+    // 네비 표시 여부 (custom 모드면 화살표 영역 숨김)
     const navEl = document.getElementById(prefix+'-period-nav');
-    if(navEl) navEl.style.display = st.mode === 'custom' ? 'none' : '';
+    if(navEl) navEl.style.display = st.mode === 'custom' ? 'none' : 'flex';
     // 라벨 갱신
     const fromEl = document.getElementById(prefix+'-from');
     const toEl = document.getElementById(prefix+'-to');
@@ -4147,9 +4121,18 @@ const PeriodNav = (function(){
 })();
 
 function initSettleDashboard() {
-  // 기본 모드: 이번 달
-  if(!_settlePeriodAnchor) _settlePeriodAnchor = new Date();
-  setSettlePeriodMode(_settlePeriodMode || 'month');
+  // 통합 PeriodNav 사용
+  if(!window._settlePeriodNavAttached){
+    setTimeout(() => {
+      try {
+        PeriodNav.attach('settle', { defaultMode: 'month', onChange: () => loadSettleDashboard() });
+        window._settlePeriodNavAttached = true;
+      } catch(e){ console.warn('PeriodNav attach failed (settle):', e); }
+    }, 50);
+  } else {
+    // 이미 부착된 경우 데이터만 다시 로드
+    loadSettleDashboard();
+  }
 }
 
 // ★ 강제 재계산: 모든 캐시 비우고 처음부터 다시 로드
