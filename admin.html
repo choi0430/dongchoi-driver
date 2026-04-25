@@ -1281,7 +1281,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 드라이버별 뷰 -->
   <div id="wage-view-single">
     <div style="padding:10px 14px 0;display:flex;gap:6px;align-items:center;">
-      <select id="wage-driver-sel" class="profit-sel" style="flex:1;" onchange="_wageWeekIdx=0;rWage()"></select>
+      <select id="wage-driver-sel" class="profit-sel" style="flex:1;" onchange="ST.wageDriver=this.value;_wageWeekIdx=0;rWage()"></select>
       <button class="btn brd sm" onclick="deleteWageWeek()" style="padding:0 10px;" title="주간 삭제">🗑</button>
     </div>
     <!-- 주간 네비게이션 -->
@@ -12289,6 +12289,11 @@ async function rWage(){
   const dSel = document.getElementById('wage-driver-sel');
   if(!dSel) return;
   const drivers = DB.D.map(d=>({name:d.Name_KR||d.Name_EN, en:d.Name_EN}));
+  // ★ 현재 dropdown의 값(사용자 선택)이 유효하면 그것을 우선 사용
+  const currentVal = dSel.value;
+  if(currentVal && drivers.some(d=>d.name===currentVal)){
+    ST.wageDriver = currentVal;
+  }
   dSel.innerHTML = drivers.map(d=>'<option value="'+escH(d.name)+'">'+escH(d.name)+'</option>').join('');
   if(!ST.wageDriver && drivers.length>0) ST.wageDriver = drivers[0].name;
   if(ST.wageDriver) dSel.value = ST.wageDriver;
