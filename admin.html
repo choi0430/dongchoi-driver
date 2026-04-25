@@ -1582,6 +1582,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
             <th style="min-width:70px;">날짜</th>
             <th style="min-width:60px;">차량</th>
             <th style="min-width:80px;">투어코드</th>
+            <th style="min-width:70px;">가이드</th>
             <th style="min-width:100px;">코스</th>
             <th style="min-width:40px;">인승</th>
             <th style="min-width:55px;">금액</th>
@@ -6203,6 +6204,21 @@ function _onSubInvTCChange(sel){
       });
     } else { sel.value=''; }
   }
+  // ★ 가이드 자동 채움 — 선택된 투어코드의 Daily Report에서 가이드 조회
+  const tc = sel.value;
+  if(tc && tc !== '__add__'){
+    const rowId = sel.id.replace('sir-tc-', '');
+    const guideEl = document.getElementById('sir-guide-'+rowId);
+    if(guideEl){
+      const reports = (DB.R&&DB.R.length) ? DB.R : (_drCache||[]);
+      const match = reports.find(r => (r.Tour_Code||'').trim().toUpperCase() === tc.toUpperCase());
+      if(match && match.Guide){
+        guideEl.value = match.Guide;
+      } else {
+        guideEl.value = '';
+      }
+    }
+  }
 }
 
 function _buildEtcSelect(id, val){
@@ -6293,6 +6309,7 @@ function addSubInvRow(){
     <td><input type="date" id="sir-date-${n}" class="profit-finp" style="width:70px;font-size:10px;padding:3px;"></td>
     <td><select id="sir-rego-${n}" class="profit-finp" style="width:90px;font-size:10px;padding:3px;"><option value="">—</option>${vehOpts}</select></td>
     <td>${_buildTourCodeSelect('sir-tc-'+n, '')}</td>
+    <td><input id="sir-guide-${n}" class="profit-finp" style="width:70px;font-size:10px;padding:3px;color:var(--t3);" placeholder="자동" readonly></td>
     <td>${_buildCourseSelect('sir-tour-'+n, '')}</td>
     <td><select id="sir-seats-${n}" class="profit-finp" style="width:40px;font-size:10px;padding:3px;">
       <option value="21S">21</option><option value="25S">25</option><option value="40S">40</option><option value="50S">50</option>
@@ -6523,6 +6540,7 @@ function _addSubInvRowFromReport(r){
     <td><input type="date" id="sir-date-${n}" class="profit-finp" style="width:70px;font-size:10px;padding:3px;" value="${dateVal}"></td>
     <td><select id="sir-rego-${n}" class="profit-finp" style="width:90px;font-size:10px;padding:3px;"><option value="">—</option>${vehOpts}</select></td>
     <td>${_buildTourCodeSelect('sir-tc-'+n, tcVal)}</td>
+    <td><input id="sir-guide-${n}" class="profit-finp" style="width:70px;font-size:10px;padding:3px;color:var(--t3);" value="${(r.Guide||'').replace(/"/g,'&quot;')}" placeholder="자동" readonly></td>
     <td>${_buildCourseSelect('sir-tour-'+n, tourVal)}</td>
     <td><select id="sir-seats-${n}" class="profit-finp" style="width:40px;font-size:10px;padding:3px;">
       <option value="21S"${seatsVal==='21S'?' selected':''}>21</option>
@@ -9941,9 +9959,11 @@ function renderInvPreview(rows, agency, from, to) {
           ${_invEditMode ? `<div style="margin-top:3px;display:flex;gap:2px;flex-wrap:wrap;"><button onclick="_toggleInvExclude('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid ${excl?'#86efac':'#fecaca'};background:${excl?'#f0fdf4':'#fef2f2'};color:${excl?'#166534':'#ef4444'};cursor:pointer;">${excl?'포함':'제외'}</button>${r._manual && r._manualId ? `<button onclick="openInvItemModal('${escH(r._manualId)}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;">✏️</button><button onclick="deleteInvItem('${escH(r._manualId)}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;">🗑</button>` : `<button onclick="_editInvRowAsManual(${ri})" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;">✏️</button><button onclick="_deleteInvRow('${escH(rowKey)}','${escH(agency)}','${from}','${to}')" style="font-size:9px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;">🗑</button>`}</div>` : ''}
         </td>
         <td style="padding:6px;vertical-align:top;">
+          ${r.Tour_Code ? `<div style="font-family:monospace;font-size:10px;color:var(--ac);font-weight:700;">${escH(r.Tour_Code)}</div>` : ''}
+          ${r.Guide ? `<div style="font-size:10px;color:var(--t2);">🧭 ${escH(r.Guide)}</div>` : ''}
           <div style="font-weight:600;">${escH(r.Attraction||'—')}</div>
           <div style="font-size:10px;color:var(--t3);">${escH(r.Rego||'—')}${r.Seats?' ('+escH(r.Seats)+')':''} ${srcBadge} ${manualBadge} ${subBadge} ${ovBadge}</div>
-          <div style="font-size:10px;color:var(--t3);">🚌 ${escH(r.Driver||'—')}${r.Guide?' &nbsp;·&nbsp; 🧭 '+escH(r.Guide):''}${r.Tour_Code?' &nbsp;·&nbsp; '+escH(r.Tour_Code):''}${r._subInvNum?' &nbsp;·&nbsp; <span style="color:#9d174d;">📋'+escH(r._subInvNum)+'</span>':''}</div>
+          <div style="font-size:10px;color:var(--t3);">🚌 ${escH(r.Driver||'—')}${r._subInvNum?' &nbsp;·&nbsp; <span style="color:#9d174d;">📋'+escH(r._subInvNum)+'</span>':''}</div>
           ${r._timeStart||r._timeEnd ? `<div style="font-size:10px;color:var(--t3);">⏱ ${r._timeStart||''}${r._timeEnd?' ~ '+r._timeEnd:''}</div>` : ''}
           ${r.Pickup||r.Dropoff ? `<div style="font-size:10px;color:var(--ac);margin-top:1px;">📍 ${escH(r.Pickup||'—')} → ${escH(r.Dropoff||'—')}</div>` : ''}
         </td>
