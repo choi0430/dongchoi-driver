@@ -1258,12 +1258,76 @@ function getAllMasters() {
                     'Invoice_Deductions', 'Invoice_Manual_Items'];
     const result = {};
 
+    // ★ 최적화: 스프레드시트를 한 번만 열고 모든 시트를 그 인스턴스로 처리
+    // 기존: 각 getMaster() 호출마다 openById 재실행 → 23번 × ~200ms 낭비
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+
     sheets.forEach(name => {
-      const r = getMaster(name);
-      result[name] = r.ok ? r.rows : [];
+      try {
+        const r = _getMasterFast(ss, name);
+        result[name] = r.ok ? r.rows : [];
+      } catch (e) {
+        result[name] = [];
+      }
     });
 
     return {ok: true, data: result};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ── getMaster 최적화 버전 (기존 ss 인스턴스 재사용) ──
+function _getMasterFast(ss, sheetName) {
+  try {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return {ok: true, sheet: sheetName, rows: []};
+
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow < 2 || lastCol < 1) return {ok: true, sheet: sheetName, rows: []};
+
+    // ensureSheet 스킵 (읽기 전용이므로 헤더 보정 불필요)
+    const data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+    const headers = data[0];
+
+    const canonicalHeaders = MASTER_HEADERS[sheetName];
+    const normToCanonical = {};
+    if (canonicalHeaders) {
+      canonicalHeaders.forEach(ch => {
+        normToCanonical[normalizeKey(ch)] = ch;
+      });
+    }
+
+    const PHONE_FIELDS = ['phone','mobile','mobile_1','mobile_2','moblie_2'];
+    const phoneColIdxSet = new Set();
+    headers.forEach((h, i) => {
+      if (PHONE_FIELDS.includes(normalizeKey(h))) phoneColIdxSet.add(i);
+    });
+
+    const rows = data.slice(1).map((row, rowIdx) => {
+      const obj = {};
+      headers.forEach((h, i) => {
+        const nk = normalizeKey(h);
+        let canonKey = (h && normToCanonical[nk]) || h;
+        if (!normToCanonical[nk] && FIELD_ALIASES[nk]) {
+          for (const alias of FIELD_ALIASES[nk]) {
+            if (normToCanonical[alias]) { canonKey = normToCanonical[alias]; break; }
+          }
+        }
+        let val = row[i];
+        if (phoneColIdxSet.has(i) && val !== '' && val !== null && val !== undefined) {
+          let s = String(val).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
+          if (s.length === 9) s = '0' + s;
+          val = s;
+        }
+        obj[canonKey] = val;
+      });
+      obj._rowIndex = rowIdx + 2;
+      return obj;
+    });
+
+    return {ok: true, sheet: sheetName, rows};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
