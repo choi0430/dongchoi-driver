@@ -93,7 +93,9 @@ const MASTER_HEADERS = {
   // ── 인보이스 수동 항목 ──
   'Invoice_Manual_Items': ['ID','Agency','Period','Date','Rego','Tour','Seats','TourCode','Note','Amount','OT','Hotel','Dist','Trailer','Toll','Start','End','Driver','Guide','Pickup','Dropoff'],
   // ── 인증 토큰 (세션 관리) ──
-  'Active_Tokens': ['Token','User','Role','IssuedAt','ExpiresAt','LastUsed','UserAgent']
+  'Active_Tokens': ['Token','User','Role','IssuedAt','ExpiresAt','LastUsed','UserAgent'],
+  // ── 로그인 실패 추적 (rate limiting) ──
+  'Auth_Failures': ['Name','FailCount','FirstFail','LastFail','LockedUntil']
 };
 
 // ── Tab Colors ──
@@ -109,7 +111,8 @@ const TAB_COLORS = {
   'Defect_Reports':'#dc2626','Bus_Damage':'#ea580c',
   'Maint_Records':'#059669','Invoice_Overrides':'#7c3aed','Company_Profile':'#0284c7',
   'Invoice_Deductions':'#db2777','Invoice_Manual_Items':'#9333ea',
-  'Active_Tokens':'#374151'
+  'Active_Tokens':'#374151',
+  'Auth_Failures':'#991b1b'
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -144,6 +147,17 @@ const ADMIN_NAMES = ['Branden Choi', 'Branden', '최동철', 'Dong Cheol Choi'];
 
 const TOKEN_TTL_DRIVER_MS = 7 * 24 * 60 * 60 * 1000;   // 7일
 const TOKEN_TTL_ADMIN_MS  = 1 * 24 * 60 * 60 * 1000;   // 24시간
+
+// ── 보안 상수 ──
+// PIN 해시 식별 prefix (이 prefix가 있으면 해시된 값으로 인식)
+const PIN_HASH_PREFIX = 'h1$';
+// PIN 해시 salt (시스템 고유값 — 변경 시 모든 PIN 재설정 필요)
+const PIN_HASH_SECRET = 'DC_FLEET_2026_K7p9Qx2L';
+// Rate limiting: 5회 실패 → 15분 락
+const AUTH_MAX_FAILS = 5;
+const AUTH_LOCK_MS = 15 * 60 * 1000;
+// 실패 카운트 리셋 윈도우: 첫 실패 후 30분 내 시도만 누적
+const AUTH_FAIL_WINDOW_MS = 30 * 60 * 1000;
 
 // 인증 없이 호출 가능한 액션 (로그인 및 공개 메타데이터)
 const PUBLIC_ACTIONS = ['ping', 'login', 'logout', 'get_login_names'];
@@ -184,6 +198,110 @@ function _getAuthSheet() {
   return ensureSheet(ss, 'Active_Tokens');
 }
 
+function _getAuthFailSheet() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  return ensureSheet(ss, 'Auth_Failures');
+}
+
+// ── PIN 해시 (SHA-256, salt=secret + name) ─────────────────────────────────
+// 결과 형식: 'h1$' + base64url(sha256(secret + ':' + name + ':' + pin))
+function _hashPin(pin, name) {
+  const input = PIN_HASH_SECRET + ':' + String(name || '').trim() + ':' + String(pin || '');
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input, Utilities.Charset.UTF_8);
+  return PIN_HASH_PREFIX + Utilities.base64EncodeWebSafe(bytes).replace(/=+$/, '');
+}
+
+// 저장된 PIN(평문 또는 해시)과 입력 PIN 비교
+// - 저장값이 'h1$'로 시작 → 해시 비교
+// - 그 외 → 평문 비교 (마이그레이션 호환)
+function _verifyPin(storedPin, inputPin, name) {
+  const stored = String(storedPin || '');
+  const input = String(inputPin || '');
+  if (!stored || !input) return false;
+  if (stored.indexOf(PIN_HASH_PREFIX) === 0) {
+    return stored === _hashPin(input, name);
+  }
+  // 평문 비교 (마이그레이션 전 호환)
+  return stored === input;
+}
+
+// ── Rate Limiting ─────────────────────────────────────────────────────────
+// 반환: {locked: bool, remainingMs?: number, failCount?: number}
+function _checkAuthLock(name) {
+  try {
+    const sheet = _getAuthFailSheet();
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return {locked: false};
+    const now = new Date().getTime();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === name) {
+        const lockedUntilStr = String(data[i][4] || '');
+        if (lockedUntilStr) {
+          const lockedUntil = new Date(lockedUntilStr).getTime();
+          if (!isNaN(lockedUntil) && lockedUntil > now) {
+            return {locked: true, remainingMs: lockedUntil - now, failCount: Number(data[i][1] || 0)};
+          }
+        }
+        return {locked: false, failCount: Number(data[i][1] || 0), rowIndex: i + 1};
+      }
+    }
+    return {locked: false};
+  } catch (err) {
+    return {locked: false};  // fail-open: 시트 오류 시 정상 진행
+  }
+}
+
+// 로그인 실패 기록
+function _recordAuthFail(name) {
+  try {
+    const sheet = _getAuthFailSheet();
+    const data = sheet.getDataRange().getValues();
+    const now = new Date();
+    const nowMs = now.getTime();
+    let foundRow = -1;
+    let firstFail = now.toISOString();
+    let failCount = 0;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === name) {
+        foundRow = i + 1;
+        const ff = new Date(String(data[i][2] || ''));
+        // 윈도우 만료 시 카운트 리셋
+        if (!isNaN(ff.getTime()) && (nowMs - ff.getTime()) < AUTH_FAIL_WINDOW_MS) {
+          failCount = Number(data[i][1] || 0);
+          firstFail = String(data[i][2] || now.toISOString());
+        }
+        break;
+      }
+    }
+    failCount += 1;
+    const lockedUntil = (failCount >= AUTH_MAX_FAILS) ? new Date(nowMs + AUTH_LOCK_MS).toISOString() : '';
+    const rowData = [name, failCount, firstFail, now.toISOString(), lockedUntil];
+    if (foundRow > 0) {
+      sheet.getRange(foundRow, 1, 1, 5).setValues([rowData]);
+    } else {
+      sheet.appendRow(rowData);
+    }
+    return {failCount: failCount, locked: !!lockedUntil};
+  } catch (err) {
+    return {failCount: 0, locked: false};
+  }
+}
+
+// 로그인 성공 시 실패 기록 삭제
+function _clearAuthFails(name) {
+  try {
+    const sheet = _getAuthFailSheet();
+    const data = sheet.getDataRange().getValues();
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]) === name) {
+        sheet.deleteRow(i + 1);
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+}
+
 function _generateToken() {
   // 256-bit 랜덤 문자열 (base64 url-safe)
   const bytes = new Array(32);
@@ -202,6 +320,15 @@ function _loginAction(payload) {
       return {ok: false, error: 'name and pin required'};
     }
 
+    // ── Rate limit 체크 ──
+    const lockState = _checkAuthLock(nameInput);
+    if (lockState.locked) {
+      const mins = Math.ceil(lockState.remainingMs / 60000);
+      return {ok: false, error: 'locked', reason: 'too_many_attempts',
+              lockMinutes: mins,
+              message: '로그인 시도가 너무 많습니다. ' + mins + '분 후 다시 시도하세요.'};
+    }
+
     // M_Drivers에서 사용자 찾기 (Name_KR 또는 Name_EN 매칭)
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ss.getSheetByName('M_Drivers');
@@ -216,6 +343,8 @@ function _loginAction(payload) {
     if (pinIdx === -1) return {ok: false, error: 'PIN column missing'};
 
     let matched = null;
+    let matchedRow = -1;
+    let storedPinPlaintext = false;
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       const nameKr = String(row[nameKrIdx] || '').trim();
@@ -224,16 +353,45 @@ function _loginAction(payload) {
       if (active && active !== 'Y' && active !== '') continue;
       if (nameKr === nameInput || nameEn === nameInput) {
         const storedPin = String(row[pinIdx] || '').trim();
-        if (storedPin && storedPin === pinInput) {
+        // 저장된 이름(시트의 KR)으로 해시 검증해야 일관성 유지
+        const verifyName = nameKr || nameEn;
+        if (storedPin && _verifyPin(storedPin, pinInput, verifyName)) {
           matched = { nameKr, nameEn };
+          matchedRow = i + 1;
+          storedPinPlaintext = (storedPin.indexOf(PIN_HASH_PREFIX) !== 0);
           break;
         }
       }
     }
 
     if (!matched) {
-      // 실패는 구체적 사유 노출 안 함 (사용자 열거 방지)
-      return {ok: false, error: 'invalid credentials'};
+      // 실패 기록 + 락 카운트 증가
+      const failResult = _recordAuthFail(nameInput);
+      // 사용자 열거 방지를 위해 일관된 에러 메시지
+      const resp = {ok: false, error: 'invalid credentials'};
+      // 락 임박 경고
+      if (failResult.locked) {
+        resp.reason = 'now_locked';
+        resp.message = '로그인 시도가 너무 많아 계정이 ' + Math.ceil(AUTH_LOCK_MS / 60000) + '분간 잠겼습니다.';
+      } else if (failResult.failCount >= AUTH_MAX_FAILS - 2) {
+        resp.warning = 'attempts_remaining';
+        resp.attemptsLeft = AUTH_MAX_FAILS - failResult.failCount;
+      }
+      return resp;
+    }
+
+    // 로그인 성공 → 실패 카운트 클리어
+    _clearAuthFails(nameInput);
+
+    // ── 평문 PIN 자동 업그레이드 (성공 시에만) ──
+    if (storedPinPlaintext && matchedRow > 0) {
+      try {
+        const verifyName = matched.nameKr || matched.nameEn;
+        const hashed = _hashPin(pinInput, verifyName);
+        sheet.getRange(matchedRow, pinIdx + 1).setValue(hashed);
+      } catch (e) {
+        // 업그레이드 실패해도 로그인은 진행
+      }
     }
 
     // 관리자 여부 판정
@@ -342,6 +500,79 @@ function _cleanupExpiredTokens() {
     }
   } catch (err) {
     Logger.log('cleanup error: ' + err.toString());
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 보안 관리 유틸 함수 (Apps Script 에디터에서 직접 실행)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 일회성 PIN 마이그레이션: M_Drivers의 모든 평문 PIN을 해시로 변환
+ * Apps Script 에디터에서 함수 선택 → 실행
+ * (자동 업그레이드도 작동하므로 필수는 아님 — 첫 로그인 시 자동 변환됨)
+ */
+function migrateAllPinsToHash() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('M_Drivers');
+    if (!sheet) { Logger.log('M_Drivers not found'); return; }
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) { Logger.log('no drivers'); return; }
+    const headers = data[0].map(String);
+    const krIdx = headers.indexOf('Name_KR');
+    const enIdx = headers.indexOf('Name_EN');
+    const pinIdx = headers.indexOf('PIN');
+    if (pinIdx === -1) { Logger.log('PIN column not found'); return; }
+
+    let migrated = 0;
+    let alreadyHashed = 0;
+    let skipped = 0;
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const pin = String(row[pinIdx] || '').trim();
+      const verifyName = String(row[krIdx] || row[enIdx] || '').trim();
+      if (!pin) { skipped++; continue; }
+      if (pin.indexOf(PIN_HASH_PREFIX) === 0) { alreadyHashed++; continue; }
+      if (!verifyName) { skipped++; continue; }
+      const hashed = _hashPin(pin, verifyName);
+      sheet.getRange(i + 1, pinIdx + 1).setValue(hashed);
+      migrated++;
+    }
+    const summary = '✅ PIN 마이그레이션 완료\n  변환: ' + migrated + '명\n  이미 해시: ' + alreadyHashed + '명\n  건너뜀(빈 PIN/이름 없음): ' + skipped + '명';
+    Logger.log(summary);
+    return summary;
+  } catch (err) {
+    Logger.log('migration error: ' + err.toString());
+    return 'error: ' + err.toString();
+  }
+}
+
+/**
+ * 관리자용: 특정 사용자의 로그인 잠금 해제
+ * Apps Script 에디터에서 _adminUnlockUser 함수의 name을 바꿔서 실행
+ */
+function _adminUnlockUser() {
+  const name = '최동철'; // ← 잠금 해제할 사용자 이름으로 변경
+  _clearAuthFails(name);
+  Logger.log('✅ 잠금 해제: ' + name);
+  return 'unlocked: ' + name;
+}
+
+/**
+ * 관리자용: 모든 활성 토큰 강제 무효화 (전체 로그아웃)
+ * 보안 사고 발생 시 사용
+ */
+function _adminInvalidateAllTokens() {
+  try {
+    const sheet = _getAuthSheet();
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+    Logger.log('✅ 모든 토큰 무효화됨');
+    return 'all tokens cleared';
+  } catch (err) {
+    Logger.log('error: ' + err.toString());
+    return 'error: ' + err.toString();
   }
 }
 
@@ -1317,6 +1548,21 @@ function addMasterRow(sheetName, data) {
       const nk = normalizeKey(h);
       return normMap[nk] !== undefined ? normMap[nk] : '';
     });
+
+    // ── M_Drivers의 PIN은 해시화 (이미 해시면 그대로) ──
+    if (sheetName === 'M_Drivers') {
+      const pinColIdx = headers.indexOf('PIN');
+      const krIdx = headers.indexOf('Name_KR');
+      const enIdx = headers.indexOf('Name_EN');
+      if (pinColIdx >= 0 && row[pinColIdx]) {
+        const rawPin = String(row[pinColIdx] || '').trim();
+        if (rawPin && rawPin.indexOf(PIN_HASH_PREFIX) !== 0) {
+          const verifyName = String(row[krIdx] || row[enIdx] || '').trim();
+          row[pinColIdx] = _hashPin(rawPin, verifyName);
+        }
+      }
+    }
+
     sheet.appendRow(row);
 
     return {ok: true, row: sheet.getLastRow()};
@@ -1404,6 +1650,20 @@ function updateMasterRow(sheetName, rowIndex, data) {
     // 정확한 키 먼저, 없으면 정규화 키로 fallback (공백↔언더스코어 불일치 허용)
     const normMap = buildNormMap(data);
     var PHONE_COL_NAMES = ['phone','mobile','mobile_1','mobile_2','moblie_2'];
+
+    // ── M_Drivers 업데이트 시 기존 PIN 보존을 위한 사전 조회 ──
+    // _stripPinFromDrivers로 클라이언트에서 PIN이 빠진 상태로 오기 때문에,
+    // payload에 PIN이 없거나 빈 값이면 기존 PIN을 유지해야 함.
+    let existingPinValue = null;
+    if (sheetName === 'M_Drivers') {
+      const pinColIdx = headers.indexOf('PIN');
+      if (pinColIdx >= 0) {
+        try {
+          existingPinValue = sheet.getRange(ri, pinColIdx + 1).getValue();
+        } catch(e){ existingPinValue = null; }
+      }
+    }
+
     const row = headers.map((h, i) => {
       let val;
       if (data[h] !== undefined) val = data[h];
@@ -1416,6 +1676,36 @@ function updateMasterRow(sheetName, rowIndex, data) {
         let s = String(val).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
         if (s.length === 9) s = '0' + s;
         val = s;
+      }
+      // ★ M_Drivers의 PIN 컬럼: 빈 값이면 기존 값 보존, 평문이면 해시화
+      if (sheetName === 'M_Drivers' && h === 'PIN') {
+        const incoming = String(val || '').trim();
+        if (!incoming || incoming === '••••' || incoming === '****') {
+          // payload에 PIN이 없거나 마스킹 → 기존 값 유지
+          val = existingPinValue !== null ? existingPinValue : '';
+        } else if (incoming.indexOf(PIN_HASH_PREFIX) !== 0) {
+          // 평문 PIN이면 해시화 (4자리 이상 숫자 검증)
+          if (/^\d{4,}$/.test(incoming)) {
+            const krIdx = headers.indexOf('Name_KR');
+            const enIdx = headers.indexOf('Name_EN');
+            const verifyName = String(row[krIdx] !== undefined ? data[headers[krIdx]] || normMap[normalizeKey(headers[krIdx])] : '') ||
+                               String(data[headers[enIdx]] || '') || '';
+            // verifyName이 빈 경우 시트에서 가져옴
+            let nameForHash = verifyName;
+            if (!nameForHash) {
+              try {
+                const krVal = krIdx >= 0 ? sheet.getRange(ri, krIdx + 1).getValue() : '';
+                const enVal = enIdx >= 0 ? sheet.getRange(ri, enIdx + 1).getValue() : '';
+                nameForHash = String(krVal || enVal || '').trim();
+              } catch(e){}
+            }
+            val = _hashPin(incoming, nameForHash);
+          } else {
+            // 형식 불량 → 기존 값 유지 (안전 우선)
+            val = existingPinValue !== null ? existingPinValue : '';
+          }
+        }
+        // 이미 해시면 그대로 사용
       }
       return val;
     });
@@ -1455,11 +1745,66 @@ function replaceMasterSheet(sheetName, rows) {
     const sheet = ensureSheet(ss, sheetName);
     const headers = MASTER_HEADERS[sheetName];
 
+    // ── M_Drivers 일괄 교체 시 기존 PIN 백업 (이름 → PIN 맵) ──
+    // 클라이언트가 _stripPinFromDrivers로 PIN 없이 보내기 때문에, 빈 값이 와도
+    // 원래 PIN을 보존해야 한다.
+    let pinBackup = null;
+    if (sheetName === 'M_Drivers') {
+      pinBackup = {};
+      try {
+        const lastR = sheet.getLastRow();
+        const lastC = sheet.getLastColumn();
+        if (lastR > 1 && lastC > 0) {
+          const existingHeaders = sheet.getRange(1, 1, 1, lastC).getValues()[0].map(String);
+          const krIdx = existingHeaders.indexOf('Name_KR');
+          const enIdx = existingHeaders.indexOf('Name_EN');
+          const pinIdx = existingHeaders.indexOf('PIN');
+          if (pinIdx >= 0 && (krIdx >= 0 || enIdx >= 0)) {
+            const existing = sheet.getRange(2, 1, lastR - 1, lastC).getValues();
+            existing.forEach(r => {
+              const kr = krIdx >= 0 ? String(r[krIdx] || '').trim() : '';
+              const en = enIdx >= 0 ? String(r[enIdx] || '').trim() : '';
+              const pin = String(r[pinIdx] || '').trim();
+              if (pin) {
+                if (kr) pinBackup[kr] = pin;
+                if (en) pinBackup[en] = pin;
+              }
+            });
+          }
+        }
+      } catch(e){ pinBackup = {}; }
+    }
+
     const lastRow = sheet.getLastRow();
     if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
 
     if (rows && rows.length > 0) {
-      const data = rows.map(obj => headers.map(h => obj[h] !== undefined ? obj[h] : ''));
+      const data = rows.map(obj => headers.map(h => {
+        let val = obj[h] !== undefined ? obj[h] : '';
+        // ── M_Drivers PIN 복원/해시 처리 ──
+        if (sheetName === 'M_Drivers' && h === 'PIN') {
+          const incoming = String(val || '').trim();
+          if (!incoming || incoming === '••••' || incoming === '****') {
+            // 비어있으면 백업에서 복원
+            const kr = String(obj['Name_KR'] || '').trim();
+            const en = String(obj['Name_EN'] || '').trim();
+            val = (pinBackup && (pinBackup[kr] || pinBackup[en])) || '';
+          } else if (incoming.indexOf(PIN_HASH_PREFIX) !== 0) {
+            // 평문이면 해시화 (4자리 이상 숫자만)
+            if (/^\d{4,}$/.test(incoming)) {
+              const verifyName = String(obj['Name_KR'] || obj['Name_EN'] || '').trim();
+              val = _hashPin(incoming, verifyName);
+            } else {
+              // 형식 불량 → 백업 복원
+              const kr = String(obj['Name_KR'] || '').trim();
+              const en = String(obj['Name_EN'] || '').trim();
+              val = (pinBackup && (pinBackup[kr] || pinBackup[en])) || '';
+            }
+          }
+          // 이미 해시면 그대로
+        }
+        return val;
+      }));
       sheet.getRange(2, 1, data.length, headers.length).setValues(data);
     }
 
@@ -1623,9 +1968,20 @@ function updateDriverPin(driverName, pin) {
 
     if (pinIdx === -1) return {ok: false, msg: 'PIN column not found'};
 
+    // 입력된 PIN 검증
+    const pinStr = String(pin || '').trim();
+    if (!pinStr || pinStr.length < 4 || !/^\d+$/.test(pinStr)) {
+      return {ok: false, msg: 'PIN은 4자리 이상의 숫자여야 합니다'};
+    }
+
     for (let r = 1; r < data.length; r++) {
       if (data[r][nameENIdx] === driverName || data[r][nameKRIdx] === driverName) {
-        sheet.getRange(r + 1, pinIdx + 1).setValue(pin);
+        // 시트의 KR 이름으로 해시 (로그인 시와 일관)
+        const verifyName = String(data[r][nameKRIdx] || data[r][nameENIdx] || '').trim();
+        const hashed = _hashPin(pinStr, verifyName);
+        sheet.getRange(r + 1, pinIdx + 1).setValue(hashed);
+        // PIN 변경 시 해당 사용자의 실패 카운트도 클리어
+        try { _clearAuthFails(driverName); } catch(e){}
         return {ok: true};
       }
     }
