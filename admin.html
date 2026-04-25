@@ -389,41 +389,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       localStorage.setItem('dc_admin_session', acctName);
       if(status) status.textContent = '';
       if(typeof toast==='function')toast('데이터 로딩 중...','ok');
-      // ★ 새 통합 번들 로더 (캐시 우선 + 백그라운드 갱신)
-      // 캐시 있으면 즉시 화면 표시, 없으면 await
-      if(typeof loadAdminBundle==='function'){
-        (async function(){
-          try {
-            const r = loadAdminBundle({initial: true});
-            if(!r.fromCache){
-              await r.refreshPromise; // 캐시 없으면 첫 응답 기다림
-            }
-            // 후속 작업: 캐시 적용된 직후에도 무조건 한 번 실행 (지연 데이터)
-            if(typeof loadPSFromSheets==='function'){ try { await loadPSFromSheets(); } catch(e){} }
-            if(typeof loadNoticesFromGAS==='function'){ try { await loadNoticesFromGAS(); } catch(e){} }
-            if(typeof initNoticesIfEmpty==='function'){ try { await initNoticesIfEmpty(); } catch(e){} }
-            // Leave + Fatigue (병렬)
-            try {
-              await Promise.allSettled([
-                (typeof loadAdminLeaves==='function' ? loadAdminLeaves() : Promise.resolve()),
-                (typeof loadFatigueAlerts==='function' ? loadFatigueAlerts() : Promise.resolve())
-              ]);
-            } catch(e){}
-            try { rDash(); } catch(e){}
-            try { if(typeof initTabBadges==='function') initTabBadges(); } catch(e){}
-            try { if(typeof startAdminAutoSync==='function') startAdminAutoSync(); } catch(e){}
-            // ✅ 데이터 로드 완료
-            if(typeof toast==='function') toast('✅ 데이터 로드 완료','ok');
-          } catch(e){
-            console.error('loadAdminBundle 흐름 실패, 폴백:', e);
-            // 실패 시 기존 방식 폴백
-            if(typeof loadAllFromSheets==='function') loadAllFromSheets();
-          }
-        })();
-      } else {
-        // 폴백 (이전 코드와 호환)
-        if(typeof loadAllFromSheets==='function') loadAllFromSheets();
-      }
+      // ★ 임시: 새 번들 로직을 비활성화하고 기존 안정적인 loadAllFromSheets 사용
+      // (디버깅 후 다시 활성화 예정)
+      if(typeof loadAllFromSheets==='function') loadAllFromSheets();
     })
     .catch(function(err){
       console.error('Login error:', err);
@@ -2143,31 +2111,8 @@ function autoRestoreAdminSession(){
   document.getElementById('sl').classList.remove('on');
   document.getElementById('sm').classList.add('on');
   document.getElementById('ddate').textContent=(()=>{const n=new Date();const dd=String(n.getDate()).padStart(2,'0');const mm=String(n.getMonth()+1).padStart(2,'0');const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+n.getFullYear()+' ('+days[n.getDay()]+')'})();
-  // ★ 통합 번들 로더 사용 (캐시 즉시 적용 + 백그라운드 갱신)
-  if(typeof loadAdminBundle==='function'){
-    (async function(){
-      try {
-        const r = loadAdminBundle({initial: true});
-        if(!r.fromCache){ await r.refreshPromise; }
-        if(typeof loadPSFromSheets==='function'){ try { await loadPSFromSheets(); } catch(e){} }
-        if(typeof loadNoticesFromGAS==='function'){ try { await loadNoticesFromGAS(); } catch(e){} }
-        try {
-          await Promise.allSettled([
-            (typeof loadAdminLeaves==='function' ? loadAdminLeaves() : Promise.resolve()),
-            (typeof loadFatigueAlerts==='function' ? loadFatigueAlerts() : Promise.resolve())
-          ]);
-        } catch(e){}
-        try { rDash(); } catch(e){}
-        try { if(typeof initTabBadges==='function') initTabBadges(); } catch(e){}
-        try { if(typeof startAdminAutoSync==='function') startAdminAutoSync(); } catch(e){}
-      } catch(e){
-        console.error('Session restore bundle 실패, 폴백:', e);
-        loadAllFromSheets();
-      }
-    })();
-  } else {
-    loadAllFromSheets();
-  }
+  // ★ 임시: 안정적인 loadAllFromSheets 사용 (디버깅 후 번들 로직 재활성화)
+  loadAllFromSheets();
 }
 
 // ═══════════════════════════════════════
@@ -14282,17 +14227,21 @@ async function loadAdminBundle(opts){
     try { rWage(); } catch(e){}
     toast('📡 캐시 적용 — 백그라운드 갱신 중...','ok');
   }
-
   // 서버 갱신 (Promise 반환 — 호출자가 await할지 결정)
   const refreshPromise = (async () => {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(()=>controller.abort(), 45000);
+      const timeout = setTimeout(()=>controller.abort(), 25000);
       const res = await fetch(APPS_SCRIPT_URL + '?action=get_admin_bundle', {signal: controller.signal});
       clearTimeout(timeout);
       if(!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
-      if(!json.ok) throw new Error(json.error || 'bundle failed');
+      if(!json.ok){
+        // 서버에서 명시적 에러 (unauthorized, forbidden, action 미지원 등)
+        const errMsg = json.error || json.reason || 'bundle failed';
+        console.error('[loadAdminBundle] 서버 응답 실패:', errMsg, json);
+        throw new Error(errMsg);
+      }
       await _applyAdminBundle(json);
       _saveAdminCache(json);
 
@@ -14311,6 +14260,7 @@ async function loadAdminBundle(opts){
       // UI 재렌더
       try { rDash(); } catch(e){}
       try { rWage(); } catch(e){}
+      console.log('[loadAdminBundle] ✅ 성공');
       return true;
     } catch(e){
       console.warn('loadAdminBundle 서버 호출 실패:', e.message);
