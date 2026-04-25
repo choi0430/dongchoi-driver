@@ -190,7 +190,8 @@ const ADMIN_ONLY_ACTIONS = [
 const ADMIN_ONLY_GET_ACTIONS = [
   'get_agency_txn', 'get_sub_txn', 'get_agency_balances',
   'get_invoices', 'get_all_leave_requests', 'get_roster',
-  'get_ledger', 'get_defect_reports'
+  'get_ledger', 'get_defect_reports',
+  'get_admin_bundle'
 ];
 
 function _getAuthSheet() {
@@ -747,6 +748,18 @@ function doGet(e) {
         if (result && result.data && result.data.M_Drivers) {
           const stripped = _stripPinFromDrivers({rows: result.data.M_Drivers});
           result.data.M_Drivers = stripped.rows;
+        }
+        return cors(result);
+      }
+
+      // ★ 관리자 앱 통합 번들 — 한 번의 openById로 모든 필요 데이터 반환
+      // 기존 6개 endpoint(get_all_masters, get_sub_rates, get_ledger, get_wages,
+      // get_notices, get_max_km, get_price_sub)를 단일 호출로 처리
+      case 'get_admin_bundle': {
+        const result = getAdminBundle();
+        if (result && result.data && result.data.masters && result.data.masters.M_Drivers) {
+          const stripped = _stripPinFromDrivers({rows: result.data.masters.M_Drivers});
+          result.data.masters.M_Drivers = stripped.rows;
         }
         return cors(result);
       }
@@ -1328,6 +1341,97 @@ function _getMasterFast(ss, sheetName) {
     });
 
     return {ok: true, sheet: sheetName, rows};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ★ 관리자 앱 통합 번들 — 단일 openById로 6+ endpoint 한번에 처리
+// 기존 흐름 (시퀀셜):
+//   get_all_masters → get_sub_rates → get_ledger → get_wages → get_notices
+//   → get_max_km → get_price_sub  (각각 openById 호출)
+// 새 흐름:
+//   openById 1회 + 모든 시트 한번에 읽기
+// ═══════════════════════════════════════════════════════════════════════════
+function getAdminBundle() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+
+    // 1) 모든 마스터 시트 (기존 getAllMasters 동일)
+    const masterSheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
+                    'M_PriceClient', 'M_PriceDriver', 'M_PriceSub', 'M_SUB',
+                    'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions',
+                    'Sub_Rates', 'Ledger', 'MOT_Report', 'HVIS_Bookings',
+                    'Maint_Records', 'Invoice_Overrides', 'Company_Profile',
+                    'Invoice_Deductions', 'Invoice_Manual_Items'];
+    const masters = {};
+    masterSheets.forEach(name => {
+      try {
+        const r = _getMasterFast(ss, name);
+        masters[name] = r.ok ? r.rows : [];
+      } catch (e) {
+        masters[name] = [];
+      }
+    });
+
+    // 2) Wages (별도 — driver 필터 없이 전체)
+    let wages = [];
+    try {
+      const wagesResult = _getMasterFast(ss, 'Wages');
+      wages = wagesResult.ok ? wagesResult.rows : [];
+    } catch (e) { wages = []; }
+
+    // 3) Notices
+    let notices = [];
+    try {
+      const noticesResult = _getMasterFast(ss, 'Notices');
+      notices = noticesResult.ok ? noticesResult.rows : [];
+    } catch (e) { notices = []; }
+
+    // 4) Max KM per Rego (Pre_Departure + Daily_Report + End_of_Shift 스캔)
+    const kmMap = {};
+    try {
+      const scanForKM = (sheetName, kmFields) => {
+        const sheet = ss.getSheetByName(sheetName);
+        if (!sheet) return;
+        const lastRow = sheet.getLastRow();
+        const lastCol = sheet.getLastColumn();
+        if (lastRow < 2 || lastCol < 1) return;
+        const data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+        const headers = data[0];
+        const regoIdx = headers.indexOf('Rego');
+        if (regoIdx < 0) return;
+        const colIdxs = kmFields.map(f => headers.indexOf(f)).filter(i => i >= 0);
+        for (let i = 1; i < data.length; i++) {
+          const row = data[i];
+          const rego = String(row[regoIdx] || '').trim();
+          if (!rego) continue;
+          colIdxs.forEach(ci => {
+            const v = parseFloat(row[ci]);
+            if (!isNaN(v) && v > 0) {
+              if (!kmMap[rego] || v > kmMap[rego]) kmMap[rego] = v;
+            }
+          });
+        }
+      };
+      scanForKM('Pre_Departure', ['Start_KM']);
+      scanForKM('Daily_Report',  ['KM_Start', 'KM_End']);
+      scanForKM('End_of_Shift',  ['End_KM']);
+    } catch (e) { /* km 실패해도 진행 */ }
+
+    return {
+      ok: true,
+      data: {
+        masters: masters,
+        wages: wages,
+        notices: notices,
+        kmMap: kmMap,
+        // sub_rates와 ledger, price_sub은 masters에 이미 포함됨 (Sub_Rates, Ledger, M_PriceSub)
+        // 클라이언트는 masters['Sub_Rates'], masters['Ledger'], masters['M_PriceSub']로 접근
+      },
+      ts: new Date().toISOString()
+    };
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
