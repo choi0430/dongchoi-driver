@@ -10386,6 +10386,7 @@ window._saveSubInvEdit = _saveSubInvEdit;
 // BALANCE MODULE (거래처 잔액 관리: 여행사 / 외주 SUB / 드라이버)
 // ═══════════════════════════════════════════════════════════════════
 let _balAgencyTxns = [];   // Agency_Txn rows from sheet
+let _balInvoices = [];     // Invoices 시트 (PeriodTo로 정확한 due date 계산용)
 let _balSubTxns = [];      // SUB_Txn rows from sheet
 let _balWageTxns = [];     // Driver wage DR/CR from Wages+Ledger
 let _balTab = 'agency';
@@ -10424,6 +10425,7 @@ async function syncBalanceData(force){
     const invJson = await invRes.json();
     if(agJson.ok && agJson.rows) _balAgencyTxns = agJson.rows;
     if(subJson.ok && subJson.rows) _balSubTxns = subJson.rows;
+    if(invJson.ok && invJson.rows) _balInvoices = invJson.rows;
 
     // ★ Agency_Txn은 인보이스 발행(saveInvoiceToSheet) 시에만 생성됨
     // sync에서는 기존 데이터 로드만 수행 (자동 생성 없음)
@@ -11001,15 +11003,33 @@ function _buildCashFlowForWeek(targetMonISO) {
     const dr = Number(tx.DR) || 0;
     if (dr <= 0) return;
 
-    // DueDate = FinishDate + 14일 (항상 계산 — 기존 저장값은 이전 규칙일 수 있음)
-    let finISO = _tryParseDate(tx.FinishDate);
-    if (!finISO) finISO = _tryParseDate(tx.StartDate);
-    if (!finISO) finISO = _tryParseDate(tx.Date);
+    // ★ Due date 계산 — 우선순위:
+    //   1. Invoices 시트의 PeriodTo + 14일 (가장 정확 — 항상 인보이스 자체의 마지막 날짜)
+    //   2. tx.DueDate (저장 시점 값)
+    //   3. tx.FinishDate + 14일
     let dueISO = '';
-    if (finISO) {
-      const fd = new Date(finISO + 'T00:00:00');
-      fd.setDate(fd.getDate() + 14);
-      dueISO = _localISO(fd);
+    const invID = String(tx.InvoiceID||'').trim();
+    if (invID && _balInvoices && _balInvoices.length) {
+      const inv = _balInvoices.find(i => String(i.InvNumber||'').trim() === invID);
+      if (inv && inv.PeriodTo) {
+        const ptISO = _tryParseDate(inv.PeriodTo);
+        if (ptISO) {
+          const fd = new Date(ptISO + 'T00:00:00');
+          fd.setDate(fd.getDate() + 14);
+          dueISO = _localISO(fd);
+        }
+      }
+    }
+    if (!dueISO) dueISO = _tryParseDate(tx.DueDate) || '';
+    if (!dueISO) {
+      let finISO = _tryParseDate(tx.FinishDate);
+      if (!finISO) finISO = _tryParseDate(tx.StartDate);
+      if (!finISO) finISO = _tryParseDate(tx.Date);
+      if (finISO) {
+        const fd = new Date(finISO + 'T00:00:00');
+        fd.setDate(fd.getDate() + 14);
+        dueISO = _localISO(fd);
+      }
     }
     if (!dueISO) return;
     if (dueISO < monS || dueISO > sunS) return;
