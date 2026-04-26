@@ -10997,13 +10997,16 @@ function _buildWeeklyData() {
 
 /* ── Cash Flow for a specific week ── */
 let _cfWeekOffset = 0; // 0 = this week, -1 = last week, +1 = next week
+let _cfIncludeOverdue = false; // 이번 주 + 이전 미수금 포함 토글
 
-function _buildCashFlowForWeek(targetMonISO) {
+function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
   const monD = new Date(targetMonISO + 'T00:00:00');
   const sunD = new Date(monD); sunD.setDate(sunD.getDate() + 6);
   const monS = targetMonISO;
   const _localISO = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   const sunS = _localISO(sunD);
+  // 토글 ON 시 이전 미수도 포함 — 시작일을 무한 과거로 (2020-01-01)
+  const filterStartS = includeOverdue ? '2020-01-01' : monS;
 
   const receivables = []; // agency income due this week
   const subPayables = []; // sub costs due this week
@@ -11038,7 +11041,7 @@ function _buildCashFlowForWeek(targetMonISO) {
       }
     }
     if (!dueISO) return;
-    if (dueISO < monS || dueISO > sunS) return;
+    if (dueISO < filterStartS || dueISO > sunS) return;
 
     // Check unpaid balance
     const key = (tx.Agency || '') + '|' + (tx.InvoiceID || '');
@@ -11074,7 +11077,7 @@ function _buildCashFlowForWeek(targetMonISO) {
       }
     }
     if (!dueISO) return;
-    if (dueISO < monS || dueISO > sunS) return;
+    if (dueISO < filterStartS || dueISO > sunS) return;
 
     subPayables.push({
       company: tx.SubCompany || 'Unknown',
@@ -11090,7 +11093,7 @@ function _buildCashFlowForWeek(targetMonISO) {
   (_balWageTxns || []).forEach(tx => {
     const dateISO = _tryParseDate(tx.date);
     if (!dateISO) return;
-    if (dateISO < monS || dateISO > sunS) return;
+    if (dateISO < filterStartS || dateISO > sunS) return;
 
     const name = tx.driver || 'Unknown';
     if (!driverTotals[name]) driverTotals[name] = { dr: 0, cr: 0 };
@@ -11311,7 +11314,7 @@ function renderBalWeeklySummary() {
   const _lISO = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   const targetMonISO = _lISO(thisMon);
 
-  const cf = _buildCashFlowForWeek(targetMonISO);
+  const cf = _buildCashFlowForWeek(targetMonISO, _cfIncludeOverdue);
   const isThisWeek = _cfWeekOffset === 0;
   const weekTitle = isThisWeek ? '\uC774\uBC88 \uC8FC \uD604\uAE08 \uD750\uB984' : _weekLabel(targetMonISO); // 이번 주 현금 흐름
   const netColor = cf.netCashFlow >= 0 ? 'var(--gn)' : 'var(--rd)';
@@ -11327,7 +11330,13 @@ function renderBalWeeklySummary() {
       </div>
       <button onclick="_cfWeekOffset++;renderBalWeeklySummary();" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;color:var(--t2);">\uB2E4\uC74C \u25B6</button>
     </div>
-    ${!isThisWeek ? '<div style="text-align:center;margin-bottom:8px;"><button onclick="_cfWeekOffset=0;renderBalWeeklySummary();" style="background:var(--ac);color:#fff;border:none;border-radius:6px;padding:4px 14px;font-size:11px;cursor:pointer;">\uC624\uB298 \uC8FC\uAC04\uC73C\uB85C</button></div>' : ''}
+    <div style="display:flex;justify-content:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">
+      ${!isThisWeek ? '<button onclick="_cfWeekOffset=0;renderBalWeeklySummary();" style="background:var(--ac);color:#fff;border:none;border-radius:6px;padding:4px 14px;font-size:11px;cursor:pointer;">\uC624\uB298 \uC8FC\uAC04\uC73C\uB85C</button>' : ''}
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;background:${_cfIncludeOverdue?'#fef3c7':'var(--sf2)'};border:1px solid ${_cfIncludeOverdue?'#fbbf24':'var(--b1)'};border-radius:6px;padding:4px 10px;font-size:11px;color:${_cfIncludeOverdue?'#92400e':'var(--t2)'};font-weight:${_cfIncludeOverdue?'700':'500'};">
+        <input type="checkbox" ${_cfIncludeOverdue?'checked':''} onchange="_cfIncludeOverdue=this.checked;renderBalWeeklySummary();" style="margin:0;cursor:pointer;">
+        ${_cfIncludeOverdue ? '⚠️ 이전 미수금 포함' : '\uC774\uBC88 \uC8FC + \uC774\uC804 \uBBF8\uC218 \uD3EC\uD568'}
+      </label>
+    </div>
     <div style="background:${cf.netCashFlow>=0?'var(--gnd)':'var(--rdd)'};border:1px solid ${cf.netCashFlow>=0?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'};border-radius:12px;padding:14px;text-align:center;margin-bottom:10px;">
       <div style="font-size:10px;color:var(--t3);margin-bottom:4px;">\uC21C \uD604\uAE08 \uD750\uB984 (\uBC1B\uC744 \uB3C8 - \uC9C0\uAE09\uD560 \uB3C8)</div>
       <div style="font-size:24px;font-weight:800;color:${netColor};font-family:var(--fn);">${netSign}${$f(cf.netCashFlow)}</div>
@@ -11375,8 +11384,10 @@ function renderBalWeeklySummary() {
         html += '<span style="color:var(--t1);">' + escH(agency) + '</span>';
         html += '<span style="color:var(--ac);font-family:var(--fn);">' + $f(agTotal) + '</span></div>';
         items.forEach(r => {
-          html += '<div style="display:flex;justify-content:space-between;padding:1px 0 1px 10px;font-size:10px;color:var(--t3);">';
-          html += '<span>' + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')</span>';
+          // 토글 ON 시 이번 주 이전 미수금이면 ⚠ 마커
+          const isOverdue = _cfIncludeOverdue && r.dueDate < targetMonISO;
+          html += '<div style="display:flex;justify-content:space-between;padding:1px 0 1px 10px;font-size:10px;color:' + (isOverdue?'#dc2626':'var(--t3)') + ';' + (isOverdue?'font-weight:700;':'') + '">';
+          html += '<span>' + (isOverdue?'⚠ ':'') + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')</span>';
           html += '<span style="font-family:var(--fn);">' + $f(r.balance) + '</span></div>';
         });
         html += '</div>';
