@@ -1116,9 +1116,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .sm-slot-form{background:var(--sf);border:1px solid var(--ac);border-radius:8px;padding:8px;margin-top:6px;}
 .sm-slot-hdr{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t1);margin-bottom:6px;font-family:var(--fd);}
 .sm-slot-hdr b{font-weight:800;}
-.sm-slot-close{margin-left:auto;background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:2px 6px;border-radius:4px;}
+.sm-slot-close{background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:2px 6px;border-radius:4px;}
 .sm-slot-close:hover{background:#fef2f2;color:#ef4444;}
 .sm-fld{padding:6px 8px;font-size:12px;width:100%;box-sizing:border-box;}
+.sm-dr-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;font-family:var(--fd);margin-left:auto;}
+.sm-dr-badge.ok{background:#dcfce7;color:#166534;}
+.sm-dr-badge.warn{background:#fef2f2;color:#dc2626;}
 
 /* Calendar — 5 rows × slots */
 .sch-cal-table{display:grid;grid-template-columns:1fr;gap:1px;background:var(--b1);font-family:var(--fb);}
@@ -1136,7 +1139,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
 /* Slot sub-cells (3 across) within a date column */
 .sch-slot-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;width:100%;height:100%;}
-.sch-slot-cell{background:var(--sf2);padding:3px 4px;font-size:9px;line-height:1.2;font-family:var(--fd);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;display:flex;align-items:center;}
+.sch-slot-cell{background:var(--sf2);padding:3px 4px;font-size:9px;line-height:1.2;font-family:var(--fd);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;display:flex;align-items:center;letter-spacing:-0.2px;}
 .sch-slot-cell.empty{background:var(--sf);opacity:0.3;cursor:default;}
 .sch-slot-cell.invoiced{background:#fde047 !important;color:#713f12;}
 .sch-slot-cell:hover:not(.empty){filter:brightness(0.95);}
@@ -3874,9 +3877,62 @@ let _schEditTourId = null;          // 모달 편집 중인 TourID
 let _schDays = [];                  // 모달 일별 일정 데이터
 const _schCsels = {};               // {agency, guide} 검색 드롭다운 인스턴스
 const _schDayCsels = {};            // 일별 호텔/드라이버/차량 드롭다운
+let _schDRMatchIndex = null;        // {date|rego|course → DR row} 매칭 인덱스
 
 async function initSchedule(){
   await loadSchedule();
+  await _schEnsureDRCache();
+  _schBuildDRMatchIndex();
+}
+
+// DR 캐시 보장 (없으면 로드)
+async function _schEnsureDRCache(){
+  if(typeof _drCache !== 'undefined' && _drCache && _drCache.length) return;
+  try{
+    const url = APPS_SCRIPT_URL + '?action=get_reports&user=' + encodeURIComponent(getAdminUser());
+    const res = await fetch(url);
+    const json = await res.json();
+    if(json.ok && json.rows){
+      _drCache = json.rows.map((r,i) => ({...r, _rowIndex: i+2}));
+    }
+  }catch(e){
+    console.warn('DR cache load failed:', e);
+  }
+}
+
+// DR 매칭 인덱스 구축: key = `${date}|${rego}|${attraction-upper}`
+function _schBuildDRMatchIndex(){
+  _schDRMatchIndex = {};
+  if(!_drCache) return;
+  _drCache.forEach(r => {
+    const date = String(r.Date||r._iso||'').slice(0,10);
+    const rego = String(r.Rego||'').trim();
+    const att = String(r.Attraction||'').trim().toUpperCase();
+    if(!date || !rego) return;
+    const key = `${date}|${rego}|${att}`;
+    _schDRMatchIndex[key] = r;
+    // 코스 없이도 매칭할 수 있게 (date+rego만으로) — fallback
+    const fallbackKey = `${date}|${rego}|`;
+    if(!_schDRMatchIndex[fallbackKey]){
+      _schDRMatchIndex[fallbackKey] = r;
+    }
+  });
+}
+
+// 슬롯과 매칭되는 DR 찾기 (있으면 OT, Time_Start, Time_End 등 사후 데이터 반환)
+function _schFindDRForSlot(date, slot){
+  if(!_schDRMatchIndex) return null;
+  const rego = String(slot.rego||'').trim();
+  if(!date || !rego) return null;
+  const att = String(slot.course||'').trim().toUpperCase();
+  // 1. 정확 매칭 (date + rego + course)
+  if(att){
+    const key = `${date}|${rego}|${att}`;
+    if(_schDRMatchIndex[key]) return _schDRMatchIndex[key];
+  }
+  // 2. fallback (date + rego만) — 단, 같은 날 같은 차량으로 여러 코스 운행 시 첫 매칭만
+  const fallbackKey = `${date}|${rego}|`;
+  return _schDRMatchIndex[fallbackKey] || null;
 }
 
 async function loadSchedule(){
@@ -3888,6 +3944,9 @@ async function loadSchedule(){
     const json = await res.json();
     if(!json.ok) throw new Error(json.error || '조회 실패');
     _schCache = json.rows || [];
+    // DR 인덱스도 갱신
+    await _schEnsureDRCache();
+    _schBuildDRMatchIndex();
     renderScheduleList();
   }catch(e){
     if(cntEl) cntEl.textContent = '오류';
@@ -3953,23 +4012,61 @@ function renderScheduleList(){
     const pax = r.Pax ? `${r.Pax}명` : '';
     const inv = r.InvoiceID ? `<span style="background:#fef3c7;color:#b45309;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);">${escH(r.InvoiceID)}</span>` : '';
 
-    // 일별 데이터에서 차량/드라이버 요약 추출
+    // 슬롯 구조에서 차량/드라이버 추출
     const days = _schParseDays(r.TourPlan);
-    const drivers = [...new Set(days.map(d => d.driver).filter(Boolean))];
-    const regos = [...new Set(days.map(d => d.rego).filter(Boolean))];
-    const hasTrailer = days.some(d => d.trailer);
+    const driversSet = new Set();
+    const regosSet = new Set();
+    let hasTrailer = false;
+    let totalSlots = 0;
+    let matchedSlots = 0;
+    let totalActualOT = 0;
+    const today = _schToday();
+    let pastUnmatchedCount = 0;
+    days.forEach(d => {
+      if(d.trailer) hasTrailer = true;
+      ['morning','fullday','evening'].forEach(k => {
+        const s = d.slots && d.slots[k];
+        if(!s || _schIsSlotEmpty(s)) return;
+        if(s.driver) driversSet.add(s.driver);
+        if(s.rego) regosSet.add(s.rego);
+        totalSlots++;
+        const dr = _schFindDRForSlot(d.date, s);
+        if(dr){
+          matchedSlots++;
+          const ot = parseFloat(dr.OT||0);
+          if(ot > 0) totalActualOT += ot;
+        } else if(d.date < today && (s.driver || s.rego)){
+          pastUnmatchedCount++;
+        }
+      });
+    });
 
+    const drivers = [...driversSet];
+    const regos = [...regosSet];
     const driverStr = drivers.length ? `👤 ${drivers.map(escH).join('/')}` : '';
     const regoStr   = regos.length ? `🚌 ${regos.map(escH).join('/')}` : '';
     const trailer = hasTrailer ? '🚐 TRL' : '';
     const meta = [pax, seats, trailer].filter(Boolean).join(' · ');
     const people = [guide, driverStr, regoStr].filter(Boolean).join(' · ');
 
+    // DR 매칭 상태 뱃지
+    let drBadge = '';
+    if(totalSlots > 0){
+      if(matchedSlots === totalSlots){
+        drBadge = `<span style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);">▣ DR완료${totalActualOT>0?` · 실제 OT ${totalActualOT}HR`:''}</span>`;
+      } else if(matchedSlots > 0){
+        drBadge = `<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);">▣ ${matchedSlots}/${totalSlots}${totalActualOT>0?` · ${totalActualOT}HR`:''}</span>`;
+      } else if(pastUnmatchedCount > 0){
+        drBadge = `<span style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);">⚠ DR 미작성</span>`;
+      }
+    }
+
     return `<div class="sch-card s-${st}" onclick="openScheduleModal('${escH(r.TourID)}')">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
         <span class="sch-badge s-${st}">${statusLabel[st]||st}</span>
         <span style="font-size:11px;color:var(--t3);font-family:var(--fd);">${escH(period)}</span>
         ${inv}
+        ${drBadge}
       </div>
       <div style="font-size:13px;font-weight:700;color:var(--t1);margin-bottom:3px;">
         ${escH(r.Agency||'')} ${tcode ? `<span style="font-weight:500;color:var(--t2);"> · ${escH(tcode)}</span>` : ''}
@@ -4399,8 +4496,19 @@ function _smRebuildDays(){
 
     // 활성 슬롯 입력 폼
     const slotForms = SLOT_KEYS.filter(k => d.slots[k] !== null).map(k => {
+      // DR 매칭 확인
+      const matchedDR = _schFindDRForSlot(d.date, d.slots[k]);
+      const today = _schToday();
+      let drStatus = '';
+      if(matchedDR){
+        const ot = parseFloat(matchedDR.OT||0);
+        drStatus = `<span class="sm-dr-badge ok">▣ DR 매칭됨${ot>0?` · 실제 OT ${ot}HR`:' · OT 없음'}</span>`;
+      } else if(d.date < today && (d.slots[k].driver || d.slots[k].rego)){
+        drStatus = `<span class="sm-dr-badge warn">⚠ DR 미작성/미매칭 — 차량+코스 일치 확인</span>`;
+      }
       return `<div class="sm-slot-form" id="sm-slot-${i}-${k}">
         <div class="sm-slot-hdr">${SLOT_ICONS[k]} <b>${SLOT_LABELS[k]}</b>
+          ${drStatus}
           <button type="button" class="sm-slot-close" onclick="toggleSlot(${i},'${k}')" title="이 슬롯 끄기">✕</button>
         </div>
         <div class="sm-day-row">
@@ -4426,16 +4534,10 @@ function _smRebuildDays(){
             <div id="slot-driver-${i}-${k}"></div>
           </div>
         </div>
-        <div class="sm-day-row">
+        <div class="sm-day-row" style="grid-template-columns:1fr;">
           <div>
-            <div class="sm-day-lbl">코스 / 일정</div>
+            <div class="sm-day-lbl">코스 / 일정 (Attraction)</div>
             <div id="slot-course-${i}-${k}"></div>
-          </div>
-          <div>
-            <div class="sm-day-lbl">OT / 추가</div>
-            <input type="text" class="profit-finp sm-fld" placeholder="예: 3HR"
-              value="${escH(d.slots[k].ot||'')}"
-              oninput="_schDays[${i}].slots['${k}'].ot=this.value">
           </div>
         </div>
         <div class="sm-day-row">
@@ -4880,14 +4982,27 @@ function _schGetAllDays(){
   return result;
 }
 
-// 한 슬롯의 8행 표시 정보
+// 한 슬롯의 8행 표시 정보 (DR 매칭 시 실제 OT 표시)
 function _schRenderSlotRows(tour, day, slot, slotKey){
   const veh = (DB.V||[]).find(v => v.Rego === slot.rego);
   const vehLabel = veh && veh.Capacity ? `${veh.Rego}/${veh.Capacity}` : (slot.rego||'');
-  // 차량 라인에 트레일러/OT 작은 표시
   const carExtras = [];
   if(day.trailer) carExtras.push('🚐');
-  if(slot.ot) carExtras.push('+'+slot.ot);
+  // DR에서 실제 OT 가져오기
+  const dr = _schFindDRForSlot(day.date, slot);
+  if(dr){
+    const ot = parseFloat(dr.OT || 0);
+    if(ot > 0) carExtras.push(`+${ot}HR`);
+    // DR 매칭됨 마커 (▣)
+    carExtras.push('▣');
+  } else if(slot.driver || slot.rego) {
+    // DR 안 매칭됨: 일정은 있는데 보고서 없음 (운행 미완료 또는 매칭 실패)
+    const dateToday = _schToday();
+    if(day.date < dateToday){
+      // 과거 날짜 + 매칭 안됨 → 경고
+      carExtras.push('⚠');
+    }
+  }
   const carLine = [vehLabel, ...carExtras].filter(Boolean).join(' ');
   return {
     startTime: slot.startTime || '',
