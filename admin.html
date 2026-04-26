@@ -6261,6 +6261,57 @@ function renderScheduleCalendar(){
     });
   });
 
+  // ★ 같은 그룹 안에서 같은 날짜+슬롯에 여러 투어 → 자동 트랙(레인) 분할
+  // groups[key] = { date: { slotKey: {...} } } → groups[key__트랙번호] 로 분리
+  // groups 구조를 평탄화: 각 그룹의 모든 항목을 모아 트랙 알고리즘 적용
+  const splitGroups = {};
+  Object.keys(groups).forEach(grpKey => {
+    // 그룹 안의 모든 (tourID, dates 범위) 추출 — 한 투어가 여러 날짜에 걸쳐있을 수 있음
+    const tourSpans = {}; // tourID → {firstDate, lastDate, items: [{date, slotKey, data}, ...]}
+    Object.entries(groups[grpKey]).forEach(([date, slots]) => {
+      Object.entries(slots).forEach(([slotKey, data]) => {
+        const tid = data.tour.TourID;
+        if(!tourSpans[tid]) tourSpans[tid] = {firstDate: date, lastDate: date, items: []};
+        if(date < tourSpans[tid].firstDate) tourSpans[tid].firstDate = date;
+        if(date > tourSpans[tid].lastDate) tourSpans[tid].lastDate = date;
+        tourSpans[tid].items.push({date, slotKey, data});
+      });
+    });
+    // 트랙 배치 — 첫날 빠른 순으로 정렬, 각 투어를 가장 빨리 빈 트랙에 배치
+    const tourArr = Object.entries(tourSpans).sort((a,b) => {
+      if(a[1].firstDate !== b[1].firstDate) return a[1].firstDate.localeCompare(b[1].firstDate);
+      return a[0].localeCompare(b[0]);
+    });
+    const tracks = []; // [{lastDate: 'YYYY-MM-DD', items: [...]}, ...]
+    tourArr.forEach(([tid, span]) => {
+      // 빈 트랙 찾기 (lastDate < firstDate인 트랙)
+      let trackIdx = tracks.findIndex(t => t.lastDate < span.firstDate);
+      if(trackIdx < 0){
+        tracks.push({lastDate: span.lastDate, items: span.items});
+        trackIdx = tracks.length - 1;
+      } else {
+        tracks[trackIdx].lastDate = span.lastDate;
+        tracks[trackIdx].items = tracks[trackIdx].items.concat(span.items);
+      }
+    });
+    // 트랙이 1개면 원래 키 그대로, 여러 개면 트랙 번호 부여
+    if(tracks.length === 1){
+      splitGroups[grpKey] = groups[grpKey];
+    } else {
+      tracks.forEach((track, ti) => {
+        const newKey = grpKey + ' (트랙 ' + (ti+1) + ')';
+        splitGroups[newKey] = {};
+        track.items.forEach(({date, slotKey, data}) => {
+          if(!splitGroups[newKey][date]) splitGroups[newKey][date] = {};
+          splitGroups[newKey][date][slotKey] = data;
+        });
+      });
+    }
+  });
+  // groups를 splitGroups로 교체
+  Object.keys(groups).forEach(k => delete groups[k]);
+  Object.assign(groups, splitGroups);
+
   const groupKeys = Object.keys(groups).sort();
   if(groupKeys.length === 0){
     wrap.innerHTML = '<div style="padding:40px;text-align:center;color:var(--t3);font-size:12px;">이 기간에 일정이 없습니다.</div>';
