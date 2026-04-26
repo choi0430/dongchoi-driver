@@ -10596,6 +10596,7 @@ async function syncBalanceData(force){
 
     // ★ Daily_Report의 SUB 차량 운행 → SUB_Txn 자동 동기화
     //   (DC 드라이버가 SUB 차량으로 운행한 경우, getSubReportData와 동일 로직)
+    await _cleanupDuplicateSubTxn();
     await _syncDailyReportSubToSubTxn();
 
     // ★ SUB 인보이스(D1,D2...) → SUB_Txn 자동 동기화
@@ -10773,6 +10774,51 @@ async function _syncSubInvoicesToSubTxn(){
   }
 }
 
+// ★ SUB_Txn 시트의 중복 자동 정리
+// 같은 Description (DRSUB:..., LEDGER:..., SUBINV:...)을 가진 행이 여러 개면
+// 가장 작은 rowIndex만 남기고 나머지 삭제
+async function _cleanupDuplicateSubTxn(){
+  if(!_balSubTxns || !_balSubTxns.length) return;
+  const byDesc = {};
+  _balSubTxns.forEach(t => {
+    const d = String(t.Description||'').trim();
+    if(!d) return;
+    // 자동 등록 prefix만 정리 대상 (수동 거래는 보존)
+    if(!d.startsWith('DRSUB:') && !d.startsWith('LEDGER:') && !d.startsWith('SUBINV:')) return;
+    if(!byDesc[d]) byDesc[d] = [];
+    byDesc[d].push(t);
+  });
+  const dupsToDelete = [];
+  Object.entries(byDesc).forEach(([desc, rows]) => {
+    if(rows.length <= 1) return;
+    // CR(지급)이 있는 행은 보존 (이미 결제됨, 데이터 손실 방지)
+    const hasPayment = rows.some(r => Number(r.CR||0) > 0);
+    if(hasPayment) return;
+    // rowIndex 큰 것부터 정렬 (시트 행 인덱스 변동 방지)
+    rows.sort((a,b) => (b._rowIndex||0) - (a._rowIndex||0));
+    // 첫 행(가장 큰 인덱스) 제외하고 나머지 삭제
+    // → 가장 작은 인덱스(원본) 보존
+    for(let i=0; i<rows.length-1; i++){
+      if(rows[i]._rowIndex) dupsToDelete.push(rows[i]);
+    }
+  });
+  if(dupsToDelete.length === 0) return;
+  console.log('[SUB Sync] 중복 SUB_Txn 정리:', dupsToDelete.length, '건');
+  for(const t of dupsToDelete){
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'delete_sub_txn', rowIndex: t._rowIndex, _user: getAdminUser()})
+      });
+      const j = await res.json();
+      if(j.ok){
+        const idx = _balSubTxns.findIndex(x => x._rowIndex === t._rowIndex);
+        if(idx >= 0) _balSubTxns.splice(idx, 1);
+      }
+    } catch(e){ console.warn('[SUB Sync] 중복 삭제 실패:', t.Description, e); }
+  }
+}
+
 // ★ Daily_Report의 SUB 차량 운행 → SUB_Txn 자동 동기화
 // DC 드라이버가 SUB 차량으로 운행한 경우 (getSubReportData와 동일 조건):
 //   차량 owner가 DC_OWNERS에 없는 경우 → SUB 회사에 비용 발생 → SUB_Txn에 등록
@@ -10790,10 +10836,17 @@ async function _syncDailyReportSubToSubTxn(){
     }
     if(!_drCache || !_drCache.length) return;
 
-    // 기존 DRSUB 등록분 식별 (중복 방지)
+    // 기존 DRSUB 등록분 식별 (중복 방지) — key prefix만 비교
+    // DRSUB:date_rego_tour 형식의 key 부분만 추출
+    const _drsubKeyOf = (descStr) => {
+      const m = String(descStr||'').match(/^(DRSUB:\d{4}-\d{2}-\d{2}_[^_]+_[^|]*?)(?:\||$)/);
+      return m ? m[1].replace(/\s+$/,'') : '';
+    };
     const existingKeys = new Set(
-      _balSubTxns.filter(t => String(t.Description||'').startsWith('DRSUB:'))
-        .map(t => String(t.Description||''))
+      _balSubTxns
+        .filter(t => String(t.Description||'').startsWith('DRSUB:'))
+        .map(t => _drsubKeyOf(t.Description))
+        .filter(Boolean)
     );
 
     const vehicles = DB.V || [];
@@ -10826,6 +10879,19 @@ async function _syncDailyReportSubToSubTxn(){
       const drsubKey = `DRSUB:${dateISO}_${rego}_${tourCode}`;
       if(existingKeys.has(drsubKey)) return;
 
+      // 풍부한 정보 수집 — 가이드, 드라이버, 어트랙션
+      const driver = String(r.Driver||'').trim();
+      const guide = String(r.Guide||'').trim();
+      const attraction = String(calc.attraction||r.Attraction||'').trim();
+      // Remark 형식: "어트랙션 (코스) / 차량 / 투어코드 / D:드라이버 / G:가이드"
+      const remarkParts = [];
+      if(attraction) remarkParts.push(attraction);
+      if(rego) remarkParts.push(rego);
+      if(tourCode) remarkParts.push(tourCode);
+      if(driver) remarkParts.push('D:' + driver);
+      if(guide) remarkParts.push('G:' + guide);
+      const remark = remarkParts.join(' / ');
+
       newTxns.push({
         SubCompany: owner,
         Category: 'Outsourcing',
@@ -10835,7 +10901,7 @@ async function _syncDailyReportSubToSubTxn(){
         Description: drsubKey,
         DR: subCost,
         CR: 0,
-        Remark: `${calc.attraction||r.Attraction||''} / ${rego}` + (tourCode?` / ${tourCode}`:'')
+        Remark: remark
       });
     });
 
