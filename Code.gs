@@ -1351,7 +1351,7 @@ function getMaster(sheetName) {
 
 function getAllMasters() {
   try {
-    const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
+    const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels', 'M_Trailers',
                     'M_PriceClient', 'M_PriceDriver', 'M_PriceSub', 'M_SUB',
                     'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions',
                     'Sub_Rates', 'Ledger', 'MOT_Report', 'HVIS_Bookings',
@@ -1447,7 +1447,7 @@ function getAdminBundle() {
     const ss = SpreadsheetApp.openById(SHEET_ID);
 
     // 1) 모든 마스터 시트 (기존 getAllMasters 동일)
-    const masterSheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels',
+    const masterSheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels', 'M_Trailers',
                     'M_PriceClient', 'M_PriceDriver', 'M_PriceSub', 'M_SUB',
                     'M_SvcOptions', 'M_HotelOptions', 'M_DistOptions', 'M_NightRates', 'M_Attractions',
                     'Sub_Rates', 'Ledger', 'MOT_Report', 'HVIS_Bookings',
