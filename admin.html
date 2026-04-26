@@ -14462,6 +14462,122 @@ function openView(type, idx) {
 function closeView() {
   document.getElementById('view-modal').style.display = 'none';
 }
+// ─── 차량 사진 업로드 처리 ───
+// 사진을 800x600 이내, JPEG 80% 품질로 압축 후 base64로 저장
+async function handleVehiclePhotoUpload(event, side){
+  const file = event.target.files?.[0];
+  if(!file) return;
+  if(!file.type.startsWith('image/')){
+    toast('이미지 파일만 가능합니다','er');
+    return;
+  }
+  if(file.size > 15 * 1024 * 1024){ // 15MB 제한 (압축 전)
+    toast('파일이 너무 큽니다 (15MB 초과)','er');
+    return;
+  }
+  toast('🔄 사진 압축 중...','');
+  try {
+    const dataUrl = await _compressVehiclePhoto(file);
+    // 미리보기 업데이트
+    const preview = document.getElementById('fphoto_preview_' + side);
+    if(preview){
+      preview.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:contain;">`;
+    }
+    // hidden input에 저장
+    const dataInput = document.getElementById('fphoto_data_' + side);
+    if(dataInput) dataInput.value = dataUrl;
+    // 제거 버튼 추가
+    const btnContainer = preview?.nextElementSibling?.nextElementSibling;
+    if(preview?.nextElementSibling && !preview.nextElementSibling.nextElementSibling){
+      // 제거 버튼이 없으면 추가
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn brd xs';
+      removeBtn.style.cssText = 'flex:1;font-size:10px;padding:4px;';
+      removeBtn.textContent = '제거';
+      removeBtn.onclick = () => clearVehiclePhoto(side);
+      preview.nextElementSibling.appendChild(removeBtn);
+    }
+    toast('✅ 사진 업로드 완료','ok');
+  } catch(err){
+    console.error('Vehicle photo upload error:', err);
+    toast('❌ 사진 처리 실패: ' + err.message, 'er');
+  }
+  // input value 초기화 (같은 파일 다시 선택 가능하도록)
+  event.target.value = '';
+}
+
+function clearVehiclePhoto(side){
+  const preview = document.getElementById('fphoto_preview_' + side);
+  if(preview){
+    preview.innerHTML = '<span style="font-size:11px;color:#94a3b8;">📷 클릭하여 업로드</span>';
+  }
+  const dataInput = document.getElementById('fphoto_data_' + side);
+  if(dataInput) dataInput.value = '';
+  // 제거 버튼 숨김
+  const removeBtn = preview?.nextElementSibling?.querySelector('.brd');
+  if(removeBtn) removeBtn.remove();
+}
+
+// 사진 압축 — 800x600 이내, JPEG 80% (시트 셀 50,000자 한도 대응)
+function _compressVehiclePhoto(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          // 최대 800x600 이내로 비율 유지 리사이즈
+          const MAX_W = 800;
+          const MAX_H = 600;
+          let w = img.width;
+          let h = img.height;
+          if(w > MAX_W || h > MAX_H){
+            const ratio = Math.min(MAX_W / w, MAX_H / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          // JPEG 80% 품질로 base64 변환
+          let quality = 0.8;
+          let dataUrl = canvas.toDataURL('image/jpeg', quality);
+          // 시트 셀 한도 (~50,000자) 대응 — 너무 크면 점진적으로 품질 낮춤
+          while(dataUrl.length > 45000 && quality > 0.3){
+            quality -= 0.1;
+            dataUrl = canvas.toDataURL('image/jpeg', quality);
+          }
+          if(dataUrl.length > 45000){
+            // 그래도 크면 캔버스 크기 더 줄임
+            const newW = Math.round(w * 0.7);
+            const newH = Math.round(h * 0.7);
+            canvas.width = newW;
+            canvas.height = newH;
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, newW, newH);
+            ctx.drawImage(img, 0, 0, newW, newH);
+            dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+          }
+          if(dataUrl.length > 45000){
+            reject(new Error('사진 압축 후에도 너무 큼 — 더 작은 사진 사용'));
+            return;
+          }
+          resolve(dataUrl);
+        } catch(err) { reject(err); }
+      };
+      img.onerror = () => reject(new Error('이미지 로드 실패'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('파일 읽기 실패'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function openM(type,idx){
   ST.mt=type;ST.mi=idx;
   const ie=idx!==null;
@@ -14511,7 +14627,33 @@ function openM(type,idx){
         <div><label class="fl">변속기 (Transmission)</label><div class="fsw"><select class="fs" id="f15">
           <option value="Auto"${(d.Transmission||'Auto')==='Auto'?' selected':''}>🔄 Auto (자동)</option>
           <option value="Manual"${d.Transmission==='Manual'?' selected':''}>🔧 Manual (수동)</option>
-        </select></div></div></div>`;
+        </select></div></div></div>
+      <!-- ★ 차량 사진 업로드 (4면) — 데미지 체크용 도식도로 사용 -->
+      <div style="margin-top:14px;padding:12px;background:var(--sf2,#f8fafc);border-radius:10px;border:1px solid var(--bd,#e2e8f0);">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px;">📸 차량 사진 (데미지 체크용)</div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:10px;">사진을 업로드하면 드라이버 앱의 Pre Departure / End of Shift 데미지 체크 화면에서 이 사진 위에 마킹할 수 있습니다. 미업로드 시 기본 일러스트 사용.</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;">
+          ${['Front','Back','Left','Right'].map((side, i) => {
+            const fieldId = 'fphoto_' + side.toLowerCase();
+            const previewId = 'fphoto_preview_' + side.toLowerCase();
+            const photoKey = 'Photo_' + side;
+            const existingPhoto = d[photoKey] || '';
+            const labelKR = {Front:'정면',Back:'후면',Left:'좌측',Right:'우측'}[side];
+            return `<div style="background:#fff;border-radius:8px;padding:8px;border:1px solid var(--bd);">
+              <div style="font-size:11px;font-weight:700;margin-bottom:6px;text-align:center;">${side} (${labelKR})</div>
+              <div id="${previewId}" style="width:100%;aspect-ratio:4/3;background:#f1f5f9;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:6px;border:1px dashed #cbd5e1;cursor:pointer;" onclick="document.getElementById('${fieldId}').click()">
+                ${existingPhoto ? `<img src="${existingPhoto}" style="width:100%;height:100%;object-fit:contain;">` : '<span style="font-size:11px;color:#94a3b8;">📷 클릭하여 업로드</span>'}
+              </div>
+              <input type="file" id="${fieldId}" accept="image/*" capture="environment" style="display:none;" onchange="handleVehiclePhotoUpload(event, '${side.toLowerCase()}')">
+              <div style="display:flex;gap:4px;">
+                <button type="button" class="btn bgh xs" style="flex:1;font-size:10px;padding:4px;" onclick="document.getElementById('${fieldId}').click()">${existingPhoto ? '교체' : '선택'}</button>
+                ${existingPhoto ? `<button type="button" class="btn brd xs" style="flex:1;font-size:10px;padding:4px;" onclick="clearVehiclePhoto('${side.toLowerCase()}')">제거</button>` : ''}
+              </div>
+              <input type="hidden" id="fphoto_data_${side.toLowerCase()}" value="${existingPhoto}">
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
   }
   else if(type==='D'){
     const nokName = d.NEXT_OF_KIN||d['NEXT OF KIN']||'';
@@ -14725,13 +14867,19 @@ function saveM(){
     if(!gv('f0')){toast('차량번호 필수','er');return}
     sheetName='M_Vehicles';
     const _prevV = ie ? DB.V[idx] : {};
+    // 사진 데이터 (hidden input에서 추출 — 비어있으면 기존 값 유지)
+    const photoF = document.getElementById('fphoto_data_front')?.value || _prevV.Photo_Front || '';
+    const photoB = document.getElementById('fphoto_data_back')?.value || _prevV.Photo_Back || '';
+    const photoL = document.getElementById('fphoto_data_left')?.value || _prevV.Photo_Left || '';
+    const photoR = document.getElementById('fphoto_data_right')?.value || _prevV.Photo_Right || '';
     obj={_rowIndex:ie?(_prevV?._rowIndex||null):null,
          Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),Manufacture_Date:gn('f4'),
          Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:fmtDate(gv('f7')),HVIS_Date:fmtDate(gv('f8')),
          Current_KM: _prevV.Current_KM||0,
          Next_Service_KM:gn('f9'),
          VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14'),Transmission:gv('f15')||'Auto',
-         Active: _prevV.Active||''};
+         Active: _prevV.Active||'',
+         Photo_Front: photoF, Photo_Back: photoB, Photo_Left: photoL, Photo_Right: photoR};
     ie?DB.V[idx]=obj:DB.V.push(obj);
     // 서브 차량이면 DB.PS에 슬롯 보장
     if(obj.Owner && !DC_OWNERS.includes(obj.Owner) && !DB.PS[obj.Owner]) DB.PS[obj.Owner]={};
