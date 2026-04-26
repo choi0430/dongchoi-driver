@@ -1280,6 +1280,14 @@ function doGet(e) {
         return cors(getScheduleStats());
       }
 
+      case 'get_driver_schedule': {
+        // 드라이버에게 배정된 일정 조회 (드라이버 앱용 — 인증 불필요, 드라이버 식별만)
+        const driver = e.parameter.driver || '';
+        const from = e.parameter.from || '';
+        const to = e.parameter.to || '';
+        return cors(getDriverSchedule(driver, from, to));
+      }
+
       case 'get_sub_rates':
         return cors(getSubRatesSheet());
 
@@ -4861,6 +4869,95 @@ function getSchedule(filters) {
     if (filters.to)     rows = rows.filter(r => String(r.StartDate||'') <= filters.to);
     rows.sort((a, b) => String(b.StartDate||'').localeCompare(String(a.StartDate||'')));
     return { ok: true, rows: rows };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * 드라이버에게 배정된 일정 조회
+ * driver: 드라이버 한국어 이름 (예: "최동철")
+ * from/to: 'YYYY-MM-DD' (해당 범위에 일부라도 걸치는 일정 반환)
+ * 반환: 일별 슬롯 평탄화 [{ tourId, tourCode, agency, date, slotKey, slot, hotel, guide, guidePhone, pax, seats, flightIn, flightOut, status }]
+ */
+function getDriverSchedule(driver, from, to) {
+  try {
+    if (!driver) return { ok: true, slots: [] };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Schedule');
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { ok: true, slots: [] };
+    const headers = data[0];
+    const DATE_FIELDS = ['StartDate','EndDate'];
+    const idx = {};
+    headers.forEach((h, ci) => idx[h] = ci);
+
+    const result = [];
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const status = String(row[idx.Status]||'').trim();
+      if (status === 'cancelled') continue;
+      // 날짜 범위 체크
+      const sd = row[idx.StartDate] instanceof Date ? Utilities.formatDate(row[idx.StartDate], 'Australia/Sydney', 'yyyy-MM-dd') : String(row[idx.StartDate]||'').slice(0,10);
+      const ed = row[idx.EndDate] instanceof Date ? Utilities.formatDate(row[idx.EndDate], 'Australia/Sydney', 'yyyy-MM-dd') : String(row[idx.EndDate]||'').slice(0,10);
+      if (from && ed && ed < from) continue;
+      if (to && sd && sd > to) continue;
+
+      // TourPlan 파싱
+      let days = [];
+      try { days = JSON.parse(row[idx.TourPlan] || '[]'); } catch(e) { continue; }
+      if (!Array.isArray(days)) continue;
+
+      const tourId = row[idx.TourID];
+      const tourCode = row[idx.TourCode] || '';
+      const agency = row[idx.Agency] || '';
+      const guide = row[idx.Guide] || '';
+      const guidePhone = row[idx.GuidePhone] || '';
+      const pax = row[idx.Pax] || '';
+      const seats = row[idx.Seats] || '';
+      const flightIn = row[idx.FlightIn] || '';
+      const flightOut = row[idx.FlightOut] || '';
+      const hotel = row[idx.Hotel] || '';
+
+      days.forEach(d => {
+        if (!d || !d.date) return;
+        const dateStr = String(d.date).slice(0,10);
+        if (from && dateStr < from) return;
+        if (to && dateStr > to) return;
+        // 그 날 트레일러 사용 여부
+        const trailer = !!d.trailer;
+        ['morning','fullday','evening'].forEach(slotKey => {
+          const slot = d.slots && d.slots[slotKey];
+          if (!slot) return;
+          // 드라이버 매칭
+          if (String(slot.driver||'').trim() !== String(driver).trim()) return;
+          result.push({
+            tourId: tourId,
+            tourCode: tourCode,
+            agency: agency,
+            date: dateStr,
+            slotKey: slotKey,
+            slot: slot,
+            hotel: hotel,
+            trailer: trailer,
+            guide: guide,
+            guidePhone: guidePhone,
+            pax: pax,
+            seats: seats,
+            flightIn: flightIn,
+            flightOut: flightOut,
+            status: status
+          });
+        });
+      });
+    }
+    // 날짜순 정렬 → 같은 날 슬롯 순
+    const slotOrder = { morning: 0, fullday: 1, evening: 2 };
+    result.sort((a,b) => {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return slotOrder[a.slotKey] - slotOrder[b.slotKey];
+    });
+    return { ok: true, slots: result };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
