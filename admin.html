@@ -11132,14 +11132,18 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
   });
 
   const totalIn = roundMoney(receivables.reduce((s, r) => s + r.balance, 0));
+  // 받은 돈 합계 (이번 주 due 항목 중 이미 paid된 금액)
+  const totalCollected = roundMoney(receivables.reduce((s, r) => s + (r.paid || 0), 0));
   const totalSubOut = roundMoney(subPayables.reduce((s, r) => s + (r.balance!==undefined?r.balance:r.amount), 0));
+  // 지급한 서브 합계
+  const totalSubPaid = roundMoney(subPayables.reduce((s, r) => s + (r.paid || 0), 0));
   // 드라이버: 실제 지급해야 할 금액 (발생-지급, 마이너스면 0)
   const totalWageEarned = roundMoney(driverPay.reduce((s, r) => s + r.earned, 0));
   const totalWagePaid = roundMoney(driverPay.reduce((s, r) => s + r.paid, 0));
   const totalWageOut = roundMoney(Math.max(0, totalWageEarned - totalWagePaid));
   return {
     receivables, subPayables, driverPay,
-    totalIn, totalSubOut, totalWageOut, totalWageEarned, totalWagePaid,
+    totalIn, totalCollected, totalSubOut, totalSubPaid, totalWageOut, totalWageEarned, totalWagePaid,
     netCashFlow: roundMoney(totalIn - totalSubOut - totalWageOut)
   };
 }
@@ -11357,22 +11361,32 @@ function renderBalWeeklySummary() {
       </label>
     </div>
     <div style="background:${cf.netCashFlow>=0?'var(--gnd)':'var(--rdd)'};border:1px solid ${cf.netCashFlow>=0?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'};border-radius:12px;padding:14px;text-align:center;margin-bottom:10px;">
-      <div style="font-size:10px;color:var(--t3);margin-bottom:4px;">\uC21C \uD604\uAE08 \uD750\uB984 (\uBC1B\uC744 \uB3C8 - \uC9C0\uAE09\uD560 \uB3C8)</div>
+      <div style="font-size:10px;color:var(--t3);margin-bottom:4px;">\uC21C \uD604\uAE08 \uD750\uB984 (\uB354 \ubc1b\uc544\uc57c \ud560 \ub3c8 - \ub354 \uc9c0\uae09\ud574\uc57c \ud560 \ub3c8)</div>
       <div style="font-size:24px;font-weight:800;color:${netColor};font-family:var(--fn);">${netSign}${$f(cf.netCashFlow)}</div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
-      <div style="background:var(--acd);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:8px;text-align:center;">
-        <div style="font-size:9px;color:var(--t3);">\uBC1B\uC744 \uB3C8</div>
-        <div style="font-size:14px;font-weight:700;color:var(--ac);font-family:var(--fn);">${$f(cf.totalIn)}</div>
+    <!-- 4분할 카드: 받음/받아야 할 / 지급함/지급해야 할 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+      <!-- IN: 받은 돈 -->
+      <div style="background:var(--gnd);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:8px;">
+        <div style="font-size:9px;color:var(--t3);text-align:center;margin-bottom:2px;">\uC774\ubc88 \uc8fc \ubc1b\uc740 \ub3c8</div>
+        <div style="font-size:14px;font-weight:700;color:var(--gn);font-family:var(--fn);text-align:center;">✓ ${$f(cf.totalCollected||0)}</div>
       </div>
-      <div style="background:var(--rdd);border:1px solid rgba(239,68,68,.15);border-radius:10px;padding:8px;text-align:center;">
-        <div style="font-size:9px;color:var(--t3);">\uC11C\uBE0C \uC9C0\uAE09</div>
-        <div style="font-size:14px;font-weight:700;color:var(--or);font-family:var(--fn);">${$f(cf.totalSubOut)}</div>
+      <!-- IN: 더 받아야 할 돈 -->
+      <div style="background:var(--acd);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:8px;">
+        <div style="font-size:9px;color:var(--t3);text-align:center;margin-bottom:2px;">\ub354 \ubc1b\uc544\uc57c \ud560 \ub3c8</div>
+        <div style="font-size:14px;font-weight:700;color:var(--ac);font-family:var(--fn);text-align:center;">${$f(cf.totalIn)}</div>
       </div>
-      <div style="background:var(--rdd);border:1px solid rgba(239,68,68,.15);border-radius:10px;padding:8px;text-align:center;">
-        <div style="font-size:9px;color:var(--t3);">\uB4DC\uB77C\uC774\uBC84 \uBBF8\uC9C0\uAE09</div>
-        <div style="font-size:14px;font-weight:700;color:var(--rd);font-family:var(--fn);">${$f(cf.totalWageOut)}</div>
-        <div style="font-size:8px;color:var(--t3);">\uBC1C\uC0DD ${$f(cf.totalWageEarned)}</div>
+      <!-- OUT: 지급한 돈 -->
+      <div style="background:var(--gnd);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:8px;">
+        <div style="font-size:9px;color:var(--t3);text-align:center;margin-bottom:2px;">\uC774\ubc88 \uc8fc \uc9c0\uae09\ud55c \ub3c8</div>
+        <div style="font-size:14px;font-weight:700;color:var(--gn);font-family:var(--fn);text-align:center;">✓ ${$f((cf.totalSubPaid||0) + (cf.totalWagePaid||0))}</div>
+        <div style="font-size:8px;color:var(--t3);text-align:center;margin-top:2px;">서브 ${$f(cf.totalSubPaid||0)} · 급여 ${$f(cf.totalWagePaid||0)}</div>
+      </div>
+      <!-- OUT: 더 지급해야 할 돈 -->
+      <div style="background:var(--rdd);border:1px solid rgba(239,68,68,.15);border-radius:10px;padding:8px;">
+        <div style="font-size:9px;color:var(--t3);text-align:center;margin-bottom:2px;">\ub354 \uc9c0\uae09\ud574\uc57c \ud560 \ub3c8</div>
+        <div style="font-size:14px;font-weight:700;color:var(--rd);font-family:var(--fn);text-align:center;">${$f(cf.totalSubOut + cf.totalWageOut)}</div>
+        <div style="font-size:8px;color:var(--t3);text-align:center;margin-top:2px;">서브 ${$f(cf.totalSubOut)} · 급여 ${$f(cf.totalWageOut)}</div>
       </div>
     </div>`;
 
