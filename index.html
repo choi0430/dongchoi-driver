@@ -3335,6 +3335,26 @@ function postToSheetsWithRetry(action, data) {
     .then(r => {
       if(r?.ok) {
         showToast('☁️ Google Sheets 저장됨', 'success');
+      } else if(r?.code === 'VEHICLE_LOCKED' || r?.code === 'TRAILER_LOCKED') {
+        // ★ 잠금 충돌 — 재시도 큐에 넣지 않고 사용자에게 모달 알림
+        console.error('잠금 충돌:', r);
+        const msg = r.error || '다른 드라이버가 사용 중입니다.';
+        showToast('🔒 ' + msg, 'error');
+        if(r.code === 'VEHICLE_LOCKED' && r.conflict){
+          // 차량 잠금 모달 호출 (이미 있는 함수 활용)
+          if(typeof showLockedVehicleModal === 'function'){
+            showLockedVehicleModal(r.conflict.rego, r.conflict);
+          }
+        }
+        // 로컬 활성 shift 제거 (서버에서 거부됐으므로)
+        if(action === 'save_predeparture' && data.Rego && currentDriver?.name){
+          activeShifts = activeShifts.filter(s => !(s.rego === data.Rego && s.date === data.Date));
+          localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+          editingShiftId = null;
+          if(typeof renderShiftSection === 'function') renderShiftSection();
+          // Pre Departure 화면으로 되돌림
+          if(typeof goStep === 'function') goStep(1);
+        }
       } else {
         console.warn('Sheets 저장 실패, 큐에 추가:', r);
         addToRetryQueue(action, data);
