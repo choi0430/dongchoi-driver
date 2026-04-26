@@ -7967,9 +7967,9 @@ async function emailSubSettlement(subOwner) {
   const to = document.getElementById('settle-to')?.value||'';
 
   const subCo = (_subCompanies||[]).find(s=>s.SubName===subOwner) || {};
-  let toEmail = (subCo.Email||'').trim();
+  let toEmail = normalizeEmails(subCo.Email||'');
   if(!toEmail) {
-    toEmail = (prompt(`${subOwner}의 이메일 주소를 입력하세요:`, '')||'').trim();
+    toEmail = normalizeEmails(prompt(`${subOwner}의 이메일 주소를 입력하세요 (콤마/세미콜론으로 여러 개 가능):`, '')||'');
     if(!toEmail) return;
   }
 
@@ -12871,6 +12871,18 @@ function _manualItemsToRows(agency, from) {
 // ═══════════════════════════════════════
 
 // Dong Choi Pty Ltd 발행자 정보
+// 이메일 정규화: 콤마/세미콜론/공백/줄바꿈으로 구분된 여러 주소를
+// GmailApp이 인식 가능한 콤마+공백 형식으로 변환
+// "a@x.com; b@y.com\nc@z.com  d@w.com" → "a@x.com, b@y.com, c@z.com, d@w.com"
+function normalizeEmails(s){
+  if(!s) return '';
+  return String(s)
+    .split(/[,;\s\n\r]+/)
+    .map(e => e.trim())
+    .filter(e => e && e.includes('@'))
+    .join(', ');
+}
+
 const DC_COMPANY = {
   name:    'DONG CHOI PTY LTD',
   abn:     '',
@@ -14648,10 +14660,10 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
   if (!agency || !periodFrom || !periodTo) { toast('⚠️ 인보이스 정보가 부족합니다','er'); return; }
 
   const client = DB.C.find(c => c.Name === agency) || {};
-  let toEmail  = (client.Email || '').trim();
-  const ccEmail = (client.Email_CC || '').trim();
+  let toEmail  = normalizeEmails(client.Email || '');
+  const ccEmail = normalizeEmails(client.Email_CC || '');
   if (!toEmail) {
-    toEmail = (prompt(`${agency}의 이메일 주소를 입력하세요:`, '') || '').trim();
+    toEmail = normalizeEmails(prompt(`${agency}의 이메일 주소를 입력하세요 (콤마/세미콜론으로 여러 개 가능):`, '') || '');
     if (!toEmail) return;
   }
   const ccInfo = ccEmail ? `\nCC: ${ccEmail}` : '';
@@ -14700,9 +14712,9 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
           const _sm = _manualJSON ? JSON.parse(_manualJSON) : [];
           const _savedRows = _si.map(item => {
             const hasIndiv = item.hotel!==undefined || item.dist!==undefined || item.trailer!==undefined;
-            return { _iso:item.date||'', Date:item.date||'', Attraction:item.tour||'-', Rego:item.rego||'', Seats:item.seats||'', Driver:item.driver||'', Tour_Code:item.tourcode||'', Pickup:item.pickup||'', Dropoff:item.dropoff||'', _timeStart:item.timeStart||'', _timeEnd:item.timeEnd||'', _manual:true, _rateSource:item.rateSource||'price_table', SVC_Charge:item.base||0, OT:item.ot||0, Hotel_Surcharge:hasIndiv?(item.hotel||0):(item.extra||0), Dist_Surcharge:item.dist||0, Early:item.early||0, Parking:item.parking||0, Trailer:item.trailer||0, Night_DR:item.night||0, Tip:item.tip||0, Meal:item.meal||0, Toll:item.toll||0, Etc:item.etc||0 };
+            return { _iso:item.date||'', Date:item.date||'', Attraction:item.tour||'-', Rego:item.rego||'', Seats:item.seats||'', Driver:item.driver||'', Guide:item.guide||'', Tour_Code:item.tourcode||'', Pickup:item.pickup||'', Dropoff:item.dropoff||'', _timeStart:item.timeStart||'', _timeEnd:item.timeEnd||'', _manual:true, _rateSource:item.rateSource||'price_table', SVC_Charge:item.base||0, OT:item.ot||0, Hotel_Surcharge:hasIndiv?(item.hotel||0):(item.extra||0), Dist_Surcharge:item.dist||0, Early:item.early||0, Parking:item.parking||0, Trailer:item.trailer||0, Night_DR:item.night||0, Tip:item.tip||0, Meal:item.meal||0, Toll:item.toll||0, Etc:item.etc||0 };
           });
-          _sm.forEach(m => { _savedRows.push({ _iso:parseToISO(m.date)||m.date||'', Date:m.date||'', Attraction:m.tour||'-', Rego:m.rego||'', Seats:m.seats||'', Driver:m.driver||'', Tour_Code:m.tourcode||'', Pickup:m.pickup||'', Dropoff:m.dropoff||'', _timeStart:m.start||'', _timeEnd:m.end||'', _manual:true, SVC_Charge:m.amount||0, OT:m.ot||0, Hotel_Surcharge:m.hotel||0, Dist_Surcharge:m.dist||0, Early:m.early||0, Parking:m.parking||0, Trailer:m.trailer||0, Night_DR:m.night||0, Tip:m.tip||0, Meal:m.meal||0, Toll:m.toll||0, Etc:m.etc||0 }); });
+          _sm.forEach(m => { _savedRows.push({ _iso:parseToISO(m.date)||m.date||'', Date:m.date||'', Attraction:m.tour||'-', Rego:m.rego||'', Seats:m.seats||'', Driver:m.driver||'', Guide:m.guide||'', Tour_Code:m.tourcode||'', Pickup:m.pickup||'', Dropoff:m.dropoff||'', _timeStart:m.start||'', _timeEnd:m.end||'', _manual:true, SVC_Charge:m.amount||0, OT:m.ot||0, Hotel_Surcharge:m.hotel||0, Dist_Surcharge:m.dist||0, Early:m.early||0, Parking:m.parking||0, Trailer:m.trailer||0, Night_DR:m.night||0, Tip:m.tip||0, Meal:m.meal||0, Toll:m.toll||0, Etc:m.etc||0 }); });
           _savedRows.sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
           const _origExcl = _invExcludes, _origOver = _invOverrides;
           _invExcludes = {}; _invOverrides = {};
@@ -15787,8 +15799,8 @@ async function emailInvoice() {
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
 
   const client = DB.C.find(c => c.Name === agency) || {};
-  let toEmail  = (client.Email || '').trim();
-  const ccEmail = (client.Email_CC || '').trim();
+  let toEmail  = normalizeEmails(client.Email || '');
+  const ccEmail = normalizeEmails(client.Email_CC || '');
   // ★ 현재 여행사/기간에 맞는 번호 조회 (이력 → 현재 생성분 → 신규 순)
   const invNum = getExistingOrNewInvNum(agency, from);
 
@@ -15804,7 +15816,7 @@ async function emailInvoice() {
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
 
   if (!toEmail) {
-    toEmail = (prompt(`${agency}의 이메일 주소를 입력하세요:\n(여행사 정보에 이메일을 등록하면 자동으로 불러옵니다)`, '') || '').trim();
+    toEmail = normalizeEmails(prompt(`${agency}의 이메일 주소를 입력하세요 (콤마/세미콜론으로 여러 개 가능):\n(여행사 정보에 이메일을 등록하면 자동으로 불러옵니다)`, '') || '');
     if (!toEmail) return;
   }
 
@@ -21777,15 +21789,15 @@ async function emailQuotation() {
   if (_quoItems.length===0) { toast('견적 항목을 추가하세요','er'); return; }
 
   const client = (DB.C||[]).find(c=>c.Name===agency)||{};
-  let toEmail = (client.Email||'').trim();
-  const ccEmailQuo = (client.Email_CC||'').trim();
+  let toEmail = normalizeEmails(client.Email||'');
+  const ccEmailQuo = normalizeEmails(client.Email_CC||'');
   const quoNum = _quoNum();
   const grandTotal = _quoItems.reduce((s,i)=>s+((i.price||0)+(i.ot||0)+(i.extra||0))*(i.qty||1),0);
   const validDate = document.getElementById('quo-valid')?.value||'';
   const fd = ds => ds ? fmtDate(ds)||ds : '—';
 
   if (!toEmail) {
-    toEmail = (prompt(`${agency||'고객'}의 이메일 주소를 입력하세요:\n(여행사 정보에 이메일을 등록하면 자동으로 불러옵니다)`,'') || '').trim();
+    toEmail = normalizeEmails(prompt(`${agency||'고객'}의 이메일 주소를 입력하세요 (콤마/세미콜론으로 여러 개 가능):\n(여행사 정보에 이메일을 등록하면 자동으로 불러옵니다)`,'') || '');
     if (!toEmail) return;
   }
 
