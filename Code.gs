@@ -3497,10 +3497,18 @@ function deleteInvoice(invNumber) {
  */
 function sendInvoiceEmail(payload) {
   try {
-    const to        = (payload.to || '').trim();
+    // 다중 이메일 정규화: 콤마/세미콜론/공백/줄바꿈으로 구분된 여러 주소 → "a@x.com, b@y.com" 형식
+    function _normEmails(s){
+      if(!s) return '';
+      return String(s).split(/[,;\s\n\r]+/)
+        .map(e => e.trim())
+        .filter(e => e && e.indexOf('@') !== -1)
+        .join(', ');
+    }
+    const to        = _normEmails(payload.to);
     const subject   = (payload.subject || '').trim();
     const body      = (payload.body || '').trim();
-    const cc        = (payload.cc || '').trim();
+    const cc        = _normEmails(payload.cc);
     const name      = payload.senderName || 'Dong Choi Pty Ltd';
     const replyTo   = (payload.replyTo || '').trim();
     const pdfBase64 = payload.pdfBase64 || '';
