@@ -45,7 +45,7 @@ const MASTER_HEADERS = {
   'M_Clients':  ['Name','ClientID','ABN','Mobile','Email','Email_CC','Address','Bank_Name','BSB','Account_Number'],
   'M_Guides':   ['GuideID','Guide_Name','Mobile','Agency','Email','Remarks'],
   'M_Hotels':   ['Hotel_Name','Phone','Address','Surcharge_Area'],
-  'M_Trailers': ['Trailer_Number','Owner','Capacity','Notes','Active'],
+  'M_Trailers': ['Trailer_Number','Owner','Capacity','Rego_Date','ESafety_Date','Notes','Active'],
   'M_PriceClient': ['Agency','Course','max_hours','seats_21_rate','seats_21_ot',
                     'seats_25_rate','seats_25_ot','seats_40_rate','seats_40_ot',
                     'seats_50_rate','seats_50_ot'],
@@ -590,15 +590,36 @@ function migrateAddTrailerSystem() {
     ensureColumn('Pre_Departure', 'Trailer_Number', 'Signature');
     ensureColumn('M_Drivers', 'Owner', 'PIN');
 
-    // M_Trailers 시트 생성
+    // M_Trailers 시트 생성 또는 컬럼 추가
     let tSheet = ss.getSheetByName('M_Trailers');
     if (!tSheet) {
       tSheet = ss.insertSheet('M_Trailers');
-      tSheet.getRange(1, 1, 1, 5).setValues([['Trailer_Number','Owner','Capacity','Notes','Active']]);
-      tSheet.getRange(1, 1, 1, 5).setFontWeight('bold');
+      tSheet.getRange(1, 1, 1, 7).setValues([['Trailer_Number','Owner','Capacity','Rego_Date','ESafety_Date','Notes','Active']]);
+      tSheet.getRange(1, 1, 1, 7).setFontWeight('bold');
       tSheet.setFrozenRows(1);
       log.push('M_Trailers: created');
     } else {
+      // 기존 시트라면 새 컬럼 추가 (있으면 스킵)
+      const existing = tSheet.getRange(1, 1, 1, tSheet.getLastColumn()).getValues()[0];
+      // Capacity 다음에 Rego_Date, ESafety_Date 순서로
+      const insertIfMissing = (col, afterCol) => {
+        if (existing.indexOf(col) >= 0) return;
+        const afterIdx = existing.indexOf(afterCol);
+        if (afterIdx >= 0) {
+          tSheet.insertColumnAfter(afterIdx + 1);
+          tSheet.getRange(1, afterIdx + 2).setValue(col);
+          existing.splice(afterIdx + 1, 0, col);
+          log.push('M_Trailers.' + col + ': inserted after ' + afterCol);
+        } else {
+          tSheet.getRange(1, tSheet.getLastColumn() + 1).setValue(col);
+          existing.push(col);
+          log.push('M_Trailers.' + col + ': appended');
+        }
+      };
+      insertIfMissing('Rego_Date', 'Capacity');
+      insertIfMissing('ESafety_Date', 'Rego_Date');
+      // 이전 마이그레이션에서 잘못 추가된 HVIS_Date 컬럼은 그대로 둠 (데이터 손실 방지)
+      // 사용자가 직접 삭제 가능
       log.push('M_Trailers: already exists');
     }
 
