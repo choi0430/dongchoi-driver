@@ -206,7 +206,7 @@ const ADMIN_ONLY_GET_ACTIONS = [
   'get_agency_txn', 'get_sub_txn', 'get_agency_balances',
   'get_invoices', 'get_all_leave_requests', 'get_roster',
   'get_ledger', 'get_defect_reports',
-  'get_admin_bundle'
+  'get_admin_bundle', 'get_audit_log'
 ];
 
 function _getAuthSheet() {
@@ -801,6 +801,239 @@ function _migratePlainPinsWithNewSecret() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 자동 백업 시스템 (Daily Backup System)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 목적: 데이터 손상/실수 삭제 시 복구 가능하도록 매일 자동 백업
+// 흐름:
+//   1) 매일 새벽 2시 (Sydney 시간) 시간 트리거 → runDailyBackup() 실행
+//   2) 같은 스프레드시트에 _BACKUP_YYYYMMDD 형태로 시트 복제
+//   3) 7일 지난 백업은 자동 삭제 (BACKUP_RETENTION_DAYS)
+//
+// 사용법:
+//   • 트리거 등록: setupBackupTrigger() 한 번만 실행
+//   • 즉시 백업: runDailyBackup() 실행
+//   • 트리거 제거: removeBackupTrigger() 실행
+//   • 복구: 백업 시트 내용을 원본 시트에 복사
+//
+// 백업되는 시트 목록은 BACKUP_SHEETS 상수에서 관리
+// ═══════════════════════════════════════════════════════════════════════════
+
+const BACKUP_RETENTION_DAYS = 7;
+const BACKUP_SHEET_PREFIX = '_BAK_';
+
+// 백업 대상 시트 (운영에 핵심적인 데이터만)
+const BACKUP_SHEETS = [
+  'Daily_Report', 'Pre_Departure', 'End_of_Shift',
+  'M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels', 'M_Trailers',
+  'M_PriceClient', 'M_PriceDriver', 'M_PriceSub', 'M_SUB',
+  'M_NightRates',
+  'Wages', 'Ledger',
+  'Invoices', 'Invoice_Manual_Items', 'Invoice_Deductions',
+  'Notices', 'Defect_Reports',
+  'Leave_Requests', 'MOT_Report',
+  'Agency_Txn', 'Sub_Txn',
+  'Company_Profile'
+];
+
+/**
+ * 매일 자동 백업 실행 (트리거에서 호출됨)
+ * 또는 수동으로 GAS 에디터에서 실행 가능
+ */
+function runDailyBackup() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const today = new Date();
+    const dateStr = Utilities.formatDate(today, 'Australia/Sydney', 'yyyyMMdd');
+    const backupSuffix = BACKUP_SHEET_PREFIX + dateStr;
+    const log = [];
+    log.push('═══ 자동 백업 시작: ' + dateStr + ' ═══');
+
+    let successCount = 0;
+    let skipCount = 0;
+    let errorCount = 0;
+
+    // 1) 백업할 시트들 복제
+    BACKUP_SHEETS.forEach(sheetName => {
+      try {
+        const srcSheet = ss.getSheetByName(sheetName);
+        if (!srcSheet) {
+          log.push('  ⚠️ ' + sheetName + ': 원본 없음 (스킵)');
+          skipCount++;
+          return;
+        }
+        const backupName = sheetName + backupSuffix;
+        // 이미 같은 날짜 백업이 있으면 스킵 (멱등성)
+        const existing = ss.getSheetByName(backupName);
+        if (existing) {
+          log.push('  ⏭️ ' + backupName + ': 이미 존재 (스킵)');
+          skipCount++;
+          return;
+        }
+        // 시트 복제
+        const copy = srcSheet.copyTo(ss);
+        copy.setName(backupName);
+        // 백업 시트는 숨김 처리 (원본과 헷갈림 방지)
+        copy.hideSheet();
+        log.push('  ✅ ' + backupName);
+        successCount++;
+      } catch(e) {
+        log.push('  ❌ ' + sheetName + ': ' + e.toString());
+        errorCount++;
+      }
+    });
+
+    log.push('───');
+    log.push('성공: ' + successCount + ' / 스킵: ' + skipCount + ' / 실패: ' + errorCount);
+
+    // 2) 오래된 백업 삭제 (7일 이상)
+    log.push('═══ 오래된 백업 삭제 ═══');
+    const cutoffDate = new Date(today.getTime() - BACKUP_RETENTION_DAYS * 86400000);
+    const allSheets = ss.getSheets();
+    let deletedCount = 0;
+    allSheets.forEach(sh => {
+      const name = sh.getName();
+      // 백업 시트 패턴: <원본이름>_BAK_YYYYMMDD
+      const m = name.match(/_BAK_(\d{8})$/);
+      if (!m) return;
+      const dateStr = m[1];
+      const y = parseInt(dateStr.substring(0, 4));
+      const mo = parseInt(dateStr.substring(4, 6)) - 1;
+      const d = parseInt(dateStr.substring(6, 8));
+      const sheetDate = new Date(y, mo, d);
+      if (sheetDate < cutoffDate) {
+        try {
+          ss.deleteSheet(sh);
+          log.push('  🗑️ 삭제: ' + name);
+          deletedCount++;
+        } catch(e) {
+          log.push('  ❌ 삭제 실패: ' + name + ' — ' + e.toString());
+        }
+      }
+    });
+    log.push('총 ' + deletedCount + '개 오래된 백업 삭제');
+    log.push('═══ 백업 완료 ═══');
+
+    Logger.log(log.join('\n'));
+
+    // 백업 결과를 별도 로그 시트에도 기록
+    try {
+      let logSheet = ss.getSheetByName('_Backup_Log');
+      if (!logSheet) {
+        logSheet = ss.insertSheet('_Backup_Log');
+        logSheet.getRange(1, 1, 1, 5).setValues([['Timestamp', 'Date', 'Success', 'Skipped', 'Errors']]);
+        logSheet.setFrozenRows(1);
+        logSheet.hideSheet();
+      }
+      logSheet.appendRow([new Date().toISOString(), dateStr, successCount, skipCount, errorCount]);
+    } catch(e) {}
+
+    return log.join('\n');
+  } catch (err) {
+    Logger.log('runDailyBackup error: ' + err.toString());
+    return 'error: ' + err.toString();
+  }
+}
+
+/**
+ * 백업 트리거 등록 (한 번만 실행)
+ * 매일 새벽 2시 (Sydney) runDailyBackup 자동 실행
+ */
+function setupBackupTrigger() {
+  // 기존 동일 트리거 제거 (중복 방지)
+  removeBackupTrigger();
+  // 새 트리거 등록
+  ScriptApp.newTrigger('runDailyBackup')
+    .timeBased()
+    .everyDays(1)
+    .atHour(2)
+    .inTimezone('Australia/Sydney')
+    .create();
+  Logger.log('✅ 자동 백업 트리거 등록: 매일 새벽 2시 (Sydney 시간)');
+  return 'Backup trigger created.';
+}
+
+/**
+ * 백업 트리거 제거
+ */
+function removeBackupTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === 'runDailyBackup') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  Logger.log('Removed ' + removed + ' backup trigger(s).');
+  return removed;
+}
+
+/**
+ * 백업 시트 목록 확인
+ */
+function listBackups() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheets = ss.getSheets();
+  const backups = {};
+  sheets.forEach(sh => {
+    const name = sh.getName();
+    const m = name.match(/^(.+?)_BAK_(\d{8})$/);
+    if (!m) return;
+    const orig = m[1];
+    const dateStr = m[2];
+    if (!backups[dateStr]) backups[dateStr] = [];
+    backups[dateStr].push(orig);
+  });
+  const log = ['═══ 현재 백업 목록 ═══'];
+  Object.keys(backups).sort().reverse().forEach(d => {
+    log.push(d + ' (' + backups[d].length + '개): ' + backups[d].join(', '));
+  });
+  if (Object.keys(backups).length === 0) log.push('백업 없음');
+  Logger.log(log.join('\n'));
+  return log.join('\n');
+}
+
+/**
+ * 특정 날짜 백업으로부터 시트 복원
+ * 사용법: restoreFromBackup('Daily_Report', '20260425')
+ * ⚠️ 주의: 원본 시트의 현재 데이터가 백업으로 덮어씌워짐
+ */
+function restoreFromBackup(sheetName, dateStr) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const backupName = sheetName + BACKUP_SHEET_PREFIX + dateStr;
+    const backupSheet = ss.getSheetByName(backupName);
+    if (!backupSheet) {
+      Logger.log('❌ 백업 시트 없음: ' + backupName);
+      return 'backup not found';
+    }
+    const origSheet = ss.getSheetByName(sheetName);
+    if (!origSheet) {
+      Logger.log('❌ 원본 시트 없음: ' + sheetName);
+      return 'original not found';
+    }
+    // 안전장치: 복원 전에 현재 시트를 _BAK_BEFORE_RESTORE_<timestamp>로 백업
+    const tsLabel = Utilities.formatDate(new Date(), 'Australia/Sydney', 'yyyyMMdd_HHmmss');
+    const safetyBackup = origSheet.copyTo(ss);
+    safetyBackup.setName(sheetName + '_BAK_BEFORE_RESTORE_' + tsLabel);
+    safetyBackup.hideSheet();
+    // 원본 데이터 클리어 후 백업 데이터 복사
+    origSheet.clearContents();
+    const data = backupSheet.getDataRange().getValues();
+    if (data.length > 0 && data[0].length > 0) {
+      origSheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+    }
+    Logger.log('✅ 복원 완료: ' + sheetName + ' (백업 날짜: ' + dateStr + ')');
+    Logger.log('   안전 백업: ' + safetyBackup.getName());
+    return 'restored: ' + sheetName + ' from ' + dateStr;
+  } catch (err) {
+    Logger.log('restoreFromBackup error: ' + err.toString());
+    return 'error: ' + err.toString();
+  }
+}
+
 /**
  * 관리자용: 특정 사용자의 로그인 잠금 해제
  * Apps Script 에디터에서 _adminUnlockUser 함수의 name을 바꿔서 실행
@@ -1014,6 +1247,12 @@ function doGet(e) {
           result.data.masters.M_Drivers = stripped.rows;
         }
         return cors(result);
+      }
+
+      case 'get_audit_log': {
+        // 최근 감사 로그 조회 (관리자 전용)
+        const limit = parseInt(e.parameter.limit || '200', 10);
+        return cors(getAuditLog(limit));
       }
 
       case 'get_sub_rates':
@@ -2944,6 +3183,32 @@ function appendAuditLog(user, action, sheet, rowIndex, summary) {
   } catch (e) {
     // 감사 로그 실패는 무시 (메인 작업 방해하지 않음)
     console.warn('appendAuditLog error:', e.toString());
+  }
+}
+
+/**
+ * 감사 로그 조회 (관리자 전용)
+ * 최신순으로 limit건 반환
+ */
+function getAuditLog(limit) {
+  try {
+    limit = limit || 200;
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const logSheet = ss.getSheetByName('Audit_Log');
+    if (!logSheet) return { ok: true, rows: [], total: 0 };
+    const data = logSheet.getDataRange().getValues();
+    if (data.length < 2) return { ok: true, rows: [], total: 0 };
+    const headers = data[0];
+    const rows = [];
+    // 최신순 (마지막부터)
+    for (let i = data.length - 1; i >= 1 && rows.length < limit; i--) {
+      const row = {};
+      headers.forEach((h, j) => { row[h] = data[i][j]; });
+      rows.push(row);
+    }
+    return { ok: true, rows: rows, total: data.length - 1 };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
   }
 }
 
