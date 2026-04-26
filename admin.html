@@ -4228,11 +4228,15 @@ async function onSettleTourCodeSearch(){
         return;
       }
     }
-    // 투어코드 또는 가이드 매칭되는 SUB 행만 필터링
-    const matched = _drCache.filter(r =>
-      (r.Tour_Code||'').toUpperCase().includes(tc) ||
-      (r.Guide||'').toUpperCase().includes(tc)
-    );
+    // 투어코드 또는 가이드 매칭되는 SUB 행만 필터링 (공백/하이픈 무시)
+    const tcNorm = tc.replace(/[\s\-_\.]/g, '');
+    const matched = _drCache.filter(r => {
+      const code = (r.Tour_Code||'').toUpperCase();
+      const guide = (r.Guide||'').toUpperCase();
+      const codeNorm = code.replace(/[\s\-_\.]/g, '');
+      const guideNorm = guide.replace(/[\s\-_\.]/g, '');
+      return code.includes(tc) || guide.includes(tc) || codeNorm.includes(tcNorm) || guideNorm.includes(tcNorm);
+    });
     window._settleData_tc = matched
       .map(r => {
         const calc = calcSubReport(r);
@@ -4299,10 +4303,14 @@ function renderSettleDashboard() {
   let data = filter ? baseData.filter(d=>d.subOwner===filter) : baseData;
   // 투어코드 필터링 (대소문자 무시, 부분 매칭)
   if(tcSearch){
-    data = data.filter(d => 
-      (d.tourCode||'').toUpperCase().includes(tcSearch) ||
-      (d._raw?.Guide||'').toUpperCase().includes(tcSearch)
-    );
+    const tcNorm = tcSearch.replace(/[\s\-_\.]/g, '');
+    data = data.filter(d => {
+      const code = (d.tourCode||'').toUpperCase();
+      const guide = (d._raw?.Guide||'').toUpperCase();
+      const codeNorm = code.replace(/[\s\-_\.]/g, '');
+      const guideNorm = guide.replace(/[\s\-_\.]/g, '');
+      return code.includes(tcSearch) || guide.includes(tcSearch) || codeNorm.includes(tcNorm) || guideNorm.includes(tcNorm);
+    });
   }
 
   if (!data.length) {
@@ -5683,10 +5691,14 @@ async function onSdpTourCodeSearch(){
       }
     }
     // 투어코드 매칭 + SUB 행만 필터링 → calcSubReport 적용 → 그루핑
-    const matched = _drCache.filter(r =>
-      (r.Tour_Code||'').toUpperCase().includes(tc) ||
-      (r.Guide||'').toUpperCase().includes(tc)
-    );
+    const tcNorm = tc.replace(/[\s\-_\.]/g, '');
+    const matched = _drCache.filter(r => {
+      const code = (r.Tour_Code||'').toUpperCase();
+      const guide = (r.Guide||'').toUpperCase();
+      const codeNorm = code.replace(/[\s\-_\.]/g, '');
+      const guideNorm = guide.replace(/[\s\-_\.]/g, '');
+      return code.includes(tc) || guide.includes(tc) || codeNorm.includes(tcNorm) || guideNorm.includes(tcNorm);
+    });
     const data = matched
       .map(r => {
         const calc = calcSubReport(r);
@@ -6368,9 +6380,11 @@ function addSubInvRow(){
 /* ── 투어코드 검색 → 리포트 자동 불러오기 ── */
 async function _searchByTourCode(){
   const q = (document.getElementById('sub-inv-tc-search')?.value||'').trim().toUpperCase();
-  if(!q){ toast('투어코드를 입력하세요','er'); return; }
+  if(!q){ toast('투어코드 또는 가이드를 입력하세요','er'); return; }
   const from = document.getElementById('sub-inv-from')?.value||'';
   const to   = document.getElementById('sub-inv-to')?.value||'';
+  // ★ 공백/하이픈/특수문자 제거 — "0421 PAP 21 JQ-618" ≡ "0421PAP21JQ618"
+  const qNorm = q.replace(/[\s\-_\.]/g, '');
 
   // 1) 드라이버 리포트(DB.R) 검색
   let reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
@@ -6382,7 +6396,10 @@ async function _searchByTourCode(){
   const reportMatches = reports.filter(r=>{
     const tc = (r.Tour_Code||'').trim().toUpperCase();
     const guide = (r.Guide||'').trim().toUpperCase();
-    if(!tc.includes(q) && !guide.includes(q)) return false;
+    const tcNorm = tc.replace(/[\s\-_\.]/g, '');
+    const guideNorm = guide.replace(/[\s\-_\.]/g, '');
+    // 원본 또는 정규화 버전 모두 시도
+    if(!tc.includes(q) && !guide.includes(q) && !tcNorm.includes(qNorm) && !guideNorm.includes(qNorm)) return false;
     if(from||to){
       const d = (r.Date||'').slice(0,10);
       if(from && d < from) return false;
@@ -6398,7 +6415,8 @@ async function _searchByTourCode(){
     try{ items = JSON.parse(inv.Items||'[]'); }catch(e){}
     items.forEach(it=>{
       const tc = (it.tourCode||'').trim().toUpperCase();
-      if(!tc.includes(q)) return;
+      const tcNorm = tc.replace(/[\s\-_\.]/g, '');
+      if(!tc.includes(q) && !tcNorm.includes(qNorm)) return;
       const d = (it.date||'').slice(0,10);
       if(from && d < from) return;
       if(to   && d > to) return;
