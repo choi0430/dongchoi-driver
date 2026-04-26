@@ -10590,6 +10590,10 @@ async function syncBalanceData(force){
     // ★ Ledger → SUB_Txn 자동 동기화 (외주 + Dong Choi 차량)
     await _syncLedgerToSubTxn();
 
+    // ★ Daily_Report의 SUB 차량 운행 → SUB_Txn 자동 동기화
+    //   (DC 드라이버가 SUB 차량으로 운행한 경우, getSubReportData와 동일 로직)
+    await _syncDailyReportSubToSubTxn();
+
     // ★ SUB 인보이스(D1,D2...) → SUB_Txn 자동 동기화
     await _syncSubInvoicesToSubTxn();
 
@@ -10762,6 +10766,92 @@ async function _syncSubInvoicesToSubTxn(){
     }
   } catch(e) {
     console.warn('[SUB Sync] SubInvoice→SUB_Txn 동기화 오류:', e);
+  }
+}
+
+// ★ Daily_Report의 SUB 차량 운행 → SUB_Txn 자동 동기화
+// DC 드라이버가 SUB 차량으로 운행한 경우 (getSubReportData와 동일 조건):
+//   차량 owner가 DC_OWNERS에 없는 경우 → SUB 회사에 비용 발생 → SUB_Txn에 등록
+// 고유 키: DRSUB:Date_Rego_TourCode (LEDGER와 구분)
+// 같은 운행이 LEDGER에도 있을 수 있으나 DRSUB가 더 정확 (Daily_Report 직접 기반)
+async function _syncDailyReportSubToSubTxn(){
+  try {
+    // DR 캐시 보장
+    if(!_drCache){
+      try {
+        const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+        const json = await res.json();
+        if(json.ok && json.rows) _drCache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
+      } catch(e){ console.warn('[SUB Sync] DR 로드 실패:', e); return; }
+    }
+    if(!_drCache || !_drCache.length) return;
+
+    // 기존 DRSUB 등록분 식별 (중복 방지)
+    const existingKeys = new Set(
+      _balSubTxns.filter(t => String(t.Description||'').startsWith('DRSUB:'))
+        .map(t => String(t.Description||''))
+    );
+
+    const vehicles = DB.V || [];
+    const newTxns = [];
+
+    _drCache.forEach(r => {
+      // Private 운행 제외
+      if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return;
+      const rego = (r.Rego||'').trim();
+      if(!rego) return;
+      // 차량 owner 조회
+      const veh = vehicles.find(v => v.Rego === rego);
+      if(!veh) return;
+      const owner = (veh.Owner||'').trim();
+      if(!owner) return;
+      // DC 차량 제외 (SUB 차량만)
+      if(DC_OWNERS.includes(owner)) return;
+
+      const dateISO = parseToISO(r.Date||'');
+      if(!dateISO) return;
+
+      // calcSubReport로 SUB 비용 계산
+      let calc;
+      try { calc = calcSubReport(r); } catch(e){ return; }
+      if(!calc) return;
+      const subCost = (calc.subCost?.total) || 0;
+      if(subCost <= 0) return;
+
+      const tourCode = (r.Tour_Code||'').trim();
+      const drsubKey = `DRSUB:${dateISO}_${rego}_${tourCode}`;
+      if(existingKeys.has(drsubKey)) return;
+
+      newTxns.push({
+        SubCompany: owner,
+        Category: 'Outsourcing',
+        Date: dateISO,
+        FinishDate: dateISO,
+        InvoiceNo: '',
+        Description: drsubKey,
+        DR: subCost,
+        CR: 0,
+        Remark: `${calc.attraction||r.Attraction||''} / ${rego}` + (tourCode?` / ${tourCode}`:'')
+      });
+    });
+
+    if(newTxns.length === 0) return;
+    console.log('[SUB Sync] DailyReport→SUB_Txn 자동 등록:', newTxns.length, '건');
+
+    for(const txn of newTxns) {
+      try {
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST', headers: {'Content-Type':'text/plain'},
+          body: JSON.stringify({action:'add_sub_txn', data:txn, _user:getAdminUser()})
+        });
+        const j = await res.json();
+        if(j.ok) {
+          _balSubTxns.push({...txn, _rowIndex:j.row||j.rowIndex});
+        }
+      } catch(e2) { console.warn('[SUB Sync] DRSUB 등록 실패:', txn.Description, e2); }
+    }
+  } catch(e) {
+    console.warn('[SUB Sync] DailyReport→SUB_Txn 동기화 오류:', e);
   }
 }
 
@@ -10963,25 +11053,43 @@ function _buildSubInvSuppressionIndex(){
   });
 }
 
-// LEDGER 거래가 SUBINV에 의해 가려져야 하는지 확인
+// LEDGER/DRSUB 거래가 SUBINV에 의해 가려져야 하는지 확인
 function _isSubLedgerSuppressed(t){
   const desc = String(t.Description||'');
-  if(!desc.startsWith('LEDGER:')) return false; // SUBINV 본인이나 수동 항목은 가리지 않음
+  // LEDGER (localStorage 기반) + DRSUB (Daily_Report 기반) 모두 SUBINV에 의해 가림 대상
+  if(!desc.startsWith('LEDGER:') && !desc.startsWith('DRSUB:')) return false;
   const subCo = String(t.SubCompany||'').trim().toLowerCase();
   if(!subCo) return false;
   const ranges = _subInvSuppressIdx[subCo];
   if(!ranges || !ranges.length) return false;
-  // LEDGER 거래의 날짜가 어떤 SUBINV 기간에 속하는지 확인
+  // 거래 날짜가 어떤 SUBINV 기간에 속하는지 확인
   const dateISO = _tryParseDate(t.Date);
   if(!dateISO) return false;
   return ranges.some(r => dateISO >= r.from && dateISO <= r.to);
 }
 
 function _subBalances(){
-  // ★ SUBINV 우선 정책: LEDGER가 같은 SubCompany+기간의 SUBINV에 의해 가려진 경우 제외
+  // ★ SUBINV 우선 정책: LEDGER/DRSUB가 같은 SubCompany+기간의 SUBINV에 의해 가려진 경우 제외
+  // ★ DRSUB 우선 정책: 같은 날짜+차량 운행이 LEDGER에도 있으면 DRSUB가 더 정확하므로 LEDGER 가림
+  const drsubKeys = new Set();
+  _balSubTxns.forEach(t => {
+    const desc = String(t.Description||'');
+    if(desc.startsWith('DRSUB:')){
+      // DRSUB:date_rego_tour → 동일 날짜+차량 키 추출
+      const m = desc.match(/^DRSUB:(\d{4}-\d{2}-\d{2})_([^_]+)/);
+      if(m) drsubKeys.add(m[1] + '|' + m[2]);
+    }
+  });
+
   const map = {};
   _balSubTxns.forEach(t=>{
     if(_isSubLedgerSuppressed(t)) return;
+    // LEDGER 거래가 같은 날짜+차량의 DRSUB에 의해 가려지는지 확인
+    const desc = String(t.Description||'');
+    if(desc.startsWith('LEDGER:')){
+      const m = desc.match(/^LEDGER:(\d{4}-\d{2}-\d{2})_([^_]+)/);
+      if(m && drsubKeys.has(m[1] + '|' + m[2])) return; // DRSUB 우선
+    }
     const name = t.SubCompany||'Unknown';
     const cat = t.Category||'Outsourcing';
     if(!map[name]) map[name]={name, dr:0, cr:0, wageDr:0, wageCr:0};
@@ -11310,8 +11418,24 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     }
   });
 
+  // ★ DRSUB 우선 정책 인덱스 — 같은 날짜+차량 LEDGER 가림용
+  const _drsubKeysCF = new Set();
+  (_balSubTxns || []).forEach(t => {
+    const desc = String(t.Description||'');
+    if(desc.startsWith('DRSUB:')){
+      const m = desc.match(/^DRSUB:(\d{4}-\d{2}-\d{2})_([^_]+)/);
+      if(m) _drsubKeysCF.add(m[1] + '|' + m[2]);
+    }
+  });
+
   (_balSubTxns || []).forEach(tx => {
     if(_isSubLedgerSuppressed(tx)) return; // SUBINV 우선 정책: 가림
+    // LEDGER가 같은 날짜+차량 DRSUB에 의해 가려지는지
+    const desc = String(tx.Description||'');
+    if(desc.startsWith('LEDGER:')){
+      const m = desc.match(/^LEDGER:(\d{4}-\d{2}-\d{2})_([^_]+)/);
+      if(m && _drsubKeysCF.has(m[1] + '|' + m[2])) return;
+    }
     const dr = Number(tx.DR) || 0;
     if (dr <= 0) return;
 
