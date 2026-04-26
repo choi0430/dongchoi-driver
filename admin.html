@@ -1103,8 +1103,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
     <div id="sm-err" style="display:none;background:#fef2f2;color:#ef4444;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:11px;font-weight:700;"></div>
 
-    <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;">
+    <div style="display:grid;grid-template-columns:auto auto 1fr 1fr;gap:6px;">
       <button id="sm-del-btn" onclick="deleteScheduleConfirm()" class="btn" style="padding:10px 14px;background:#ef4444;color:white;font-weight:700;display:none;">🗑️</button>
+      <button id="sm-inv-btn" onclick="openInvoiceFromSchedule()" class="btn" style="padding:10px 14px;background:#7c3aed;color:white;font-weight:700;display:none;" title="이 일정의 여행사+기간으로 인보이스 페이지 이동">📋 인보이스</button>
       <button onclick="closeScheduleModal()" class="btn bgh" style="padding:10px;font-weight:700;">취소</button>
       <button onclick="saveScheduleData()" class="btn bac" style="padding:10px;font-weight:700;">저장</button>
     </div>
@@ -4483,6 +4484,8 @@ function openScheduleModal(tourId, focusDate, focusSlot){
     tidEl.textContent = r.TourID;
     statusRow.style.display = 'block';
     delBtn.style.display = 'block';
+    const invBtn = document.getElementById('sm-inv-btn');
+    if(invBtn) invBtn.style.display = 'block';
     _schCsels.agency.setValue(r.Agency || '');
     document.getElementById('sm-tourcode').value = r.TourCode || '';
     document.getElementById('sm-start').value = _schToISO(r.StartDate);
@@ -4518,6 +4521,8 @@ function openScheduleModal(tourId, focusDate, focusSlot){
     tidEl.textContent = '';
     statusRow.style.display = 'none';
     delBtn.style.display = 'none';
+    const invBtn = document.getElementById('sm-inv-btn');
+    if(invBtn) invBtn.style.display = 'none';
     ['sm-tourcode','sm-pax','sm-seats','sm-guidephone',
      'sm-flightin','sm-flightin-date','sm-flightin-time',
      'sm-flightout','sm-flightout-date','sm-flightout-time',
@@ -4647,6 +4652,54 @@ function closeScheduleModal(){
   _schEditTourId = null;
   _schDays = [];
   Object.keys(_schDayCsels).forEach(k => delete _schDayCsels[k]);
+}
+
+// 캘린더 → 인보이스 바로가기
+// 현재 편집 중인 일정의 여행사 + 기간으로 인보이스 페이지 이동
+async function openInvoiceFromSchedule(){
+  const tourId = _schEditTourId;
+  if(!tourId){ toast('일정을 먼저 저장하세요','er'); return; }
+  const r = (_schCache||[]).find(x => x.TourID === tourId);
+  if(!r){ toast('일정 정보를 찾을 수 없습니다','er'); return; }
+
+  const agency = r.Agency || '';
+  if(!agency){ toast('여행사 정보가 없습니다','er'); return; }
+
+  // 일정의 시작일/종료일 → ISO
+  const startISO = _schToISO(r.StartDate);
+  const endISO = _schToISO(r.EndDate);
+  if(!startISO || !endISO){ toast('일정 기간 정보가 없습니다','er'); return; }
+
+  // 기간을 그 달의 1일~말일로 확장 (월별 인보이스가 일반적)
+  const startMonth = startISO.slice(0, 7); // "2026-04"
+  const [y, m] = startMonth.split('-').map(Number);
+  const periodFrom = `${y}-${String(m).padStart(2,'0')}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const periodTo = `${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+
+  // 모달 닫고 인보이스 페이지로
+  closeScheduleModal();
+  if(typeof nv === 'function'){ nv('pinv','ninv'); }
+  if(typeof initInvoice === 'function'){ initInvoice(); }
+
+  // 잠시 대기 후 폼 채움 (페이지 렌더 대기)
+  setTimeout(() => {
+    const agSel = document.getElementById('inv-agency');
+    const fromInp = document.getElementById('inv-from');
+    const toInp = document.getElementById('inv-to');
+    if(agSel) {
+      agSel.value = agency;
+      // change 이벤트로 그 여행사의 데이터 재로딩
+      agSel.dispatchEvent(new Event('change', {bubbles:true}));
+    }
+    if(fromInp) fromInp.value = periodFrom;
+    if(toInp) toInp.value = periodTo;
+    // PeriodNav 동기화
+    setTimeout(() => {
+      if(typeof loadInvReports === 'function') loadInvReports();
+      toast(`📋 ${agency} ${startMonth} 인보이스 페이지로 이동`,'ok');
+    }, 200);
+  }, 300);
 }
 
 // ═══════════════════════════════════════
@@ -12345,6 +12398,45 @@ function _invSeatKey(s){
   return m ? m[1] : '21';
 }
 
+// SUB 슬롯에서 SUB 지급 비용 자동 계산 (DB.PS = M_PriceSub 기반)
+// mode='sub' 슬롯 또는 SUB 차량을 사용하는 슬롯이 대상
+// 반환: { subCo, amount, course, seats, ot } 또는 null
+function _calcSlotSubCost(tour, day, slot, slotKey){
+  const seats = _invSeatKey(tour.Seats);
+  const course = (slot.course||'').trim();
+  if(!course) return null;
+
+  // SUB 업체 결정
+  let subCo = '';
+  const slotMode = slot.mode || 'dc';
+  if(slotMode === 'sub'){
+    subCo = (slot.subCompany||'').trim();
+  } else if(slot.rego){
+    // mode='dc'인데 차량이 SUB 차량인 경우 (시나리오 3)
+    const veh = (DB.V||[]).find(v => v.Rego === slot.rego);
+    const owner = (veh?.Owner||'').trim();
+    if(owner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(owner)){
+      subCo = owner;
+    }
+  }
+  if(!subCo) return null; // 자사 케이스
+
+  // DB.PS[subCo][course][seats] 단가 조회
+  const psCo = (typeof DB !== 'undefined' && DB.PS) ? DB.PS[subCo] : null;
+  if(!psCo) return { subCo, amount: 0, course, seats, ot: 0, _noRate: true };
+  let entry = psCo[course];
+  if(!entry){
+    const lower = course.toLowerCase();
+    const k = Object.keys(psCo).find(k => k.toLowerCase() === lower);
+    if(k) entry = psCo[k];
+  }
+  if(!entry) return { subCo, amount: 0, course, seats, ot: 0, _noRate: true };
+  const seatData = entry[seats] || entry['21'];
+  const amount = parseFloat(seatData?.rate) || 0;
+  const otRate = parseFloat(seatData?.ot) || 0;
+  return { subCo, amount, course, seats, ot: 0, _otRate: otRate };
+}
+
 // 슬롯에서 인보이스 항목 자동 계산
 // 여행사 단가표(DB.PC) + 호텔 서차지 + Early/Late 자동 적용
 // 시나리오 분기:
@@ -12499,6 +12591,7 @@ async function openInvScheduleImport(){
 
   _invSchImportData = candidates.map(c => {
     const calc = _calcSlotInvoiceItem(c.tour, c.day, c.slot, c.slotKey);
+    const subCalc = _calcSlotSubCost(c.tour, c.day, c.slot, c.slotKey);
     const isSubMode = (c.slot.mode || 'dc') === 'sub';
     const tourCode = c.tour.TourCode || c.tour.TourID || '';
     const dupKey = `${c.date}|${(calc?.tour||'').toLowerCase()}|${tourCode.toLowerCase()}`;
@@ -12506,6 +12599,7 @@ async function openInvScheduleImport(){
     return {
       ...c,
       calc,
+      subCalc, // SUB 비용 (있으면 자동 정산 대상)
       isSubMode,
       tourCode,
       isDup,
@@ -12525,14 +12619,17 @@ function _renderInvScheduleImportModal(){
   const items = _invSchImportData;
 
   let totalAmount = 0;
+  let totalSubAmount = 0;
   items.forEach(it => {
     if(!it.selected) return;
     const c = it.calc || {};
     totalAmount += (c.amount||0) + (c.hotel||0) + (c.dist||0) + (c.trailer||0) + (c.ot||0);
+    if(it.subCalc && !it.subCalc._noRate) totalSubAmount += (it.subCalc.amount||0);
   });
 
   const rowsHtml = items.map((it, idx) => {
     const c = it.calc || {};
+    const sc = it.subCalc;
     const slot = it.slot;
     const subTotal = (c.amount||0) + (c.hotel||0) + (c.dist||0) + (c.trailer||0) + (c.ot||0);
     const slotIcon = it.slotKey === 'morning' ? '🌅' : it.slotKey === 'evening' ? '🌙' : '🌞';
@@ -12540,6 +12637,15 @@ function _renderInvScheduleImportModal(){
     const dateAU = (typeof _schFmtAU === 'function') ? _schFmtAU(it.date) : it.date;
     const dupBadge = it.isDup ? '<span style="background:#fef2f2;color:#dc2626;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px;">중복</span>' : '';
     const noRateBadge = c._noRate ? '<span style="background:#fef3c7;color:#92400e;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px;">단가없음</span>' : '';
+    // SUB 비용 셀
+    let subCostHtml = '-';
+    if(sc){
+      if(sc._noRate){
+        subCostHtml = `<span style="color:#92400e;" title="${escH(sc.subCo)} 단가표 없음">⚠ ${escH(sc.subCo)}</span>`;
+      } else {
+        subCostHtml = `<span style="color:#7c3aed;font-weight:700;" title="${escH(sc.subCo)}">$${(sc.amount||0).toLocaleString()}</span>`;
+      }
+    }
     return `<tr style="border-bottom:1px solid var(--bd);">
       <td style="padding:6px 4px;text-align:center;"><input type="checkbox" ${it.selected?'checked':''} onchange="_invSchImportData[${idx}].selected=this.checked;_renderInvScheduleImportModal()"></td>
       <td style="padding:6px 4px;font-size:11px;">${dateAU}</td>
@@ -12551,6 +12657,7 @@ function _renderInvScheduleImportModal(){
       <td style="padding:6px 4px;font-size:11px;text-align:right;color:#dc2626;font-family:var(--fd);">${(c.hotel||0)>0?'$'+(c.hotel).toLocaleString():'-'}</td>
       <td style="padding:6px 4px;font-size:11px;text-align:right;color:#dc2626;font-family:var(--fd);">${(c.dist||0)>0?'$'+(c.dist).toLocaleString():'-'}</td>
       <td style="padding:6px 4px;font-size:11px;text-align:right;font-weight:700;font-family:var(--fd);">$${subTotal.toLocaleString()}</td>
+      <td style="padding:6px 4px;font-size:11px;text-align:right;font-family:var(--fd);">${subCostHtml}</td>
     </tr>`;
   }).join('');
 
@@ -12564,7 +12671,7 @@ function _renderInvScheduleImportModal(){
         <button onclick="document.getElementById('inv-sch-modal').style.display='none'" style="background:transparent;border:none;font-size:20px;cursor:pointer;">×</button>
       </div>
       <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#1e40af;">
-        💡 호텔/공항 서차지 자동 계산 · DR이 있으면 정확한 비용은 DR이 우선 · "단가없음" 항목은 수동 입력 필요
+        💡 호텔/공항 서차지 자동 · DR 있으면 정확한 비용은 DR 우선 · "단가없음" 항목은 수동 입력 필요 · <b>SUB 비용은 M_PriceSub 기준 자동 계산되어 SUB_Txn에 거래 자동 생성</b>
       </div>
       <div style="overflow:auto;flex:1;border:1px solid var(--bd);border-radius:8px;">
         <table style="width:100%;border-collapse:collapse;font-size:11px;">
@@ -12579,17 +12686,22 @@ function _renderInvScheduleImportModal(){
               <th style="padding:8px 4px;text-align:right;">기본료</th>
               <th style="padding:8px 4px;text-align:right;">호텔</th>
               <th style="padding:8px 4px;text-align:right;">서차지</th>
-              <th style="padding:8px 4px;text-align:right;">소계</th>
+              <th style="padding:8px 4px;text-align:right;">청구 소계</th>
+              <th style="padding:8px 4px;text-align:right;color:#7c3aed;">SUB 비용</th>
             </tr>
           </thead>
-          <tbody>${rowsHtml || '<tr><td colspan="10" style="padding:20px;text-align:center;color:var(--t3);">매칭된 일정 없음</td></tr>'}</tbody>
+          <tbody>${rowsHtml || '<tr><td colspan="11" style="padding:20px;text-align:center;color:var(--t3);">매칭된 일정 없음</td></tr>'}</tbody>
         </table>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;">
-        <div style="font-size:13px;font-weight:700;">선택 합계: <span style="color:var(--ac);">$${totalAmount.toLocaleString()}</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:8px;">
+        <div style="font-size:13px;display:flex;gap:16px;align-items:center;">
+          <div style="font-weight:700;">청구 합계: <span style="color:var(--ac);">$${totalAmount.toLocaleString()}</span></div>
+          ${totalSubAmount > 0 ? `<div style="font-weight:700;">SUB 지급: <span style="color:#7c3aed;">$${totalSubAmount.toLocaleString()}</span></div>
+          <div style="font-weight:700;">예상 마진: <span style="color:#16a34a;">$${(totalAmount-totalSubAmount).toLocaleString()}</span></div>` : ''}
+        </div>
         <div style="display:flex;gap:8px;">
           <button onclick="document.getElementById('inv-sch-modal').style.display='none'" style="padding:8px 16px;border:1px solid var(--bd);background:white;border-radius:6px;font-weight:700;cursor:pointer;">취소</button>
-          <button onclick="applyInvScheduleImport()" style="padding:8px 16px;border:none;background:var(--ac);color:white;border-radius:6px;font-weight:700;cursor:pointer;">선택 항목 추가</button>
+          <button onclick="applyInvScheduleImport()" style="padding:8px 16px;border:none;background:var(--ac);color:white;border-radius:6px;font-weight:700;cursor:pointer;">선택 항목 추가${totalSubAmount > 0 ? ' (+ SUB 자동 정산)' : ''}</button>
         </div>
       </div>
     </div>
@@ -12607,7 +12719,9 @@ function applyInvScheduleImport(){
   const period = (document.getElementById('inv-from')?.value || '').slice(0,7);
 
   let added = 0;
+  let subAdded = 0;
   let dayTrailerSeen = {}; // 같은 날 트레일러 중복 방지
+  const subTxnsToCreate = [];
 
   selected.forEach(it => {
     const c = it.calc || {};
@@ -12673,16 +12787,47 @@ function applyInvScheduleImport(){
         }})
       }).catch(e => console.warn('save manual item failed:', e));
     }
+
+    // ★ SUB 비용 자동 정산 — Sub_Txn에 DR(지급할 비용) 거래 추가
+    if(it.subCalc && !it.subCalc._noRate && (it.subCalc.amount||0) > 0){
+      subTxnsToCreate.push({
+        SubCompany: it.subCalc.subCo,
+        Category: 'service',
+        Date: it.date,
+        InvoiceNo: '',  // SUB가 인보이스 발행 시 채워짐, 또는 수동 입력
+        Description: `${item.tour} (${tourCode}) - ${it.subCalc.seats}S` + (it.isSubMode ? ' [SUB통째]' : ' [DC운행]'),
+        DR: it.subCalc.amount,
+        CR: 0,
+        Remark: `Schedule 자동 (${it.tour.TourID||''})`
+      });
+      subAdded++;
+    }
   });
 
   // 정렬 + 저장
   items.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
   _setInvManualItems(key, items);
 
+  // ★ SUB 거래 일괄 생성 (있으면)
+  if(subTxnsToCreate.length > 0){
+    Promise.all(subTxnsToCreate.map(txn =>
+      fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'add_sub_txn', data: txn, _user: getAdminUser()})
+      }).then(r => r.json()).catch(e => { console.warn('add_sub_txn failed:', e); return {ok:false}; })
+    )).then(results => {
+      const okCount = results.filter(r => r.ok).length;
+      if(okCount > 0){
+        toast(`✅ SUB 거래 ${okCount}건 자동 생성됨 (Sub Contract → 정산 탭에서 확인)`,'ok');
+      }
+    });
+  }
+
   document.getElementById('inv-sch-modal').style.display = 'none';
   if(typeof renderInvManualList === 'function') renderInvManualList();
   if(typeof _refreshInvPreview === 'function') _refreshInvPreview();
-  toast(`✅ ${added}건 추가됨`,'ok');
+  const subMsg = subAdded > 0 ? ` (+ SUB 거래 ${subAdded}건 자동 생성)` : '';
+  toast(`✅ ${added}건 추가됨${subMsg}`,'ok');
 }
 
 
