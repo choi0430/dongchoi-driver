@@ -11447,6 +11447,9 @@ function renderBalWeeklySummary() {
   const totWage = wageBal.reduce((s, a) => s + a.dr, 0);
   const totWagePaid = wageBal.reduce((s, a) => s + a.cr, 0);
   const totNet = roundMoney(totIncome - totSub - totWage);
+  // ★ 미수/미지급 차액 (받을 돈 - 지급할 돈)
+  const totUnpaid = roundMoney((totSub - totSubPaid) + (totWage - totWagePaid));
+  const netUnpaid = roundMoney(totReceivable - totUnpaid);
 
   listEl.innerHTML += `
     <div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-top:10px;overflow:hidden;">
@@ -11465,7 +11468,17 @@ function renderBalWeeklySummary() {
           <div style="background:var(--rdd);border-radius:8px;padding:8px;text-align:center;">
             <div style="font-size:9px;color:var(--t3);">\uCD1D \uC9C0\uCD9C</div>
             <div style="font-size:13px;font-weight:700;color:var(--rd);font-family:var(--fn);">${$f(roundMoney(totSub + totWage))}</div>
-            <div style="font-size:9px;color:var(--t3);">\uBBF8\uC9C0\uAE09 <span style="color:var(--rd);">${$f(roundMoney((totSub-totSubPaid)+(totWage-totWagePaid)))}</span></div>
+            <div style="font-size:9px;color:var(--t3);">\uBBF8\uC9C0\uAE09 <span style="color:var(--rd);">${$f(totUnpaid)}</span></div>
+          </div>
+        </div>
+        <!-- ★ 미수/미지급 차액 -->
+        <div style="background:${netUnpaid>=0?'var(--gnd)':'var(--rdd)'};border:1px solid ${netUnpaid>=0?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'};border-radius:8px;padding:10px 12px;margin-top:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <span style="font-size:11px;font-weight:600;color:var(--t2);">\uBBF8\uC218 \u2212 \uBBF8\uC9C0\uAE09 \uCC28\uC561</span>
+            <span style="font-size:14px;font-weight:800;font-family:var(--fn);color:${netUnpaid>=0?'var(--gn)':'var(--rd)'};">${netUnpaid>=0?'+':'\u2212'}${$f(Math.abs(netUnpaid))}</span>
+          </div>
+          <div style="font-size:9px;color:var(--t3);text-align:right;font-family:var(--fn);">
+            ${$f(totReceivable)} \u2212 ${$f(totUnpaid)}
           </div>
         </div>
         <div style="background:${totNet>=0?'var(--gnd)':'var(--rdd)'};border-radius:8px;padding:8px 10px;margin-top:8px;display:flex;justify-content:space-between;align-items:center;">
