@@ -1109,19 +1109,37 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .sm-day-trailer{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2);font-weight:600;cursor:pointer;padding:6px 8px;background:var(--sf2);border-radius:6px;}
 .sm-day-trailer input{margin:0;}
 
-/* Calendar */
+/* Slot toggle buttons */
+.sm-slot-toggle-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin:8px 0 6px;}
+.sm-slot-btn{padding:8px 6px;border-radius:6px;border:1px dashed var(--b2);background:var(--sf);font-size:11px;font-weight:700;color:var(--t3);cursor:pointer;font-family:var(--fd);}
+.sm-slot-btn.on{border-style:solid;border-color:var(--ac);background:var(--acd);color:var(--ac);}
+.sm-slot-form{background:var(--sf);border:1px solid var(--ac);border-radius:8px;padding:8px;margin-top:6px;}
+.sm-slot-hdr{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t1);margin-bottom:6px;font-family:var(--fd);}
+.sm-slot-hdr b{font-weight:800;}
+.sm-slot-close{margin-left:auto;background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:2px 6px;border-radius:4px;}
+.sm-slot-close:hover{background:#fef2f2;color:#ef4444;}
+.sm-fld{padding:6px 8px;font-size:12px;width:100%;box-sizing:border-box;}
+
+/* Calendar — 5 rows × slots */
 .sch-cal-table{display:grid;grid-template-columns:1fr;gap:1px;background:var(--b1);font-family:var(--fb);}
 .sch-cal-row{display:grid;gap:1px;}
 .sch-cal-headrow .sch-cal-hdr-cell{background:var(--sf2);padding:8px 4px;text-align:center;font-family:var(--fd);}
 .sch-cal-headrow .sch-cal-hdr-cell.today{background:#fff7ed;border:2px solid #f59e0b;}
 .sch-cal-grp{background:var(--sf);padding:8px 10px;font-size:11px;font-weight:800;color:var(--t1);font-family:var(--fd);display:flex;align-items:center;border-left:3px solid var(--ac);}
-.sch-cal-cell{background:var(--sf);padding:3px;min-height:50px;display:flex;flex-direction:column;gap:2px;}
-.sch-cal-cell.empty{background:var(--sf2);opacity:0.4;}
-.sch-cal-evt{background:var(--ac);color:white;border-radius:4px;padding:3px 5px;font-size:9px;cursor:pointer;line-height:1.3;font-family:var(--fd);}
-.sch-cal-evt:hover{opacity:0.85;}
-.sch-cal-evt.invoiced{background:#fde047;color:#713f12;}
-.sch-cal-evt-title{font-weight:800;font-size:10px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.sch-cal-evt-line{font-size:9px;opacity:0.95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sch-cal-grp-main{background:var(--sf2);}
+.sch-cal-rowlbl{background:var(--sf2);padding:4px 8px;font-size:9px;color:var(--t3);font-weight:700;text-align:right;font-family:var(--fd);display:flex;align-items:center;justify-content:flex-end;border-left:3px solid var(--ac);}
+.sch-cal-cell{background:var(--sf);min-height:28px;display:flex;}
+.sch-cal-cell.empty{background:var(--sf2);}
+.sch-cal-hdr-merge{background:var(--ac);color:var(--t1);padding:5px 6px;font-size:10px;font-weight:800;font-family:var(--fd);cursor:pointer;border-radius:3px;margin:1px;display:flex;align-items:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sch-cal-hdr-merge.invoiced{background:#fde047 !important;color:#713f12;}
+.sch-cal-hdr-merge:hover{filter:brightness(0.95);}
+
+/* Slot sub-cells (3 across) within a date column */
+.sch-slot-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;width:100%;height:100%;}
+.sch-slot-cell{background:var(--sf2);padding:3px 4px;font-size:9px;line-height:1.2;font-family:var(--fd);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;display:flex;align-items:center;}
+.sch-slot-cell.empty{background:var(--sf);opacity:0.3;cursor:default;}
+.sch-slot-cell.invoiced{background:#fde047 !important;color:#713f12;}
+.sch-slot-cell:hover:not(.empty){filter:brightness(0.95);}
 </style>
 
 
@@ -4205,7 +4223,10 @@ function openScheduleModal(tourId){
     const fi = document.querySelector('input[name="sm-fi-type"][value="intl"]'); if(fi) fi.checked = true;
     const fo = document.querySelector('input[name="sm-fo-type"][value="intl"]'); if(fo) fo.checked = true;
     const hint = document.getElementById('sm-coach-hint'); if(hint){ hint.style.display='none'; hint.textContent=''; }
-    _schDays = [{ date: today, hotel:'', driver:'', rego:'', course:'', ot:'', coachTime:'', trailer:false }];
+    _schDays = [{
+      date: today, hotel:'', trailer:false, ot:'',
+      slots: { morning:null, fullday: _schEmptySlot(), evening:null }
+    }];
     _smRebuildDays();
   }
 
@@ -4250,7 +4271,15 @@ function onSmDateChange(){
   const newDays = [];
   let cursor = sd;
   while(cursor <= ed){
-    newDays.push(existing[cursor] || { date: cursor, hotel:'', driver:'', rego:'', course:'', ot:'', coachTime:'', trailer:false });
+    if(existing[cursor]){
+      newDays.push(existing[cursor]);
+    } else {
+      // 새 날짜: 기본 fullday 활성화
+      newDays.push({
+        date: cursor, hotel:'', trailer:false, ot:'',
+        slots: { morning:null, fullday: _schEmptySlot(), evening:null }
+      });
+    }
     cursor = _schAddDays(cursor, 1);
   }
   _schDays = newDays;
@@ -4258,18 +4287,24 @@ function onSmDateChange(){
 }
 
 // 도착 시간 또는 국내/국제 선택 변경 → 첫날 코치 부킹 시간 자동 계산
-// 국내선: 도착 + 30분, 국제선: 도착 + 1시간
+// 우선순위: morning 슬롯 → 없으면 fullday 슬롯
 function onSmFlightInTimeChange(){
   const t = document.getElementById('sm-flightin-time').value;
   if(!t || _schDays.length === 0) return;
   const isIntl = (document.querySelector('input[name="sm-fi-type"]:checked')?.value || 'intl') === 'intl';
   const addMin = isIntl ? 60 : 30;
   const newTime = _addMinutes(t, addMin);
-  _schDays[0].coachTime = newTime;
-  // 첫날 카드의 코치 시간 input 갱신
-  const inp = document.getElementById('day-coach-0');
-  if(inp) inp.value = newTime;
-  // 힌트
+  const d = _schDays[0];
+  // 활성 슬롯 결정
+  let target = null, slotKey = null;
+  if(d.slots.morning){ target = d.slots.morning; slotKey = 'morning'; }
+  else if(d.slots.fullday){ target = d.slots.fullday; slotKey = 'fullday'; }
+  else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; slotKey = 'fullday'; }
+  target.startTime = newTime;
+  // 시작장소가 비어있으면 'AIRPORT' 자동 채움 (편의)
+  if(!target.startPlace) target.startPlace = 'AIRPORT';
+  // UI 갱신 (해당 슬롯이 안 그려져있을 수 있어 rebuild)
+  _smRebuildDays();
   const hint = document.getElementById('sm-coach-hint');
   if(hint){
     hint.textContent = `💡 첫날 픽업: ${isIntl?'국제선 +1시간':'국내선 +30분'} = ${newTime} (수정 가능)`;
@@ -4278,7 +4313,7 @@ function onSmFlightInTimeChange(){
 }
 
 // 출국 시간 또는 국내/국제 선택 변경 → 마지막날 코치 부킹 시간 자동 계산
-// 국내선: 출발 - 2시간, 국제선: 출발 - 3시간
+// 우선순위: evening 슬롯 → 없으면 fullday 슬롯
 function onSmFlightOutTimeChange(){
   const t = document.getElementById('sm-flightout-time').value;
   if(!t || _schDays.length === 0) return;
@@ -4286,9 +4321,15 @@ function onSmFlightOutTimeChange(){
   const subMin = isIntl ? 180 : 120;
   const newTime = _addMinutes(t, -subMin);
   const lastIdx = _schDays.length - 1;
-  _schDays[lastIdx].coachTime = newTime;
-  const inp = document.getElementById('day-coach-' + lastIdx);
-  if(inp) inp.value = newTime;
+  const d = _schDays[lastIdx];
+  let target = null, slotKey = null;
+  if(d.slots.evening){ target = d.slots.evening; slotKey = 'evening'; }
+  else if(d.slots.fullday){ target = d.slots.fullday; slotKey = 'fullday'; }
+  else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; slotKey = 'fullday'; }
+  target.startTime = newTime;
+  if(!target.endPlace) target.endPlace = 'AIRPORT';
+  if(!target.endTime) target.endTime = t; // 항공 출발 시간을 도착 시간으로 (편의)
+  _smRebuildDays();
   const hint = document.getElementById('sm-coach-hint');
   if(hint){
     hint.textContent = `💡 마지막날 공항: ${isIntl?'국제선 -3시간':'국내선 -2시간'} = ${newTime} (수정 가능)`;
@@ -4330,13 +4371,91 @@ function _smRebuildDays(){
   // 기존 csel 인스턴스 제거
   Object.keys(_schDayCsels).forEach(k => delete _schDayCsels[k]);
 
+  // 모든 일자에 slots 보장
+  _schDays.forEach(d => {
+    if(!d.slots) d.slots = { morning:null, fullday:null, evening:null };
+    ['morning','fullday','evening'].forEach(k => {
+      if(d.slots[k] === undefined) d.slots[k] = null;
+    });
+  });
+
+  const SLOT_KEYS = ['morning','fullday','evening'];
+  const SLOT_LABELS = { morning:'AM (샌딩)', fullday:'풀데이', evening:'PM (트랜스퍼)' };
+  const SLOT_ICONS = { morning:'🌅', fullday:'☀️', evening:'🌆' };
   const dayOfWeek = ['일','월','화','수','목','금','토'];
+
   wrap.innerHTML = _schDays.map((d, i) => {
     const dow = dayOfWeek[_schDayOfWeek(d.date)];
     const dayNum = _schDayOfWeek(d.date);
     const isWeekend = dayNum === 0 || dayNum === 6;
+
+    // 활성 슬롯 토글 버튼
+    const slotToggles = SLOT_KEYS.map(k => {
+      const active = d.slots[k] !== null;
+      return `<button type="button" class="sm-slot-btn ${active?'on':''}" onclick="toggleSlot(${i},'${k}')">
+        ${SLOT_ICONS[k]} ${SLOT_LABELS[k]}
+      </button>`;
+    }).join('');
+
+    // 활성 슬롯 입력 폼
+    const slotForms = SLOT_KEYS.filter(k => d.slots[k] !== null).map(k => {
+      return `<div class="sm-slot-form" id="sm-slot-${i}-${k}">
+        <div class="sm-slot-hdr">${SLOT_ICONS[k]} <b>${SLOT_LABELS[k]}</b>
+          <button type="button" class="sm-slot-close" onclick="toggleSlot(${i},'${k}')" title="이 슬롯 끄기">✕</button>
+        </div>
+        <div class="sm-day-row">
+          <div>
+            <div class="sm-day-lbl">시작 시간</div>
+            <input type="time" id="day-${i}-${k}-st" class="profit-finp sm-fld" value="${escH(d.slots[k].startTime||'')}"
+              oninput="_schDays[${i}].slots['${k}'].startTime=this.value">
+          </div>
+          <div>
+            <div class="sm-day-lbl">시작 장소</div>
+            <input type="text" id="day-${i}-${k}-sp" class="profit-finp sm-fld" placeholder="예: M PMT, ADGE"
+              value="${escH(d.slots[k].startPlace||'')}"
+              oninput="_schDays[${i}].slots['${k}'].startPlace=this.value">
+          </div>
+        </div>
+        <div class="sm-day-row">
+          <div>
+            <div class="sm-day-lbl">차량</div>
+            <div id="slot-rego-${i}-${k}"></div>
+          </div>
+          <div>
+            <div class="sm-day-lbl">드라이버</div>
+            <div id="slot-driver-${i}-${k}"></div>
+          </div>
+        </div>
+        <div class="sm-day-row">
+          <div>
+            <div class="sm-day-lbl">코스 / 일정</div>
+            <div id="slot-course-${i}-${k}"></div>
+          </div>
+          <div>
+            <div class="sm-day-lbl">OT / 추가</div>
+            <input type="text" class="profit-finp sm-fld" placeholder="예: 3HR"
+              value="${escH(d.slots[k].ot||'')}"
+              oninput="_schDays[${i}].slots['${k}'].ot=this.value">
+          </div>
+        </div>
+        <div class="sm-day-row">
+          <div>
+            <div class="sm-day-lbl">도착 시간</div>
+            <input type="time" id="day-${i}-${k}-et" class="profit-finp sm-fld" value="${escH(d.slots[k].endTime||'')}"
+              oninput="_schDays[${i}].slots['${k}'].endTime=this.value">
+          </div>
+          <div>
+            <div class="sm-day-lbl">도착 장소</div>
+            <input type="text" id="day-${i}-${k}-ep" class="profit-finp sm-fld" placeholder="예: HOTEL, AIRPORT"
+              value="${escH(d.slots[k].endPlace||'')}"
+              oninput="_schDays[${i}].slots['${k}'].endPlace=this.value">
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
     return `<div class="sm-day">
-      <div class="sm-day-hdr" style="display:flex;align-items:center;gap:6px;">
+      <div class="sm-day-hdr" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
         <span style="background:var(--ac);color:white;border-radius:4px;padding:1px 6px;font-size:10px;">DAY ${i+1}</span>
         <span>${escH(d.date)} (<span style="color:${isWeekend?'#ef4444':'inherit'}">${dow}</span>)</span>
       </div>
@@ -4345,40 +4464,13 @@ function _smRebuildDays(){
           <div class="sm-day-lbl">호텔 (오늘 묵을 곳)</div>
           <div id="day-hotel-${i}"></div>
         </div>
-        <div>
-          <div class="sm-day-lbl">코스 / 일정 (Attraction)</div>
-          <div id="day-course-${i}"></div>
-        </div>
-      </div>
-      <div class="sm-day-row three">
-        <div>
-          <div class="sm-day-lbl">드라이버</div>
-          <div id="day-driver-${i}"></div>
-        </div>
-        <div>
-          <div class="sm-day-lbl">차량 (Rego)</div>
-          <div id="day-rego-${i}"></div>
-        </div>
-        <div>
-          <div class="sm-day-lbl">코치 부킹 시간</div>
-          <input type="time" id="day-coach-${i}" class="profit-finp" style="width:100%;box-sizing:border-box;padding:8px 10px;font-size:12px;"
-            value="${escH(d.coachTime||'')}"
-            oninput="_schDays[${i}].coachTime=this.value">
-        </div>
-      </div>
-      <div class="sm-day-row" style="grid-template-columns:1fr 1fr;">
-        <div>
-          <div class="sm-day-lbl">OT / 추가</div>
-          <input type="text" class="profit-finp" style="width:100%;box-sizing:border-box;padding:8px 10px;font-size:12px;"
-            placeholder="예: 3HR"
-            value="${escH(d.ot||'')}"
-            oninput="_schDays[${i}].ot=this.value">
-        </div>
         <label class="sm-day-trailer" for="day-trailer-${i}" style="margin-top:14px;">
           <input type="checkbox" id="day-trailer-${i}" ${d.trailer?'checked':''} onchange="_schDays[${i}].trailer=this.checked">
-          <span>🚐 트레일러</span>
+          <span>🚐 트레일러 사용</span>
         </label>
       </div>
+      <div class="sm-slot-toggle-row">${slotToggles}</div>
+      ${slotForms}
     </div>`;
   }).join('');
 
@@ -4392,13 +4484,12 @@ function _smRebuildDays(){
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  // 코스(Attraction) 옵션: 선택된 여행사의 M_PriceClient 기준
+  // 코스(Attraction) 옵션
   const agency = (_schCsels.agency?.getValue() || _schCsels.agency?.input?.value || '').trim();
   let courseList = [];
   if(agency && DB.PC && DB.PC[agency]){
     courseList = Object.keys(DB.PC[agency]).filter(Boolean);
   }
-  // 다른 여행사의 attraction도 sub-suggest (sub로 표시)
   if(courseList.length === 0 && DB.PC){
     const allCourses = new Set();
     Object.values(DB.PC).forEach(ag => {
@@ -4427,9 +4518,9 @@ function _smRebuildDays(){
       sub: [v.Capacity, v.Owner].filter(Boolean).join(' · ')
     }));
 
-  // 각 일별 검색 드롭다운 빌드
+  // 각 일별 + 슬롯별 검색 드롭다운 빌드
   _schDays.forEach((d, i) => {
-    // 호텔 → 변경 시 그 날부터 마지막날까지 자동 전파
+    // 호텔 (날짜 단위)
     _schDayCsels['hotel-'+i] = buildSearchSelect('day-hotel-'+i, {
       items: hotelItems,
       value: d.hotel || '',
@@ -4439,82 +4530,100 @@ function _smRebuildDays(){
     });
     if(d.hotel) _schDayCsels['hotel-'+i].setValue(d.hotel);
 
-    // 코스 (Attraction)
-    _schDayCsels['course-'+i] = buildSearchSelect('day-course-'+i, {
-      items: courseItems,
-      value: d.course || '',
-      placeholder: '코스 검색 (BM, OPERA...)',
-      onSelect: (it) => { _schDays[i].course = it.value; },
-      onClear: () => { _schDays[i].course = ''; }
+    // 활성 슬롯마다 드롭다운
+    SLOT_KEYS.forEach(k => {
+      if(d.slots[k] === null) return;
+      const cellPrefix = `${i}-${k}`;
+      // 차량
+      _schDayCsels['rego-'+cellPrefix] = buildSearchSelect('slot-rego-'+cellPrefix, {
+        items: vehItems,
+        value: d.slots[k].rego || '',
+        placeholder: '차량',
+        onSelect: (it) => { _propagateSlotField(i, k, 'rego', it.value); },
+        onClear: () => { _schDays[i].slots[k].rego = ''; }
+      });
+      if(d.slots[k].rego) _schDayCsels['rego-'+cellPrefix].setValue(d.slots[k].rego);
+      // 드라이버
+      _schDayCsels['driver-'+cellPrefix] = buildSearchSelect('slot-driver-'+cellPrefix, {
+        items: driverItems,
+        value: d.slots[k].driver || '',
+        placeholder: '드라이버',
+        onSelect: (it) => { _propagateSlotField(i, k, 'driver', it.value); },
+        onClear: () => { _schDays[i].slots[k].driver = ''; }
+      });
+      if(d.slots[k].driver) _schDayCsels['driver-'+cellPrefix].setValue(d.slots[k].driver);
+      // 코스 (자유 입력 가능)
+      _schDayCsels['course-'+cellPrefix] = buildSearchSelect('slot-course-'+cellPrefix, {
+        items: courseItems,
+        value: d.slots[k].course || '',
+        placeholder: '코스 (BM, OPERA...)',
+        onSelect: (it) => { _schDays[i].slots[k].course = it.value; },
+        onClear: () => { _schDays[i].slots[k].course = ''; }
+      });
+      if(d.slots[k].course) _schDayCsels['course-'+cellPrefix].setValue(d.slots[k].course);
+      const courseInp = _schDayCsels['course-'+cellPrefix].input;
+      if(courseInp){
+        courseInp.addEventListener('input', () => { _schDays[i].slots[k].course = courseInp.value; });
+      }
     });
-    if(d.course) _schDayCsels['course-'+i].setValue(d.course);
-    // 자유 입력 허용 (입력 시 _schDays에 반영)
-    const courseInp = _schDayCsels['course-'+i].input;
-    if(courseInp){
-      courseInp.addEventListener('input', () => { _schDays[i].course = courseInp.value; });
-    }
-
-    // 드라이버 → 변경 시 그 날부터 마지막날까지 자동 전파
-    _schDayCsels['driver-'+i] = buildSearchSelect('day-driver-'+i, {
-      items: driverItems,
-      value: d.driver || '',
-      placeholder: '드라이버',
-      onSelect: (it) => { _propagateDriver(i, it.value); },
-      onClear: () => { _schDays[i].driver = ''; }
-    });
-    if(d.driver) _schDayCsels['driver-'+i].setValue(d.driver);
-
-    // 차량 → 변경 시 그 날부터 마지막날까지 자동 전파
-    _schDayCsels['rego-'+i] = buildSearchSelect('day-rego-'+i, {
-      items: vehItems,
-      value: d.rego || '',
-      placeholder: '차량',
-      onSelect: (it) => { _propagateRego(i, it.value); },
-      onClear: () => { _schDays[i].rego = ''; }
-    });
-    if(d.rego) _schDayCsels['rego-'+i].setValue(d.rego);
   });
 }
 
+// 슬롯 ON/OFF 토글
+function toggleSlot(dayIdx, slotKey){
+  const d = _schDays[dayIdx];
+  if(!d) return;
+  if(d.slots[slotKey] === null){
+    // 활성화 — 신규 슬롯
+    d.slots[slotKey] = _schEmptySlot();
+    // 호텔이 정해져 있으면 자동으로 시작/종료 장소를 호텔로 (편의)
+    if(d.hotel){
+      if(slotKey === 'morning'){ d.slots[slotKey].startPlace = d.hotel; }
+      if(slotKey === 'fullday'){ d.slots[slotKey].startPlace = d.hotel; d.slots[slotKey].endPlace = d.hotel; }
+      if(slotKey === 'evening'){ d.slots[slotKey].startPlace = d.hotel; }
+    }
+  } else {
+    // 비활성화 — 데이터 있을 시 확인
+    if(!_schIsSlotEmpty(d.slots[slotKey])){
+      if(!confirm('이 슬롯에 입력된 데이터가 있습니다. 정말 끄시겠습니까?')) return;
+    }
+    d.slots[slotKey] = null;
+  }
+  _smRebuildDays();
+}
+
 // ═══════════════════════════════════════
-// 자동 전파 헬퍼: i번째 일자 변경 시 → 그 뒤로도 같이 변경
-// (단, 그 뒤가 비어있거나 이전 값과 동일했던 경우만)
+// 자동 전파 헬퍼
 // ═══════════════════════════════════════
 function _propagateHotel(idx, newVal){
   const oldVal = _schDays[idx].hotel || '';
   _schDays[idx].hotel = newVal;
   for(let j = idx + 1; j < _schDays.length; j++){
     const cur = _schDays[j].hotel || '';
-    // 비어있거나 이전과 같은 값이면 새 값으로 전파
     if(!cur || cur === oldVal){
       _schDays[j].hotel = newVal;
       if(_schDayCsels['hotel-'+j]) _schDayCsels['hotel-'+j].setValue(newVal);
-    } else {
-      break; // 다른 값으로 명시적으로 바뀌어 있으면 멈춤
-    }
-  }
-}
-function _propagateDriver(idx, newVal){
-  const oldVal = _schDays[idx].driver || '';
-  _schDays[idx].driver = newVal;
-  for(let j = idx + 1; j < _schDays.length; j++){
-    const cur = _schDays[j].driver || '';
-    if(!cur || cur === oldVal){
-      _schDays[j].driver = newVal;
-      if(_schDayCsels['driver-'+j]) _schDayCsels['driver-'+j].setValue(newVal);
     } else {
       break;
     }
   }
 }
-function _propagateRego(idx, newVal){
-  const oldVal = _schDays[idx].rego || '';
-  _schDays[idx].rego = newVal;
+
+// 슬롯 필드(driver/rego) 자동 전파
+// 같은 슬롯 키(morning/fullday/evening) 기준으로 그 뒤 날짜로 전파
+function _propagateSlotField(idx, slotKey, field, newVal){
+  const cur = _schDays[idx].slots[slotKey];
+  if(!cur) return;
+  const oldVal = cur[field] || '';
+  cur[field] = newVal;
   for(let j = idx + 1; j < _schDays.length; j++){
-    const cur = _schDays[j].rego || '';
-    if(!cur || cur === oldVal){
-      _schDays[j].rego = newVal;
-      if(_schDayCsels['rego-'+j]) _schDayCsels['rego-'+j].setValue(newVal);
+    const slot = _schDays[j].slots[slotKey];
+    if(!slot) continue; // 슬롯 비활성이면 스킵
+    const v = slot[field] || '';
+    if(!v || v === oldVal){
+      slot[field] = newVal;
+      const csel = _schDayCsels[`${field}-${j}-${slotKey}`];
+      if(csel) csel.setValue(newVal);
     } else {
       break;
     }
@@ -4524,14 +4633,54 @@ function _propagateRego(idx, newVal){
 // ═══════════════════════════════════════
 // 직렬화 / 역직렬화
 // ═══════════════════════════════════════
+// 슬롯 구조: { startTime, startPlace, endTime, endPlace, course, driver, rego }
+// 빈 슬롯은 null
+function _schEmptySlot(){
+  return { startTime:'', startPlace:'', endTime:'', endPlace:'', course:'', driver:'', rego:'' };
+}
+function _schIsSlotEmpty(s){
+  if(!s) return true;
+  return !s.startTime && !s.startPlace && !s.endTime && !s.endPlace && !s.course && !s.driver && !s.rego;
+}
+
 function _schParseDays(tourPlan){
   if(!tourPlan) return [];
-  if(Array.isArray(tourPlan)) return tourPlan;
-  try{
-    const parsed = JSON.parse(tourPlan);
-    if(Array.isArray(parsed)) return parsed;
-    return [];
-  }catch(e){ return []; }
+  let arr = tourPlan;
+  if(typeof arr === 'string'){
+    try{ arr = JSON.parse(arr); }catch(e){ return []; }
+  }
+  if(!Array.isArray(arr)) return [];
+  // 마이그레이션: 구버전(슬롯 없음) → 신버전 (slots.fullday로 채움)
+  return arr.map(d => {
+    if(d && d.slots){
+      // 이미 신버전 — 누락된 슬롯 보강
+      d.slots.morning = d.slots.morning || null;
+      d.slots.fullday = d.slots.fullday || null;
+      d.slots.evening = d.slots.evening || null;
+      return d;
+    }
+    // 구버전 변환
+    const fullday = (d && (d.driver || d.rego || d.course || d.coachTime)) ? {
+      startTime: d.coachTime || '',
+      startPlace: d.hotel || '',
+      endTime: '',
+      endPlace: d.hotel || '',
+      course: d.course || '',
+      driver: d.driver || '',
+      rego: d.rego || ''
+    } : null;
+    return {
+      date: d?.date || '',
+      hotel: d?.hotel || '',
+      trailer: !!d?.trailer,
+      ot: d?.ot || '',
+      slots: {
+        morning: null,
+        fullday: fullday,
+        evening: null
+      }
+    };
+  });
 }
 
 function _schParseFlight(s){
@@ -4701,19 +4850,26 @@ function schCalToday(){
 
 // 일별 데이터 추출 — _schCache에서 모든 일정의 일별 정보를 평탄화
 function _schGetAllDays(){
-  // [{date, tour, day}] 형태로 반환 (각 day에 tour 객체 + 일별 데이터)
+  // [{date, tour, day}] — 슬롯 인식 가능
   const result = [];
   _schCache.forEach(t => {
     if(String(t.Status||'') === 'cancelled') return;
     const days = _schParseDays(t.TourPlan);
     if(days.length === 0){
-      // TourPlan이 없으면 시작일~종료일을 자동 생성 (legacy)
+      // legacy: TourPlan 없는 일정 → fullday 슬롯으로 가정
       const sd = String(t.StartDate||'').slice(0,10);
       const ed = String(t.EndDate||'').slice(0,10);
       if(sd && ed && /^\d{4}-\d{2}-\d{2}$/.test(sd) && /^\d{4}-\d{2}-\d{2}$/.test(ed)){
         let cursor = sd;
         while(cursor <= ed){
-          result.push({ date: cursor, tour: t, day: { date: cursor, hotel: t.Hotel||'', driver: t.Driver||'', rego: t.Rego||'', course:'', ot:'', trailer: false } });
+          result.push({
+            date: cursor,
+            tour: t,
+            day: {
+              date: cursor, hotel: t.Hotel||'', trailer: false,
+              slots: { morning:null, fullday:{ startTime:'', startPlace:'', endTime:'', endPlace:'', course:'', driver: t.Driver||'', rego: t.Rego||'' }, evening:null }
+            }
+          });
           cursor = _schAddDays(cursor, 1);
         }
       }
@@ -4722,6 +4878,26 @@ function _schGetAllDays(){
     }
   });
   return result;
+}
+
+// 한 슬롯의 8행 표시 정보
+function _schRenderSlotRows(tour, day, slot, slotKey){
+  const veh = (DB.V||[]).find(v => v.Rego === slot.rego);
+  const vehLabel = veh && veh.Capacity ? `${veh.Rego}/${veh.Capacity}` : (slot.rego||'');
+  // 차량 라인에 트레일러/OT 작은 표시
+  const carExtras = [];
+  if(day.trailer) carExtras.push('🚐');
+  if(slot.ot) carExtras.push('+'+slot.ot);
+  const carLine = [vehLabel, ...carExtras].filter(Boolean).join(' ');
+  return {
+    startTime: slot.startTime || '',
+    startPlace: slot.startPlace || '',
+    car: carLine,
+    driver: slot.driver || '',
+    course: slot.course || '',
+    endTime: slot.endTime || '',
+    endPlace: slot.endPlace || ''
+  };
 }
 
 function renderScheduleCalendar(){
@@ -4733,9 +4909,8 @@ function renderScheduleCalendar(){
   // 기간 계산
   let startDt, endDt, dayCount;
   if(_schCalMode === 'week'){
-    // 월요일 시작
     const d = new Date(_schCalAnchor);
-    const dow = d.getDay(); // 0=일
+    const dow = d.getDay();
     const offset = dow === 0 ? -6 : 1 - dow;
     d.setDate(d.getDate() + offset);
     d.setHours(0,0,0,0);
@@ -4750,7 +4925,6 @@ function renderScheduleCalendar(){
     dayCount = endDt.getDate();
   }
 
-  // 헤더 라벨
   const fmtMD = (dt) => `${dt.getMonth()+1}/${dt.getDate()}`;
   const fmtYMD = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
   if(_schCalMode === 'week'){
@@ -4759,26 +4933,30 @@ function renderScheduleCalendar(){
     periodEl.textContent = `${startDt.getFullYear()}년 ${startDt.getMonth()+1}월`;
   }
 
-  // 모든 일별 데이터 가져오기
   const allDays = _schGetAllDays();
-  // 기간 내 데이터만 필터
   const startStr = fmtYMD(startDt);
   const endStr = fmtYMD(endDt);
   const inRange = allDays.filter(x => x.date >= startStr && x.date <= endStr);
 
-  // 그룹별로 묶기
-  const groups = {}; // {groupKey: {date: [items]}}
+  // 그룹별로 묶기 — 슬롯 단위 평탄화
+  // groups[key][date][slotKey] = { tour, day, slot }
+  const groups = {};
   inRange.forEach(x => {
-    let key;
-    switch(groupBy){
-      case 'guide':  key = x.tour.Guide || '(미지정)'; break;
-      case 'rego':   key = x.day.rego || '(미지정)'; break;
-      case 'driver': key = x.day.driver || '(미지정)'; break;
-      default:       key = x.tour.Agency || '(미지정)';
-    }
-    if(!groups[key]) groups[key] = {};
-    if(!groups[key][x.date]) groups[key][x.date] = [];
-    groups[key][x.date].push(x);
+    const slots = x.day.slots || { morning:null, fullday:null, evening:null };
+    ['morning','fullday','evening'].forEach(slotKey => {
+      const slot = slots[slotKey];
+      if(!slot || _schIsSlotEmpty(slot)) return;
+      let key;
+      switch(groupBy){
+        case 'guide':  key = x.tour.Guide || '(미지정)'; break;
+        case 'rego':   key = slot.rego || '(미지정)'; break;
+        case 'driver': key = slot.driver || '(미지정)'; break;
+        default:       key = x.tour.Agency || '(미지정)';
+      }
+      if(!groups[key]) groups[key] = {};
+      if(!groups[key][x.date]) groups[key][x.date] = {};
+      groups[key][x.date][slotKey] = { tour: x.tour, day: x.day, slot: slot };
+    });
   });
 
   const groupKeys = Object.keys(groups).sort();
@@ -4805,76 +4983,127 @@ function renderScheduleCalendar(){
     </div>`;
   }
 
-  // 셀 색상 (여행사/가이드별)
-  const colorPalette = ['#dbeafe','#fef3c7','#dcfce7','#fee2e2','#e0e7ff','#fce7f3','#cffafe','#fed7aa','#d9f99d','#f3e8ff'];
-  const colorMap = {};
-  let cIdx = 0;
-  // 그룹 행
+  // 색상 (TourID 기준 — 같은 투어 = 같은 색)
+  const tourColors = ['#dbeafe','#fef3c7','#dcfce7','#fee2e2','#e0e7ff','#fce7f3','#cffafe','#fed7aa','#d9f99d','#f3e8ff'];
+  const tourColorMap = {};
+  let tCidx = 0;
+  function colorForTour(tid){
+    if(tourColorMap[tid] === undefined){
+      tourColorMap[tid] = tourColors[tCidx % tourColors.length];
+      tCidx++;
+    }
+    return tourColorMap[tid];
+  }
+
+  // 그룹별 행 렌더링
   let rowsHtml = '';
   groupKeys.forEach(grp => {
-    if(colorMap[grp] === undefined){
-      colorMap[grp] = colorPalette[cIdx % colorPalette.length];
-      cIdx++;
-    }
-    let cellsHtml = '';
-    dates.forEach(ds => {
-      const items = groups[grp][ds] || [];
-      if(items.length === 0){
-        cellsHtml += '<div class="sch-cal-cell empty"></div>';
-      } else {
-        const cellContent = items.map(x => {
-          const t = x.tour;
-          const d = x.day;
-          const tcode = t.TourCode || t.TourID || '';
-          const labels = [];
-          // 그룹별로 보여줄 정보 다르게
-          if(groupBy === 'agency'){
-            if(d.rego) labels.push(d.rego);
-            if(d.driver) labels.push(d.driver);
-            if(t.Guide) labels.push(t.Guide);
-          } else if(groupBy === 'guide'){
-            labels.push(t.Agency || '');
-            if(d.rego) labels.push(d.rego);
-            if(d.driver) labels.push(d.driver);
-          } else if(groupBy === 'rego'){
-            labels.push(t.Agency || '');
-            if(t.Guide) labels.push(t.Guide);
-            if(d.driver) labels.push(d.driver);
-          } else if(groupBy === 'driver'){
-            labels.push(t.Agency || '');
-            if(d.rego) labels.push(d.rego);
-            if(t.Guide) labels.push(t.Guide);
-          }
-          if(d.hotel) labels.push('🏨 ' + d.hotel);
-          if(d.course) labels.push(d.course);
-          if(d.ot) labels.push('OT:' + d.ot);
-          if(d.trailer) labels.push('🚐');
-          const isInvoiced = String(t.Status||'') === 'invoiced' || String(t.Status||'') === 'paid';
-          return `<div class="sch-cal-evt ${isInvoiced?'invoiced':''}"
-                       onclick="event.stopPropagation();openScheduleModal('${escH(t.TourID)}')"
-                       title="${escH(t.Agency)} · ${escH(tcode)}">
-            <div class="sch-cal-evt-title">${escH(tcode||t.Agency)}</div>
-            ${labels.filter(Boolean).map(l => `<div class="sch-cal-evt-line">${escH(l)}</div>`).join('')}
-          </div>`;
-        }).join('');
-        cellsHtml += `<div class="sch-cal-cell">${cellContent}</div>`;
+    // ── 행 1: 헤더 (같은 TourID 가로 병합) ──
+    let hdrCells = '';
+    {
+      let i = 0;
+      while(i < dates.length){
+        const ds = dates[i];
+        const cellSlots = groups[grp][ds] || {};
+        const slotsHere = ['morning','fullday','evening'].filter(k => cellSlots[k]);
+        if(slotsHere.length === 0){
+          hdrCells += '<div class="sch-cal-cell empty"></div>';
+          i++;
+          continue;
+        }
+        // 첫 슬롯의 TourID 기준 (한 셀 내 여러 투어가 있어도 첫 것만)
+        const firstSlot = cellSlots[slotsHere[0]];
+        const tid = firstSlot.tour.TourID;
+        const tcode = firstSlot.tour.TourCode || tid;
+        const guide = firstSlot.tour.Guide || '';
+        const seats = firstSlot.tour.Seats || '';
+        const trl = firstSlot.day.trailer ? 'TRAILER' : '';
+        const phone = firstSlot.tour.GuidePhone || '';
+        // 다음 셀로 같은 투어가 이어지는지 확인 (가로 병합)
+        let span = 1;
+        for(let j = i + 1; j < dates.length; j++){
+          const nextSlots = groups[grp][dates[j]] || {};
+          const nextKeys = ['morning','fullday','evening'].filter(k => nextSlots[k]);
+          if(nextKeys.length === 0) break;
+          const nextTid = nextSlots[nextKeys[0]].tour.TourID;
+          if(nextTid === tid) span++;
+          else break;
+        }
+        const isInvoiced = String(firstSlot.tour.Status||'') === 'invoiced' || String(firstSlot.tour.Status||'') === 'paid';
+        const headerLabel = [firstSlot.tour.Agency, tcode, seats, guide, phone, trl].filter(Boolean).join(' ');
+        hdrCells += `<div class="sch-cal-hdr-merge ${isInvoiced?'invoiced':''}" style="grid-column:span ${span};background:${colorForTour(tid)};"
+                       onclick="event.stopPropagation();openScheduleModal('${escH(tid)}')">
+          ${escH(headerLabel)}
+        </div>`;
+        i += span;
       }
-    });
-    rowsHtml += `<div class="sch-cal-row">
-      <div class="sch-cal-grp" style="background:${colorMap[grp]};">${escH(grp)}</div>
-      ${cellsHtml}
+    }
+
+    // ── 행 2-8: 슬롯 별 시작시간/시작장소/차량/드라이버/코스/도착시간/도착장소 ──
+    function renderRow(rowName){
+      let cells = '';
+      dates.forEach(ds => {
+        const cellSlots = groups[grp][ds] || {};
+        const slotsHere = ['morning','fullday','evening'].filter(k => cellSlots[k]);
+        if(slotsHere.length === 0){
+          cells += '<div class="sch-cal-cell empty"></div>';
+          return;
+        }
+        let inner = '';
+        ['morning','fullday','evening'].forEach(slotKey => {
+          const item = cellSlots[slotKey];
+          if(!item){
+            inner += '<div class="sch-slot-cell empty"></div>';
+            return;
+          }
+          const r = _schRenderSlotRows(item.tour, item.day, item.slot, slotKey);
+          let txt = '';
+          let bg = colorForTour(item.tour.TourID);
+          let isInv = String(item.tour.Status||'') === 'invoiced' || String(item.tour.Status||'') === 'paid';
+          switch(rowName){
+            case 'startTime':  txt = r.startTime; break;
+            case 'startPlace': txt = r.startPlace; break;
+            case 'car':        txt = r.car; break;
+            case 'driver':     txt = r.driver; break;
+            case 'course':     txt = r.course; break;
+            case 'endTime':    txt = r.endTime; break;
+            case 'endPlace':   txt = r.endPlace; break;
+          }
+          inner += `<div class="sch-slot-cell ${isInv?'invoiced':''}" style="background:${bg};"
+                         onclick="event.stopPropagation();openScheduleModal('${escH(item.tour.TourID)}')"
+                         title="${escH(item.tour.Agency)} · ${escH(item.tour.TourCode||item.tour.TourID)}">
+            ${escH(txt)}
+          </div>`;
+        });
+        cells += `<div class="sch-cal-cell"><div class="sch-slot-row">${inner}</div></div>`;
+      });
+      return cells;
+    }
+
+    rowsHtml += `<div class="sch-cal-row sch-cal-grouprow" data-row="header">
+      <div class="sch-cal-grp sch-cal-grp-main">${escH(grp)}</div>
+      ${hdrCells}
     </div>`;
+    rowsHtml += `<div class="sch-cal-row sch-cal-subrow"><div class="sch-cal-rowlbl">시작⏰</div>${renderRow('startTime')}</div>`;
+    rowsHtml += `<div class="sch-cal-row sch-cal-subrow"><div class="sch-cal-rowlbl">시작📍</div>${renderRow('startPlace')}</div>`;
+    rowsHtml += `<div class="sch-cal-row sch-cal-subrow"><div class="sch-cal-rowlbl">차량🚌</div>${renderRow('car')}</div>`;
+    rowsHtml += `<div class="sch-cal-row sch-cal-subrow"><div class="sch-cal-rowlbl">드라이버</div>${renderRow('driver')}</div>`;
+    rowsHtml += `<div class="sch-cal-row sch-cal-subrow"><div class="sch-cal-rowlbl">코스</div>${renderRow('course')}</div>`;
+    rowsHtml += `<div class="sch-cal-row sch-cal-subrow"><div class="sch-cal-rowlbl">도착⏰</div>${renderRow('endTime')}</div>`;
+    rowsHtml += `<div class="sch-cal-row sch-cal-subrow"><div class="sch-cal-rowlbl">도착📍</div>${renderRow('endPlace')}</div>`;
   });
 
   // 최종 HTML
-  const colTemplate = `160px repeat(${dayCount}, minmax(110px, 1fr))`;
-  const minWidth = (160 + dayCount * 110) + 'px';
+  const colTemplate = `140px repeat(${dayCount}, minmax(140px, 1fr))`;
+  const minWidth = (140 + dayCount * 140) + 'px';
   wrap.innerHTML = `<div class="sch-cal-table" style="min-width:${minWidth};">
     <div class="sch-cal-row sch-cal-headrow" style="grid-template-columns:${colTemplate};">
       <div class="sch-cal-grp" style="background:var(--sf2);">${groupBy === 'agency'?'여행사':(groupBy==='guide'?'가이드':(groupBy==='rego'?'차량':'드라이버'))}</div>
       ${dateHeaders}
     </div>
-    ${rowsHtml.replace(/<div class="sch-cal-row">/g, `<div class="sch-cal-row" style="grid-template-columns:${colTemplate};">`)}
+    ${rowsHtml
+      .replace(/<div class="sch-cal-row sch-cal-grouprow"/g, `<div class="sch-cal-row sch-cal-grouprow" style="grid-template-columns:${colTemplate};"`)
+      .replace(/<div class="sch-cal-row sch-cal-subrow">/g, `<div class="sch-cal-row sch-cal-subrow" style="grid-template-columns:${colTemplate};">`)}
   </div>`;
 }
 
