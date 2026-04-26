@@ -12112,6 +12112,85 @@ function renderExpiryAlerts(){
     } catch(e) { console.warn('[PWA] notification error:', e); }
   };
 })();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 날짜 입력 자동 강화 (Date Input Enhancer)
+// 모든 <input type="date">에 dd/mm/yyyy 미리보기를 자동으로 추가
+// ═══════════════════════════════════════════════════════════════════════════
+(function(){
+  const DOWS = ['일','월','화','수','목','금','토'];
+  function fmtAU(iso){
+    if(!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return '';
+    const [y, m, d] = iso.slice(0,10).split('-');
+    const dt = new Date(Date.UTC(parseInt(y), parseInt(m)-1, parseInt(d)));
+    const dow = isNaN(dt.getTime()) ? '' : DOWS[dt.getUTCDay()];
+    return `${d}/${m}/${y}${dow ? ' ('+dow+')' : ''}`;
+  }
+  function attachPreview(input){
+    if(input._dateAuAttached) return;
+    if(input.type !== 'date') return;
+    input._dateAuAttached = true;
+    const prev = document.createElement('span');
+    prev.className = 'date-au-preview';
+    prev.style.cssText = 'display:inline-block;margin-left:6px;font-size:10px;font-weight:600;color:#7c3aed;letter-spacing:-0.2px;vertical-align:middle;';
+    if(input.nextSibling){
+      input.parentNode.insertBefore(prev, input.nextSibling);
+    } else {
+      input.parentNode.appendChild(prev);
+    }
+    const update = () => {
+      prev.textContent = input.value ? '📅 ' + fmtAU(input.value) : '';
+    };
+    update();
+    input.addEventListener('input', update);
+    input.addEventListener('change', update);
+    input.addEventListener('focus', update);
+    setTimeout(update, 0);
+    input._dateAuPrev = prev;
+    input._dateAuUpdate = update;
+  }
+  function scanAll(root){
+    (root || document).querySelectorAll('input[type="date"]').forEach(attachPreview);
+  }
+  function startObserver(){
+    if(window._dateAuObserver) return;
+    const obs = new MutationObserver(muts => {
+      let needScan = false;
+      for(const m of muts){
+        if(m.addedNodes && m.addedNodes.length) needScan = true;
+      }
+      if(needScan){
+        scanAll(document);
+        document.querySelectorAll('input[type="date"]').forEach(inp => {
+          if(inp._dateAuUpdate) inp._dateAuUpdate();
+        });
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    window._dateAuObserver = obs;
+  }
+  window._refreshDatePreviews = function(){
+    document.querySelectorAll('input[type="date"]').forEach(inp => {
+      if(inp._dateAuUpdate) inp._dateAuUpdate();
+      else attachPreview(inp);
+    });
+  };
+  function init(){
+    scanAll(document);
+    startObserver();
+    let pollCount = 0;
+    const pollT = setInterval(() => {
+      pollCount++;
+      window._refreshDatePreviews();
+      if(pollCount >= 5) clearInterval(pollT);
+    }, 1000);
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
 </script>
 
 </body>
