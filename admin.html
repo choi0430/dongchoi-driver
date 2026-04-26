@@ -6358,6 +6358,44 @@ function renderScheduleCalendar(){
     return tourColorMap[tid];
   }
 
+  // ★ 주 경계 끊김 방지 — 같은 TourID가 이전/다음 주에 이어지는지 검사
+  // _schGetAllDays() 결과는 모든 일정 데이터 — 현재 보이는 기간 외도 포함
+  // 주 경계: dates[0]은 월요일, dates[dates.length-1]은 일요일 (week mode일 때)
+  const prevDayOfFirst = (() => {
+    if(_schCalMode !== 'week') return null;
+    const d = new Date(dates[0] + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    return fmtYMD(d);
+  })();
+  const nextDayOfLast = (() => {
+    if(_schCalMode !== 'week') return null;
+    const d = new Date(dates[dates.length-1] + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+    return fmtYMD(d);
+  })();
+  // 인접 일에 그룹+TourID 일치하는 일정 존재 여부 검사
+  function _hasAdjacentSameTour(grpKey, tourID, adjacentDate){
+    if(!adjacentDate) return false;
+    if(!allDays || !allDays.length) return false;
+    return allDays.some(x => {
+      if(x.date !== adjacentDate) return false;
+      if(x.tour.TourID !== tourID) return false;
+      // 그룹 키 매칭 — 트랙 분할로 키가 변경됐을 수 있으니 원본 그룹 기반으로
+      const baseGrpKey = grpKey.replace(/ \(트랙 \d+\)$/, '');
+      const slots = x.day.slots || {};
+      const anySlot = ['morning','fullday','evening'].map(k => slots[k]).find(s => s);
+      if(!anySlot) return false;
+      let key;
+      switch(groupBy){
+        case 'guide':  key = x.tour.Guide || '(미지정)'; break;
+        case 'rego':   key = anySlot.rego || '(미지정)'; break;
+        case 'driver': key = anySlot.driver || '(미지정)'; break;
+        default:       key = x.tour.Agency || '(미지정)';
+      }
+      return key === baseGrpKey;
+    });
+  }
+
   // 그룹별 행 렌더링
   let rowsHtml = '';
   groupKeys.forEach(grp => {
@@ -6407,6 +6445,16 @@ function renderScheduleCalendar(){
         if(endSlot === 'fullday') rightPad = 1; // 1/3 비움
         if(endSlot === 'morning') rightPad = 2; // 2/3 비움
 
+        // ★ 주 경계 연결 검사: 첫 셀이 월요일(dates[0])이고 이전 일요일에 같은 TourID 있으면
+        //   → 좌측 패딩을 헤더 영역으로 확장 (끊김 없이 연결되어 보이도록)
+        const isFirstCellOfWeek = (i === 0);
+        const isLastCellOfWeek = (i + span - 1 === dates.length - 1);
+        const continueFromPrevWeek = isFirstCellOfWeek && _schCalMode === 'week' && _hasAdjacentSameTour(grp, tid, prevDayOfFirst);
+        const continueToNextWeek = isLastCellOfWeek && _schCalMode === 'week' && _hasAdjacentSameTour(grp, tid, nextDayOfLast);
+        // 연결되면 패딩을 0으로 → 헤더가 끝까지 연장
+        if(continueFromPrevWeek) leftPad = 0;
+        if(continueToNextWeek) rightPad = 0;
+
         // 만약 span === 1 이고 첫날=마지막날이면 한 슬롯만 사용한 경우
         // span === 1일 때 startSlot ≠ endSlot이 가능 (예: morning + evening 둘 다 사용)
         const isInvoiced = String(firstSlot.tour.Status||'') === 'invoiced' || String(firstSlot.tour.Status||'') === 'paid';
@@ -6430,9 +6478,13 @@ function renderScheduleCalendar(){
         // 안전: headerWidth가 0 이하면 1로
         const safeHeaderWidth = Math.max(1, headerWidth);
 
+        // 좌/우 테두리 클래스 — 주 경계 연결 시 해당 쪽 테두리 제거
+        const tourLeftCls = continueFromPrevWeek ? '' : 'tour-left';
+        const tourRightCls = continueToNextWeek ? '' : 'tour-right';
+
         hdrCells += `<div class="sch-cal-hdr-merge-wrap" style="grid-column:span ${span};display:grid;grid-template-columns:repeat(${totalSlots}, 1fr);gap:0;">
           ${leftPad > 0 ? `<div style="grid-column:span ${leftPad};"></div>` : ''}
-          <div class="sch-cal-hdr-merge tour-block tour-left tour-right ${isInvoiced?'invoiced':''}" data-tour-id="${escH(tid)}" style="grid-column:span ${safeHeaderWidth};background:${colorForTour(tid)};"
+          <div class="sch-cal-hdr-merge tour-block ${tourLeftCls} ${tourRightCls} ${isInvoiced?'invoiced':''}" data-tour-id="${escH(tid)}" style="grid-column:span ${safeHeaderWidth};background:${colorForTour(tid)};"
                        onclick="event.stopPropagation();openScheduleModal('${escH(tid)}')">
             ${headerLabel}
           </div>
@@ -6461,17 +6513,44 @@ function renderScheduleCalendar(){
         }
         // 이 셀의 TourID와 인접 셀 비교 (좌/우 끝 검출)
         const myTid = dayTourIds[dateIdx];
-        const isLeftEdge = dateIdx === 0 || dayTourIds[dateIdx-1] !== myTid;
-        const isRightEdge = dateIdx === dates.length-1 || dayTourIds[dateIdx+1] !== myTid;
+        let isLeftEdge = dateIdx === 0 || dayTourIds[dateIdx-1] !== myTid;
+        let isRightEdge = dateIdx === dates.length-1 || dayTourIds[dateIdx+1] !== myTid;
+        // ★ 주 경계 연결 — 첫/마지막 셀이고 인접 주에 같은 TourID가 있으면 edge 제거
+        if(isLeftEdge && dateIdx === 0 && _schCalMode === 'week' && myTid && _hasAdjacentSameTour(grp, myTid, prevDayOfFirst)){
+          isLeftEdge = false;
+        }
+        if(isRightEdge && dateIdx === dates.length-1 && _schCalMode === 'week' && myTid && _hasAdjacentSameTour(grp, myTid, nextDayOfLast)){
+          isRightEdge = false;
+        }
         // 좌측 끝 슬롯: 첫 활성 슬롯 (morning/fullday/evening 중)
         const startSlotKey = ['morning','fullday','evening'].find(k => cellSlots[k]);
         // 우측 끝 슬롯: 마지막 활성 슬롯 (역순)
         const endSlotKey = ['evening','fullday','morning'].find(k => cellSlots[k]);
+        // ★ 주 경계 연결 — 첫/마지막 셀에서 빈 슬롯도 일정 박스 일부로 표시
+        const fillBeforeStart = (dateIdx === 0 && _schCalMode === 'week' && myTid && _hasAdjacentSameTour(grp, myTid, prevDayOfFirst));
+        const fillAfterEnd = (dateIdx === dates.length-1 && _schCalMode === 'week' && myTid && _hasAdjacentSameTour(grp, myTid, nextDayOfLast));
+        const slotOrder = ['morning','fullday','evening'];
+        const startIdx = slotOrder.indexOf(startSlotKey);
+        const endIdx = slotOrder.indexOf(endSlotKey);
+        const continueBg = fillBeforeStart || fillAfterEnd ? colorForTour(myTid) : null;
+
         let inner = '';
-        ['morning','fullday','evening'].forEach(slotKey => {
+        slotOrder.forEach((slotKey, slotIdx) => {
           const item = cellSlots[slotKey];
           if(!item){
-            // 슬롯 비활성: 페어형이면 2칸, 합쳐진 행이면 1칸 차지
+            // 빈 슬롯이지만 주 경계 연결 영역이면 일정 박스의 일부로 표시
+            const isInFillBefore = fillBeforeStart && slotIdx < startIdx;
+            const isInFillAfter = fillAfterEnd && slotIdx > endIdx;
+            if(isInFillBefore || isInFillAfter){
+              const fillStyle = `background:${continueBg};`;
+              if(rowName === 'course'){
+                inner += `<div class="sch-slot-cell wide pending" style="${fillStyle}"></div>`;
+              } else {
+                inner += `<div class="sch-slot-cell pending" style="${fillStyle}"></div><div class="sch-slot-cell pending" style="${fillStyle}"></div>`;
+              }
+              return;
+            }
+            // 일반 비활성 슬롯
             if(rowName === 'course'){
               inner += '<div class="sch-slot-cell empty wide"></div>';
             } else {
