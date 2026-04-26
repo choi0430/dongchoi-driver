@@ -5110,6 +5110,8 @@ function submitDailyReport(){
   autoRate();
   calcTotal();
   const total = parseFloat(document.getElementById('t-ta').textContent.replace('$',''))||0;
+  // 드라이버 본인 지급액 (토스트 표시용 — 여행사 청구액은 드라이버에게 노출 안 함)
+  const _drPay = parseFloat(document.getElementById('t-dr').textContent.replace(/[^0-9.-]/g,''))||0;
   const svcLabel = (()=>{ const b=document.querySelector('.csel-btn[data-csel="f-svc-select"]'); return b?b.textContent.trim():''; })();
   const _kmStartRaw = document.getElementById('dr-km-start').value;
   const _kmEndRaw   = document.getElementById('dr-km-end').value;
@@ -5176,7 +5178,7 @@ function submitDailyReport(){
   todayReports.push({...report, rego: shift.rego, driver: currentDriver?.name||''});
   // 투어 코드 최근 목록에 저장
   if(report.tourcode) tcSaveCode(report.tourcode);
-  showToast(`✅ Daily Report 저장됨 ($${total})`,'success');
+  showToast(`✅ Daily Report 저장됨 (지급액 $${_drPay})`,'success');
   // 드라이버별 localStorage 저장
   if(currentDriver?.name) {
     localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
@@ -7692,11 +7694,11 @@ function onNightChange(){
     const drAmt    = r.dr    || 0;
     const taAmt    = r.ta    || 0;
     const drNetAmt = drAmt - ownerAmt;  // 실 지급 야경 수당
-    // 현재 차량의 SUB 정보 확인
+    // 현재 차량의 SUB 정보 확인 (차주 이름은 표시 안 함, "차주 납입"으로만 표기)
     const _hRego = document.getElementById('pre-rego')?.value || '';
     const _hSub = getSubOwnerForRego(_hRego);
-    const _hPayTo = _hSub ? '차주('+_hSub+') 납입' : '회사 납입';
-    const _hPayToShort = _hSub ? _hSub+' 납입' : '회사납입';
+    const _hPayTo = _hSub ? '차주 납입' : '회사 납입';
+    const _hPayToShort = _hSub ? '차주 납입' : '회사납입';
     let hintHtml = '';
     if(isPrivate){
       // 개인 야경: 간단한 차감 안내만 표시
@@ -8074,13 +8076,14 @@ function calcTotal(){
   // 현재 차량의 SUB 정보 확인
   const _curRego = document.getElementById('pre-rego')?.value || '';
   const _curSubOwner = getSubOwnerForRego(_curRego);
-  const _ownerLabel = _curSubOwner ? '🌃 차주('+_curSubOwner+') 납입' : '🌃 야경 회사 납입';
+  // 드라이버 앱: 차주 이름은 노출 안 함 (차주에게 납입한다는 사실만 표시)
+  const _ownerLabel = _curSubOwner ? '🌃 야경 차주 납입' : '🌃 야경 회사 납입';
   // 총액 표시
   document.getElementById('t-ta').textContent='$'+ta.toFixed(0);
   // 소계 표시
   const grossEl = document.getElementById('t-dr-gross');
   if(grossEl) grossEl.textContent='$'+dr.toFixed(0);
-  // 야경 납입 행 표시/숨김
+  // 야경 납입 행 표시/숨김 (차주/회사 이름은 노출 안 하지만 납입금액은 드라이버가 알아야 함)
   const ownerRow = document.getElementById('night-owner-row');
   const ownerEl  = document.getElementById('t-owner');
   const ownerLabelEl = ownerRow?.querySelector('.total-label');
@@ -9160,7 +9163,7 @@ async function renderPay(){
     const card = document.createElement('div');
     card.className = 'pay-week-card';
     const subGroupArr = Object.values(subGroups).sort((a,b)=>b.total-a.total);
-    const subBadgesHtml = subGroupArr.map(sg=>`<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">SUB·${sg.name} $${sg.total.toLocaleString()} (${sg.count}건)</span>`).join(' ');
+    const subBadgesHtml = subGroupArr.map(sg=>`<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">SUB 차량 $${sg.total.toLocaleString()} (${sg.count}건)</span>`).join(' ');
 
     card.innerHTML = `
       <div class="pay-week-top">
@@ -9319,7 +9322,7 @@ function showPayDetail(wk){
         <span style="font-size:13px;font-weight:800;color:#c4b5fd;">$${subDRGrand.toLocaleString()}</span>
       </div>
       ${detailSubArr.map(sg=>`<div style="display:flex;justify-content:space-between;padding:2px 0;">
-        <span style="font-size:10px;color:rgba(255,255,255,.5);">　SUB·${sg.name} (${sg.count}건)</span>
+        <span style="font-size:10px;color:rgba(255,255,255,.5);">　SUB 차량 (${sg.count}건)</span>
         <span style="font-size:11px;font-weight:700;color:#c4b5fd;">$${sg.total.toLocaleString()}</span>
       </div>`).join('')}
       <div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.1);">
@@ -9399,7 +9402,7 @@ function showPayDetail(wk){
       if(r.manualBonus>0) breakdown.push({label:'수동변속 보너스', val:r.manualBonus, color:'#f59e0b'});
 
       const _noSub = getSubOwnerForRego(r.rego);
-      const _noLabel = _noSub ? '차주('+_noSub+') 납입 (야간투어)' : '회사 납입 (야간투어)';
+      const _noLabel = _noSub ? '차주 납입 (야간투어)' : '회사 납입 (야간투어)';
       const _noColor = _noSub ? '#7c3aed' : 'var(--red)';
       const nightOwnerNote = (r.nightOwner||0)>0
         ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-top:1px dashed ${_noSub?'rgba(124,58,237,0.3)':'rgba(239,68,68,0.3)'};margin-top:4px;">
@@ -9421,7 +9424,7 @@ function showPayDetail(wk){
       html+=`<div class="pay-report-row" ${_rSub?'style="border-left:3px solid #7c3aed;"':''}>
         <div class="pay-report-row-top">
           <div>
-            <div class="pay-report-agency">${r.agency||'—'}${_rSub?' <span style="background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;margin-left:4px;">SUB·'+_rSub+'</span>':''}</div>
+            <div class="pay-report-agency">${r.agency||'—'}${_rSub?' <span style="background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;margin-left:4px;">SUB 차량</span>':''}</div>
             <div class="pay-report-attr">${r.attraction||''} ${r.rego?'· '+r.rego:''}${r.seats?' · <span style="background:var(--surface3,rgba(255,255,255,.1));border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;">'+r.seats+'</span>':''}</div>
             ${r.timeStart?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">⏱ '+parseSheetTime(r.timeStart)+' – '+parseSheetTime(r.timeEnd||'')+(calcDuration(r.timeStart,r.timeEnd)?'<span style="margin-left:6px;background:var(--surface3,rgba(255,255,255,.1));border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;">'+calcDuration(r.timeStart,r.timeEnd)+'</span>':'')+'</div>':''}
             ${(r.kmStart||r.kmEnd)?'<div style="font-size:11px;color:var(--muted);margin-top:2px;">🛣 '+(r.kmStart?r.kmStart+' km':'—')+' → '+(r.kmEnd?r.kmEnd+' km':'—')+(r.kmStart&&r.kmEnd&&parseInt(r.kmEnd)-parseInt(r.kmStart)>0?' <span style="margin-left:4px;background:rgba(14,159,110,.15);border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;color:var(--green);">+'+( parseInt(r.kmEnd)-parseInt(r.kmStart) ).toLocaleString()+' km</span>':'')+'</div>':''}
