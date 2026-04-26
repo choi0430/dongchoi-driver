@@ -24,11 +24,11 @@ const REPORT_HEADERS = {
   'Daily_Report':   ['Submitted','Driver','Date','Rego','Seats','Agency','Attraction','Pickup','Dropoff',
                      'KM_Start','KM_End','Time_Start','Time_End','Guide','Tour_Code',
                      'SVC_Label','SVC_Charge','Hotel_Surcharge','Dist_Surcharge',
-                     'OT','Trailer','Total_TA','DR_Cost','Toll','Toll_Personal',
+                     'OT','Trailer','Trailer_Number','Total_TA','DR_Cost','Toll','Toll_Personal',
                      'Fuel','Fuel_Personal','Early','Night_Type','Night_DR','Night_Owner',
                      'Wash','Meal','Tip','Etc','Etc_Desc','Remarks'],
   'Pre_Departure':  ['Submitted','Driver','Date','Rego','Seats','Start_KM','Fuel','Start_Time',
-                     'Check_Results','Remarks','Signature'],
+                     'Check_Results','Remarks','Signature','Trailer_Number'],
   'End_of_Shift':   ['Submitted','Driver','Date','Rego','Start_KM','End_KM','End_Time','Fuel_End','Damage','Check_Results','Daily_Reports','Remarks','Signature'],
   'MOT_Report':     ['Submitted','Driver','Date','Time','Rego','Location','Officer','Type',
                      'Result','NoticeNum','Fine','Notes','FailedItems','Checks']
@@ -41,10 +41,11 @@ const MASTER_HEADERS = {
                  'Accreditation','Current_Status','Transmission','Active'],
   'M_Drivers':  ['Name_EN','Name_KR','Initials','DriverID','Mobile_1','NEXT_OF_KIN','Moblie_2','License_Class',
                  'License_No','License_Expiry','Authority_No','Authority_Expiry','WWC_No','WWC_Expiry',
-                 'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','Active'],
+                 'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','Owner','Active'],
   'M_Clients':  ['Name','ClientID','ABN','Mobile','Email','Email_CC','Address','Bank_Name','BSB','Account_Number'],
   'M_Guides':   ['GuideID','Guide_Name','Mobile','Agency','Email','Remarks'],
   'M_Hotels':   ['Hotel_Name','Phone','Address','Surcharge_Area'],
+  'M_Trailers': ['Trailer_Number','Owner','Capacity','Notes','Active'],
   'M_PriceClient': ['Agency','Course','max_hours','seats_21_rate','seats_21_ot',
                     'seats_25_rate','seats_25_ot','seats_40_rate','seats_40_ot',
                     'seats_50_rate','seats_50_ot'],
@@ -550,6 +551,66 @@ function migrateAllPinsToHash() {
 }
 
 /**
+ * 일회성 마이그레이션: 트레일러 시스템 도입을 위한 시트 헤더 갱신
+ * Apps Script 에디터에서 함수 선택 → 실행
+ * 변경:
+ *   - Daily_Report: Trailer 다음에 Trailer_Number 추가
+ *   - Pre_Departure: Signature 다음에 Trailer_Number 추가
+ *   - M_Drivers: PIN 다음에 Owner 추가
+ *   - M_Trailers 시트 신규 생성
+ */
+function migrateAddTrailerSystem() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const log = [];
+
+    function ensureColumn(sheetName, colName, afterCol) {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) { log.push(sheetName + ': sheet not found, skip'); return; }
+      const lastCol = sheet.getLastColumn();
+      const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+      if (headers.indexOf(colName) >= 0) {
+        log.push(sheetName + '.' + colName + ': already exists');
+        return;
+      }
+      const afterIdx = headers.indexOf(afterCol);
+      if (afterIdx < 0) {
+        // afterCol이 없으면 맨 끝에 추가
+        sheet.getRange(1, lastCol + 1).setValue(colName);
+        log.push(sheetName + '.' + colName + ': appended at end');
+        return;
+      }
+      // afterCol 다음 위치에 컬럼 삽입
+      sheet.insertColumnAfter(afterIdx + 1);
+      sheet.getRange(1, afterIdx + 2).setValue(colName);
+      log.push(sheetName + '.' + colName + ': inserted after ' + afterCol);
+    }
+
+    ensureColumn('Daily_Report', 'Trailer_Number', 'Trailer');
+    ensureColumn('Pre_Departure', 'Trailer_Number', 'Signature');
+    ensureColumn('M_Drivers', 'Owner', 'PIN');
+
+    // M_Trailers 시트 생성
+    let tSheet = ss.getSheetByName('M_Trailers');
+    if (!tSheet) {
+      tSheet = ss.insertSheet('M_Trailers');
+      tSheet.getRange(1, 1, 1, 5).setValues([['Trailer_Number','Owner','Capacity','Notes','Active']]);
+      tSheet.getRange(1, 1, 1, 5).setFontWeight('bold');
+      tSheet.setFrozenRows(1);
+      log.push('M_Trailers: created');
+    } else {
+      log.push('M_Trailers: already exists');
+    }
+
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+  } catch (err) {
+    Logger.log('migrateAddTrailerSystem error: ' + err.toString());
+    return 'error: ' + err.toString();
+  }
+}
+
+/**
  * 관리자용: 특정 사용자의 로그인 잠금 해제
  * Apps Script 에디터에서 _adminUnlockUser 함수의 name을 바꿔서 실행
  */
@@ -788,6 +849,9 @@ function doGet(e) {
       case 'get_active_regos':
         return cors(getActiveRegos());
 
+      case 'get_active_trailers':
+        return cors(getActiveTrailers());
+
       case 'get_my_shifts':
         return cors(getMyShifts(effectiveDriver));
 
@@ -879,6 +943,9 @@ function doPost(e) {
       // ── Report Operations ──
       case 'save_report':
         return cors(saveReport('Daily_Report', payload.data));
+
+      case 'release_trailer':
+        return cors(releaseTrailer(payload.driver || _user, payload.trailerNum));
 
       case 'update_report': {
         const r = updateReport(payload.sheet, payload.rowIndex, payload.data);
@@ -1494,6 +1561,42 @@ function getSheetRows(sheetName) {
   }
 }
 
+// ── 날짜 정규화: 어떤 형식이든 'YYYY-MM-DD' 로 변환 ──
+function _normalizeDateISO(val) {
+  if (!val) return '';
+  // Date 객체
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + d;
+  }
+  const s = String(val).trim();
+  if (!s) return '';
+  // 이미 YYYY-MM-DD?
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return m[1] + '-' + String(m[2]).padStart(2,'0') + '-' + String(m[3]).padStart(2,'0');
+  // DD/MM/YYYY?
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return m[3] + '-' + String(m[2]).padStart(2,'0') + '-' + String(m[1]).padStart(2,'0');
+  // ISO timestamp?
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+  if (m) return s.slice(0, 10);
+  return s;
+}
+
+function _todayISO_Sydney() {
+  const now = new Date();
+  // 호주 동부 표준시 보정 (서머타임 무시 — Pre_Departure는 ±1일 허용 범위에서 비교됨)
+  const sydOffset = 10 * 60;
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const syd = new Date(utc + sydOffset * 60000);
+  const yy = syd.getFullYear();
+  const mm = String(syd.getMonth() + 1).padStart(2, '0');
+  const dd = String(syd.getDate()).padStart(2, '0');
+  return yy + '-' + mm + '-' + dd;
+}
+
 function getActiveRegos() {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -1505,27 +1608,14 @@ function getActiveRegos() {
     if (preData.length < 2) return {ok: true, regos: []};
     const preHeaders = preData[0];
 
-    // Get today's date in Sydney timezone (UTC+10)
-    const now = new Date();
-    const sydOffset = 10 * 60;
-    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-    const syd = new Date(utc + sydOffset * 60000);
-    const yy = syd.getFullYear();
-    const mm = String(syd.getMonth() + 1).padStart(2, '0');
-    const dd = String(syd.getDate()).padStart(2, '0');
-    const todayISO = yy + '-' + mm + '-' + dd;
-    const todayDMY = dd + '/' + mm + '/' + yy;
-
-    function isToday(val) {
-      const s = String(val).trim().replace(/\s+.*/, '');
-      return s === todayISO || s === todayDMY;
-    }
+    const todayISO = _todayISO_Sydney();
 
     const preRows = preData.slice(1).map(row => {
       const obj = {};
       preHeaders.forEach((h, i) => obj[h] = row[i]);
+      obj._iso = _normalizeDateISO(obj.Date);
       return obj;
-    }).filter(r => isToday(r.Date));
+    }).filter(r => r._iso === todayISO);
 
     // Collect EoS data for today
     const eosSet = new Set();
@@ -1535,8 +1625,9 @@ function getActiveRegos() {
       eosData.slice(1).forEach(row => {
         const obj = {};
         eosH.forEach((h, i) => obj[h] = row[i]);
-        if (isToday(obj.Date)) {
-          eosSet.add(String(obj.Rego).trim() + '|' + String(obj.Date).trim());
+        const iso = _normalizeDateISO(obj.Date);
+        if (iso === todayISO) {
+          eosSet.add(String(obj.Rego).trim() + '|' + iso);
         }
       });
     }
@@ -1545,20 +1636,125 @@ function getActiveRegos() {
     const active = [];
     const seen = new Set();
     preRows.forEach(r => {
-      const regoKey = String(r.Rego).trim() + '|' + String(r.Date).trim();
+      const regoKey = String(r.Rego).trim() + '|' + r._iso;
       if (!eosSet.has(regoKey) && !seen.has(regoKey)) {
         seen.add(regoKey);
         const driverName = String(r.Driver || '').trim();
         active.push({
           driver: driverName || 'Unknown',
           rego: String(r.Rego).trim(),
-          date: String(r.Date).trim(),
+          date: r._iso,
           startTime: String(r.Start_Time || '').trim()
         });
       }
     });
 
     return {ok: true, regos: active};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 트레일러 잠금 시스템
+// 트레일러 잠금 = Pre_Departure에 Trailer_Number 기록 + End_of_Shift 없음
+// "트레일러 반납" 시 Pre_Departure 행의 Trailer_Number를 비움
+// ═══════════════════════════════════════════════════════════════════
+function getActiveTrailers() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const preSheet = ss.getSheetByName('Pre_Departure');
+    const eosSheet = ss.getSheetByName('End_of_Shift');
+    if (!preSheet) return {ok: true, trailers: []};
+
+    const preData = preSheet.getDataRange().getValues();
+    if (preData.length < 2) return {ok: true, trailers: []};
+    const preH = preData[0];
+
+    const todayISO = _todayISO_Sydney();
+
+    // Pre_Departure 오늘 행 + Trailer_Number 있는 행만
+    const preRows = preData.slice(1).map((row, idx) => {
+      const obj = {};
+      preH.forEach((h, i) => obj[h] = row[i]);
+      obj._iso = _normalizeDateISO(obj.Date);
+      obj._rowIndex = idx + 2; // 시트 행 번호 (1-based + 헤더)
+      return obj;
+    }).filter(r => r._iso === todayISO && String(r.Trailer_Number || '').trim());
+
+    // 오늘 EOS된 차량 찾기 (Rego 기준 — 차량 마감 = 트레일러도 마감)
+    const eosSet = new Set();
+    if (eosSheet && eosSheet.getLastRow() > 1) {
+      const eosData = eosSheet.getDataRange().getValues();
+      const eosH = eosData[0];
+      eosData.slice(1).forEach(row => {
+        const obj = {};
+        eosH.forEach((h, i) => obj[h] = row[i]);
+        const iso = _normalizeDateISO(obj.Date);
+        if (iso === todayISO) {
+          eosSet.add(String(obj.Rego).trim() + '|' + iso);
+        }
+      });
+    }
+
+    const active = [];
+    const seen = new Set();
+    preRows.forEach(r => {
+      const trailer = String(r.Trailer_Number || '').trim();
+      if (!trailer) return;
+      // 차량이 EOS 됐으면 트레일러도 자동 반납
+      const regoKey = String(r.Rego).trim() + '|' + r._iso;
+      if (eosSet.has(regoKey)) return;
+      if (seen.has(trailer)) return;
+      seen.add(trailer);
+      active.push({
+        trailer: trailer,
+        driver: String(r.Driver || '').trim() || 'Unknown',
+        rego: String(r.Rego).trim(),
+        date: r._iso,
+        startTime: String(r.Start_Time || '').trim(),
+        rowIndex: r._rowIndex
+      });
+    });
+
+    return {ok: true, trailers: active};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// 트레일러 반납: Pre_Departure 행의 Trailer_Number 셀 비우기
+function releaseTrailer(driver, trailerNum) {
+  try {
+    if (!driver || !trailerNum) return {ok: false, error: 'driver and trailerNum required'};
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const preSheet = ss.getSheetByName('Pre_Departure');
+    if (!preSheet) return {ok: false, error: 'Pre_Departure sheet not found'};
+
+    const data = preSheet.getDataRange().getValues();
+    const headers = data[0];
+    const idxDriver = headers.indexOf('Driver');
+    const idxDate = headers.indexOf('Date');
+    const idxTN = headers.indexOf('Trailer_Number');
+    if (idxTN < 0) return {ok: false, error: 'Trailer_Number column missing — add it to Pre_Departure sheet'};
+
+    const todayISO = _todayISO_Sydney();
+    const trailer = String(trailerNum).trim();
+    const driverName = String(driver).trim();
+
+    // 가장 최근의 매칭 행 찾기 (역방향 검색)
+    for (let i = data.length - 1; i >= 1; i--) {
+      const row = data[i];
+      const rowDriver = String(row[idxDriver] || '').trim();
+      const rowDate = _normalizeDateISO(row[idxDate]);
+      const rowTrailer = String(row[idxTN] || '').trim();
+      if (rowDriver === driverName && rowDate === todayISO && rowTrailer === trailer) {
+        // 셀 비우기
+        preSheet.getRange(i + 1, idxTN + 1).setValue('');
+        return {ok: true, msg: 'Trailer ' + trailer + ' released', rowIndex: i + 1};
+      }
+    }
+    return {ok: false, error: 'No matching active trailer found for ' + driverName + ' / ' + trailer};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
@@ -1645,6 +1841,47 @@ function saveReport(sheetName, data) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers])
         .setBackground('#1a56db').setFontColor('white').setFontWeight('bold');
       sheet.setFrozenRows(1);
+    }
+
+    // ★ Pre_Departure: 같은 날짜에 같은 차량을 다른 드라이버가 잠갔는지 서버단 검증 (race condition 방지)
+    if (sheetName === 'Pre_Departure') {
+      const myDriver = String(data.Driver || '').trim();
+      const myRego = String(data.Rego || '').trim();
+      const myDate = _normalizeDateISO(data.Date);
+      const myTrailer = String(data.Trailer_Number || '').trim();
+      if (myRego && myDate) {
+        const active = getActiveRegos();
+        if (active.ok && active.regos) {
+          const conflict = active.regos.find(r =>
+            r.rego === myRego && r.date === myDate && r.driver !== myDriver
+          );
+          if (conflict) {
+            return {
+              ok: false,
+              code: 'VEHICLE_LOCKED',
+              error: '차량 ' + myRego + '은(는) 이미 ' + conflict.driver + ' 드라이버가 운행 중입니다.',
+              conflict: conflict
+            };
+          }
+        }
+      }
+      // ★ 트레일러 충돌 검사
+      if (myTrailer) {
+        const activeTr = getActiveTrailers();
+        if (activeTr.ok && activeTr.trailers) {
+          const trConflict = activeTr.trailers.find(t =>
+            t.trailer === myTrailer && t.driver !== myDriver
+          );
+          if (trConflict) {
+            return {
+              ok: false,
+              code: 'TRAILER_LOCKED',
+              error: '트레일러 ' + myTrailer + '은(는) 이미 ' + trConflict.driver + ' 드라이버가 사용 중입니다.',
+              conflict: trConflict
+            };
+          }
+        }
+      }
     }
 
     // ★ 실제 시트 헤더를 읽어서 매핑 (컬럼 순서 불일치 방지)
