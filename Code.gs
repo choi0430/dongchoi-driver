@@ -38,7 +38,8 @@ const REPORT_HEADERS = {
 const MASTER_HEADERS = {
   'M_Vehicles': ['Rego','Make','Model','Manufacture_Date','Capacity','Owner','Rego_Date','HVIS_Date',
                  'Current_KM','Last_Service_KM','Service_Interval','VIN','Engine_Number',
-                 'Accreditation','Current_Status','Transmission','Active'],
+                 'Accreditation','Current_Status','Transmission','Active',
+                 'Photo_Front','Photo_Back','Photo_Left','Photo_Right'],
   'M_Drivers':  ['Name_EN','Name_KR','Initials','DriverID','Mobile_1','NEXT_OF_KIN','Moblie_2','License_Class',
                  'License_No','License_Expiry','Authority_No','Authority_Expiry','WWC_No','WWC_Expiry',
                  'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','Owner','Active'],
@@ -589,6 +590,12 @@ function migrateAddTrailerSystem() {
     ensureColumn('Daily_Report', 'Trailer_Number', 'Trailer');
     ensureColumn('Pre_Departure', 'Trailer_Number', 'Signature');
     ensureColumn('M_Drivers', 'Owner', 'PIN');
+
+    // M_Vehicles에 사진 컬럼 4개 추가 (Active 다음)
+    ensureColumn('M_Vehicles', 'Photo_Front', 'Active');
+    ensureColumn('M_Vehicles', 'Photo_Back', 'Photo_Front');
+    ensureColumn('M_Vehicles', 'Photo_Left', 'Photo_Back');
+    ensureColumn('M_Vehicles', 'Photo_Right', 'Photo_Left');
 
     // M_Trailers 시트 생성 또는 컬럼 추가
     let tSheet = ss.getSheetByName('M_Trailers');
