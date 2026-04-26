@@ -10582,7 +10582,11 @@ async function syncBalanceData(force){
     const invJson = await invRes.json();
     if(agJson.ok && agJson.rows) _balAgencyTxns = agJson.rows;
     if(subJson.ok && subJson.rows) _balSubTxns = subJson.rows;
-    if(invJson.ok && invJson.rows) _balInvoices = invJson.rows;
+    if(invJson.ok && invJson.rows) {
+      _balInvoices = invJson.rows;
+      // ★ _invHistoryCache도 채움 (SUBINV 정확 매칭용 — Items JSON 파싱)
+      if(!_invHistoryCache) _invHistoryCache = (invJson.rows||[]).slice().reverse();
+    }
 
     // ★ Agency_Txn은 인보이스 발행(saveInvoiceToSheet) 시에만 생성됨
     // sync에서는 기존 데이터 로드만 수행 (자동 생성 없음)
@@ -11018,11 +11022,23 @@ function renderBalAgencyList(){
 //       데이터는 SUB_Txn에 그대로 보존되지만 합계/리스트에서 안 보임.
 //       이유: SUB 인보이스가 진실(공식 채무), LEDGER는 운행 메모.
 //
-// 인덱스 구조: { SubCompany_lower: [ {from:'YYYY-MM-DD', to:'YYYY-MM-DD'}, ... ] }
+// ═══════════════════════════════════════════════════════════════════════════
+// SUBINV 우선 정책 — LEDGER/DRSUB 가림 인덱스
+// ═══════════════════════════════════════════════════════════════════════════
+// 정책: SUB 회사가 인보이스(D1, D2...)를 발행한 기간에 대해서는
+//       LEDGER/DRSUB 자동 등록분을 화면에서 제외.
+//       데이터는 SUB_Txn에 그대로 보존되지만 합계/리스트에서 안 보임.
+//
+// 두 가지 가림 인덱스:
+//   1. _subInvSuppressIdx: 기간 범위 — { subCo: [{from, to}] } (기존, 광범위 fallback)
+//   2. _subInvExactKeys: 정확한 운행 키 — Set<"YYYY-MM-DD|REGO"> (Items JSON 파싱)
+//      Items에 명시된 운행만 정확히 가림 → 인보이스 안에 안 들어간 운행은 그대로 표시
 let _subInvSuppressIdx = {};
+let _subInvExactKeys = new Set(); // 더 정확한 매칭용
 
 function _buildSubInvSuppressionIndex(){
   _subInvSuppressIdx = {};
+  _subInvExactKeys = new Set();
   if(!_balSubTxns || !_balSubTxns.length) return;
 
   // SUBINV 자동 등록분 식별
@@ -11051,20 +11067,68 @@ function _buildSubInvSuppressionIndex(){
     if(!_subInvSuppressIdx[subCo]) _subInvSuppressIdx[subCo] = [];
     _subInvSuppressIdx[subCo].push({from: fromISO, to: toISO});
   });
+
+  // 정확한 운행 키 추출 (Items JSON 파싱) — 더 정밀한 매칭
+  // _invHistoryCache에서 SUBINV 인보이스의 Items를 읽어 날짜+차량/투어코드 키 생성
+  if(typeof _invHistoryCache !== 'undefined' && _invHistoryCache && _invHistoryCache.length){
+    _invHistoryCache.forEach(inv => {
+      const isSub = inv.Source === 'SUB' || (typeof _isSubInvNumber === 'function' && _isSubInvNumber(inv.InvNumber||''));
+      if(!isSub) return;
+      let items = [];
+      try { items = JSON.parse(inv.Items||'[]'); } catch(e){}
+      try {
+        const m = JSON.parse(inv.ManualItems||'[]');
+        if(Array.isArray(m)) items = items.concat(m);
+      } catch(e){}
+      if(!Array.isArray(items)) return;
+      items.forEach(it => {
+        const dateRaw = it.date || it.Date || '';
+        const dateISO = parseToISO(String(dateRaw));
+        if(!dateISO) return;
+        const rego = String(it.rego || it.Rego || '').trim();
+        const tourCode = String(it.tourCode || it.tour_code || it.Tour_Code || '').trim();
+        // 두 가지 키로 등록 — rego 매칭 + tourCode 매칭 (어느 쪽이든 매치 시 가림)
+        if(rego) _subInvExactKeys.add(dateISO + '|R|' + rego);
+        if(tourCode) _subInvExactKeys.add(dateISO + '|T|' + tourCode);
+      });
+    });
+  }
 }
 
 // LEDGER/DRSUB 거래가 SUBINV에 의해 가려져야 하는지 확인
+// 정확도 순: (1) 정확한 키 매칭 → (2) 기간 범위 매칭 (fallback)
 function _isSubLedgerSuppressed(t){
   const desc = String(t.Description||'');
-  // LEDGER (localStorage 기반) + DRSUB (Daily_Report 기반) 모두 SUBINV에 의해 가림 대상
   if(!desc.startsWith('LEDGER:') && !desc.startsWith('DRSUB:')) return false;
   const subCo = String(t.SubCompany||'').trim().toLowerCase();
   if(!subCo) return false;
+
+  // 거래의 날짜+차량/투어코드 추출
+  // DRSUB:date_rego_tour 또는 LEDGER:date_rego_tour
+  const m = desc.match(/^(?:DRSUB|LEDGER):(\d{4}-\d{2}-\d{2})_([^_]+)(?:_(.+))?$/);
+  let dateISO = '';
+  let rego = '';
+  let tourCode = '';
+  if(m){
+    dateISO = m[1];
+    rego = m[2];
+    tourCode = m[3] || '';
+  } else {
+    dateISO = _tryParseDate(t.Date) || '';
+  }
+  if(!dateISO) return false;
+
+  // ★ 1단계: 정확한 키 매칭 (가장 정확)
+  if(_subInvExactKeys.size > 0){
+    if(rego && _subInvExactKeys.has(dateISO + '|R|' + rego)) return true;
+    if(tourCode && _subInvExactKeys.has(dateISO + '|T|' + tourCode)) return true;
+    // 정확한 키가 있는데 매치 안 되면 가리지 않음 (정밀 모드)
+    // 단, 인보이스 Items가 비어있을 가능성 대비 fallback도 시도
+  }
+
+  // ★ 2단계: 기간 범위 매칭 (Items 데이터 부족 시 fallback)
   const ranges = _subInvSuppressIdx[subCo];
   if(!ranges || !ranges.length) return false;
-  // 거래 날짜가 어떤 SUBINV 기간에 속하는지 확인
-  const dateISO = _tryParseDate(t.Date);
-  if(!dateISO) return false;
   return ranges.some(r => dateISO >= r.from && dateISO <= r.to);
 }
 
@@ -11113,6 +11177,7 @@ function renderBalSubList(){
   const balances = _subBalances().filter(a=> !search || a.name.toLowerCase().includes(search));
   // 가려진 LEDGER 건수 카운트 (안내용)
   const suppressedCount = (_balSubTxns||[]).filter(t => _isSubLedgerSuppressed(t)).length;
+  const exactMatchMode = _subInvExactKeys && _subInvExactKeys.size > 0;
   const totalBal = balances.reduce((s,a)=>s+a.balance,0);
   const totalDR = balances.reduce((s,a)=>s+a.dr+a.wageDr,0);
   const totalCR = balances.reduce((s,a)=>s+a.cr+a.wageCr,0);
@@ -11132,7 +11197,7 @@ function renderBalSubList(){
         <div style="font-size:15px;font-weight:700;color:${totalBal>0?'var(--rd)':'var(--gn)'};font-family:var(--fn);">$${Math.abs(totalBal).toLocaleString('en',{minimumFractionDigits:2})}</div>
       </div>
     </div>
-    <div style="font-size:10px;color:var(--t3);margin-top:6px;">총 ${balances.length}개 서브 회사${suppressedCount>0?` <span style="color:#7c3aed;">· SUBINV 우선 정책으로 ${suppressedCount}건 LEDGER 가려짐 (중복 방지)</span>`:''}</div>`;
+    <div style="font-size:10px;color:var(--t3);margin-top:6px;">총 ${balances.length}개 서브 회사${suppressedCount>0?` <span style="color:#7c3aed;">· SUBINV 우선 정책으로 ${suppressedCount}건 운행 가려짐${exactMatchMode?' (정확 매칭)':' (기간 매칭)'}</span>`:''}</div>`;
 
   const list = document.getElementById('bal-sub-list');
   if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">거래 내역이 없습니다</div>'; return; }
