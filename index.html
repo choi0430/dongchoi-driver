@@ -8467,7 +8467,19 @@ function renderDriverSchedule(){
     if(slot.startPlace) subParts.push(`📍 ${slot.startPlace}`);
     const detailParts = [];
     if(slot.course) detailParts.push(slot.course);
-    if(slot.rego) detailParts.push(`🚐 ${slot.rego}`);
+    // 차량 SUB 인지 확인
+    let regoBadge = '';
+    if(slot.rego){
+      const veh = (typeof MASTER !== 'undefined' && MASTER && MASTER.vehicles) ? MASTER.vehicles.find(v => v.Rego === slot.rego) : null;
+      const owner = (veh?.Owner||'').trim();
+      const isSubVeh = owner && !/dong\s*choi/i.test(owner) && owner.toLowerCase() !== 'dong choi pty ltd';
+      if(isSubVeh){
+        regoBadge = `🏢 ${slot.rego} (서브: ${owner})`;
+      } else {
+        regoBadge = `🚐 ${slot.rego}`;
+      }
+    }
+    if(regoBadge) detailParts.push(regoBadge);
     if(s.guide) detailParts.push(`👤 ${s.guide}`);
     if(s.pax) detailParts.push(`${s.pax}명`);
 
