@@ -1123,6 +1123,20 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .sm-dr-badge.ok{background:#dcfce7;color:#166534;}
 .sm-dr-badge.warn{background:#fef2f2;color:#dc2626;}
 
+/* 장소 타입 라디오 */
+.sm-place-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-bottom:4px;}
+.sm-place-radio{display:flex;align-items:center;justify-content:center;gap:3px;padding:5px 4px;border-radius:5px;border:1px solid var(--b2);background:var(--sf2);font-size:10px;font-weight:600;color:var(--t3);cursor:pointer;font-family:var(--fd);}
+.sm-place-radio.on{background:var(--ac);color:white;border-color:var(--ac);}
+.sm-place-radio input{display:none;}
+
+/* 검색 드롭다운 상태별 색상 (휴무/배정됨) */
+.scsel-item.s-leave{background:#fafafa;color:#9ca3af;}
+.scsel-item.s-leave .scsel-item-sub{color:#dc2626;}
+.scsel-item.s-busy{background:#fffbeb;}
+.scsel-item.s-busy .scsel-item-sub{color:#92400e;}
+.scsel-item.s-leave:hover,.scsel-item.s-leave.active{background:#9ca3af;color:white;}
+.scsel-item.s-busy:hover,.scsel-item.s-busy.active{background:#f59e0b;color:white;}
+
 /* Calendar — 5 rows × slots */
 .sch-cal-table{display:grid;grid-template-columns:1fr;gap:1px;background:var(--b1);font-family:var(--fb);}
 .sch-cal-row{display:grid;gap:1px;}
@@ -3878,11 +3892,128 @@ let _schDays = [];                  // 모달 일별 일정 데이터
 const _schCsels = {};               // {agency, guide} 검색 드롭다운 인스턴스
 const _schDayCsels = {};            // 일별 호텔/드라이버/차량 드롭다운
 let _schDRMatchIndex = null;        // {date|rego|course → DR row} 매칭 인덱스
+let _schLeaveByDate = null;         // {date(YYYY-MM-DD): Set<driverName>}
+let _schBusyDriverByDate = null;    // {date: Map<driverName, [{tourId, tourCode}]>}
+let _schBusyRegoByDate = null;      // {date: Map<rego, [{tourId, tourCode}]>}
 
 async function initSchedule(){
   await loadSchedule();
   await _schEnsureDRCache();
   _schBuildDRMatchIndex();
+  await _schLoadLeaves();
+  _schBuildAvailabilityIndex();
+}
+
+// 휴무 데이터 로드 (관리자 페이지에서 이미 _adminLeaves에 있을 수도 있음)
+async function _schLoadLeaves(){
+  if(typeof _adminLeaves !== 'undefined' && _adminLeaves && _adminLeaves.length) return;
+  try{
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_all_leave_requests&filter=all&user='+encodeURIComponent(getAdminUser()));
+    const json = await res.json();
+    if(json?.ok){
+      window._adminLeaves = json.requests || [];
+    }
+  }catch(e){ console.warn('leave load failed:', e); }
+}
+
+// 가용성 인덱스 구축
+function _schBuildAvailabilityIndex(){
+  // 1. 휴무 by date: Approved 상태만
+  _schLeaveByDate = {};
+  const leaves = (typeof _adminLeaves !== 'undefined' && _adminLeaves) || [];
+  leaves.forEach(lr => {
+    if(String(lr.Status||'').toLowerCase() !== 'approved') return;
+    const driver = String(lr.Driver||'').trim();
+    if(!driver) return;
+    const from = _schParseLeaveDate(lr.Date_From);
+    const to = _schParseLeaveDate(lr.Date_To) || from;
+    if(!from) return;
+    let cursor = from;
+    while(cursor <= to){
+      if(!_schLeaveByDate[cursor]) _schLeaveByDate[cursor] = new Set();
+      _schLeaveByDate[cursor].add(driver);
+      cursor = _schAddDays(cursor, 1);
+    }
+  });
+
+  // 2. 다른 일정에 이미 배정된 드라이버/차량
+  _schBusyDriverByDate = {};
+  _schBusyRegoByDate = {};
+  _schCache.forEach(t => {
+    if(String(t.Status||'') === 'cancelled') return;
+    const tourId = t.TourID;
+    const tourCode = t.TourCode || tourId;
+    const days = _schParseDays(t.TourPlan);
+    days.forEach(d => {
+      const date = String(d.date||'').slice(0,10);
+      if(!date) return;
+      ['morning','fullday','evening'].forEach(k => {
+        const s = d.slots && d.slots[k];
+        if(!s) return;
+        if(s.driver){
+          if(!_schBusyDriverByDate[date]) _schBusyDriverByDate[date] = new Map();
+          if(!_schBusyDriverByDate[date].has(s.driver)) _schBusyDriverByDate[date].set(s.driver, []);
+          _schBusyDriverByDate[date].get(s.driver).push({tourId, tourCode, slot:k});
+        }
+        if(s.rego){
+          if(!_schBusyRegoByDate[date]) _schBusyRegoByDate[date] = new Map();
+          if(!_schBusyRegoByDate[date].has(s.rego)) _schBusyRegoByDate[date].set(s.rego, []);
+          _schBusyRegoByDate[date].get(s.rego).push({tourId, tourCode, slot:k});
+        }
+      });
+    });
+  });
+}
+
+// "29/04/2026" or "2026-04-29" 형식 → "YYYY-MM-DD"
+function _schParseLeaveDate(s){
+  if(!s) return null;
+  const str = String(s).trim();
+  // ISO
+  if(/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0,10);
+  // dd/mm/yyyy
+  const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m){
+    return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
+  }
+  // try Date parse
+  const d = new Date(str);
+  if(!isNaN(d.getTime())){
+    return _schToday.call(null, d) || null;
+  }
+  return null;
+}
+
+// 드라이버 가용성: 'available' | 'leave' | 'busy'
+// busy 상태일 때 reason 같이 반환
+function _schDriverStatus(driverName, date, currentTourId){
+  if(!driverName || !date) return { status:'available' };
+  // 휴무 우선
+  if(_schLeaveByDate && _schLeaveByDate[date] && _schLeaveByDate[date].has(driverName)){
+    return { status:'leave' };
+  }
+  // 다른 일정 배정 (자기 일정 제외)
+  if(_schBusyDriverByDate && _schBusyDriverByDate[date] && _schBusyDriverByDate[date].has(driverName)){
+    const conflicts = _schBusyDriverByDate[date].get(driverName).filter(c => c.tourId !== currentTourId);
+    if(conflicts.length){
+      const codes = [...new Set(conflicts.map(c => c.tourCode))].slice(0,2).join(', ');
+      return { status:'busy', reason: `배정됨: ${codes}` };
+    }
+  }
+  return { status:'available' };
+}
+
+// 차량 가용성
+function _schRegoStatus(rego, date, currentTourId){
+  if(!rego || !date) return { status:'available' };
+  if(_schBusyRegoByDate && _schBusyRegoByDate[date] && _schBusyRegoByDate[date].has(rego)){
+    const conflicts = _schBusyRegoByDate[date].get(rego).filter(c => c.tourId !== currentTourId);
+    if(conflicts.length){
+      const codes = [...new Set(conflicts.map(c => c.tourCode))].slice(0,2).join(', ');
+      return { status:'busy', reason: `배정됨: ${codes}` };
+    }
+  }
+  return { status:'available' };
 }
 
 // DR 캐시 보장 (없으면 로드)
@@ -3947,6 +4078,9 @@ async function loadSchedule(){
     // DR 인덱스도 갱신
     await _schEnsureDRCache();
     _schBuildDRMatchIndex();
+    // 가용성 인덱스 갱신 (휴무 + 다른 일정 배정)
+    await _schLoadLeaves();
+    _schBuildAvailabilityIndex();
     renderScheduleList();
   }catch(e){
     if(cntEl) cntEl.textContent = '오류';
@@ -4120,12 +4254,14 @@ function buildSearchSelect(containerId, options){
       list.innerHTML = '<div class="scsel-empty">결과 없음</div>';
       return;
     }
-    list.innerHTML = filtered.slice(0, 50).map((it, i) => `
-      <div class="scsel-item${i===inst.activeIdx?' active':''}" data-val="${escH(it.value)}" data-idx="${i}">
+    list.innerHTML = filtered.slice(0, 50).map((it, i) => {
+      const statusCls = it._status === 'leave' ? ' s-leave' : (it._status === 'busy' ? ' s-busy' : '');
+      return `
+      <div class="scsel-item${i===inst.activeIdx?' active':''}${statusCls}" data-val="${escH(it.value)}" data-idx="${i}">
         <div>${escH(it.label)}</div>
         ${it.sub ? `<div class="scsel-item-sub">${escH(it.sub)}</div>` : ''}
       </div>
-    `).join('');
+    `;}).join('');
     list.querySelectorAll('.scsel-item').forEach(el => {
       el.onmousedown = (e) => {
         e.preventDefault();
@@ -4393,14 +4529,16 @@ function onSmFlightInTimeChange(){
   const newTime = _addMinutes(t, addMin);
   const d = _schDays[0];
   // 활성 슬롯 결정
-  let target = null, slotKey = null;
-  if(d.slots.morning){ target = d.slots.morning; slotKey = 'morning'; }
-  else if(d.slots.fullday){ target = d.slots.fullday; slotKey = 'fullday'; }
-  else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; slotKey = 'fullday'; }
+  let target = null;
+  if(d.slots.morning){ target = d.slots.morning; }
+  else if(d.slots.fullday){ target = d.slots.fullday; }
+  else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; }
   target.startTime = newTime;
-  // 시작장소가 비어있으면 'AIRPORT' 자동 채움 (편의)
-  if(!target.startPlace) target.startPlace = 'AIRPORT';
-  // UI 갱신 (해당 슬롯이 안 그려져있을 수 있어 rebuild)
+  // 시작장소가 비어있으면 공항 자동 (도착 → 공항에서 출발)
+  if(!target.startPlace){
+    target.startPlace = isIntl ? 'Sydney INTL' : 'Sydney DOM';
+    target.startPlaceType = 'airport';
+  }
   _smRebuildDays();
   const hint = document.getElementById('sm-coach-hint');
   if(hint){
@@ -4419,12 +4557,15 @@ function onSmFlightOutTimeChange(){
   const newTime = _addMinutes(t, -subMin);
   const lastIdx = _schDays.length - 1;
   const d = _schDays[lastIdx];
-  let target = null, slotKey = null;
-  if(d.slots.evening){ target = d.slots.evening; slotKey = 'evening'; }
-  else if(d.slots.fullday){ target = d.slots.fullday; slotKey = 'fullday'; }
-  else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; slotKey = 'fullday'; }
+  let target = null;
+  if(d.slots.evening){ target = d.slots.evening; }
+  else if(d.slots.fullday){ target = d.slots.fullday; }
+  else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; }
   target.startTime = newTime;
-  if(!target.endPlace) target.endPlace = 'AIRPORT';
+  if(!target.endPlace){
+    target.endPlace = isIntl ? 'Sydney INTL' : 'Sydney DOM';
+    target.endPlaceType = 'airport';
+  }
   if(!target.endTime) target.endTime = t; // 항공 출발 시간을 도착 시간으로 (편의)
   _smRebuildDays();
   const hint = document.getElementById('sm-coach-hint');
@@ -4485,6 +4626,7 @@ function _smRebuildDays(){
     const dow = dayOfWeek[_schDayOfWeek(d.date)];
     const dayNum = _schDayOfWeek(d.date);
     const isWeekend = dayNum === 0 || dayNum === 6;
+    const isLastDay = (i === _schDays.length - 1);
 
     // 활성 슬롯 토글 버튼
     const slotToggles = SLOT_KEYS.map(k => {
@@ -4519,9 +4661,10 @@ function _smRebuildDays(){
           </div>
           <div>
             <div class="sm-day-lbl">시작 장소</div>
-            <input type="text" id="day-${i}-${k}-sp" class="profit-finp sm-fld" placeholder="예: M PMT, ADGE"
-              value="${escH(d.slots[k].startPlace||'')}"
-              oninput="_schDays[${i}].slots['${k}'].startPlace=this.value">
+            <div class="sm-place-row">
+              ${_smPlaceTypeRadios(i, k, 'startPlaceType', d.slots[k].startPlaceType||'')}
+            </div>
+            ${_smPlaceInput(i, k, 'startPlace', d.slots[k].startPlace||'', d.slots[k].startPlaceType||'', d.hotel)}
           </div>
         </div>
         <div class="sm-day-row">
@@ -4548,9 +4691,10 @@ function _smRebuildDays(){
           </div>
           <div>
             <div class="sm-day-lbl">도착 장소</div>
-            <input type="text" id="day-${i}-${k}-ep" class="profit-finp sm-fld" placeholder="예: HOTEL, AIRPORT"
-              value="${escH(d.slots[k].endPlace||'')}"
-              oninput="_schDays[${i}].slots['${k}'].endPlace=this.value">
+            <div class="sm-place-row">
+              ${_smPlaceTypeRadios(i, k, 'endPlaceType', d.slots[k].endPlaceType||'')}
+            </div>
+            ${_smPlaceInput(i, k, 'endPlace', d.slots[k].endPlace||'', d.slots[k].endPlaceType||'', d.hotel)}
           </div>
         </div>
       </div>`;
@@ -4560,10 +4704,11 @@ function _smRebuildDays(){
       <div class="sm-day-hdr" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
         <span style="background:var(--ac);color:white;border-radius:4px;padding:1px 6px;font-size:10px;">DAY ${i+1}</span>
         <span>${escH(d.date)} (<span style="color:${isWeekend?'#ef4444':'inherit'}">${dow}</span>)</span>
+        ${isLastDay && _schDays.length > 1 ? '<span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700;">🛫 마지막날</span>' : ''}
       </div>
       <div class="sm-day-row">
         <div>
-          <div class="sm-day-lbl">호텔 (오늘 묵을 곳)</div>
+          <div class="sm-day-lbl">호텔 ${isLastDay && _schDays.length > 1 ? '(출국일이면 비워두기)' : '(오늘 묵을 곳)'}</div>
           <div id="day-hotel-${i}"></div>
         </div>
         <label class="sm-day-trailer" for="day-trailer-${i}" style="margin-top:14px;">
@@ -4601,28 +4746,63 @@ function _smRebuildDays(){
   }
   const courseItems = courseList.sort().map(c => ({ value: c, label: c }));
 
-  // 드라이버 옵션
-  const driverItems = (DB.D||[])
+  // 드라이버 기본 옵션 (Active 필터)
+  const baseDriverItems = (DB.D||[])
     .filter(dr => String(dr.Active||'').toUpperCase() !== 'N')
     .map(dr => ({
       value: dr.Name_KR || dr.Name_EN || '',
-      label: dr.Name_KR || dr.Name_EN || '',
-      sub: [dr.Name_EN, dr.Mobile].filter(Boolean).join(' · ')
+      _label: dr.Name_KR || dr.Name_EN || '',
+      _baseSub: [dr.Name_EN, dr.Mobile].filter(Boolean).join(' · ')
     }))
     .filter(it => it.value);
 
-  // 차량 옵션
-  const vehItems = (DB.V||[])
+  // 차량 기본 옵션
+  const baseVehItems = (DB.V||[])
     .filter(v => String(v.Active||'').toUpperCase() !== 'N')
     .map(v => ({
       value: v.Rego,
-      label: v.Rego,
-      sub: [v.Capacity, v.Owner].filter(Boolean).join(' · ')
+      _label: v.Rego,
+      _baseSub: [v.Capacity, v.Owner].filter(Boolean).join(' · ')
     }));
+
+  // 일자별 가용성 적용 — 정렬: available → busy → leave
+  const STATUS_ORDER = { available:0, busy:1, leave:2 };
+  function buildDriverItemsForDate(date){
+    const enriched = baseDriverItems.map(it => {
+      const stt = _schDriverStatus(it.value, date, _schEditTourId);
+      let label = it._label;
+      let sub = it._baseSub;
+      if(stt.status === 'leave'){ label = '🚫 ' + label; sub = '⛔ 휴무중' + (sub?' · '+sub:''); }
+      else if(stt.status === 'busy'){ label = '⚠️ ' + label; sub = stt.reason + (sub?' · '+sub:''); }
+      return { value: it.value, label, sub, _status: stt.status };
+    });
+    enriched.sort((a,b) => {
+      const so = STATUS_ORDER[a._status] - STATUS_ORDER[b._status];
+      if(so !== 0) return so;
+      return String(a.value).localeCompare(String(b.value));
+    });
+    return enriched;
+  }
+  function buildVehItemsForDate(date){
+    const enriched = baseVehItems.map(it => {
+      const stt = _schRegoStatus(it.value, date, _schEditTourId);
+      let label = it._label;
+      let sub = it._baseSub;
+      if(stt.status === 'busy'){ label = '⚠️ ' + label; sub = stt.reason + (sub?' · '+sub:''); }
+      return { value: it.value, label, sub, _status: stt.status };
+    });
+    enriched.sort((a,b) => {
+      const so = STATUS_ORDER[a._status] - STATUS_ORDER[b._status];
+      if(so !== 0) return so;
+      return 0;
+    });
+    return enriched;
+  }
 
   // 각 일별 + 슬롯별 검색 드롭다운 빌드
   _schDays.forEach((d, i) => {
-    // 호텔 (날짜 단위)
+    // 호텔 (날짜 단위) — 모든 날에 입력 가능 (마지막 날도 호텔 드롭 가능성 있음)
+    // 자동 전파에서만 마지막 날 제외 (_propagateHotel에서 처리)
     _schDayCsels['hotel-'+i] = buildSearchSelect('day-hotel-'+i, {
       items: hotelItems,
       value: d.hotel || '',
@@ -4632,13 +4812,17 @@ function _smRebuildDays(){
     });
     if(d.hotel) _schDayCsels['hotel-'+i].setValue(d.hotel);
 
+    // 일자별 가용성 인지 옵션
+    const driverItemsDate = buildDriverItemsForDate(d.date);
+    const vehItemsDate = buildVehItemsForDate(d.date);
+
     // 활성 슬롯마다 드롭다운
     SLOT_KEYS.forEach(k => {
       if(d.slots[k] === null) return;
       const cellPrefix = `${i}-${k}`;
       // 차량
       _schDayCsels['rego-'+cellPrefix] = buildSearchSelect('slot-rego-'+cellPrefix, {
-        items: vehItems,
+        items: vehItemsDate,
         value: d.slots[k].rego || '',
         placeholder: '차량',
         onSelect: (it) => { _propagateSlotField(i, k, 'rego', it.value); },
@@ -4647,7 +4831,7 @@ function _smRebuildDays(){
       if(d.slots[k].rego) _schDayCsels['rego-'+cellPrefix].setValue(d.slots[k].rego);
       // 드라이버
       _schDayCsels['driver-'+cellPrefix] = buildSearchSelect('slot-driver-'+cellPrefix, {
-        items: driverItems,
+        items: driverItemsDate,
         value: d.slots[k].driver || '',
         placeholder: '드라이버',
         onSelect: (it) => { _propagateSlotField(i, k, 'driver', it.value); },
@@ -4667,6 +4851,31 @@ function _smRebuildDays(){
       if(courseInp){
         courseInp.addEventListener('input', () => { _schDays[i].slots[k].course = courseInp.value; });
       }
+
+      // 시작 장소 — placeType이 hotel이면 호텔 검색 드롭다운 빌드
+      if(d.slots[k].startPlaceType === 'hotel'){
+        const csel = buildSearchSelect(`place-csel-${i}-${k}-startPlace`, {
+          items: hotelItems,
+          value: d.slots[k].startPlace || '',
+          placeholder: '호텔 검색',
+          onSelect: (it) => { _schDays[i].slots[k].startPlace = it.value; },
+          onClear: () => { _schDays[i].slots[k].startPlace = ''; }
+        });
+        if(d.slots[k].startPlace && csel) csel.setValue(d.slots[k].startPlace);
+        _schDayCsels[`startPlace-${i}-${k}`] = csel;
+      }
+      // 도착 장소 — placeType이 hotel이면 호텔 검색 드롭다운 빌드
+      if(d.slots[k].endPlaceType === 'hotel'){
+        const csel = buildSearchSelect(`place-csel-${i}-${k}-endPlace`, {
+          items: hotelItems,
+          value: d.slots[k].endPlace || '',
+          placeholder: '호텔 검색',
+          onSelect: (it) => { _schDays[i].slots[k].endPlace = it.value; },
+          onClear: () => { _schDays[i].slots[k].endPlace = ''; }
+        });
+        if(d.slots[k].endPlace && csel) csel.setValue(d.slots[k].endPlace);
+        _schDayCsels[`endPlace-${i}-${k}`] = csel;
+      }
     });
   });
 }
@@ -4680,9 +4889,20 @@ function toggleSlot(dayIdx, slotKey){
     d.slots[slotKey] = _schEmptySlot();
     // 호텔이 정해져 있으면 자동으로 시작/종료 장소를 호텔로 (편의)
     if(d.hotel){
-      if(slotKey === 'morning'){ d.slots[slotKey].startPlace = d.hotel; }
-      if(slotKey === 'fullday'){ d.slots[slotKey].startPlace = d.hotel; d.slots[slotKey].endPlace = d.hotel; }
-      if(slotKey === 'evening'){ d.slots[slotKey].startPlace = d.hotel; }
+      if(slotKey === 'morning'){
+        d.slots[slotKey].startPlace = d.hotel;
+        d.slots[slotKey].startPlaceType = 'hotel';
+      }
+      if(slotKey === 'fullday'){
+        d.slots[slotKey].startPlace = d.hotel;
+        d.slots[slotKey].startPlaceType = 'hotel';
+        d.slots[slotKey].endPlace = d.hotel;
+        d.slots[slotKey].endPlaceType = 'hotel';
+      }
+      if(slotKey === 'evening'){
+        d.slots[slotKey].startPlace = d.hotel;
+        d.slots[slotKey].startPlaceType = 'hotel';
+      }
     }
   } else {
     // 비활성화 — 데이터 있을 시 확인
@@ -4695,12 +4915,79 @@ function toggleSlot(dayIdx, slotKey){
 }
 
 // ═══════════════════════════════════════
+// 장소 타입 라디오 + 스마트 입력
+// type: '' (선택안함) | 'airport' | 'hotel' | 'other'
+// ═══════════════════════════════════════
+function _smPlaceTypeRadios(dayIdx, slotKey, fieldType, currentType){
+  const types = [
+    {v:'airport', label:'✈️ 공항'},
+    {v:'hotel',   label:'🏨 호텔'},
+    {v:'other',   label:'📍 기타'}
+  ];
+  return types.map(t => `
+    <label class="sm-place-radio ${currentType===t.v?'on':''}">
+      <input type="radio" name="place-${dayIdx}-${slotKey}-${fieldType}" value="${t.v}" ${currentType===t.v?'checked':''}
+        onchange="setPlaceType(${dayIdx},'${slotKey}','${fieldType}','${t.v}')">
+      <span>${t.label}</span>
+    </label>
+  `).join('');
+}
+
+function _smPlaceInput(dayIdx, slotKey, fieldName, currentValue, currentType, dayHotel){
+  // type별로 입력 방식 다름
+  if(currentType === 'airport'){
+    // 공항은 자유 입력 (Sydney Domestic, International T1 등)
+    return `<input type="text" id="place-inp-${dayIdx}-${slotKey}-${fieldName}" class="profit-finp sm-fld"
+      placeholder="예: Sydney INTL T1, M PMT, JQ T2"
+      value="${escH(currentValue||'')}"
+      oninput="_schDays[${dayIdx}].slots['${slotKey}'].${fieldName}=this.value">`;
+  }
+  if(currentType === 'hotel'){
+    // 호텔은 검색 드롭다운 (자동으로 그날 호텔과 동기화)
+    return `<div id="place-csel-${dayIdx}-${slotKey}-${fieldName}"></div>`;
+  }
+  if(currentType === 'other'){
+    // 기타는 자유 입력
+    return `<input type="text" id="place-inp-${dayIdx}-${slotKey}-${fieldName}" class="profit-finp sm-fld"
+      placeholder="장소명 입력"
+      value="${escH(currentValue||'')}"
+      oninput="_schDays[${dayIdx}].slots['${slotKey}'].${fieldName}=this.value">`;
+  }
+  // 미선택 — 안내
+  return `<div style="padding:6px 10px;background:var(--sf2);border-radius:6px;font-size:11px;color:var(--t3);">위에서 장소 타입 선택</div>`;
+}
+
+function setPlaceType(dayIdx, slotKey, fieldType, newType){
+  const slot = _schDays[dayIdx]?.slots?.[slotKey];
+  if(!slot) return;
+  const fieldName = fieldType.replace('Type',''); // startPlaceType → startPlace
+  const oldType = slot[fieldType] || '';
+  slot[fieldType] = newType;
+  // 타입 바꿀 때 자동으로 값 채우거나 비우기
+  if(newType === 'airport' && oldType !== 'airport'){
+    // 기본값 — 빈칸 유지 (사용자가 입력)
+    if(!slot[fieldName] || oldType === 'hotel'){
+      slot[fieldName] = '';
+    }
+  } else if(newType === 'hotel'){
+    // 그날 호텔 자동 적용
+    slot[fieldName] = _schDays[dayIdx].hotel || '';
+  } else if(newType === 'other' && oldType === 'hotel'){
+    slot[fieldName] = '';
+  }
+  _smRebuildDays();
+}
+
+// ═══════════════════════════════════════
 // 자동 전파 헬퍼
 // ═══════════════════════════════════════
 function _propagateHotel(idx, newVal){
   const oldVal = _schDays[idx].hotel || '';
   _schDays[idx].hotel = newVal;
+  // 마지막 날 = 출국일 → 호텔 없음 (마지막 인덱스는 전파에서 제외)
+  const lastIdx = _schDays.length - 1;
   for(let j = idx + 1; j < _schDays.length; j++){
+    if(j === lastIdx) break; // 출국일은 호텔 자동 전파 안 함
     const cur = _schDays[j].hotel || '';
     if(!cur || cur === oldVal){
       _schDays[j].hotel = newVal;
