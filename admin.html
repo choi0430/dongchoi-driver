@@ -3945,7 +3945,7 @@ function _schBuildAvailabilityIndex(){
     const tourCode = t.TourCode || tourId;
     const days = _schParseDays(t.TourPlan);
     days.forEach(d => {
-      const date = String(d.date||'').slice(0,10);
+      const date = _schToISO(d.date);
       if(!date) return;
       ['morning','fullday','evening'].forEach(k => {
         const s = d.slots && d.slots[k];
@@ -4137,8 +4137,8 @@ function renderScheduleList(){
 
   listEl.innerHTML = rows.map(r => {
     const st = String(r.Status||'scheduled').trim();
-    const sd = String(r.StartDate||'').slice(0,10);
-    const ed = String(r.EndDate||'').slice(0,10);
+    const sd = _schToISO(r.StartDate);
+    const ed = _schToISO(r.EndDate);
     const period = sd === ed ? sd : `${sd} ~ ${ed}`;
     const tcode = r.TourCode || '';
     const guide = r.Guide ? `🧭 ${escH(r.Guide)}` : '';
@@ -4409,8 +4409,8 @@ function openScheduleModal(tourId){
     delBtn.style.display = 'block';
     _schCsels.agency.setValue(r.Agency || '');
     document.getElementById('sm-tourcode').value = r.TourCode || '';
-    document.getElementById('sm-start').value = String(r.StartDate||'').slice(0,10);
-    document.getElementById('sm-end').value = String(r.EndDate||'').slice(0,10);
+    document.getElementById('sm-start').value = _schToISO(r.StartDate);
+    document.getElementById('sm-end').value = _schToISO(r.EndDate);
     document.getElementById('sm-pax').value = r.Pax || '';
     document.getElementById('sm-seats').value = r.Seats || '';
     _schCsels.guide.setValue(r.Guide || '');
@@ -4419,13 +4419,13 @@ function openScheduleModal(tourId){
     // 항공편 (FlightIn = "OZ602|2026-04-08|09:30|intl" 식 또는 자유텍스트)
     const fi = _schParseFlight(r.FlightIn);
     document.getElementById('sm-flightin').value = fi.code;
-    document.getElementById('sm-flightin-date').value = fi.date;
+    document.getElementById('sm-flightin-date').value = _schToISO(fi.date);
     document.getElementById('sm-flightin-time').value = fi.time;
     const fiRadio = document.querySelector(`input[name="sm-fi-type"][value="${fi.type==='dom'?'dom':'intl'}"]`);
     if(fiRadio) fiRadio.checked = true;
     const fo = _schParseFlight(r.FlightOut);
     document.getElementById('sm-flightout').value = fo.code;
-    document.getElementById('sm-flightout-date').value = fo.date;
+    document.getElementById('sm-flightout-date').value = _schToISO(fo.date);
     document.getElementById('sm-flightout-time').value = fo.time;
     const foRadio = document.querySelector(`input[name="sm-fo-type"][value="${fo.type==='dom'?'dom':'intl'}"]`);
     if(foRadio) foRadio.checked = true;
@@ -4472,6 +4472,32 @@ function _schToday(){
     timeZone: 'Australia/Sydney', year:'numeric', month:'2-digit', day:'2-digit'
   });
   return fmt.format(new Date()); // en-CA → YYYY-MM-DD
+}
+
+// 다양한 날짜 형식을 ISO (yyyy-mm-dd)로 변환
+// 입력: "2026-04-27" / "27/04/2026" / "2026-04-27T..." / Date 객체 / 빈값
+function _schToISO(v){
+  if(!v) return '';
+  if(v instanceof Date && !isNaN(v.getTime())){
+    return _schToday.call(null) === '' ? '' :
+      `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}-${String(v.getDate()).padStart(2,'0')}`;
+  }
+  const s = String(v).trim();
+  if(!s) return '';
+  // ISO yyyy-mm-dd (또는 yyyy-mm-ddTHH:MM:SS)
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // dd/mm/yyyy 또는 d/m/yyyy
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m) return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
+  // dd-mm-yyyy
+  m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
+  if(m) return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
+  // 마지막 수단: Date 파싱
+  const d = new Date(s);
+  if(!isNaN(d.getTime())){
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  return '';
 }
 
 function closeScheduleModal(){
@@ -5167,6 +5193,8 @@ function _schParseDays(tourPlan){
       d.slots.morning = d.slots.morning || null;
       d.slots.fullday = d.slots.fullday || null;
       d.slots.evening = d.slots.evening || null;
+      // 날짜 ISO 정규화
+      if(d.date) d.date = _schToISO(d.date);
       return d;
     }
     // 구버전 변환
@@ -5180,7 +5208,7 @@ function _schParseDays(tourPlan){
       rego: d.rego || ''
     } : null;
     return {
-      date: d?.date || '',
+      date: _schToISO(d?.date || ''),
       hotel: d?.hotel || '',
       trailer: !!d?.trailer,
       ot: d?.ot || '',
@@ -5376,8 +5404,8 @@ function _schGetAllDays(){
     const days = _schParseDays(t.TourPlan);
     if(days.length === 0){
       // legacy: TourPlan 없는 일정 → fullday 슬롯으로 가정
-      const sd = String(t.StartDate||'').slice(0,10);
-      const ed = String(t.EndDate||'').slice(0,10);
+      const sd = _schToISO(t.StartDate);
+      const ed = _schToISO(t.EndDate);
       if(sd && ed && /^\d{4}-\d{2}-\d{2}$/.test(sd) && /^\d{4}-\d{2}-\d{2}$/.test(ed)){
         let cursor = sd;
         while(cursor <= ed){
