@@ -6320,54 +6320,94 @@ function renderScheduleCalendar(){
 
   // ★ 같은 그룹 안에서 다른 TourID들을 자동 트랙 분할
   // 같은 TourID는 항상 한 트랙 (여러 날짜에 걸쳐 가로 병합 유지)
+  // ★★ 트랙 인덱스 안정화: 각 그룹의 모든 일정(allDays)에서 가이드/TourID별 트랙 번호 미리 계산
+  //    → 매주 같은 가이드/투어는 같은 트랙 번호 유지 (사용자가 트랙 1↔2 이동 안 보임)
+  function _computeStableTrackIndex(grpKey){
+    // 같은 그룹의 모든 일정 (현재 보이는 기간 외 포함)
+    const allInGroup = (allDays||[]).filter(x => {
+      const slots = x.day.slots || {};
+      const anySlot = ['morning','fullday','evening'].map(k => slots[k]).find(s => s);
+      if(!anySlot) return false;
+      let key;
+      switch(groupBy){
+        case 'guide':  key = x.tour.Guide || '(미지정)'; break;
+        case 'rego':   key = anySlot.rego || '(미지정)'; break;
+        case 'driver': key = anySlot.driver || '(미지정)'; break;
+        default:       key = x.tour.Agency || '(미지정)';
+      }
+      return key === grpKey;
+    });
+    // TourID별 firstDate 모음
+    const tspans = {};
+    allInGroup.forEach(x => {
+      const tid = x.tour.TourID;
+      if(!tspans[tid]) tspans[tid] = {firstDate: x.date, lastDate: x.date, tour: x.tour};
+      if(x.date < tspans[tid].firstDate) tspans[tid].firstDate = x.date;
+      if(x.date > tspans[tid].lastDate) tspans[tid].lastDate = x.date;
+    });
+    // firstDate → TourCode/Guide → TourID 순으로 정렬 (안정적인 결정성)
+    const tourArr = Object.entries(tspans).sort((a,b) => {
+      if(a[1].firstDate !== b[1].firstDate) return a[1].firstDate.localeCompare(b[1].firstDate);
+      const ag = String(a[1].tour.Guide||'') + (a[1].tour.TourCode||'');
+      const bg = String(b[1].tour.Guide||'') + (b[1].tour.TourCode||'');
+      if(ag !== bg) return ag.localeCompare(bg);
+      return a[0].localeCompare(b[0]);
+    });
+    // 트랙 배치 — 글로벌 일정 기준
+    const tracks = []; // [{lastDate}]
+    const tourToTrack = {}; // tid → trackIdx
+    tourArr.forEach(([tid, span]) => {
+      let trackIdx = tracks.findIndex(t => t.lastDate < span.firstDate);
+      if(trackIdx < 0){
+        tracks.push({lastDate: span.lastDate});
+        trackIdx = tracks.length - 1;
+      } else {
+        tracks[trackIdx].lastDate = span.lastDate;
+      }
+      tourToTrack[tid] = trackIdx;
+    });
+    return {tourToTrack, totalTracks: tracks.length};
+  }
+
   const splitGroups = {};
   Object.keys(groups).forEach(grpKey => {
-    // 그룹 안의 모든 TourID 별로 일정 정보 수집
-    const tourSpans = {}; // tourID → {firstDate, lastDate, items: [{date, slotKey, data}, ...]}
+    // 글로벌 트랙 인덱스 계산 (전체 일정 기준 — 매주 안정적)
+    const {tourToTrack, totalTracks} = _computeStableTrackIndex(grpKey);
+
+    // 현재 주의 일정만 트랙별로 분배
+    const trackItems = Array.from({length: totalTracks}, () => []);
     Object.entries(groups[grpKey]).forEach(([date, slots]) => {
       Object.entries(slots).forEach(([slotKey, dataArr]) => {
-        // dataArr는 배열 — 같은 슬롯에 여러 투어가 있을 수 있음
         dataArr.forEach(data => {
           const tid = data.tour.TourID;
-          if(!tourSpans[tid]) tourSpans[tid] = {firstDate: date, lastDate: date, items: []};
-          if(date < tourSpans[tid].firstDate) tourSpans[tid].firstDate = date;
-          if(date > tourSpans[tid].lastDate) tourSpans[tid].lastDate = date;
-          tourSpans[tid].items.push({date, slotKey, data});
+          const trackIdx = tourToTrack[tid] ?? 0;
+          trackItems[trackIdx].push({date, slotKey, data});
         });
       });
     });
-    // 트랙 배치 — 첫날 빠른 순으로 정렬, 각 투어를 가장 빨리 빈 트랙에 배치
-    const tourArr = Object.entries(tourSpans).sort((a,b) => {
-      if(a[1].firstDate !== b[1].firstDate) return a[1].firstDate.localeCompare(b[1].firstDate);
-      return a[0].localeCompare(b[0]);
-    });
-    const tracks = []; // [{lastDate, items: [...]}, ...]
-    tourArr.forEach(([tid, span]) => {
-      // 빈 트랙 찾기 (트랙의 lastDate < 새 투어의 firstDate)
-      let trackIdx = tracks.findIndex(t => t.lastDate < span.firstDate);
-      if(trackIdx < 0){
-        tracks.push({lastDate: span.lastDate, items: span.items});
-      } else {
-        tracks[trackIdx].lastDate = span.lastDate;
-        tracks[trackIdx].items = tracks[trackIdx].items.concat(span.items);
-      }
-    });
-    // 트랙별 그룹 키 생성
-    if(tracks.length === 0){
-      // 안전장치 — 빈 그룹은 통과
+
+    // 비어있지 않은 트랙만 추출 (현재 주에 일정 없는 트랙은 표시 안 함)
+    const usedTracks = trackItems.map((items, idx) => ({items, originalIdx: idx})).filter(t => t.items.length > 0);
+
+    if(usedTracks.length === 0){
       splitGroups[grpKey] = {};
+    } else if(usedTracks.length === 1 && totalTracks === 1){
+      // 트랙 1개만 사용 + 글로벌도 1개 → 접미사 없음
+      splitGroups[grpKey] = {};
+      usedTracks[0].items.forEach(({date, slotKey, data}) => {
+        if(!splitGroups[grpKey][date]) splitGroups[grpKey][date] = {};
+        splitGroups[grpKey][date][slotKey] = data;
+      });
     } else {
-      const useTrackSuffix = tracks.length > 1;
-      if(useTrackSuffix){
-        console.log(`[Schedule] "${grpKey}" 트랙 ${tracks.length}개 분할:`,
-          tracks.map((t, ti) => `트랙${ti+1}: ${t.items.map(i=>i.date+'/'+i.data.tour.TourID).join(',')}`).join(' | '));
-      }
-      tracks.forEach((track, ti) => {
-        const newKey = useTrackSuffix ? (grpKey + ' (트랙 ' + (ti+1) + ')') : grpKey;
+      // 글로벌 트랙 N개 — 각 트랙은 글로벌 인덱스(originalIdx) 기준으로 안정된 번호 부여
+      console.log(`[Schedule] "${grpKey}" 글로벌 트랙 ${totalTracks}개 (현재 주 ${usedTracks.length}개 표시):`,
+        usedTracks.map(t => `트랙${t.originalIdx+1}: ${t.items.map(i=>i.date+'/'+i.data.tour.TourID).join(',')}`).join(' | '));
+      usedTracks.forEach(({items, originalIdx}) => {
+        // 글로벌 트랙이 1개뿐이면 접미사 없음 (희박한 케이스)
+        const newKey = totalTracks > 1 ? (grpKey + ' (트랙 ' + (originalIdx+1) + ')') : grpKey;
         splitGroups[newKey] = {};
-        track.items.forEach(({date, slotKey, data}) => {
+        items.forEach(({date, slotKey, data}) => {
           if(!splitGroups[newKey][date]) splitGroups[newKey][date] = {};
-          // 같은 트랙 내 같은 날짜+슬롯에 둘 이상은 알고리즘상 발생 안 함 (다른 트랙으로 분리됐으니)
           splitGroups[newKey][date][slotKey] = data;
         });
       });
@@ -6473,6 +6513,9 @@ function renderScheduleCalendar(){
         const tcode = firstSlot.tour.TourCode || tid;
         const guide = firstSlot.tour.Guide || '';
         const seats = firstSlot.tour.Seats || '';
+        const pax = firstSlot.tour.Pax || '';
+        // ★ 인승 표시: "Pax/Seats" 형식 (예: 13/21S). Pax 없으면 Seats만
+        const paxSeats = (pax && seats) ? (pax + '/' + seats) : (seats || pax);
         const trl = firstSlot.day.trailer ? 'TRAILER' : '';
         const phone = fixPhone(firstSlot.tour.GuidePhone || '');
         // 다음 셀로 같은 투어가 이어지는지 확인 (가로 병합)
@@ -6515,13 +6558,13 @@ function renderScheduleCalendar(){
         const isInvoiced = String(firstSlot.tour.Status||'') === 'invoiced' || String(firstSlot.tour.Status||'') === 'paid';
         // 시나리오 자동 판별 (첫 활성 슬롯 기준)
         const scenIcon = _schTourScenarioIcon(firstSlot.slot, firstSlot.day && firstSlot.day.trailer);
-        // 헤더 라벨을 HTML로 — TRAILER만 빨간색 강조
+        // 헤더 라벨을 HTML로 — TRAILER만 빨간색 강조 + 앞뒤 공백
         const labelParts = [];
         if(scenIcon) labelParts.push(scenIcon);
         if(firstSlot.tour.Agency) labelParts.push(escH(firstSlot.tour.Agency));
         if(tcode) labelParts.push(escH(tcode));
-        if(seats) labelParts.push(escH(seats));
-        if(trl) labelParts.push(`<span style="color:#dc2626;font-weight:900;">${escH(trl)}</span>`);
+        if(paxSeats) labelParts.push(escH(paxSeats));
+        if(trl) labelParts.push(`<span style="color:#dc2626;font-weight:900;">&nbsp;${escH(trl)}&nbsp;</span>`);
         if(guide) labelParts.push(escH(guide));
         if(phone) labelParts.push(escH(phone));
         const headerLabel = labelParts.join(' ');
