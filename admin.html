@@ -4700,15 +4700,32 @@ function _smRebuildDays(){
       </div>`;
     }).join('');
 
+    // 트레일러 토글 표시 여부 — 어느 슬롯이라도 startPlace !== endPlace 면 표시
+    let needsTrailer = false;
+    ['morning','fullday','evening'].forEach(k => {
+      const s = d.slots && d.slots[k];
+      if(!s) return;
+      const sp = (s.startPlace||'').trim();
+      const ep = (s.endPlace||'').trim();
+      // 둘 다 입력됐고 다르면 → 트레일러 의미 있음
+      if(sp && ep && sp !== ep) needsTrailer = true;
+    });
+    // 트레일러 필요 없는데 체크되어 있었으면 자동 해제
+    if(!needsTrailer && d.trailer) d.trailer = false;
+
+    const trailerToggle = needsTrailer
+      ? `<label class="sm-day-trailer" for="day-trailer-${i}" style="margin-left:auto;">
+          <input type="checkbox" id="day-trailer-${i}" ${d.trailer?'checked':''} onchange="_schDays[${i}].trailer=this.checked;_smRebuildDays()">
+          <span>🚐 트레일러</span>
+        </label>`
+      : '';
+
     return `<div class="sm-day">
       <div class="sm-day-hdr" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
         <span style="background:var(--ac);color:white;border-radius:4px;padding:1px 6px;font-size:10px;">DAY ${i+1}</span>
         <span>${escH(d.date)} (<span style="color:${isWeekend?'#ef4444':'inherit'}">${dow}</span>)</span>
         ${isLastDay && _schDays.length > 1 ? '<span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700;">🛫 마지막날</span>' : ''}
-        <label class="sm-day-trailer" for="day-trailer-${i}" style="margin-left:auto;">
-          <input type="checkbox" id="day-trailer-${i}" ${d.trailer?'checked':''} onchange="_schDays[${i}].trailer=this.checked">
-          <span>🚐 트레일러</span>
-        </label>
+        ${trailerToggle}
       </div>
       <div class="sm-slot-toggle-row">${slotToggles}</div>
       ${slotForms}
