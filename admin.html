@@ -5825,6 +5825,61 @@ async function saveScheduleData(){
   if(!data.EndDate)   return showErr('종료일을 입력하세요');
   if(data.EndDate < data.StartDate) return showErr('종료일은 시작일보다 빠를 수 없습니다');
 
+  // ★ 충돌 검사 — 같은 차량/드라이버/가이드가 같은 시간대에 다른 일정에 이미 있는지
+  const conflicts = [];
+  try {
+    if(!_schBusyDriverByDate || !_schBusyRegoByDate) _schBuildAvailabilityIndex();
+    _schDays.forEach(d => {
+      ['morning','fullday','evening'].forEach(slotKey => {
+        const slot = d.slots && d.slots[slotKey];
+        if(!slot) return;
+        // 차량 충돌 — 자사 운영 모드일 때만 (서브는 차량명 free-text)
+        if(slot.mode !== 'sub' && slot.rego){
+          const busy = _schBusyRegoByDate[d.date];
+          if(busy && busy.has(slot.rego)){
+            const others = busy.get(slot.rego).filter(b => b.tourId !== _schEditTourId);
+            others.forEach(o => {
+              conflicts.push(`📅 ${d.date} · 🚐 차량 ${slot.rego} 이미 ${o.tourCode || o.tourId}에 사용 중`);
+            });
+          }
+        }
+        // 드라이버 충돌
+        if(slot.mode !== 'sub' && slot.driver){
+          const busy = _schBusyDriverByDate[d.date];
+          if(busy && busy.has(slot.driver)){
+            const others = busy.get(slot.driver).filter(b => b.tourId !== _schEditTourId);
+            others.forEach(o => {
+              conflicts.push(`📅 ${d.date} · 👤 드라이버 ${slot.driver} 이미 ${o.tourCode || o.tourId}에 사용 중`);
+            });
+          }
+        }
+      });
+    });
+    // 가이드 충돌 — 같은 가이드가 같은 날짜의 다른 일정에 있는지
+    if(data.Guide && _schCache){
+      const startD = data.StartDate;
+      const endD = data.EndDate;
+      _schCache.forEach(s => {
+        if(s.TourID === _schEditTourId) return;
+        if((s.Guide||'').trim() !== data.Guide.trim()) return;
+        const sStart = (s.StartDate||'').slice(0,10);
+        const sEnd = (s.EndDate||'').slice(0,10) || sStart;
+        // 기간 겹침 검사
+        if(sStart <= endD && sEnd >= startD){
+          const overlap = (sStart > startD ? sStart : startD) + ' ~ ' + (sEnd < endD ? sEnd : endD);
+          conflicts.push(`🧑‍💼 가이드 ${data.Guide} 이미 ${s.TourCode || s.TourID}에 배정됨 (${overlap})`);
+        }
+      });
+    }
+  } catch(e) { console.warn('충돌 검사 오류:', e); }
+
+  if(conflicts.length > 0){
+    const msg = '⚠️ 다음 충돌이 감지되었습니다:\n\n' + conflicts.slice(0, 8).join('\n') +
+                (conflicts.length > 8 ? `\n\n... 외 ${conflicts.length-8}건` : '') +
+                '\n\n계속 저장하시겠습니까?';
+    if(!confirm(msg)) return;
+  }
+
   toast('💾 저장 중...','in');
   try{
     const res = await fetch(APPS_SCRIPT_URL, {
@@ -22014,6 +22069,8 @@ function acknowledgeTabItems(tabKey){
 function _refreshNewItemIds(){
   if(!_tabBadgeInited) return;
   const curIds = _getTabItemIds();
+  // 이전 새 항목 카운트 (토스트용)
+  const prevTotal = Object.values(_newItemIds||{}).reduce((s, set) => s + (set?.size||0), 0);
   Object.keys(curIds).forEach(k => {
     const knownSet = _knownIds[k] || new Set();
     if(knownSet.size === 0 && !_tabBadgeInited) return; // 첫 방문
@@ -22022,6 +22079,25 @@ function _refreshNewItemIds(){
     _newItemIds[k] = newSet;
   });
   updateTabBadges();
+  // 신규 토스트 — 이전 대비 새 항목이 추가됐으면 알림
+  const curTotal = Object.values(_newItemIds||{}).reduce((s, set) => s + (set?.size||0), 0);
+  const delta = curTotal - prevTotal;
+  if(delta > 0 && _tabBadgeInited){
+    // 어떤 카테고리에 새 항목이 들어왔는지 분석
+    const newByTab = {};
+    const tabLabels = {
+      ndr: '리포트', nshift: '운행일지', ninc: '사고보고',
+      ngui: '가이드', nhtl: '호텔', nveh: '차량', ndrv: '드라이버',
+      ncli: '여행사', ninv: '인보이스', nsub_inv: 'SUB 인보이스',
+      nnotice: '공지', nmot: 'MOT', nsch: '일정'
+    };
+    Object.keys(_newItemIds).forEach(k => {
+      const cnt = (_newItemIds[k] || new Set()).size;
+      if(cnt > 0 && tabLabels[k]) newByTab[tabLabels[k]] = cnt;
+    });
+    const summary = Object.entries(newByTab).map(([l,c]) => `${l} ${c}건`).join(', ');
+    if(summary) toast(`🔔 새 항목: ${summary}`, 'ok');
+  }
 }
 
 function initTabBadges(){
@@ -22119,7 +22195,7 @@ function clearTabBadge(navId){
   if(badge) badge.classList.remove('on');
 }
 
-const ADMIN_SYNC_INTERVAL = 3 * 60 * 1000; // ★ 3분 (탭 뱃지 감지용)
+const ADMIN_SYNC_INTERVAL = 90 * 1000; // ★ 90초 (드라이버 입력 빠른 감지)
 let _adminSyncTimer = null;
 let _adminLastSync = 0;
 let _adminSyncRunning = false; // 중복 실행 방지 플래그
