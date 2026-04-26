@@ -13991,6 +13991,20 @@ async function saveInvoiceToSheet() {
     ...manualItems.map(m=>(m.tourcode||m.tourCode||'').trim()).filter(Boolean)
   ])];
 
+  // 항목 JSON 안전 직렬화 — 49000자 넘으면 경고 + 데이터 보존
+  function _safeStringify(obj, label){
+    const json = JSON.stringify(obj);
+    if(json.length > 49000){
+      // 49000자 넘으면 셀 1개 제한(50000자)에 걸려 데이터 손실 위험
+      console.warn(`[saveInvoice] ${label} JSON ${json.length}자 — 49000자 초과! 항목 일부 누락 가능`);
+      toast(`⚠️ ${label} 항목이 너무 많아 일부 누락 가능 (${obj.length}건, ${json.length}자)`,'er');
+      // 그래도 자르면 JSON.parse 실패하니 자르지 말고 원본 반환
+      // 셀이 50000자 넘으면 GAS가 처리 (배열로 분할 저장 등)
+      return json;
+    }
+    return json;
+  }
+
   const data = {
     InvNumber:   invNum,
     Agency:      agency,
@@ -14001,8 +14015,8 @@ async function saveInvoiceToSheet() {
     ExGST:       exGST,
     Status:      'issued',
     IssuedDate:  '',   // GAS에서 자동 설정
-    Items:       JSON.stringify(itemsSummary).slice(0,49000),
-    ManualItems: JSON.stringify(manualItems).slice(0,49000),
+    Items:       _safeStringify(itemsSummary, 'Items'),
+    ManualItems: _safeStringify(manualItems, 'ManualItems'),
     Deductions:  JSON.stringify(_invDeductions.filter(d=>d.amount>0)),
     Guide:       _invGuides.join(', '),
     TourCode:    _invTourCodes.join(', '),
@@ -14620,11 +14634,24 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
       _invExcludes = _origExcl; _invOverrides = _origOver;
       _showDocModal(html, {invNumber, agency, from:periodFrom, to:periodTo});
       return;
-    } catch(e) { console.error('Saved invoice preview error:', e); }
+    } catch(e) {
+      console.error('Saved invoice preview error:', e);
+      toast('⚠️ 저장된 인보이스 데이터 파싱 실패: ' + e.message, 'er');
+      return; // ★ 에러 시 fallback 차단 — 발송된 인보이스는 saved data만 사용
+    }
   }
 
-  // ⑤-2b fallback: Daily_Report에서 다시 빌드 (저장된 Items가 없는 경우)
-  console.warn('[InvPreview] FALLBACK: No saved Items found, building from Daily_Report');
+  // ⑤-2b: 저장된 Items/ManualItems 둘 다 없는 경우 — 정상 케이스가 아님
+  // (저장 자체가 실패했거나 너무 오래된 인보이스)
+  if (_previewSavedInv) {
+    // 발송된 인보이스인데 saved data 없음 — 사용자에게 알림
+    toast('⚠️ 이 인보이스는 저장된 항목 정보가 없습니다 (구버전 또는 저장 오류). 미리보기 불가.', 'er');
+    console.warn('[InvPreview] Saved invoice found but no Items/ManualItems JSON — preview blocked');
+    return;
+  }
+
+  // ⑤-2c: _previewSavedInv 자체가 없는 경우 (이력에서 못 찾음) — 폼 데이터로 새로 빌드 (드래프트 미리보기)
+  console.warn('[InvPreview] FALLBACK: No saved invoice found, building from Daily_Report (draft preview)');
   // ★ fallback에서는 현재 세션의 excludes/overrides/투어코드필터를 무시해야 원래 인보이스와 동일
   const _origExcl2 = _invExcludes, _origOver2 = _invOverrides;
   _invExcludes = {}; _invOverrides = {};
