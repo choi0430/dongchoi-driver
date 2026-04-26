@@ -6319,113 +6319,68 @@ function renderScheduleCalendar(){
   });
 
   // ★ 같은 그룹 안에서 다른 TourID들을 자동 트랙 분할
-  // 같은 TourID는 항상 한 트랙 (여러 날짜에 걸쳐 가로 병합 유지)
-  // ★★ 트랙 인덱스 안정화: 같은 TourCode는 항상 같은 트랙 번호 사용
-  //    같은 TourCode 일정이 여러 회차로 등록되어도 캘린더 같은 줄에 배치
-  //    매주 같은 TourCode = 같은 트랙 (사용자가 트랙 1↔2 이동 안 보임)
-  function _computeStableTrackIndex(grpKey){
-    // 같은 그룹의 모든 일정 (현재 보이는 기간 외 포함)
-    const allInGroup = (allDays||[]).filter(x => {
-      const slots = x.day.slots || {};
-      const anySlot = ['morning','fullday','evening'].map(k => slots[k]).find(s => s);
-      if(!anySlot) return false;
-      let key;
-      switch(groupBy){
-        case 'guide':  key = x.tour.Guide || '(미지정)'; break;
-        case 'rego':   key = anySlot.rego || '(미지정)'; break;
-        case 'driver': key = anySlot.driver || '(미지정)'; break;
-        default:       key = x.tour.Agency || '(미지정)';
-      }
-      return key === grpKey;
-    });
-
-    // ★ TourCode 단위로 묶음 (TourCode 없으면 TourID로 폴백)
-    // tcKey = TourCode || TourID
-    const tcSpans = {}; // tcKey → {firstDate, lastDate, tourIds: Set, primaryTour}
-    const tidToTcKey = {}; // tourID → tcKey 매핑
-    allInGroup.forEach(x => {
-      const tid = x.tour.TourID;
-      const tc = String(x.tour.TourCode||'').trim();
-      const tcKey = tc || tid; // TourCode 없으면 TourID 단독
-      tidToTcKey[tid] = tcKey;
-      if(!tcSpans[tcKey]){
-        tcSpans[tcKey] = {firstDate: x.date, lastDate: x.date, tourIds: new Set([tid]), primaryTour: x.tour};
-      } else {
-        tcSpans[tcKey].tourIds.add(tid);
-      }
-      if(x.date < tcSpans[tcKey].firstDate) tcSpans[tcKey].firstDate = x.date;
-      if(x.date > tcSpans[tcKey].lastDate) tcSpans[tcKey].lastDate = x.date;
-    });
-
-    // firstDate → TourCode → 첫 TourID 순으로 정렬 (안정적인 결정성)
-    const tcArr = Object.entries(tcSpans).sort((a,b) => {
-      if(a[1].firstDate !== b[1].firstDate) return a[1].firstDate.localeCompare(b[1].firstDate);
-      return a[0].localeCompare(b[0]);
-    });
-
-    // 트랙 배치 — TourCode 단위로 (같은 TourCode의 모든 회차는 한 트랙)
-    // 단, 같은 TourCode 안에서 회차끼리 시간 겹침이 있을 수 있음 — 그래도 같은 트랙 강제
-    const tracks = []; // [{lastDate}]
-    const tcToTrack = {}; // tcKey → trackIdx
-    tcArr.forEach(([tcKey, span]) => {
-      // 빈 트랙 찾기 — TourCode 단위 비교
-      let trackIdx = tracks.findIndex(t => t.lastDate < span.firstDate);
-      if(trackIdx < 0){
-        tracks.push({lastDate: span.lastDate});
-        trackIdx = tracks.length - 1;
-      } else {
-        // 트랙 재사용 — 마지막 날짜 갱신
-        if(span.lastDate > tracks[trackIdx].lastDate) tracks[trackIdx].lastDate = span.lastDate;
-      }
-      tcToTrack[tcKey] = trackIdx;
-    });
-
-    // tourToTrack 매핑 — 모든 TourID가 자기 TourCode의 트랙으로
-    const tourToTrack = {};
-    Object.keys(tidToTcKey).forEach(tid => {
-      tourToTrack[tid] = tcToTrack[tidToTcKey[tid]] ?? 0;
-    });
-    return {tourToTrack, totalTracks: tracks.length};
-  }
+  // 정책: 공간 활용 우선 — 매주 빈 자리에 일정을 채워 트랙 수 최소화
+  //       같은 TourCode는 한 트랙 유지 (회차가 여러 개여도 같은 줄에 표시)
+  //       서로 다른 TourCode는 시간이 안 겹치면 같은 트랙 재사용 (그리디 압축)
+  // 결과: 일정이 많을수록 트랙 수 최소화. 같은 가이드/투어가 트랙 번호 바뀔 수 있음.
 
   const splitGroups = {};
   Object.keys(groups).forEach(grpKey => {
-    // 글로벌 트랙 인덱스 계산 (전체 일정 기준 — 매주 안정적)
-    const {tourToTrack, totalTracks} = _computeStableTrackIndex(grpKey);
-
-    // 현재 주의 일정만 트랙별로 분배
-    const trackItems = Array.from({length: totalTracks}, () => []);
+    // 1) 현재 주의 일정에서 TourCode/TourID 단위로 묶음
+    //    tcKey = TourCode || TourID — 같은 TourCode 회차들은 한 단위로 트랙 배치
+    const tcGroups = {}; // tcKey → {firstDate, lastDate, items: [{date, slotKey, data}, ...]}
     Object.entries(groups[grpKey]).forEach(([date, slots]) => {
       Object.entries(slots).forEach(([slotKey, dataArr]) => {
         dataArr.forEach(data => {
           const tid = data.tour.TourID;
-          const trackIdx = tourToTrack[tid] ?? 0;
-          trackItems[trackIdx].push({date, slotKey, data});
+          const tc = String(data.tour.TourCode||'').trim();
+          const tcKey = tc || tid;
+          if(!tcGroups[tcKey]){
+            tcGroups[tcKey] = {firstDate: date, lastDate: date, items: []};
+          }
+          if(date < tcGroups[tcKey].firstDate) tcGroups[tcKey].firstDate = date;
+          if(date > tcGroups[tcKey].lastDate) tcGroups[tcKey].lastDate = date;
+          tcGroups[tcKey].items.push({date, slotKey, data});
         });
       });
     });
 
-    // 비어있지 않은 트랙만 추출 (현재 주에 일정 없는 트랙은 표시 안 함)
-    const usedTracks = trackItems.map((items, idx) => ({items, originalIdx: idx})).filter(t => t.items.length > 0);
+    // 2) firstDate 순으로 정렬 후 그리디 트랙 배치
+    //    각 단위를 가장 빠른 빈 트랙(lastDate < 새 firstDate)에 채움
+    const tcArr = Object.entries(tcGroups).sort((a,b) => {
+      if(a[1].firstDate !== b[1].firstDate) return a[1].firstDate.localeCompare(b[1].firstDate);
+      return a[0].localeCompare(b[0]);
+    });
+    const tracks = []; // [{lastDate, items: [...]}, ...]
+    tcArr.forEach(([tcKey, span]) => {
+      let trackIdx = tracks.findIndex(t => t.lastDate < span.firstDate);
+      if(trackIdx < 0){
+        tracks.push({lastDate: span.lastDate, items: span.items});
+      } else {
+        // 빈 트랙 재사용
+        if(span.lastDate > tracks[trackIdx].lastDate) tracks[trackIdx].lastDate = span.lastDate;
+        tracks[trackIdx].items = tracks[trackIdx].items.concat(span.items);
+      }
+    });
 
-    if(usedTracks.length === 0){
+    // 3) splitGroups에 트랙별 데이터 등록
+    if(tracks.length === 0){
       splitGroups[grpKey] = {};
-    } else if(usedTracks.length === 1 && totalTracks === 1){
-      // 트랙 1개만 사용 + 글로벌도 1개 → 접미사 없음
+    } else if(tracks.length === 1){
+      // 트랙 1개 — 접미사 없음
       splitGroups[grpKey] = {};
-      usedTracks[0].items.forEach(({date, slotKey, data}) => {
+      tracks[0].items.forEach(({date, slotKey, data}) => {
         if(!splitGroups[grpKey][date]) splitGroups[grpKey][date] = {};
         splitGroups[grpKey][date][slotKey] = data;
       });
     } else {
-      // 글로벌 트랙 N개 — 각 트랙은 글로벌 인덱스(originalIdx) 기준으로 안정된 번호 부여
-      console.log(`[Schedule] "${grpKey}" 글로벌 트랙 ${totalTracks}개 (현재 주 ${usedTracks.length}개 표시):`,
-        usedTracks.map(t => `트랙${t.originalIdx+1}: ${t.items.map(i=>i.date+'/'+i.data.tour.TourID).join(',')}`).join(' | '));
-      usedTracks.forEach(({items, originalIdx}) => {
-        // 글로벌 트랙이 1개뿐이면 접미사 없음 (희박한 케이스)
-        const newKey = totalTracks > 1 ? (grpKey + ' (트랙 ' + (originalIdx+1) + ')') : grpKey;
+      // 트랙 N개 — 트랙 번호 접미사
+      console.log(`[Schedule] "${grpKey}" 트랙 ${tracks.length}개 (그리디 압축):`,
+        tracks.map((t, ti) => `트랙${ti+1}: ${t.items.map(i=>i.date+'/'+i.data.tour.TourID).join(',')}`).join(' | '));
+      tracks.forEach((track, ti) => {
+        const newKey = grpKey + ' (트랙 ' + (ti+1) + ')';
         splitGroups[newKey] = {};
-        items.forEach(({date, slotKey, data}) => {
+        track.items.forEach(({date, slotKey, data}) => {
           if(!splitGroups[newKey][date]) splitGroups[newKey][date] = {};
           splitGroups[newKey][date][slotKey] = data;
         });
