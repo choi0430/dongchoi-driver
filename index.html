@@ -5041,6 +5041,10 @@ function addDailyReport(shiftId){
   // Private 초기화
   const pvtChk = document.getElementById('dr-private');
   if(pvtChk && pvtChk.checked){ pvtChk.checked=false; togglePrivateMode(); }
+  // ★ Schedule prefill 적용 (홈에서 일정 카드 탭으로 진입한 경우)
+  if(!_hasDraft){
+    setTimeout(()=>{ try{ applySchedulePrefill(); }catch(e){ console.warn('prefill error', e); } }, 200);
+  }
 }
 
 function startEndShift(shiftId){
@@ -8513,6 +8517,125 @@ function renderDriverSchedule(){
   wrap.innerHTML = html;
 }
 
+// Schedule prefill 적용 — sessionStorage의 일정 데이터를 DR 폼에 자동 채움
+function applySchedulePrefill(){
+  const raw = sessionStorage.getItem('dc_dr_prefill');
+  if(!raw) return;
+  let data;
+  try{ data = JSON.parse(raw); }catch(e){ sessionStorage.removeItem('dc_dr_prefill'); return; }
+  // 사용 후 즉시 제거 (한 번만 적용 — 다른 DR에 새는 것 방지)
+  sessionStorage.removeItem('dc_dr_prefill');
+  if(!data || !data.slot) return;
+  const slot = data.slot;
+
+  let filled = [];
+
+  // 여행사
+  const agency = document.getElementById('dr-agency');
+  if(agency && data.agency){
+    agency.value = data.agency;
+    if(typeof sddPickAgency === 'function') try{ sddPickAgency(data.agency); }catch(e){}
+    filled.push('여행사');
+  }
+
+  // 인승
+  const seats = document.getElementById('dr-seats');
+  if(seats && data.seats){
+    // 25S, 21S 형식 그대로 또는 25 → 25S 변환
+    let s = String(data.seats).trim();
+    if(/^\d+$/.test(s)) s = s + 'S';
+    seats.value = s;
+    seats.dispatchEvent(new Event('change', {bubbles:true}));
+    filled.push('인승');
+  }
+
+  // 가이드
+  const guide = document.getElementById('dr-guide');
+  if(guide && data.guide){
+    guide.value = data.guide;
+    if(typeof sddPick === 'function') try{ sddPick('guide', data.guide); }catch(e){}
+    // 가이드 전화 자동 채움 (currentGuidePhone)
+    if(typeof MASTER !== 'undefined' && MASTER && Array.isArray(MASTER.guides)){
+      const found = MASTER.guides.find(g => (g.name || g.Guide_Name) === data.guide);
+      if(found && (found.mobile || found.Mobile)) window.currentGuidePhone = found.mobile || found.Mobile;
+    }
+    filled.push('가이드');
+  } else if(guide && data.guidePhone){
+    window.currentGuidePhone = data.guidePhone;
+  }
+
+  // 투어 코드
+  const tc = document.getElementById('dr-tourcode');
+  if(tc && data.tourCode){
+    tc.value = data.tourCode;
+    filled.push('투어코드');
+  }
+
+  // 코스 / Attraction
+  const att = document.getElementById('dr-attraction');
+  if(att && slot.course){
+    att.value = slot.course;
+    if(typeof sddPick === 'function') try{ sddPick('attraction', slot.course); }catch(e){}
+    filled.push('코스');
+  }
+
+  // 픽업 / 드롭
+  const pickup = document.getElementById('dr-pickup');
+  if(pickup && slot.startPlace){
+    pickup.value = slot.startPlace;
+    if(typeof sddPick === 'function') try{ sddPick('pickup', slot.startPlace); }catch(e){}
+    filled.push('픽업');
+  }
+  const dropoff = document.getElementById('dr-dropoff');
+  if(dropoff && slot.endPlace){
+    dropoff.value = slot.endPlace;
+    if(typeof sddPick === 'function') try{ sddPick('dropoff', slot.endPlace); }catch(e){}
+    filled.push('드롭');
+  }
+
+  // 시작 / 종료 시간
+  const startT = document.getElementById('dr-start');
+  if(startT && slot.startTime){
+    startT.value = slot.startTime;
+    startT.dispatchEvent(new Event('change', {bubbles:true}));
+    filled.push('시작시간');
+  }
+  const endT = document.getElementById('dr-end');
+  if(endT && slot.endTime){
+    endT.value = slot.endTime;
+    endT.dispatchEvent(new Event('change', {bubbles:true}));
+    filled.push('종료시간');
+  }
+
+  // 날짜
+  const drDate = document.getElementById('dr-date');
+  if(drDate && data.date){
+    // dr-date는 dd/mm/yyyy 형식
+    const [y,m,d] = data.date.slice(0,10).split('-');
+    drDate.value = `${d}/${m}/${y}`;
+  }
+
+  // 서차지/힌트 재계산
+  setTimeout(() => {
+    try{
+      if(typeof updateSurchargeOptions === 'function') updateSurchargeOptions();
+      if(typeof updateSvcHint === 'function') updateSvcHint();
+      if(typeof updateOTHint === 'function') updateOTHint();
+      if(typeof updateHotelHint === 'function') updateHotelHint();
+      if(typeof updateDistHint === 'function') updateDistHint();
+      if(typeof updateEarlyHint === 'function') updateEarlyHint();
+      if(typeof checkHotelSurchargeHint === 'function') checkHotelSurchargeHint();
+      if(typeof autoFillDRSurcharges === 'function') autoFillDRSurcharges(true);
+    }catch(e){ console.warn('post-prefill hints:', e); }
+  }, 150);
+
+  if(filled.length && typeof showToast === 'function'){
+    showToast(`✅ 일정 자동 입력: ${filled.join(', ')} (${filled.length}개)`,'success');
+  } else if(filled.length && typeof toast === 'function'){
+    toast(`✅ 일정 자동 입력: ${filled.length}개 필드`,'ok');
+  }
+}
+
 // 일정 카드 클릭 → 그 일정 데이터를 임시 저장하고 DR로 이동
 function startDRFromSchedule(tourId, date, slotKey){
   const matched = _driverScheduleCache.find(s => s.tourId === tourId && s.date === date && s.slotKey === slotKey);
@@ -8524,9 +8647,22 @@ function startDRFromSchedule(tourId, date, slotKey){
   try{
     sessionStorage.setItem('dc_dr_prefill', JSON.stringify(matched));
   }catch(e){}
-  if(typeof toast === 'function') toast('✅ 일정 데이터 준비 완료. DR 시작...', 'ok');
-  // Daily Report 페이지로 이동
+  if(typeof toast === 'function') toast('✅ 일정 데이터 적용 중...', 'in');
+  // 활성 시프트 우선 처리
+  if(typeof activeShifts !== 'undefined' && activeShifts && activeShifts.length){
+    // 활성 시프트가 있으면 일정의 차량과 일치하는 것 우선
+    const matchedShift = activeShifts.find(s => s.rego === matched.slot.rego) || activeShifts[0];
+    if(matchedShift && typeof addDailyReport === 'function'){
+      addDailyReport(matchedShift.id);
+      return;
+    }
+  }
+  // 활성 시프트 없음 → Pre-Departure부터
   if(typeof showPage === 'function') showPage('report');
+  if(typeof goStep === 'function') goStep(1);
+  setTimeout(() => {
+    if(typeof toast === 'function') toast('🚐 먼저 Pre-Departure를 작성하세요. 작성 후 일정 정보가 자동 입력됩니다.','in');
+  }, 400);
 }
 
 function renderHomeBanner(notices){
