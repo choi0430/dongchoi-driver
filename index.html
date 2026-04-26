@@ -90,6 +90,18 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 .sec-title{font-family:'Barlow Condensed';font-size:22px;font-weight:700;color:var(--text);}
 .sec-sub{font-size:12px;color:var(--muted);margin-top:1px;}
 
+/* DRIVER SCHEDULE CARDS — Schedule에서 가져온 오늘/내일 일정 */
+.ds-section-hdr{display:flex;align-items:center;gap:10px;padding:12px 16px 8px;margin:0 12px;}
+.ds-slot-card{background:white;border:1.5px solid var(--border);border-radius:12px;padding:12px 14px;margin:0 12px 8px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.04);transition:transform .15s, box-shadow .15s;}
+.ds-slot-card:active{transform:scale(0.98);}
+.ds-slot-card.today{border-color:#fbbf24;background:linear-gradient(135deg,#fffbeb,#fff);box-shadow:0 2px 8px rgba(251,191,36,0.12);}
+.ds-slot-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;}
+.ds-slot-badge{font-size:10px;font-weight:800;color:#7c3aed;background:#ede9fe;padding:3px 8px;border-radius:6px;letter-spacing:-0.2px;}
+.ds-slot-title{font-size:14px;font-weight:800;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ds-slot-sub{font-size:12px;color:var(--text);margin-bottom:4px;font-weight:600;}
+.ds-slot-detail{font-size:11px;color:var(--muted);}
+.ds-slot-cta{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-size:11px;font-weight:700;color:#7c3aed;text-align:right;}
+
 /* CARDS */
 .card{background:white;border-radius:var(--radius);margin:0 12px 10px;overflow:visible;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);}
 .card-head{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
@@ -509,6 +521,9 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 
   <!-- EXPIRY ALERT BANNER (License / Authority) -->
   <div id="home-expiry-alerts"></div>
+
+  <!-- TODAY'S SCHEDULE (오늘 배정된 일정 — Schedule에서 가져옴) -->
+  <div id="home-schedule-section" style="margin-top:10px;"></div>
 
   <!-- ACTIVE SHIFT -->
   <div id="home-shift-section" style="margin-top:10px;"></div>
@@ -3955,6 +3970,7 @@ async function doLogin() {
   renderTodayReports();
   renderSalary();
   renderExpiryAlerts();
+  loadDriverSchedule();
   restoreSectionStates();
   initMyInfoPage();
   // 지난 운행 일지 로드 (비동기)
@@ -8369,6 +8385,150 @@ function renderNotices(){
   renderHomeBanner(notices);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TODAY'S SCHEDULE — 드라이버에게 배정된 오늘/내일 일정 카드
+// ═══════════════════════════════════════════════════════════════════════════
+let _driverScheduleCache = [];
+
+function _todayLocalISO(){
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Sydney', year:'numeric', month:'2-digit', day:'2-digit'
+  });
+  return fmt.format(new Date());
+}
+function _addDaysISO(iso, n){
+  const [y,m,d] = iso.split('-').map(s=>parseInt(s));
+  const dt = new Date(Date.UTC(y, m-1, d));
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
+}
+function _fmtAU(iso){
+  if(!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return iso || '';
+  const [y,m,d] = iso.slice(0,10).split('-');
+  return `${d}/${m}/${y}`;
+}
+const _SLOT_LABELS = { morning:'🌅 AM', fullday:'🌞 풀데이', evening:'🌙 PM' };
+
+async function loadDriverSchedule(){
+  // currentDriver는 {name, englishName, ...} 객체
+  let driverName = '';
+  if(typeof currentDriver !== 'undefined' && currentDriver){
+    driverName = currentDriver.name || currentDriver.englishName || '';
+  }
+  if(!driverName){
+    driverName = localStorage.getItem('dc_driver_name') || '';
+  }
+  if(!driverName){
+    _driverScheduleCache = [];
+    renderDriverSchedule();
+    return;
+  }
+  try{
+    const today = _todayLocalISO();
+    const to = _addDaysISO(today, 7); // 오늘부터 1주일치
+    const url = `${APPS_SCRIPT_URL}?action=get_driver_schedule&driver=${encodeURIComponent(driverName)}&from=${today}&to=${to}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    if(json?.ok){
+      _driverScheduleCache = json.slots || [];
+    } else {
+      _driverScheduleCache = [];
+    }
+  }catch(e){
+    console.warn('loadDriverSchedule error:', e);
+    _driverScheduleCache = [];
+  }
+  renderDriverSchedule();
+}
+
+function renderDriverSchedule(){
+  const wrap = document.getElementById('home-schedule-section');
+  if(!wrap) return;
+  const today = _todayLocalISO();
+  const tomorrow = _addDaysISO(today, 1);
+  const todaySlots = _driverScheduleCache.filter(s => s.date === today);
+  const tomorrowSlots = _driverScheduleCache.filter(s => s.date === tomorrow);
+  const futureSlots = _driverScheduleCache.filter(s => s.date > tomorrow).slice(0, 3);
+
+  if(todaySlots.length === 0 && tomorrowSlots.length === 0 && futureSlots.length === 0){
+    wrap.innerHTML = '';
+    return;
+  }
+
+  const renderSlot = (s, isToday) => {
+    const slot = s.slot || {};
+    const titleParts = [s.tourCode || s.tourId, s.agency].filter(Boolean);
+    const subParts = [];
+    if(slot.startTime) subParts.push(`⏰ ${slot.startTime}`);
+    if(slot.startPlace) subParts.push(`📍 ${slot.startPlace}`);
+    const detailParts = [];
+    if(slot.course) detailParts.push(slot.course);
+    if(slot.rego) detailParts.push(`🚐 ${slot.rego}`);
+    if(s.guide) detailParts.push(`👤 ${s.guide}`);
+    if(s.pax) detailParts.push(`${s.pax}명`);
+
+    return `<div class="ds-slot-card ${isToday?'today':''}" onclick="startDRFromSchedule('${s.tourId}','${s.date}','${s.slotKey}')">
+      <div class="ds-slot-head">
+        <span class="ds-slot-badge">${_SLOT_LABELS[s.slotKey]||s.slotKey}</span>
+        <span class="ds-slot-title">${titleParts.join(' · ')}</span>
+      </div>
+      ${subParts.length ? `<div class="ds-slot-sub">${subParts.join(' &nbsp;·&nbsp; ')}</div>` : ''}
+      ${detailParts.length ? `<div class="ds-slot-detail">${detailParts.join(' · ')}</div>` : ''}
+      ${isToday ? `<div class="ds-slot-cta">📋 이 일정으로 DR 시작 →</div>` : ''}
+    </div>`;
+  };
+
+  let html = '';
+  if(todaySlots.length){
+    html += `<div class="ds-section-hdr">
+      <div style="width:36px;height:36px;border-radius:10px;background:#fef3c7;display:flex;align-items:center;justify-content:center;font-size:18px;">📅</div>
+      <div style="flex:1;">
+        <div style="font-weight:800;font-size:14px;color:var(--text);">오늘 일정 (Today)</div>
+        <div style="font-size:11px;color:var(--muted);">${_fmtAU(today)} · ${todaySlots.length}건 배정</div>
+      </div>
+    </div>`;
+    html += todaySlots.map(s => renderSlot(s, true)).join('');
+  }
+  if(tomorrowSlots.length){
+    html += `<div class="ds-section-hdr" style="margin-top:8px;">
+      <div style="width:32px;height:32px;border-radius:8px;background:#e0e7ff;display:flex;align-items:center;justify-content:center;font-size:16px;">⏭️</div>
+      <div style="flex:1;">
+        <div style="font-weight:700;font-size:13px;color:var(--text);">내일 일정 (Tomorrow)</div>
+        <div style="font-size:10px;color:var(--muted);">${_fmtAU(tomorrow)} · ${tomorrowSlots.length}건</div>
+      </div>
+    </div>`;
+    html += tomorrowSlots.map(s => renderSlot(s, false)).join('');
+  }
+  if(futureSlots.length){
+    html += `<div class="ds-section-hdr" style="margin-top:8px;">
+      <div style="width:32px;height:32px;border-radius:8px;background:#f3e8ff;display:flex;align-items:center;justify-content:center;font-size:16px;">📆</div>
+      <div style="flex:1;">
+        <div style="font-weight:700;font-size:13px;color:var(--text);">앞으로 예정 (Upcoming)</div>
+        <div style="font-size:10px;color:var(--muted);">${futureSlots.length}건</div>
+      </div>
+    </div>`;
+    html += futureSlots.map(s => renderSlot(s, false)).join('');
+  }
+
+  wrap.innerHTML = html;
+}
+
+// 일정 카드 클릭 → 그 일정 데이터를 임시 저장하고 DR로 이동
+function startDRFromSchedule(tourId, date, slotKey){
+  const matched = _driverScheduleCache.find(s => s.tourId === tourId && s.date === date && s.slotKey === slotKey);
+  if(!matched){
+    if(typeof toast === 'function') toast('일정 정보를 찾을 수 없습니다','er');
+    return;
+  }
+  // sessionStorage에 저장 → DR 화면이 열릴 때 자동 채움
+  try{
+    sessionStorage.setItem('dc_dr_prefill', JSON.stringify(matched));
+  }catch(e){}
+  if(typeof toast === 'function') toast('✅ 일정 데이터 준비 완료. DR 시작...', 'ok');
+  // Daily Report 페이지로 이동
+  if(typeof showPage === 'function') showPage('report');
+}
+
 function renderHomeBanner(notices){
   const banner = document.getElementById('home-notice-banner');
   if(!banner) return;
@@ -9802,7 +9962,7 @@ async function runSync(silent=true, opts){
     // 현재 열린 탭에 따라 재렌더링
     const activePage = document.querySelector('.page.active')?.id;
     if(activePage==='page-pay')    renderPay();
-    if(activePage==='page-home')   { syncSalary(); renderTodayReports(); }
+    if(activePage==='page-home')   { syncSalary(); renderTodayReports(); loadDriverSchedule(); }
     _lastSyncTime = Date.now();
     if(failCount >= results.length) setSyncBadge('error');
     else setSyncBadge('ok');
