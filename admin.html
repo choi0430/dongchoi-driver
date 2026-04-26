@@ -11047,7 +11047,8 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     const key = (tx.Agency || '') + '|' + (tx.InvoiceID || '');
     const paid = agCR[key] || 0;
     const balance = roundMoney(dr - paid);
-    if (balance <= 0.01) return; // already fully paid
+    // 잔액 0인 항목도 리스트에 포함 (녹색 "완료" 표시 — 사용자가 받은 사실 인지)
+    // 단 합계 계산엔 잔액만 들어감
 
     receivables.push({
       agency: tx.Agency || 'Unknown',
@@ -11055,12 +11056,22 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
       amount: dr,
       paid: paid,
       balance: balance,
+      isPaid: balance <= 0.01,
       dueDate: dueISO,
       tourCode: tx.TourCode || ''
     });
   });
 
   // ── 2. Sub Payables (FinishDate + 14 days in target week) ──
+  // CR(지급) 인덱스 — InvoiceNo 또는 SubCompany+Date 매칭
+  const subCR = {};
+  (_balSubTxns || []).forEach(tx => {
+    if (String(tx.Type || '').toUpperCase() === 'CR' || (Number(tx.CR) || 0) > 0) {
+      const key = (tx.SubCompany || '') + '|' + (tx.InvoiceNo || '');
+      subCR[key] = (subCR[key] || 0) + (Number(tx.CR) || 0);
+    }
+  });
+
   (_balSubTxns || []).forEach(tx => {
     const dr = Number(tx.DR) || 0;
     if (dr <= 0) return;
@@ -11079,11 +11090,19 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     if (!dueISO) return;
     if (dueISO < filterStartS || dueISO > sunS) return;
 
+    // 지급액 추적
+    const subKey = (tx.SubCompany || '') + '|' + (tx.InvoiceNo || '');
+    const subPaid = subCR[subKey] || 0;
+    const subBalance = roundMoney(dr - subPaid);
+
     subPayables.push({
       company: tx.SubCompany || 'Unknown',
       invoiceNo: tx.InvoiceNo || '',
       description: tx.Description || '',
       amount: dr,
+      paid: subPaid,
+      balance: subBalance,
+      isPaid: subBalance <= 0.01,
       dueDate: dueISO
     });
   });
@@ -11113,7 +11132,7 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
   });
 
   const totalIn = roundMoney(receivables.reduce((s, r) => s + r.balance, 0));
-  const totalSubOut = roundMoney(subPayables.reduce((s, r) => s + r.amount, 0));
+  const totalSubOut = roundMoney(subPayables.reduce((s, r) => s + (r.balance!==undefined?r.balance:r.amount), 0));
   // 드라이버: 실제 지급해야 할 금액 (발생-지급, 마이너스면 0)
   const totalWageEarned = roundMoney(driverPay.reduce((s, r) => s + r.earned, 0));
   const totalWagePaid = roundMoney(driverPay.reduce((s, r) => s + r.paid, 0));
@@ -11384,6 +11403,13 @@ function renderBalWeeklySummary() {
         html += '<span style="color:var(--t1);">' + escH(agency) + '</span>';
         html += '<span style="color:var(--ac);font-family:var(--fn);">' + $f(agTotal) + '</span></div>';
         items.forEach(r => {
+          // 잔액 0이면 "완료" 녹색 표시 (드라이버 급여와 동일한 UX)
+          if (r.isPaid) {
+            html += '<div style="display:flex;justify-content:space-between;padding:1px 0 1px 10px;font-size:10px;color:var(--gn);">';
+            html += '<span>' + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')</span>';
+            html += '<span style="font-family:var(--fn);font-weight:700;">완료</span></div>';
+            return;
+          }
           // 토글 ON 시 이번 주 이전 미수금이면 ⚠ 마커
           const isOverdue = _cfIncludeOverdue && r.dueDate < targetMonISO;
           html += '<div style="display:flex;justify-content:space-between;padding:1px 0 1px 10px;font-size:10px;color:' + (isOverdue?'#dc2626':'var(--t3)') + ';' + (isOverdue?'font-weight:700;':'') + '">';
@@ -11399,10 +11425,16 @@ function renderBalWeeklySummary() {
     if (cf.subPayables.length) {
       html += '<div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-bottom:10px;padding:12px 14px;">';
       html += '<div style="font-size:12px;font-weight:700;color:var(--or);margin-bottom:8px;">\uD83D\uDE8C \uC11C\uBE0C \uC9C0\uAE09 \uC608\uC815</div>';
-      cf.subPayables.sort((a,b) => b.amount - a.amount).forEach(s => {
+      cf.subPayables.sort((a,b) => (b.balance||b.amount) - (a.balance||a.amount)).forEach(s => {
+        if (s.isPaid) {
+          html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">';
+          html += '<span style="color:var(--t3);">' + escH(s.company) + (s.invoiceNo ? ' <span style="font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + '</span>';
+          html += '<span style="font-weight:700;font-family:var(--fn);color:var(--gn);">완료</span></div>';
+          return;
+        }
         html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">';
         html += '<span style="color:var(--t2);">' + escH(s.company) + (s.invoiceNo ? ' <span style="color:var(--t3);font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="color:var(--t3);font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + '</span>';
-        html += '<span style="font-weight:600;font-family:var(--fn);color:var(--or);">' + $f(s.amount) + '</span></div>';
+        html += '<span style="font-weight:600;font-family:var(--fn);color:var(--or);">' + $f(s.balance!==undefined?s.balance:s.amount) + '</span></div>';
       });
       html += '</div>';
     }
