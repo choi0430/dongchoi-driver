@@ -476,9 +476,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </div>
 
   <div class="shd" style="margin-top:6px"><div class="stl">💰 요금/서브</div></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
     <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pprc','nprc');rP()"><div style="font-size:20px;margin-bottom:4px">💰</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">요금표</div><div style="font-size:11px;color:var(--t3)">여행사별 요금</div></div>
     <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('phtl','nhtl');rH()"><div style="font-size:20px;margin-bottom:4px">🏨</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Hotels (호텔)</div><div style="font-size:11px;color:var(--t3)" id="qh">—</div></div>
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('ptrl','ntrl');rT()"><div style="font-size:20px;margin-bottom:4px">🚐</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Trailers (트레일러)</div><div style="font-size:11px;color:var(--t3)" id="qt">—</div></div>
     <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('psub','nsub');rSub()"><div style="font-size:20px;margin-bottom:4px">🤝</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">서브</div><div style="font-size:11px;color:var(--t3)">외주 업체</div></div>
   </div>
 
@@ -665,6 +666,16 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </div>
   <div class="srw"><span class="sri">🔍</span><input type="text" placeholder="호텔명 검색..." oninput="flt('H',this.value)"></div>
   <div id="hlist"></div>
+</div>
+
+<!-- TRAILER -->
+<div class="pg" id="ptrl">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">🚐 Trailer Master (트레일러)</div><div class="ssb" id="tcnt"></div></div>
+    <button class="btn bac sm" onclick="openM('T',null)">+ Add (추가)</button>
+  </div>
+  <div class="srw"><span class="sri">🔍</span><input type="text" placeholder="트레일러 번호 검색..." oninput="flt('T',this.value)"></div>
+  <div id="tlist"></div>
 </div>
 
 
@@ -1903,6 +1914,7 @@ const DB = {
   C:  [],
   G:  [],
   H:  [],
+  T:  [],  // M_Trailers
   R:  [],
   PC: {},
   PD: {},
@@ -2337,6 +2349,8 @@ function rDash(){
   document.getElementById('qc').textContent=DB.C.length+'개사';
   document.getElementById('qg').textContent=DB.G.length+'명';
   document.getElementById('qh').textContent=DB.H.length+'개';
+  const qtEl = document.getElementById('qt');
+  if(qtEl) qtEl.textContent = (DB.T?.length || 0) + '대';
   const als=[];
   // ★ HVIS 부킹 데이터 로드
   const hvisBookings=getHvisBookings();
@@ -2426,6 +2440,46 @@ function rDash(){
       als.push({sort:9998,type:'service',
         bg:'#f0f9ff',bc:'#38bdf8',fc:'#0284c7',icon:'⚙️',
         m:`${v.Rego} — Next Service (다음 서비스) ${_nSKM.toLocaleString()}km — No Current KM Data (현재 KM 데이터 없음)`});
+    }
+  });
+  // ── 🚐 트레일러 Rego / E-Safety 만료 알림 ──
+  (DB.T||[]).forEach(t=>{
+    if((t.Active||'Y').toUpperCase()!=='Y') return;
+    const num = t.Trailer_Number;
+    if(!num) return;
+    const rd = du(t.Rego_Date);
+    const ed = du(t.ESafety_Date);
+    // Rego 만료 임박 (90일 이내)
+    if(!isEmpty(t.Rego_Date) && rd !== null && rd < 90){
+      const urgent = rd<0, warn = rd<30;
+      als.push({sort:rd,type:'trailer_rego',
+        bg:urgent?'#fef2f2':warn?'#fff7ed':'#fefce8',
+        bc:urgent?'#ef4444':warn?'#f97316':'#eab308',
+        fc:urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
+        icon:'🚐',
+        m:`${num} (트레일러 ${t.Owner||''}) — Rego (등록) ${fmtDays(rd, t.Rego_Date)}`});
+    }
+    // E-Safety 만료 임박 (연 1회 점검 — 90일 전부터 경고)
+    if(!isEmpty(t.ESafety_Date) && ed !== null && ed < 90){
+      const urgent = ed<0, warn = ed<30;
+      als.push({sort:ed,type:'trailer_esafety',
+        bg:urgent?'#fef2f2':warn?'#fff7ed':'#fefce8',
+        bc:urgent?'#ef4444':warn?'#f97316':'#eab308',
+        fc:urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
+        icon:'🛡️',
+        m:`${num} (트레일러) — E-Safety Check (연1회 점검) ${fmtDays(ed, t.ESafety_Date)}`});
+    }
+    // Rego 정보 없음
+    if(isEmpty(t.Rego_Date)){
+      als.push({sort:9991,type:'trailer_missing',
+        bg:'#f0f9ff',bc:'#38bdf8',fc:'#0284c7',icon:'⚠️',
+        m:`${num} (트레일러) — Rego 만료일 미등록`});
+    }
+    // E-Safety 정보 없음
+    if(isEmpty(t.ESafety_Date)){
+      als.push({sort:9992,type:'trailer_missing',
+        bg:'#f0f9ff',bc:'#38bdf8',fc:'#0284c7',icon:'⚠️',
+        m:`${num} (트레일러) — E-Safety Check 만료일 미등록`});
     }
   });
   // ── 휴무 알림 (Leave Alerts) ──
@@ -3212,8 +3266,61 @@ async function rH(q=''){
     </div>`}).join('')||nores();
 }
 
+// ─── Trailer Master 렌더 ───
+async function rT(q=''){
+  // 마스터 동기화 (이미 다른 시트들은 syncHotels에서 같이 처리되니 재진입 시 sync 생략)
+  const list = DB.T.filter(t => !q || t.Trailer_Number?.toLowerCase().includes(q.toLowerCase()) || t.Owner?.toLowerCase().includes(q.toLowerCase()));
+  const cntEl = document.getElementById('tcnt');
+  if(cntEl) cntEl.textContent = `총 ${DB.T.length}개 · 표시 ${list.length}`;
+  const listEl = document.getElementById('tlist');
+  if(!listEl) return;
+  listEl.innerHTML = list.map(t => {
+    const i = DB.T.indexOf(t);
+    const isInactive = (t.Active||'Y').toUpperCase() !== 'Y';
+    const ownerColor = (t.Owner||'').toLowerCase().includes('dong choi') ? 'var(--gn)' : 'var(--ac)';
+    // 만료일 배지
+    const rd = du(t.Rego_Date);
+    const ed = du(t.ESafety_Date);
+    const badges = [];
+    if(!isEmpty(t.Rego_Date) && rd !== null && rd < 90){
+      const u = rd<0, w = rd<30;
+      const c = u?'#dc2626':w?'#ea580c':'#ca8a04';
+      const bg = u?'#fef2f2':w?'#fff7ed':'#fefce8';
+      badges.push(`<span class="tag" style="background:${bg};color:${c};border:1px solid ${c};font-weight:700;">🚗 Rego ${fmtDays(rd, t.Rego_Date)}</span>`);
+    }
+    if(!isEmpty(t.ESafety_Date) && ed !== null && ed < 90){
+      const u = ed<0, w = ed<30;
+      const c = u?'#dc2626':w?'#ea580c':'#ca8a04';
+      const bg = u?'#fef2f2':w?'#fff7ed':'#fefce8';
+      badges.push(`<span class="tag" style="background:${bg};color:${c};border:1px solid ${c};font-weight:700;">🛡️ E-Safety ${fmtDays(ed, t.ESafety_Date)}</span>`);
+    }
+    if(isEmpty(t.Rego_Date)){
+      badges.push(`<span class="tag" style="background:#f0f9ff;color:#0284c7;border:1px solid #38bdf8;">⚠️ Rego 미등록</span>`);
+    }
+    if(isEmpty(t.ESafety_Date)){
+      badges.push(`<span class="tag" style="background:#f0f9ff;color:#0284c7;border:1px solid #38bdf8;">⚠️ E-Safety 미등록</span>`);
+    }
+    return `<div class="mrow" ${isInactive?'style="opacity:0.5;"':''}>
+      <div class="mav" style="color:var(--ac)">🚐</div>
+      <div class="min">
+        <div class="mnm">${escH(t.Trailer_Number)}${newBadgeHtml('ntrl',t.Trailer_Number)}${isInactive?' <span class="tag tg" style="margin-left:4px;">비활성</span>':''}</div>
+        <div class="msb">
+          <span style="color:${ownerColor};font-weight:600;">소유: ${escH(t.Owner||'—')}</span>
+          ${t.Capacity?' · '+escH(t.Capacity):''}
+          ${t.Notes?' · '+escH(t.Notes.slice(0,40)):''}
+        </div>
+        ${badges.length ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">${badges.join('')}</div>` : ''}
+      </div>
+      <div class="mac">
+        <button class="btn bgh xs" onclick="dismissNewItem('ntrl','${esc(t.Trailer_Number)}');openM('T',${i})">Edit (수정)</button>
+        <button class="btn brd xs" onclick="cDel('T',${i},'${esc(t.Trailer_Number)}')">Delete (삭제)</button>
+      </div>
+    </div>`;
+  }).join('') || nores();
+}
+
 function flt(t,v){
-  if(t==='V')rV(v);else if(t==='D')rD(v);else if(t==='C')rC(v);else if(t==='G')rG(v);else if(t==='H')rH(v);
+  if(t==='V')rV(v);else if(t==='D')rD(v);else if(t==='C')rC(v);else if(t==='G')rG(v);else if(t==='H')rH(v);else if(t==='T')rT(v);
 }
 
 // ═══════════════════════════════════════
@@ -3323,7 +3430,7 @@ function calcSubReport(r) {
   const trailerDR_raw = parseFloat(r.Trailer)||0;
   const hotelSub = _hotelDRtoTA(hotelDR, capNum);
   const distSub  = _distDRtoTA(distDR, capNum);
-  const trailerSub = _trailerDRtoTA(trailerDR_raw, capNum);
+  let trailerSub = _trailerDRtoTA(trailerDR_raw, capNum);
   // OT TA값
   const otDR = parseFloat(r.OT)||0;
   const otRateTA = capNum>=50?160:capNum>=40?150:80;
@@ -3338,15 +3445,58 @@ function calcSubReport(r) {
   // ── 드라이버 비용 (M_PriceDriver 기준 — SUB 오너가 지급) ──
   const drCost = parseFloat(r.DR_Cost)||0;
 
-  // ── 순이익 (Dong Choi) ──
-  const profit = taAmount - subTotal;
+  // ═══════════════════════════════════════════════════════════════
+  // 시나리오 식별 — Dong Choi vs SUB 교차 운행 + 트레일러 소유 분리
+  // ═══════════════════════════════════════════════════════════════
+  // 드라이버 소속 식별: M_Drivers의 Owner 필드
+  const drvRow = (DB.D||[]).find(d => (d.Name_KR||d.Name_EN||'').trim() === driver);
+  const drvOwner = (drvRow?.Owner||'').trim();
+  const isDrvDC = !drvOwner || DC_OWNERS.includes(drvOwner) || /dong choi/i.test(drvOwner);
+  // 차량 소유: 이미 위에서 owner로 식별됨 (SUB 차량이라는 건 isSub=true로 확인됨)
+  // 시나리오 3 = SUB 차량 + DC 드라이버
+  const isCrossSub = isDrvDC; // 이 함수는 isSub=true 진입한 상태 (else 블록 처리됨)
+
+  // ═══════════════════════════════════════════════════════════════
+  // 트레일러 소유 분리 (시나리오 4)
+  // ═══════════════════════════════════════════════════════════════
+  // Pre Departure 또는 Daily Report에 Trailer_Number가 있으면 M_Trailers에서 소유자 조회
+  const trailerNum = String(r.Trailer_Number||'').trim();
+  let trailerOwner = '';
+  let trailerSplitToDC = 0;  // Dong Choi 트레일러 수익 (SUB 비용에서 분리)
+  if(trailerNum && trailerSub > 0){
+    const trailerRow = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === trailerNum);
+    trailerOwner = (trailerRow?.Owner||'').trim();
+    // Dong Choi 트레일러를 SUB 차량이 사용 → 트레일러 수익은 Dong Choi에게
+    if(trailerOwner && /dong choi/i.test(trailerOwner)){
+      trailerSplitToDC = trailerSub;
+    }
+  }
+
+  // SUB 총액에서 Dong Choi 트레일러 분리
+  const subTotalAdjusted = subTotal - trailerSplitToDC;
+  const trailerSubInCost = trailerSub - trailerSplitToDC;
+
+  // ── 순이익 (Dong Choi) = TA - SUB 지급 ──
+  // 시나리오 4면 Dong Choi 트레일러 수익이 자동 포함됨 (subTotalAdjusted가 작아지므로)
+  const profit = taAmount - subTotalAdjusted;
+
+  // 시나리오 코드 결정
+  let scenario = 'SUB_normal';  // 시나리오 2 기본
+  if(isCrossSub) scenario = 'CROSS_DC_drives_SUB';  // 시나리오 3
+  // 시나리오 4 (트레일러 임대)는 추가 플래그로 표시
+  const hasTrailerSplit = trailerSplitToDC > 0;
 
   return {
     isSub: true, subOwner: owner, rego, capKey, attraction, agency, driver,
     taAmount,
-    subCost: { base: subBase, ot: subOT, hotel: hotelSub, dist: distSub, trailer: trailerSub, night: nightOwner, total: subTotal },
+    subCost: { base: subBase, ot: subOT, hotel: hotelSub, dist: distSub, trailer: trailerSubInCost, night: nightOwner, total: subTotalAdjusted },
     drCost,
-    profit
+    profit,
+    scenario,        // 'SUB_normal' | 'CROSS_DC_drives_SUB'
+    hasTrailerSplit, // 시나리오 4 (Dong Choi 트레일러 사용)
+    trailerNum,
+    trailerOwner,
+    trailerSplitToDC // Dong Choi가 가져가는 트레일러 수익
   };
 }
 
@@ -4481,9 +4631,17 @@ function renderSettleDashboard() {
                 ].filter(Boolean).join('+');
                 const tc = it.tourCode || it._raw?.Tour_Code || '';
                 const guide = it._raw?.Guide || '';
+                // 시나리오 배지
+                const scenarioBadges = [];
+                if(it.scenario === 'CROSS_DC_drives_SUB'){
+                  scenarioBadges.push('<span title="DC 드라이버가 SUB 차량 운행 (교차)" style="display:inline-block;font-size:9px;background:#dbeafe;color:#1e40af;padding:1px 4px;border-radius:4px;font-weight:700;margin-left:3px;">🔄</span>');
+                }
+                if(it.hasTrailerSplit){
+                  scenarioBadges.push(`<span title="Dong Choi 트레일러 사용 (+$${it.trailerSplitToDC} DC 수익)" style="display:inline-block;font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px;font-weight:700;margin-left:3px;">🚐</span>`);
+                }
                 return `<tr style="border-bottom:1px solid #f0f0f0;">
                   <td style="padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${it.date}</td>
-                  <td style="padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${it.rego}</td>
+                  <td style="padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${it.rego}${scenarioBadges.join('')}</td>
                   <td style="padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escH(it.agency)}">${escH(it.agency)}</td>
                   <td style="padding:3px 6px;font-family:monospace;font-size:9px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escH(tc)}">${escH(tc)||'<span style="color:var(--t3);">—</span>'}</td>
                   <td style="padding:3px 6px;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escH(guide)}">${escH(guide)||'<span style="color:var(--t3);">—</span>'}</td>
@@ -5653,6 +5811,9 @@ async function loadSubDriverPay(){
       subTotal: d.subCost.total,
       ot: d.subCost.ot, hotel: d.subCost.hotel,
       dist: d.subCost.dist, trailer: d.subCost.trailer,
+      scenario: d.scenario,
+      hasTrailerSplit: d.hasTrailerSplit,
+      trailerSplitToDC: d.trailerSplitToDC,
       _rowIndex: d._raw?._rowIndex || 0
     });
   });
@@ -5724,6 +5885,9 @@ async function onSdpTourCodeSearch(){
         drCost: d.drCost, ta: d.taAmount, nightOwner: d.subCost.night,
         subTotal: d.subCost.total, ot: d.subCost.ot, hotel: d.subCost.hotel,
         dist: d.subCost.dist, trailer: d.subCost.trailer,
+        scenario: d.scenario,
+        hasTrailerSplit: d.hasTrailerSplit,
+        trailerSplitToDC: d.trailerSplitToDC,
         _rowIndex: d._raw?._rowIndex || 0
       });
     });
@@ -5845,9 +6009,17 @@ function renderSubDriverPay(){
               <th style="padding:4px 6px;text-align:right;">야경납입</th>
               <th style="padding:4px 6px;text-align:center;">✏️</th>
             </tr></thead>
-            <tbody>${d.items.sort((a,b)=>a.date.localeCompare(b.date)).map(it=>`<tr style="border-bottom:1px solid #f0f0f0;">
+            <tbody>${d.items.sort((a,b)=>a.date.localeCompare(b.date)).map(it=>{
+              const sBadges = [];
+              if(it.scenario === 'CROSS_DC_drives_SUB'){
+                sBadges.push('<span title="DC 드라이버가 SUB 차량 운행 (교차)" style="display:inline-block;font-size:9px;background:#dbeafe;color:#1e40af;padding:1px 4px;border-radius:4px;font-weight:700;margin-left:3px;">🔄</span>');
+              }
+              if(it.hasTrailerSplit){
+                sBadges.push(`<span title="Dong Choi 트레일러 사용 (+$${it.trailerSplitToDC} DC 수익)" style="display:inline-block;font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px;font-weight:700;margin-left:3px;">🚐</span>`);
+              }
+              return `<tr style="border-bottom:1px solid #f0f0f0;">
               <td style="padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${it.date}</td>
-              <td style="padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${it.rego}</td>
+              <td style="padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${it.rego}${sBadges.join('')}</td>
               <td style="padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escH(it.agency)}">${escH(it.agency)}</td>
               <td style="padding:3px 6px;font-family:monospace;font-size:9px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escH(it.tourCode)}">${escH(it.tourCode)||'<span style="color:var(--t3);">—</span>'}</td>
               <td style="padding:3px 6px;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escH(it.guide)}">${escH(it.guide)||'<span style="color:var(--t3);">—</span>'}</td>
@@ -5857,7 +6029,7 @@ function renderSubDriverPay(){
               <td style="padding:3px 6px;text-align:right;font-weight:700;color:var(--ac);">$${it.drCost}</td>
               <td style="padding:3px 6px;text-align:right;${it.nightOwner>0?'font-weight:700;color:#7c3aed;':'color:var(--t3);'}">${it.nightOwner>0?'+$'+it.nightOwner:'—'}</td>
               <td style="padding:3px 6px;text-align:center;"><button class="btn bgh xs" style="padding:2px 6px;font-size:10px;" onclick="event.stopPropagation();editDailyReportRow(${it._rowIndex||0})" title="이 운행 기록 수정">✏️</button></td>
-            </tr>`).join('')}
+            </tr>`;}).join('')}
             <tr style="background:var(--sf2,#f8f9fa);font-weight:700;">
               <td colspan="6" style="padding:4px 6px;">합계</td>
               <td style="padding:4px 6px;text-align:right;">$${d.taTotal.toLocaleString()}</td>
@@ -14252,13 +14424,13 @@ function openM(type,idx){
   const ie=idx!==null;
   let d={};
   if(ie){
-    if(['V','D','C','G','H'].includes(type))d=DB[type][idx]||{};
+    if(['V','D','C','G','H','T'].includes(type))d=DB[type][idx]||{};
     else if(type==='PC'){d={...DB.PC[ST.curAg]?.[idx]||{},att:idx,ag:ST.curAg};}
     else if(type==='PS'){d={...DB.PS[ST.curSub]?.[idx]||{},att:idx,sub:ST.curSub};}
     else if(type==='SG_SUB'){d={};}
     else if(type==='PD'){d={...DB.PD[idx]||{},att:idx};}
   }
-  const tmap={V:'차량',D:'드라이버',C:'여행사',G:'가이드',PC:`요금 — ${ST.curAg||'여행사'}`,PS:`서브 요금 — ${ST.curSub||'서브 회사'}`,PD:'드라이버 비용',H:'호텔',AG:'여행사 추가',SG_SUB:'서브 회사 추가'};
+  const tmap={V:'차량',D:'드라이버',C:'여행사',G:'가이드',PC:`요금 — ${ST.curAg||'여행사'}`,PS:`서브 요금 — ${ST.curSub||'서브 회사'}`,PD:'드라이버 비용',H:'호텔',T:'트레일러',AG:'여행사 추가',SG_SUB:'서브 회사 추가'};
   document.getElementById('mtt').textContent=(ie?'✏️ 수정: ':'➕ 추가: ')+tmap[type];
   let h='';
   const yr=d['Manufacture Date']||d.Manufacture_Date||'';
@@ -14461,6 +14633,37 @@ function openM(type,idx){
         <option value="YES"${d.Surcharge_Area==='YES'?' selected':''}>YES — 서차지 적용</option>
       </select></div></div>`;
   }
+  else if(type==='T'){
+    // SUB 회사 목록 (M_Vehicles의 Owner 값 중 Dong Choi 아닌 것)
+    const subOwners = [...new Set((DB.V||[]).map(v=>String(v.Owner||v.SubOwner||'').trim()).filter(o=>o && !DC_OWNERS.includes(o)))].sort();
+    const ownerOpts = ['Dong Choi', ...subOwners].map(o =>
+      `<option value="${escH(o)}"${(d.Owner||'')===o?' selected':''}>${escH(o)}</option>`
+    ).join('');
+    // 날짜 변환: ISO/Date → input type="date" 호환 YYYY-MM-DD
+    const fmtDateInput = (v) => {
+      if(!v) return '';
+      if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+      const s = String(v).trim();
+      const m1 = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if(m1) return m1[1]+'-'+String(m1[2]).padStart(2,'0')+'-'+String(m1[3]).padStart(2,'0');
+      const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if(m2) return m2[3]+'-'+String(m2[2]).padStart(2,'0')+'-'+String(m2[1]).padStart(2,'0');
+      return '';
+    };
+    h=`<div class="fr"><label class="fl">트레일러 번호*</label><input class="fi" id="f0" value="${escH(d.Trailer_Number||'')}" placeholder="예: TR-001"></div>
+      <div class="fr"><label class="fl">소유자*</label><div class="fsw"><select class="fs" id="f1">
+        <option value="">— 선택 —</option>
+        ${ownerOpts}
+      </select></div></div>
+      <div class="fr"><label class="fl">용량/규격</label><input class="fi" id="f2" value="${escH(d.Capacity||'')}" placeholder="예: 4인용, 짐 트레일러"></div>
+      <div class="fr"><label class="fl">🚗 Rego 만료일 (등록 만료)</label><input type="date" class="fi" id="f3" value="${fmtDateInput(d.Rego_Date)}"></div>
+      <div class="fr"><label class="fl">🛡️ E-Safety Check 만료일 (연 1회)</label><input type="date" class="fi" id="f4" value="${fmtDateInput(d.ESafety_Date)}"></div>
+      <div class="fr"><label class="fl">메모</label><textarea class="fta" id="f5" style="min-height:55px" placeholder="등록번호, 상태 등">${escH(d.Notes||'')}</textarea></div>
+      <div class="fr"><label class="fl">사용 가능</label><div class="fsw"><select class="fs" id="f6">
+        <option value="Y"${(d.Active||'Y').toUpperCase()==='Y'?' selected':''}>Y — 사용 가능</option>
+        <option value="N"${(d.Active||'').toUpperCase()==='N'?' selected':''}>N — 비활성 (보관/수리중)</option>
+      </select></div></div>`;
+  }
 
   document.getElementById('mb').innerHTML=h;
   document.getElementById('modal').classList.add('on');
@@ -14522,6 +14725,19 @@ function saveM(){
     obj={_rowIndex:ie?(DB.H[idx]?._rowIndex||null):null,
          Hotel_Name:gv('f0'),Phone:gv('f1'),Address:gv('f2'),Surcharge_Area:gv('f3')||''};
     ie?DB.H[idx]=obj:DB.H.push(obj);
+  } else if(t==='T'){
+    if(!gv('f0')){toast('트레일러 번호 필수','er');return}
+    if(!gv('f1')){toast('소유자 선택 필수','er');return}
+    sheetName='M_Trailers';
+    obj={_rowIndex:ie?(DB.T[idx]?._rowIndex||null):null,
+         Trailer_Number:gv('f0').trim(),
+         Owner:gv('f1').trim(),
+         Capacity:gv('f2').trim(),
+         Rego_Date:gv('f3'),
+         ESafety_Date:gv('f4'),
+         Notes:gv('f5').trim(),
+         Active:gv('f6')||'Y'};
+    ie?DB.T[idx]=obj:DB.T.push(obj);
   } else if(t==='AG'){
     let agName=gv('fagname');
     if(agName==='__new__') agName=gv('fnewname');
@@ -14590,10 +14806,10 @@ function cDel(t,i,nm){ST.dt=t;ST.di=i;document.getElementById('cdmsg').textConte
 function execDel(){
   const t=ST.dt,i=ST.di;
   document.getElementById('cdm').classList.remove('on');
-  const sheetMap={V:'M_Vehicles',D:'M_Drivers',C:'M_Clients',G:'M_Guides',H:'M_Hotels'};
-  const renderMap={V:rV,D:rD,C:rC,G:rG,H:rH};
+  const sheetMap={V:'M_Vehicles',D:'M_Drivers',C:'M_Clients',G:'M_Guides',H:'M_Hotels',T:'M_Trailers'};
+  const renderMap={V:rV,D:rD,C:rC,G:rG,H:rH,T:rT};
 
-  if(['V','D','C','G','H'].includes(t)){
+  if(['V','D','C','G','H','T'].includes(t)){
     // 여행사 삭제 시 요금표(DB.PC)에서도 제거
     if(t==='C'){
       const agName = DB.C[i]?.Name;
@@ -14602,9 +14818,11 @@ function execDel(){
         savePCToSheets();
       }
     }
+    // 시트 행 인덱스 — _rowIndex가 있으면 사용 (정확함), 없으면 i+2 폴백
+    const rowIdx = DB[t][i]?._rowIndex || (i+2);
     DB[t].splice(i,1);
     renderMap[t]?.();rDash();
-    apiDeleteMaster(sheetMap[t], i+2); // +2: 헤더행(1) + 0-based→1-based
+    apiDeleteMaster(sheetMap[t], rowIdx);
   } else if(t==='PC'){
     delete DB.PC[ST.curAg]?.[i];
     savePCToSheets();
@@ -15114,6 +15332,17 @@ async function _applyAdminBundle(bundle){
   if(d.M_Hotels?.length) DB.H = d.M_Hotels.map(r=>({
     Hotel_Name:r.Hotel_Name,Phone:fixPhone(r.Phone),Address:r.Address,Surcharge_Area:r.Surcharge_Area
   }));
+  // ── M_Trailers → DB.T ──
+  if(d.M_Trailers?.length) DB.T = d.M_Trailers.map(r=>({
+    _rowIndex:r._rowIndex,
+    Trailer_Number:String(r.Trailer_Number||'').trim(),
+    Owner:String(r.Owner||'').trim(),
+    Capacity:String(r.Capacity||'').trim(),
+    Rego_Date:r.Rego_Date||'',
+    ESafety_Date:r.ESafety_Date||r.HVIS_Date||'',  // 이전 HVIS_Date 호환
+    Notes:String(r.Notes||'').trim(),
+    Active:String(r.Active||'Y').trim()
+  })).filter(r=>r.Trailer_Number);
   // ── M_PriceClient → DB.PC ──
   if(d.M_PriceClient?.length){
     DB.PC={};
@@ -15385,6 +15614,18 @@ async function loadAllFromSheets(){
     if(d.M_Hotels?.length) DB.H = d.M_Hotels.map(r=>({
       Hotel_Name:r.Hotel_Name,Phone:fixPhone(r.Phone),Address:r.Address,Surcharge_Area:r.Surcharge_Area
     }));
+
+    // M_Trailers → DB.T
+    if(d.M_Trailers?.length) DB.T = d.M_Trailers.map(r=>({
+      _rowIndex:r._rowIndex,
+      Trailer_Number:String(r.Trailer_Number||'').trim(),
+      Owner:String(r.Owner||'').trim(),
+      Capacity:String(r.Capacity||'').trim(),
+      Rego_Date:r.Rego_Date||'',
+      ESafety_Date:r.ESafety_Date||r.HVIS_Date||'',
+      Notes:String(r.Notes||'').trim(),
+      Active:String(r.Active||'Y').trim()
+    })).filter(r=>r.Trailer_Number);
 
     // M_PriceClient → DB.PC
     if(d.M_PriceClient?.length){
