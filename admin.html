@@ -837,25 +837,63 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     </div>
   </div>
 
-  <!-- 상태별 칩 필터 -->
-  <div style="padding:8px 14px 0;display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;">
-    <button class="sch-chip on" data-status="" onclick="setScheduleFilter(this,'')">전체</button>
-    <button class="sch-chip" data-status="scheduled" onclick="setScheduleFilter(this,'scheduled')">📋 예정</button>
-    <button class="sch-chip" data-status="in_progress" onclick="setScheduleFilter(this,'in_progress')">🟢 진행중</button>
-    <button class="sch-chip" data-status="completed" onclick="setScheduleFilter(this,'completed')">✅ 완료</button>
-    <button class="sch-chip" data-status="invoiced" onclick="setScheduleFilter(this,'invoiced')">🧾 발행</button>
-    <button class="sch-chip" data-status="paid" onclick="setScheduleFilter(this,'paid')">💰 결제</button>
-    <button class="sch-chip" data-status="cancelled" onclick="setScheduleFilter(this,'cancelled')">❌ 취소</button>
+  <!-- 뷰 모드 토글 -->
+  <div style="padding:8px 14px 0;display:flex;gap:6px;">
+    <button id="sch-view-list" class="sch-view-tab on" onclick="switchScheduleView('list')">📋 리스트</button>
+    <button id="sch-view-cal" class="sch-view-tab" onclick="switchScheduleView('cal')">🗓️ 캘린더</button>
   </div>
 
-  <div class="srw" style="margin-top:8px"><span class="sri">🔍</span><input type="text" id="sch-search" placeholder="여행사 / 투어코드 / 가이드 / 드라이버 검색..." oninput="filterSchedule()"></div>
+  <!-- 리스트 뷰 -->
+  <div id="sch-view-list-wrap">
+    <div style="padding:8px 14px 0;display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+      <button class="sch-chip on" data-status="" onclick="setScheduleFilter(this,'')">전체</button>
+      <button class="sch-chip" data-status="scheduled" onclick="setScheduleFilter(this,'scheduled')">📋 예정</button>
+      <button class="sch-chip" data-status="in_progress" onclick="setScheduleFilter(this,'in_progress')">🟢 진행중</button>
+      <button class="sch-chip" data-status="completed" onclick="setScheduleFilter(this,'completed')">✅ 완료</button>
+      <button class="sch-chip" data-status="invoiced" onclick="setScheduleFilter(this,'invoiced')">🧾 발행</button>
+      <button class="sch-chip" data-status="paid" onclick="setScheduleFilter(this,'paid')">💰 결제</button>
+      <button class="sch-chip" data-status="cancelled" onclick="setScheduleFilter(this,'cancelled')">❌ 취소</button>
+    </div>
 
-  <div style="padding:6px 14px;font-size:11px;color:var(--t3);background:var(--sf2);border-radius:8px;margin:0 14px 8px;">
-    💡 일정 종료일 다음 날 자동으로 '완료' 상태로 전환됩니다. 인보이스 발행 시 자동으로 '발행' 상태로 변경됩니다.
+    <div class="srw" style="margin-top:8px"><span class="sri">🔍</span><input type="text" id="sch-search" placeholder="여행사 / 투어코드 / 가이드 / 호텔 검색..." oninput="filterSchedule()"></div>
+
+    <div style="padding:6px 14px;font-size:11px;color:var(--t3);background:var(--sf2);border-radius:8px;margin:0 14px 8px;">
+      💡 종료일 다음 날 자동으로 '완료' 상태 전환. 인보이스 발행 시 자동으로 '발행' 상태 변경.
+    </div>
+
+    <div id="sch-list" style="padding:0 14px 80px;"></div>
   </div>
 
-  <div id="sch-list" style="padding:0 14px 80px;"></div>
+  <!-- 캘린더 뷰 -->
+  <div id="sch-view-cal-wrap" style="display:none;">
+    <!-- 캘린더 컨트롤 -->
+    <div style="padding:8px 14px;display:flex;align-items:center;gap:6px;">
+      <button class="btn bgh sm" onclick="schCalNav(-1)" style="font-size:11px;padding:6px 10px;">◀</button>
+      <div id="sch-cal-period" style="flex:1;text-align:center;font-size:13px;font-weight:800;color:var(--t1);font-family:var(--fd);"></div>
+      <button class="btn bgh sm" onclick="schCalToday()" style="font-size:11px;padding:6px 10px;">오늘</button>
+      <button class="btn bgh sm" onclick="schCalNav(1)" style="font-size:11px;padding:6px 10px;">▶</button>
+    </div>
+    <div style="padding:0 14px 8px;display:flex;gap:6px;">
+      <button id="sch-cal-mode-week" class="sch-mode-tab on" onclick="setScheduleCalMode('week')">주간</button>
+      <button id="sch-cal-mode-month" class="sch-mode-tab" onclick="setScheduleCalMode('month')">월간</button>
+      <select id="sch-cal-group" onchange="renderScheduleCalendar()" style="margin-left:auto;padding:5px 8px;border-radius:6px;border:1px solid var(--b2);background:var(--sf);font-size:11px;font-family:var(--fb);">
+        <option value="agency">여행사별</option>
+        <option value="guide">가이드별</option>
+        <option value="rego">차량별</option>
+        <option value="driver">드라이버별</option>
+      </select>
+    </div>
+    <div id="sch-cal-wrap" style="padding:0 0 80px;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+      <div style="padding:40px;text-align:center;color:var(--t3);font-size:12px;">로딩 중...</div>
+    </div>
+  </div>
 </div>
+
+<style>
+.sch-view-tab,.sch-mode-tab{flex:1;padding:8px 14px;border-radius:8px;border:1px solid var(--b2);background:var(--sf);font-size:12px;font-weight:700;color:var(--t2);cursor:pointer;font-family:var(--fd);}
+.sch-view-tab.on,.sch-mode-tab.on{background:var(--ac);color:white;border-color:var(--ac);}
+</style>
+
 
 <style>
 .sch-chip{flex-shrink:0;padding:6px 12px;border-radius:14px;border:1px solid var(--b2);background:var(--sf);font-size:11px;font-weight:700;color:var(--t2);cursor:pointer;white-space:nowrap;font-family:var(--fd);}
@@ -877,116 +915,125 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .sch-badge.s-cancelled{background:#e5e7eb;color:#6b7280;}
 </style>
 
-<!-- 일정 등록/편집 모달 -->
-<div id="sch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center;padding:16px;">
-  <div style="background:var(--sf);border-radius:16px;padding:18px;width:100%;max-width:480px;max-height:92vh;overflow-y:auto;">
-    <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:14px;" id="sch-modal-title">📅 신규 일정 등록</div>
-
-    <!-- 여행사 + 투어코드 -->
-    <div style="margin-bottom:8px;">
-      <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">여행사 <span style="color:#ef4444;">*</span></div>
-      <select id="sm-agency" class="profit-sel" style="width:100%;">
-        <option value="">-- 선택 --</option>
-      </select>
-    </div>
-    <div style="margin-bottom:8px;">
-      <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">투어코드</div>
-      <input type="text" id="sm-tourcode" class="profit-finp" style="width:100%;" placeholder="예: TA-21-0310, 0408-YB-1-OZ">
+<!-- 일정 등록/편집 모달 (확장형) -->
+<div id="sch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center;padding:8px;">
+  <div style="background:var(--sf);border-radius:16px;padding:14px;width:100%;max-width:560px;max-height:96vh;overflow-y:auto;">
+    <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
+      <span id="sch-modal-title">📅 신규 일정 등록</span>
+      <span id="sm-tour-id" style="font-size:10px;color:var(--t3);font-family:var(--fd);font-weight:500;"></span>
     </div>
 
-    <!-- 시작일 / 종료일 -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">시작일 <span style="color:#ef4444;">*</span></div>
-        <input type="date" id="sm-start" class="profit-finp" style="width:100%;box-sizing:border-box">
-      </div>
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">종료일 <span style="color:#ef4444;">*</span></div>
-        <input type="date" id="sm-end" class="profit-finp" style="width:100%;box-sizing:border-box">
-      </div>
-    </div>
+    <!-- ── 기본 정보 (한 번만 입력) ── -->
+    <div style="background:var(--sf2);border-radius:10px;padding:10px;margin-bottom:10px;">
+      <div style="font-size:11px;font-weight:800;color:var(--t1);margin-bottom:8px;">📌 기본 정보</div>
 
-    <!-- 인원 / 인승 / 트레일러 -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">인원 (Pax)</div>
-        <input type="number" id="sm-pax" class="profit-finp" style="width:100%;" placeholder="0" min="0">
+      <div style="display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:6px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">여행사 <span style="color:#ef4444;">*</span></div>
+          <div id="sm-agency-csel"></div>
+        </div>
       </div>
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">인승</div>
-        <select id="sm-seats" class="profit-sel" style="width:100%;">
-          <option value="">선택</option>
-          <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
-        </select>
-      </div>
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">트레일러</div>
-        <select id="sm-trailer" class="profit-sel" style="width:100%;">
-          <option value="N">없음</option>
-          <option value="Y">있음</option>
-        </select>
-      </div>
-    </div>
 
-    <!-- 가이드 + 연락처 -->
-    <div style="display:grid;grid-template-columns:2fr 3fr;gap:8px;margin-bottom:8px;">
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">가이드</div>
-        <select id="sm-guide" class="profit-sel" style="width:100%;" onchange="onSmGuideChange()">
-          <option value="">선택</option>
-        </select>
+      <div style="display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:6px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">투어코드</div>
+          <input type="text" id="sm-tourcode" class="profit-finp" style="width:100%;box-sizing:border-box;" placeholder="예: TA-21-0310, 0408-YB-1-OZ">
+        </div>
       </div>
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">가이드 연락처</div>
-        <input type="text" id="sm-guidephone" class="profit-finp" style="width:100%;" placeholder="0400 000 000">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">시작일 <span style="color:#ef4444;">*</span></div>
+          <input type="date" id="sm-start" class="profit-finp" style="width:100%;box-sizing:border-box;" onchange="onSmDateChange()">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">종료일 <span style="color:#ef4444;">*</span></div>
+          <input type="date" id="sm-end" class="profit-finp" style="width:100%;box-sizing:border-box;" onchange="onSmDateChange()">
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">인원 (Pax)</div>
+          <input type="number" id="sm-pax" class="profit-finp" style="width:100%;box-sizing:border-box;" placeholder="0" min="0">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">인승</div>
+          <select id="sm-seats" class="profit-sel" style="width:100%;">
+            <option value="">선택</option>
+            <option>21S</option><option>25S</option><option>40S</option><option>50S</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:3fr 2fr;gap:6px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">가이드</div>
+          <div id="sm-guide-csel"></div>
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">가이드 연락처</div>
+          <input type="text" id="sm-guidephone" class="profit-finp" style="width:100%;box-sizing:border-box;" placeholder="0400 000 000">
+        </div>
       </div>
     </div>
 
-    <!-- 드라이버 + 차량 -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">드라이버</div>
-        <select id="sm-driver" class="profit-sel" style="width:100%;">
-          <option value="">선택</option>
-        </select>
+    <!-- ── 항공편 (입국 + 출국) ── -->
+    <div style="background:var(--sf2);border-radius:10px;padding:10px;margin-bottom:10px;">
+      <div style="font-size:11px;font-weight:800;color:var(--t1);margin-bottom:8px;">✈️ 항공편</div>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px;margin-bottom:6px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">입국편명</div>
+          <input type="text" id="sm-flightin" class="profit-finp" style="width:100%;box-sizing:border-box;" placeholder="OZ602">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">입국 날짜</div>
+          <input type="date" id="sm-flightin-date" class="profit-finp" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">입국 시간</div>
+          <input type="time" id="sm-flightin-time" class="profit-finp" style="width:100%;box-sizing:border-box;">
+        </div>
       </div>
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">차량 (Rego)</div>
-        <select id="sm-rego" class="profit-sel" style="width:100%;">
-          <option value="">선택</option>
-        </select>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">출국편명</div>
+          <input type="text" id="sm-flightout" class="profit-finp" style="width:100%;box-sizing:border-box;" placeholder="KE401">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">출국 날짜</div>
+          <input type="date" id="sm-flightout-date" class="profit-finp" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">출국 시간</div>
+          <input type="time" id="sm-flightout-time" class="profit-finp" style="width:100%;box-sizing:border-box;">
+        </div>
       </div>
     </div>
 
-    <!-- 입국편 / 출국편 / 호텔 -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">입국편 (Flight In)</div>
-        <input type="text" id="sm-flightin" class="profit-finp" style="width:100%;" placeholder="예: OZ602 0930">
+    <!-- ── 일별 세부 일정 (자동 생성) ── -->
+    <div style="background:var(--sf2);border-radius:10px;padding:10px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div style="font-size:11px;font-weight:800;color:var(--t1);">📆 일별 세부 일정</div>
+        <span style="font-size:10px;color:var(--t3);">날짜 입력 시 자동 생성</span>
       </div>
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">출국편 (Flight Out)</div>
-        <input type="text" id="sm-flightout" class="profit-finp" style="width:100%;" placeholder="예: KE401 0730">
+      <div id="sm-days-list">
+        <div style="padding:20px;text-align:center;color:var(--t3);font-size:11px;">시작일 / 종료일을 먼저 입력하세요</div>
       </div>
-    </div>
-    <div style="margin-bottom:8px;">
-      <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">호텔</div>
-      <input type="text" id="sm-hotel" class="profit-finp" style="width:100%;" placeholder="예: OAKS NTH RYDE">
+      <div style="font-size:10px;color:var(--t3);margin-top:6px;">💡 트레일러는 호텔이 변경되는 날 (공항↔호텔, 호텔↔호텔) 체크</div>
     </div>
 
-    <!-- 견적 금액 -->
+    <!-- ── 기타 ── -->
     <div style="margin-bottom:8px;">
       <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">견적 금액 ($, 참고용)</div>
-      <input type="number" id="sm-quote" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+      <input type="number" id="sm-quote" class="profit-finp" style="width:100%;box-sizing:border-box;" placeholder="0" min="0" step="0.01">
     </div>
 
-    <!-- 메모 -->
     <div style="margin-bottom:10px;">
       <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">메모 / 특이사항</div>
-      <textarea id="sm-notes" class="profit-finp" style="width:100%;min-height:50px;resize:vertical;" placeholder="기타 메모, 요청 사항 등"></textarea>
+      <textarea id="sm-notes" class="profit-finp" style="width:100%;min-height:50px;resize:vertical;box-sizing:border-box;" placeholder="기타 메모"></textarea>
     </div>
 
-    <!-- 상태 (편집 시만 노출) -->
     <div id="sm-status-row" style="margin-bottom:10px;display:none;">
       <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">상태</div>
       <select id="sm-status" class="profit-sel" style="width:100%;">
@@ -1001,7 +1048,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
     <div id="sm-err" style="display:none;background:#fef2f2;color:#ef4444;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:11px;font-weight:700;"></div>
 
-    <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:8px;">
+    <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;">
       <button id="sm-del-btn" onclick="deleteScheduleConfirm()" class="btn" style="padding:10px 14px;background:#ef4444;color:white;font-weight:700;display:none;">🗑️</button>
       <button onclick="closeScheduleModal()" class="btn bgh" style="padding:10px;font-weight:700;">취소</button>
       <button onclick="saveScheduleData()" class="btn bac" style="padding:10px;font-weight:700;">저장</button>
@@ -1009,6 +1056,47 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </div>
 </div>
 
+
+<!-- 검색 드롭다운 공통 스타일 -->
+<style>
+.scsel{position:relative;width:100%;}
+.scsel-input{width:100%;box-sizing:border-box;padding:8px 28px 8px 10px;border:1px solid var(--b2);border-radius:8px;background:var(--sf);font-size:12px;color:var(--t1);font-family:var(--fb);}
+.scsel-input:focus{outline:none;border-color:var(--ac);}
+.scsel-arrow{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--t3);pointer-events:none;}
+.scsel-clear{position:absolute;right:24px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--t3);cursor:pointer;line-height:1;display:none;}
+.scsel-input:not(:placeholder-shown) ~ .scsel-clear{display:block;}
+.scsel-list{position:absolute;top:100%;left:0;right:0;background:var(--sf);border:1px solid var(--b2);border-radius:8px;margin-top:2px;max-height:180px;overflow-y:auto;z-index:9100;display:none;box-shadow:0 4px 12px rgba(0,0,0,.1);}
+.scsel-list.up{top:auto;bottom:100%;margin-top:0;margin-bottom:2px;}
+.scsel-list.open{display:block;}
+.scsel-item{padding:8px 10px;font-size:12px;color:var(--t1);cursor:pointer;border-bottom:1px solid var(--b1);}
+.scsel-item:last-child{border-bottom:none;}
+.scsel-item:hover,.scsel-item.active{background:var(--ac);color:white;}
+.scsel-item-sub{font-size:10px;color:var(--t3);margin-top:1px;}
+.scsel-item:hover .scsel-item-sub,.scsel-item.active .scsel-item-sub{color:rgba(255,255,255,.8);}
+.scsel-empty{padding:12px;text-align:center;color:var(--t3);font-size:11px;}
+
+.sm-day{background:var(--sf);border:1px solid var(--b2);border-radius:8px;padding:8px;margin-bottom:6px;}
+.sm-day-hdr{font-size:11px;font-weight:800;color:var(--ac);margin-bottom:6px;font-family:var(--fd);}
+.sm-day-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;}
+.sm-day-row.three{grid-template-columns:1fr 1fr 1fr;}
+.sm-day-lbl{font-size:9px;font-weight:700;color:var(--t3);margin-bottom:2px;}
+.sm-day-trailer{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2);font-weight:600;cursor:pointer;padding:6px 8px;background:var(--sf2);border-radius:6px;}
+.sm-day-trailer input{margin:0;}
+
+/* Calendar */
+.sch-cal-table{display:grid;grid-template-columns:1fr;gap:1px;background:var(--b1);font-family:var(--fb);}
+.sch-cal-row{display:grid;gap:1px;}
+.sch-cal-headrow .sch-cal-hdr-cell{background:var(--sf2);padding:8px 4px;text-align:center;font-family:var(--fd);}
+.sch-cal-headrow .sch-cal-hdr-cell.today{background:#fff7ed;border:2px solid #f59e0b;}
+.sch-cal-grp{background:var(--sf);padding:8px 10px;font-size:11px;font-weight:800;color:var(--t1);font-family:var(--fd);display:flex;align-items:center;border-left:3px solid var(--ac);}
+.sch-cal-cell{background:var(--sf);padding:3px;min-height:50px;display:flex;flex-direction:column;gap:2px;}
+.sch-cal-cell.empty{background:var(--sf2);opacity:0.4;}
+.sch-cal-evt{background:var(--ac);color:white;border-radius:4px;padding:3px 5px;font-size:9px;cursor:pointer;line-height:1.3;font-family:var(--fd);}
+.sch-cal-evt:hover{opacity:0.85;}
+.sch-cal-evt.invoiced{background:#fde047;color:#713f12;}
+.sch-cal-evt-title{font-weight:800;font-size:10px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sch-cal-evt-line{font-size:9px;opacity:0.95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+</style>
 
 
 <!-- QUOTATION PAGE -->
@@ -3739,6 +3827,9 @@ function renderAuditLog(rows){
 let _schCache = [];                 // 서버에서 받은 전체 일정
 let _schCurrentFilter = '';         // 현재 상태 필터 ('' = 전체)
 let _schEditTourId = null;          // 모달 편집 중인 TourID
+let _schDays = [];                  // 모달 일별 일정 데이터
+const _schCsels = {};               // {agency, guide} 검색 드롭다운 인스턴스
+const _schDayCsels = {};            // 일별 호텔/드라이버/차량 드롭다운
 
 async function initSchedule(){
   await loadSchedule();
@@ -3762,7 +3853,6 @@ async function loadSchedule(){
 
 function setScheduleFilter(btn, status){
   _schCurrentFilter = status;
-  // 칩 활성화 토글
   document.querySelectorAll('.sch-chip').forEach(c => c.classList.remove('on'));
   if(btn) btn.classList.add('on');
   renderScheduleList();
@@ -3778,16 +3868,17 @@ function renderScheduleList(){
   if(!listEl) return;
 
   let rows = _schCache.slice();
-  // 상태 필터
   if(_schCurrentFilter){
     rows = rows.filter(r => String(r.Status||'').trim() === _schCurrentFilter);
   }
-  // 검색
   const q = (document.getElementById('sch-search')?.value || '').trim().toLowerCase();
   if(q){
     rows = rows.filter(r => {
-      return ['Agency','TourCode','Guide','Driver','Rego','Hotel','Notes','TourID']
-        .some(k => String(r[k]||'').toLowerCase().includes(q));
+      // 일별 데이터(TourPlan)도 검색
+      const planText = String(r.TourPlan||'').toLowerCase();
+      return ['Agency','TourCode','Guide','Hotel','Notes','TourID']
+        .some(k => String(r[k]||'').toLowerCase().includes(q))
+        || planText.includes(q);
     });
   }
 
@@ -3814,18 +3905,24 @@ function renderScheduleList(){
     const period = sd === ed ? sd : `${sd} ~ ${ed}`;
     const tcode = r.TourCode || '';
     const guide = r.Guide ? `🧭 ${escH(r.Guide)}` : '';
-    const driver = r.Driver ? `👤 ${escH(r.Driver)}` : '';
-    const rego = r.Rego ? `🚌 ${escH(r.Rego)}` : '';
     const seats = r.Seats ? `${escH(r.Seats)}` : '';
-    const trailer = String(r.Trailer||'').toUpperCase() === 'Y' ? '🚐 TRL' : '';
     const pax = r.Pax ? `${r.Pax}명` : '';
     const inv = r.InvoiceID ? `<span style="background:#fef3c7;color:#b45309;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);">${escH(r.InvoiceID)}</span>` : '';
 
+    // 일별 데이터에서 차량/드라이버 요약 추출
+    const days = _schParseDays(r.TourPlan);
+    const drivers = [...new Set(days.map(d => d.driver).filter(Boolean))];
+    const regos = [...new Set(days.map(d => d.rego).filter(Boolean))];
+    const hasTrailer = days.some(d => d.trailer);
+
+    const driverStr = drivers.length ? `👤 ${drivers.map(escH).join('/')}` : '';
+    const regoStr   = regos.length ? `🚌 ${regos.map(escH).join('/')}` : '';
+    const trailer = hasTrailer ? '🚐 TRL' : '';
     const meta = [pax, seats, trailer].filter(Boolean).join(' · ');
-    const people = [guide, driver, rego].filter(Boolean).join(' · ');
+    const people = [guide, driverStr, regoStr].filter(Boolean).join(' · ');
 
     return `<div class="sch-card s-${st}" onclick="openScheduleModal('${escH(r.TourID)}')">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
         <span class="sch-badge s-${st}">${statusLabel[st]||st}</span>
         <span style="font-size:11px;color:var(--t3);font-family:var(--fd);">${escH(period)}</span>
         ${inv}
@@ -3840,55 +3937,240 @@ function renderScheduleList(){
   }).join('');
 }
 
+// ═══════════════════════════════════════
+// 검색형 드롭다운 컴포넌트 (재사용)
+// ═══════════════════════════════════════
+function buildSearchSelect(containerId, options){
+  // options: { items: [{value, label, sub?}], value, placeholder, onSelect, onClear }
+  const cont = document.getElementById(containerId);
+  if(!cont) return null;
+  const inst = {
+    items: options.items || [],
+    value: options.value || '',
+    placeholder: options.placeholder || '검색...',
+    onSelect: options.onSelect || (() => {}),
+    onClear: options.onClear || (() => {}),
+    activeIdx: -1
+  };
+
+  cont.innerHTML = `<div class="scsel">
+    <input type="text" class="scsel-input" placeholder="${escH(inst.placeholder)}" value="${escH(inst.value)}" autocomplete="off">
+    <span class="scsel-clear" title="지우기">×</span>
+    <span class="scsel-arrow">▾</span>
+    <div class="scsel-list"></div>
+  </div>`;
+
+  const wrap = cont.querySelector('.scsel');
+  const inp = cont.querySelector('.scsel-input');
+  const list = cont.querySelector('.scsel-list');
+  const clearBtn = cont.querySelector('.scsel-clear');
+
+  inst.input = inp;
+  inst.listEl = list;
+  inst._render = () => {
+    const q = inp.value.trim().toLowerCase();
+    let filtered = inst.items;
+    if(q){
+      filtered = inst.items.filter(it =>
+        String(it.label||'').toLowerCase().includes(q) ||
+        String(it.sub||'').toLowerCase().includes(q));
+    }
+    if(filtered.length === 0){
+      list.innerHTML = '<div class="scsel-empty">결과 없음</div>';
+      return;
+    }
+    list.innerHTML = filtered.slice(0, 50).map((it, i) => `
+      <div class="scsel-item${i===inst.activeIdx?' active':''}" data-val="${escH(it.value)}" data-idx="${i}">
+        <div>${escH(it.label)}</div>
+        ${it.sub ? `<div class="scsel-item-sub">${escH(it.sub)}</div>` : ''}
+      </div>
+    `).join('');
+    list.querySelectorAll('.scsel-item').forEach(el => {
+      el.onmousedown = (e) => {
+        e.preventDefault();
+        const v = el.getAttribute('data-val');
+        inst._select(v);
+      };
+    });
+  };
+
+  inst._select = (val) => {
+    const it = inst.items.find(x => String(x.value) === String(val));
+    if(it){
+      inst.value = it.value;
+      inp.value = it.label;
+      list.classList.remove('open');
+      inst.onSelect(it);
+    }
+  };
+
+  inst._open = () => {
+    inst._render();
+    // 드롭다운이 화면 아래로 잘리는지 체크 → 위로 띄우기
+    list.classList.remove('up');
+    list.classList.add('open');
+    setTimeout(() => {
+      const rect = list.getBoundingClientRect();
+      const vh = window.innerHeight;
+      if(rect.bottom > vh - 10){
+        list.classList.add('up');
+      }
+    }, 0);
+  };
+
+  inst.setItems = (items) => {
+    inst.items = items;
+    if(list.classList.contains('open')) inst._render();
+  };
+
+  inst.setValue = (val) => {
+    const it = inst.items.find(x => String(x.value) === String(val));
+    if(it){
+      inst.value = it.value;
+      inp.value = it.label;
+    } else {
+      inst.value = '';
+      inp.value = '';
+    }
+  };
+
+  inst.getValue = () => inst.value;
+
+  inp.addEventListener('focus', inst._open);
+  inp.addEventListener('input', () => {
+    inst.value = ''; // 자유 입력 시 value 초기화
+    inst.activeIdx = -1;
+    if(!list.classList.contains('open')) inst._open();
+    else inst._render();
+  });
+  inp.addEventListener('blur', () => {
+    setTimeout(() => list.classList.remove('open'), 150);
+  });
+  inp.addEventListener('keydown', (e) => {
+    const items = inst.items;
+    const q = inp.value.trim().toLowerCase();
+    const filtered = q ? items.filter(it => String(it.label||'').toLowerCase().includes(q)) : items;
+    if(e.key === 'ArrowDown'){
+      e.preventDefault();
+      inst.activeIdx = Math.min(inst.activeIdx + 1, filtered.length - 1);
+      inst._render();
+    } else if(e.key === 'ArrowUp'){
+      e.preventDefault();
+      inst.activeIdx = Math.max(inst.activeIdx - 1, 0);
+      inst._render();
+    } else if(e.key === 'Enter'){
+      e.preventDefault();
+      if(inst.activeIdx >= 0 && filtered[inst.activeIdx]){
+        inst._select(filtered[inst.activeIdx].value);
+      }
+    } else if(e.key === 'Escape'){
+      list.classList.remove('open');
+      inp.blur();
+    }
+  });
+
+  clearBtn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    inst.value = '';
+    inp.value = '';
+    inst.onClear();
+    inp.focus();
+  });
+
+  return inst;
+}
+
+// ═══════════════════════════════════════
+// 모달 열기/닫기
+// ═══════════════════════════════════════
 function openScheduleModal(tourId){
   _schEditTourId = tourId || null;
+  _schDays = [];
   const modal = document.getElementById('sch-modal');
   const title = document.getElementById('sch-modal-title');
+  const tidEl = document.getElementById('sm-tour-id');
   const statusRow = document.getElementById('sm-status-row');
   const delBtn = document.getElementById('sm-del-btn');
   const errEl = document.getElementById('sm-err');
   if(errEl){ errEl.style.display = 'none'; errEl.textContent = ''; }
 
-  // 드롭다운 옵션 채우기
-  _smPopulateDropdowns();
+  // 여행사 검색 드롭다운
+  _schCsels.agency = buildSearchSelect('sm-agency-csel', {
+    items: (DB.C||[]).map(c => ({ value: c.Name, label: c.Name, sub: c.ABN || c.Email || '' })),
+    placeholder: '여행사 선택 (타이핑으로 검색)',
+    onSelect: () => {},
+    onClear: () => {}
+  });
+
+  // 가이드 검색 드롭다운 (정렬됨)
+  const guideItems = (DB.G||[])
+    .map(g => {
+      const n = g.Guide_Name || g['Guide Name'] || '';
+      const ph = g.Mobile || '';
+      return n ? { value: n, label: n, sub: ph, _phone: ph } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.label.localeCompare(b.label));
+  _schCsels.guide = buildSearchSelect('sm-guide-csel', {
+    items: guideItems,
+    placeholder: '가이드 선택 (타이핑으로 검색)',
+    onSelect: (it) => {
+      if(it._phone){
+        const phEl = document.getElementById('sm-guidephone');
+        if(phEl) phEl.value = it._phone;
+      }
+    },
+    onClear: () => {}
+  });
 
   if(tourId){
-    // 편집 모드
     const r = _schCache.find(x => String(x.TourID).trim() === String(tourId).trim());
     if(!r){ toast('일정을 찾을 수 없습니다','er'); return; }
     title.textContent = '📅 일정 편집';
+    tidEl.textContent = r.TourID;
     statusRow.style.display = 'block';
     delBtn.style.display = 'block';
-    document.getElementById('sm-agency').value = r.Agency || '';
+    _schCsels.agency.setValue(r.Agency || '');
     document.getElementById('sm-tourcode').value = r.TourCode || '';
     document.getElementById('sm-start').value = String(r.StartDate||'').slice(0,10);
     document.getElementById('sm-end').value = String(r.EndDate||'').slice(0,10);
     document.getElementById('sm-pax').value = r.Pax || '';
     document.getElementById('sm-seats').value = r.Seats || '';
-    document.getElementById('sm-trailer').value = String(r.Trailer||'N').toUpperCase() === 'Y' ? 'Y' : 'N';
-    document.getElementById('sm-guide').value = r.Guide || '';
+    _schCsels.guide.setValue(r.Guide || '');
     document.getElementById('sm-guidephone').value = r.GuidePhone || '';
-    document.getElementById('sm-driver').value = r.Driver || '';
-    document.getElementById('sm-rego').value = r.Rego || '';
-    document.getElementById('sm-flightin').value = r.FlightIn || '';
-    document.getElementById('sm-flightout').value = r.FlightOut || '';
-    document.getElementById('sm-hotel').value = r.Hotel || '';
+
+    // 항공편 (FlightIn = "OZ602|2026-04-08|09:30" 식 또는 자유텍스트)
+    const fi = _schParseFlight(r.FlightIn);
+    document.getElementById('sm-flightin').value = fi.code;
+    document.getElementById('sm-flightin-date').value = fi.date;
+    document.getElementById('sm-flightin-time').value = fi.time;
+    const fo = _schParseFlight(r.FlightOut);
+    document.getElementById('sm-flightout').value = fo.code;
+    document.getElementById('sm-flightout-date').value = fo.date;
+    document.getElementById('sm-flightout-time').value = fo.time;
+
     document.getElementById('sm-quote').value = r.Quote || '';
     document.getElementById('sm-notes').value = r.Notes || '';
     document.getElementById('sm-status').value = r.Status || 'scheduled';
+
+    // 일별 데이터 복원
+    _schDays = _schParseDays(r.TourPlan);
+    _smRebuildDays();
   } else {
-    // 신규 등록
     title.textContent = '📅 신규 일정 등록';
+    tidEl.textContent = '';
     statusRow.style.display = 'none';
     delBtn.style.display = 'none';
-    ['sm-agency','sm-tourcode','sm-start','sm-end','sm-pax','sm-seats','sm-guide','sm-guidephone',
-     'sm-driver','sm-rego','sm-flightin','sm-flightout','sm-hotel','sm-quote','sm-notes']
+    ['sm-tourcode','sm-pax','sm-seats','sm-guidephone',
+     'sm-flightin','sm-flightin-date','sm-flightin-time',
+     'sm-flightout','sm-flightout-date','sm-flightout-time',
+     'sm-quote','sm-notes']
       .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
-    document.getElementById('sm-trailer').value = 'N';
-    // 시작일 기본값: 오늘
     const today = new Date().toISOString().slice(0,10);
     document.getElementById('sm-start').value = today;
     document.getElementById('sm-end').value = today;
+    _schDays = [{ date: today, hotel:'', driver:'', rego:'', course:'', ot:'', trailer:false }];
+    _smRebuildDays();
   }
 
   modal.style.display = 'flex';
@@ -3897,88 +4179,228 @@ function openScheduleModal(tourId){
 function closeScheduleModal(){
   document.getElementById('sch-modal').style.display = 'none';
   _schEditTourId = null;
+  _schDays = [];
+  Object.keys(_schDayCsels).forEach(k => delete _schDayCsels[k]);
 }
 
-function _smPopulateDropdowns(){
-  // 여행사 (M_Clients)
-  const agSel = document.getElementById('sm-agency');
-  if(agSel){
-    const cur = agSel.value;
-    agSel.innerHTML = '<option value="">-- 선택 --</option>' +
-      (DB.C||[]).map(c => `<option value="${escH(c.Name)}">${escH(c.Name)}</option>`).join('');
-    if(cur) agSel.value = cur;
+// ═══════════════════════════════════════
+// 일별 일정 (TourPlan) 빌더
+// ═══════════════════════════════════════
+function onSmDateChange(){
+  const sd = document.getElementById('sm-start').value;
+  const ed = document.getElementById('sm-end').value;
+  if(!sd || !ed) return;
+  if(ed < sd){
+    document.getElementById('sm-end').value = sd;
+    return onSmDateChange();
   }
-  // 가이드 (M_Guides)
-  const gSel = document.getElementById('sm-guide');
-  if(gSel){
-    const cur = gSel.value;
-    const guides = (DB.G||[]).slice().sort((a,b)=> String(a.Guide_Name||a['Guide Name']||'').localeCompare(String(b.Guide_Name||b['Guide Name']||'')));
-    gSel.innerHTML = '<option value="">선택</option>' +
-      guides.map(g => {
-        const n = g.Guide_Name || g['Guide Name'] || '';
-        return n ? `<option value="${escH(n)}">${escH(n)}</option>` : '';
-      }).join('');
-    if(cur) gSel.value = cur;
+  // 기존 데이터 보존하면서 날짜 범위 재구성
+  const existing = {};
+  _schDays.forEach(d => { existing[d.date] = d; });
+  const newDays = [];
+  const start = new Date(sd + 'T00:00:00');
+  const end = new Date(ed + 'T00:00:00');
+  for(let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)){
+    const ds = dt.toISOString().slice(0,10);
+    newDays.push(existing[ds] || { date: ds, hotel:'', driver:'', rego:'', course:'', ot:'', trailer:false });
   }
-  // 드라이버 (M_Drivers, Active만)
-  const dSel = document.getElementById('sm-driver');
-  if(dSel){
-    const cur = dSel.value;
-    const drivers = (DB.D||[]).filter(d => String(d.Active||'').toUpperCase() !== 'N')
-      .map(d => d.Name_KR || d.Name_EN || '').filter(Boolean);
-    dSel.innerHTML = '<option value="">선택</option>' +
-      drivers.map(n => `<option value="${escH(n)}">${escH(n)}</option>`).join('');
-    if(cur) dSel.value = cur;
-  }
-  // 차량 (M_Vehicles, Active만)
-  const rSel = document.getElementById('sm-rego');
-  if(rSel){
-    const cur = rSel.value;
-    const vehs = (DB.V||[]).filter(v => String(v.Active||'').toUpperCase() !== 'N');
-    rSel.innerHTML = '<option value="">선택</option>' +
-      vehs.map(v => `<option value="${escH(v.Rego)}">${escH(v.Rego)}${v.Capacity?' ('+escH(v.Capacity)+')':''}</option>`).join('');
-    if(cur) rSel.value = cur;
-  }
+  _schDays = newDays;
+  _smRebuildDays();
 }
 
-function onSmGuideChange(){
-  // 가이드 선택 시 연락처 자동 채우기
-  const gName = document.getElementById('sm-guide').value;
-  if(!gName) return;
-  const g = (DB.G||[]).find(x => (x.Guide_Name||x['Guide Name']) === gName);
-  if(g && g.Mobile){
-    const phEl = document.getElementById('sm-guidephone');
-    if(phEl && !phEl.value) phEl.value = g.Mobile;
+function _smRebuildDays(){
+  const wrap = document.getElementById('sm-days-list');
+  if(!wrap) return;
+  if(_schDays.length === 0){
+    wrap.innerHTML = '<div style="padding:20px;text-align:center;color:var(--t3);font-size:11px;">시작일 / 종료일을 먼저 입력하세요</div>';
+    return;
   }
+  // 기존 csel 인스턴스 제거
+  Object.keys(_schDayCsels).forEach(k => delete _schDayCsels[k]);
+
+  const dayOfWeek = ['일','월','화','수','목','금','토'];
+  wrap.innerHTML = _schDays.map((d, i) => {
+    const dt = new Date(d.date + 'T00:00:00');
+    const dow = dayOfWeek[dt.getDay()];
+    const isWeekend = dt.getDay() === 0 || dt.getDay() === 6;
+    return `<div class="sm-day">
+      <div class="sm-day-hdr" style="display:flex;align-items:center;gap:6px;">
+        <span style="background:var(--ac);color:white;border-radius:4px;padding:1px 6px;font-size:10px;">DAY ${i+1}</span>
+        <span>${escH(d.date)} (<span style="color:${isWeekend?'#ef4444':'inherit'}">${dow}</span>)</span>
+      </div>
+      <div class="sm-day-row">
+        <div>
+          <div class="sm-day-lbl">호텔 (오늘 묵을 곳)</div>
+          <div id="day-hotel-${i}"></div>
+        </div>
+        <div>
+          <div class="sm-day-lbl">코스 / 일정</div>
+          <input type="text" class="profit-finp" style="width:100%;box-sizing:border-box;padding:8px 10px;font-size:12px;"
+            placeholder="예: BM, PORT, OPERA"
+            value="${escH(d.course||'')}"
+            oninput="_schDays[${i}].course=this.value">
+        </div>
+      </div>
+      <div class="sm-day-row three">
+        <div>
+          <div class="sm-day-lbl">드라이버</div>
+          <div id="day-driver-${i}"></div>
+        </div>
+        <div>
+          <div class="sm-day-lbl">차량 (Rego)</div>
+          <div id="day-rego-${i}"></div>
+        </div>
+        <div>
+          <div class="sm-day-lbl">OT / 추가</div>
+          <input type="text" class="profit-finp" style="width:100%;box-sizing:border-box;padding:8px 10px;font-size:12px;"
+            placeholder="예: 3HR"
+            value="${escH(d.ot||'')}"
+            oninput="_schDays[${i}].ot=this.value">
+        </div>
+      </div>
+      <label class="sm-day-trailer" for="day-trailer-${i}">
+        <input type="checkbox" id="day-trailer-${i}" ${d.trailer?'checked':''} onchange="_schDays[${i}].trailer=this.checked">
+        <span>🚐 트레일러 사용 (호텔 변경 / 공항 이동)</span>
+      </label>
+    </div>`;
+  }).join('');
+
+  // 각 일별 검색 드롭다운 빌드
+  _schDays.forEach((d, i) => {
+    // 호텔 드롭다운 (M_Hotels)
+    const hotelItems = (DB.H||[])
+      .filter(h => h.Hotel_Name)
+      .map(h => ({
+        value: h.Hotel_Name,
+        label: h.Hotel_Name,
+        sub: [h.Surcharge_Area, h.Address].filter(Boolean).join(' · ')
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    _schDayCsels['hotel-'+i] = buildSearchSelect('day-hotel-'+i, {
+      items: hotelItems,
+      value: d.hotel || '',
+      placeholder: '호텔 검색',
+      onSelect: (it) => { _schDays[i].hotel = it.value; },
+      onClear: () => { _schDays[i].hotel = ''; }
+    });
+    if(d.hotel) _schDayCsels['hotel-'+i].setValue(d.hotel);
+    // 드라이버 (M_Drivers)
+    const driverItems = (DB.D||[])
+      .filter(dr => String(dr.Active||'').toUpperCase() !== 'N')
+      .map(dr => ({
+        value: dr.Name_KR || dr.Name_EN || '',
+        label: dr.Name_KR || dr.Name_EN || '',
+        sub: [dr.Name_EN, dr.Mobile].filter(Boolean).join(' · ')
+      }))
+      .filter(it => it.value);
+    _schDayCsels['driver-'+i] = buildSearchSelect('day-driver-'+i, {
+      items: driverItems,
+      value: d.driver || '',
+      placeholder: '드라이버',
+      onSelect: (it) => { _schDays[i].driver = it.value; },
+      onClear: () => { _schDays[i].driver = ''; }
+    });
+    if(d.driver) _schDayCsels['driver-'+i].setValue(d.driver);
+    // 차량 (M_Vehicles)
+    const vehItems = (DB.V||[])
+      .filter(v => String(v.Active||'').toUpperCase() !== 'N')
+      .map(v => ({
+        value: v.Rego,
+        label: v.Rego,
+        sub: [v.Capacity, v.Owner].filter(Boolean).join(' · ')
+      }));
+    _schDayCsels['rego-'+i] = buildSearchSelect('day-rego-'+i, {
+      items: vehItems,
+      value: d.rego || '',
+      placeholder: '차량',
+      onSelect: (it) => { _schDays[i].rego = it.value; },
+      onClear: () => { _schDays[i].rego = ''; }
+    });
+    if(d.rego) _schDayCsels['rego-'+i].setValue(d.rego);
+  });
 }
 
+// ═══════════════════════════════════════
+// 직렬화 / 역직렬화
+// ═══════════════════════════════════════
+function _schParseDays(tourPlan){
+  if(!tourPlan) return [];
+  if(Array.isArray(tourPlan)) return tourPlan;
+  try{
+    const parsed = JSON.parse(tourPlan);
+    if(Array.isArray(parsed)) return parsed;
+    return [];
+  }catch(e){ return []; }
+}
+
+function _schParseFlight(s){
+  if(!s) return { code:'', date:'', time:'' };
+  // "OZ602|2026-04-08|09:30" 형식 우선
+  const parts = String(s).split('|');
+  if(parts.length === 3) return { code: parts[0].trim(), date: parts[1].trim(), time: parts[2].trim() };
+  // 자유 텍스트 (예: "OZ602 0930") - 코드만 보존
+  return { code: String(s).trim(), date:'', time:'' };
+}
+
+function _schSerializeFlight(code, date, time){
+  code = (code||'').trim(); date = (date||'').trim(); time = (time||'').trim();
+  if(!code && !date && !time) return '';
+  return `${code}|${date}|${time}`;
+}
+
+// ═══════════════════════════════════════
+// 저장 / 삭제
+// ═══════════════════════════════════════
 async function saveScheduleData(){
   const errEl = document.getElementById('sm-err');
   const showErr = (msg) => { if(errEl){ errEl.textContent = msg; errEl.style.display = 'block'; } };
   errEl && (errEl.style.display = 'none');
 
+  const agency = (_schCsels.agency?.getValue() || _schCsels.agency?.input?.value || '').trim();
+  const guide = (_schCsels.guide?.getValue() || '').trim();
+  // 자유 입력으로 들어간 값 (선택 안 한 경우)도 보존
+  const guideTyped = (_schCsels.guide?.input?.value || '').trim();
+  const finalGuide = guide || guideTyped;
+
+  // 날짜별 호텔에서 메인 호텔 추출 (가장 많이 등장하는 호텔)
+  const hotelCount = {};
+  _schDays.forEach(d => {
+    if(d.hotel){ hotelCount[d.hotel] = (hotelCount[d.hotel] || 0) + 1; }
+  });
+  const mainHotel = Object.keys(hotelCount).sort((a,b) => hotelCount[b] - hotelCount[a])[0] || '';
+  // 트레일러 사용 여부 (어느 날이든 한 번이라도 체크 됐으면 Y)
+  const hasTrailer = _schDays.some(d => d.trailer);
+
   const data = {
     TourID:     _schEditTourId || '',
-    Agency:     document.getElementById('sm-agency').value.trim(),
+    Agency:     agency,
     TourCode:   document.getElementById('sm-tourcode').value.trim(),
     StartDate:  document.getElementById('sm-start').value,
     EndDate:    document.getElementById('sm-end').value,
     Pax:        parseInt(document.getElementById('sm-pax').value)||'',
     Seats:      document.getElementById('sm-seats').value,
-    Trailer:    document.getElementById('sm-trailer').value,
-    Guide:      document.getElementById('sm-guide').value,
+    Trailer:    hasTrailer ? 'Y' : 'N',
+    Guide:      finalGuide,
     GuidePhone: document.getElementById('sm-guidephone').value.trim(),
-    Driver:     document.getElementById('sm-driver').value,
-    Rego:       document.getElementById('sm-rego').value,
-    FlightIn:   document.getElementById('sm-flightin').value.trim(),
-    FlightOut:  document.getElementById('sm-flightout').value.trim(),
-    Hotel:      document.getElementById('sm-hotel').value.trim(),
+    Driver:     '', // 일별 데이터에서 관리 (호환성을 위해 빈 문자열)
+    Rego:       '',
+    FlightIn:   _schSerializeFlight(
+      document.getElementById('sm-flightin').value,
+      document.getElementById('sm-flightin-date').value,
+      document.getElementById('sm-flightin-time').value
+    ),
+    FlightOut:  _schSerializeFlight(
+      document.getElementById('sm-flightout').value,
+      document.getElementById('sm-flightout-date').value,
+      document.getElementById('sm-flightout-time').value
+    ),
+    Hotel:      mainHotel,
+    TourPlan:   JSON.stringify(_schDays),
     Quote:      parseFloat(document.getElementById('sm-quote').value)||'',
     Notes:      document.getElementById('sm-notes').value.trim(),
     Status:     _schEditTourId ? document.getElementById('sm-status').value : 'scheduled'
   };
 
-  // 유효성 검사
   if(!data.Agency)    return showErr('여행사를 선택하세요');
   if(!data.StartDate) return showErr('시작일을 입력하세요');
   if(!data.EndDate)   return showErr('종료일을 입력하세요');
@@ -4027,6 +4449,223 @@ async function deleteScheduleConfirm(){
   }catch(e){
     toast('삭제 실패: ' + e.message,'er');
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 캘린더 뷰 (주간/월간) — 한눈에 보기
+// ═══════════════════════════════════════════════════════════════════════════
+let _schCalMode = 'week';        // 'week' or 'month'
+let _schCalAnchor = new Date();  // 표시 중인 기준 날짜
+
+function switchScheduleView(mode){
+  document.getElementById('sch-view-list').classList.toggle('on', mode === 'list');
+  document.getElementById('sch-view-cal').classList.toggle('on', mode === 'cal');
+  document.getElementById('sch-view-list-wrap').style.display = mode === 'list' ? 'block' : 'none';
+  document.getElementById('sch-view-cal-wrap').style.display = mode === 'cal' ? 'block' : 'none';
+  if(mode === 'cal') renderScheduleCalendar();
+}
+
+function setScheduleCalMode(mode){
+  _schCalMode = mode;
+  document.getElementById('sch-cal-mode-week').classList.toggle('on', mode === 'week');
+  document.getElementById('sch-cal-mode-month').classList.toggle('on', mode === 'month');
+  renderScheduleCalendar();
+}
+
+function schCalNav(dir){
+  const d = new Date(_schCalAnchor);
+  if(_schCalMode === 'week'){
+    d.setDate(d.getDate() + (dir * 7));
+  } else {
+    d.setMonth(d.getMonth() + dir);
+  }
+  _schCalAnchor = d;
+  renderScheduleCalendar();
+}
+
+function schCalToday(){
+  _schCalAnchor = new Date();
+  renderScheduleCalendar();
+}
+
+// 일별 데이터 추출 — _schCache에서 모든 일정의 일별 정보를 평탄화
+function _schGetAllDays(){
+  // [{date, tour, day}] 형태로 반환 (각 day에 tour 객체 + 일별 데이터)
+  const result = [];
+  _schCache.forEach(t => {
+    if(String(t.Status||'') === 'cancelled') return;
+    const days = _schParseDays(t.TourPlan);
+    if(days.length === 0){
+      // TourPlan이 없으면 시작일~종료일을 자동 생성 (legacy)
+      const sd = String(t.StartDate||'').slice(0,10);
+      const ed = String(t.EndDate||'').slice(0,10);
+      if(sd && ed){
+        const start = new Date(sd + 'T00:00:00');
+        const end = new Date(ed + 'T00:00:00');
+        for(let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)){
+          const ds = dt.toISOString().slice(0,10);
+          result.push({ date: ds, tour: t, day: { date: ds, hotel: t.Hotel||'', driver: t.Driver||'', rego: t.Rego||'', course:'', ot:'', trailer: false } });
+        }
+      }
+    } else {
+      days.forEach(d => result.push({ date: d.date, tour: t, day: d }));
+    }
+  });
+  return result;
+}
+
+function renderScheduleCalendar(){
+  const wrap = document.getElementById('sch-cal-wrap');
+  const periodEl = document.getElementById('sch-cal-period');
+  if(!wrap || !periodEl) return;
+  const groupBy = document.getElementById('sch-cal-group')?.value || 'agency';
+
+  // 기간 계산
+  let startDt, endDt, dayCount;
+  if(_schCalMode === 'week'){
+    // 월요일 시작
+    const d = new Date(_schCalAnchor);
+    const dow = d.getDay(); // 0=일
+    const offset = dow === 0 ? -6 : 1 - dow;
+    d.setDate(d.getDate() + offset);
+    d.setHours(0,0,0,0);
+    startDt = d;
+    endDt = new Date(d);
+    endDt.setDate(endDt.getDate() + 6);
+    dayCount = 7;
+  } else {
+    const d = new Date(_schCalAnchor);
+    startDt = new Date(d.getFullYear(), d.getMonth(), 1);
+    endDt = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    dayCount = endDt.getDate();
+  }
+
+  // 헤더 라벨
+  const fmtMD = (dt) => `${dt.getMonth()+1}/${dt.getDate()}`;
+  const fmtYMD = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  if(_schCalMode === 'week'){
+    periodEl.textContent = `${startDt.getFullYear()}.${fmtMD(startDt)} ~ ${fmtMD(endDt)}`;
+  } else {
+    periodEl.textContent = `${startDt.getFullYear()}년 ${startDt.getMonth()+1}월`;
+  }
+
+  // 모든 일별 데이터 가져오기
+  const allDays = _schGetAllDays();
+  // 기간 내 데이터만 필터
+  const startStr = fmtYMD(startDt);
+  const endStr = fmtYMD(endDt);
+  const inRange = allDays.filter(x => x.date >= startStr && x.date <= endStr);
+
+  // 그룹별로 묶기
+  const groups = {}; // {groupKey: {date: [items]}}
+  inRange.forEach(x => {
+    let key;
+    switch(groupBy){
+      case 'guide':  key = x.tour.Guide || '(미지정)'; break;
+      case 'rego':   key = x.day.rego || '(미지정)'; break;
+      case 'driver': key = x.day.driver || '(미지정)'; break;
+      default:       key = x.tour.Agency || '(미지정)';
+    }
+    if(!groups[key]) groups[key] = {};
+    if(!groups[key][x.date]) groups[key][x.date] = [];
+    groups[key][x.date].push(x);
+  });
+
+  const groupKeys = Object.keys(groups).sort();
+  if(groupKeys.length === 0){
+    wrap.innerHTML = '<div style="padding:40px;text-align:center;color:var(--t3);font-size:12px;">이 기간에 일정이 없습니다.</div>';
+    return;
+  }
+
+  // 날짜 셀 헤더
+  const dows = ['일','월','화','수','목','금','토'];
+  let dateHeaders = '';
+  let dates = [];
+  for(let i = 0; i < dayCount; i++){
+    const dt = new Date(startDt);
+    dt.setDate(dt.getDate() + i);
+    const ds = fmtYMD(dt);
+    dates.push(ds);
+    const dow = dows[dt.getDay()];
+    const isWknd = dt.getDay() === 0 || dt.getDay() === 6;
+    const isToday = ds === fmtYMD(new Date());
+    dateHeaders += `<div class="sch-cal-hdr-cell ${isToday?'today':''}" style="${isWknd?'color:#ef4444':''}">
+      <div style="font-size:10px;">${dow}</div>
+      <div style="font-size:13px;font-weight:800;">${dt.getDate()}</div>
+    </div>`;
+  }
+
+  // 셀 색상 (여행사/가이드별)
+  const colorPalette = ['#dbeafe','#fef3c7','#dcfce7','#fee2e2','#e0e7ff','#fce7f3','#cffafe','#fed7aa','#d9f99d','#f3e8ff'];
+  const colorMap = {};
+  let cIdx = 0;
+  // 그룹 행
+  let rowsHtml = '';
+  groupKeys.forEach(grp => {
+    if(colorMap[grp] === undefined){
+      colorMap[grp] = colorPalette[cIdx % colorPalette.length];
+      cIdx++;
+    }
+    let cellsHtml = '';
+    dates.forEach(ds => {
+      const items = groups[grp][ds] || [];
+      if(items.length === 0){
+        cellsHtml += '<div class="sch-cal-cell empty"></div>';
+      } else {
+        const cellContent = items.map(x => {
+          const t = x.tour;
+          const d = x.day;
+          const tcode = t.TourCode || t.TourID || '';
+          const labels = [];
+          // 그룹별로 보여줄 정보 다르게
+          if(groupBy === 'agency'){
+            if(d.rego) labels.push(d.rego);
+            if(d.driver) labels.push(d.driver);
+            if(t.Guide) labels.push(t.Guide);
+          } else if(groupBy === 'guide'){
+            labels.push(t.Agency || '');
+            if(d.rego) labels.push(d.rego);
+            if(d.driver) labels.push(d.driver);
+          } else if(groupBy === 'rego'){
+            labels.push(t.Agency || '');
+            if(t.Guide) labels.push(t.Guide);
+            if(d.driver) labels.push(d.driver);
+          } else if(groupBy === 'driver'){
+            labels.push(t.Agency || '');
+            if(d.rego) labels.push(d.rego);
+            if(t.Guide) labels.push(t.Guide);
+          }
+          if(d.hotel) labels.push('🏨 ' + d.hotel);
+          if(d.course) labels.push(d.course);
+          if(d.ot) labels.push('OT:' + d.ot);
+          if(d.trailer) labels.push('🚐');
+          const isInvoiced = String(t.Status||'') === 'invoiced' || String(t.Status||'') === 'paid';
+          return `<div class="sch-cal-evt ${isInvoiced?'invoiced':''}"
+                       onclick="event.stopPropagation();openScheduleModal('${escH(t.TourID)}')"
+                       title="${escH(t.Agency)} · ${escH(tcode)}">
+            <div class="sch-cal-evt-title">${escH(tcode||t.Agency)}</div>
+            ${labels.filter(Boolean).map(l => `<div class="sch-cal-evt-line">${escH(l)}</div>`).join('')}
+          </div>`;
+        }).join('');
+        cellsHtml += `<div class="sch-cal-cell">${cellContent}</div>`;
+      }
+    });
+    rowsHtml += `<div class="sch-cal-row">
+      <div class="sch-cal-grp" style="background:${colorMap[grp]};">${escH(grp)}</div>
+      ${cellsHtml}
+    </div>`;
+  });
+
+  // 최종 HTML
+  const colTemplate = `160px repeat(${dayCount}, minmax(110px, 1fr))`;
+  const minWidth = (160 + dayCount * 110) + 'px';
+  wrap.innerHTML = `<div class="sch-cal-table" style="min-width:${minWidth};">
+    <div class="sch-cal-row sch-cal-headrow" style="grid-template-columns:${colTemplate};">
+      <div class="sch-cal-grp" style="background:var(--sf2);">${groupBy === 'agency'?'여행사':(groupBy==='guide'?'가이드':(groupBy==='rego'?'차량':'드라이버'))}</div>
+      ${dateHeaders}
+    </div>
+    ${rowsHtml.replace(/<div class="sch-cal-row">/g, `<div class="sch-cal-row" style="grid-template-columns:${colTemplate};">`)}
+  </div>`;
 }
 
 // ═══════════════════════════════════════
