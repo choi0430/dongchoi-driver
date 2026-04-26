@@ -10891,25 +10891,28 @@ function _tryParseDate(val) {
   // GAS Date, ISO string, DD/MM/YYYY 등 다양한 날짜 형식 처리
   if (!val) return '';
   const s = String(val).trim();
-  // ISO with timestamp: "2026-05-09T14:00:00.000Z" — 시드니(UTC+10/+11) 기준 변환
-  // 시드니 0시는 UTC 14시(AEST) 또는 13시(AEDT)이므로 단순 slice(0,10)는 1일 빠짐
-  const isoT = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):/);
-  if (isoT) {
-    // Date 객체로 파싱 → 시드니 로컬 날짜 추출
+
+  // ISO with timestamp (T 포함) — 시드니 timezone으로 변환
+  // 예: "2026-04-12T14:00:00.000Z" (UTC), "2026-04-13T00:00:00+10:00" (이미 시드니)
+  // Date 객체 직렬화가 어떤 형태로 와도 시드니 로컬 날짜로 정확히 추출
+  if (s.indexOf('T') > 0) {
     const d = new Date(s);
     if (!isNaN(d.getTime())) {
-      // 시드니 시간대로 변환 (Intl 사용 — 자동 DST 처리)
       try {
-        const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' });
-        return fmt.format(d); // "2026-05-10" 형식 반환
+        const fmt = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Australia/Sydney',
+          year: 'numeric', month: '2-digit', day: '2-digit'
+        });
+        return fmt.format(d); // "2026-04-13" 형식 반환
       } catch (e) {
-        // Intl 실패 시 폴백: UTC 시간 + 11h 보정 (대략적, 서머타임 무시)
+        // Intl 폴백: AEDT(+11) 가정 — 실제 호주는 4월 초까지 DST
         const adj = new Date(d.getTime() + 11 * 60 * 60 * 1000);
         return adj.toISOString().slice(0, 10);
       }
     }
-    return s.slice(0, 10); // 최후 폴백
+    return s.slice(0, 10);
   }
+
   // ISO date only: "2026-03-29"
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   // DD/MM/YYYY
@@ -10918,7 +10921,7 @@ function _tryParseDate(val) {
   // parseToISO 폴백
   const iso = parseToISO(s);
   if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
-  // 숫자 (Excel serial date) — GAS에서 직렬화 오류 시
+  // 숫자 (Excel serial date)
   if (/^\d+$/.test(s)) { const d = new Date((Number(s) - 25569) * 86400000); if (!isNaN(d.getTime())) return d.toISOString().slice(0,10); }
   return '';
 }
