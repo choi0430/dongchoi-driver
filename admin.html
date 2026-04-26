@@ -9641,6 +9641,10 @@ async function initSubInvoice(){
       if(_reportsCache) DB.R = _reportsCache;
     }catch(e){ console.warn('Reports load for SUB invoice failed', e); }
   }
+  // Schedule 캐시 로드 (서브 운행 검색용 — DR 없는 SUB도 매칭 가능)
+  if(typeof _schCache !== 'undefined' && (!_schCache || !_schCache.length)){
+    try{ if(typeof loadSchedule === 'function') await loadSchedule(); }catch(e){ console.warn('Schedule load for SUB invoice failed', e); }
+  }
   // 인보이스 캐시 로드 후 이력 렌더
   if(!_invHistoryCache){
     try{
@@ -9747,18 +9751,63 @@ async function _searchByTourCode(){
     });
   });
 
-  // 3) 병합 (중복 제거: 같은 날짜+투어코드+코스 → 리포트 우선)
-  const seen = new Set();
-  reportMatches.forEach(r=>{ seen.add((r.Date||'').slice(0,10)+'|'+(r.Tour_Code||'').trim()+'|'+(r.Attraction||'').trim()); });
-  const uniqueInv = invMatches.filter(r=>{
-    const key = (r.Date||'').slice(0,10)+'|'+(r.Tour_Code||'').trim()+'|'+(r.Attraction||'').trim();
-    if(seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  // 3) Schedule 시스템 검색 — SUB 운행은 DR이 없으니 Schedule이 핵심 소스
+  const schMatches = [];
+  if(typeof _schCache !== 'undefined' && _schCache && _schCache.length){
+    _schCache.forEach(t => {
+      if(String(t.Status||'') === 'cancelled') return;
+      const tcRaw = (t.TourCode || t.TourID || '').toUpperCase();
+      const guideRaw = String(t.Guide||'').toUpperCase();
+      const tcN = tcRaw.replace(/[\s\-_\.]/g, '');
+      const guideN = guideRaw.replace(/[\s\-_\.]/g, '');
+      const matchTour = tcRaw.includes(q) || tcN.includes(qNorm);
+      const matchGuide = guideRaw.includes(q) || guideN.includes(qNorm);
+      if(!matchTour && !matchGuide) return;
+      let days = [];
+      try{ days = (typeof t.TourPlan === 'string') ? JSON.parse(t.TourPlan||'[]') : (t.TourPlan || []); }catch(e){ return; }
+      if(!Array.isArray(days)) return;
+      days.forEach(d => {
+        const dateStr = String(d.date||'').slice(0,10);
+        if(!dateStr) return;
+        if(from && dateStr < from) return;
+        if(to && dateStr > to) return;
+        ['morning','fullday','evening'].forEach(slotKey => {
+          const slot = d.slots && d.slots[slotKey];
+          if(!slot) return;
+          const isEmpty = !slot.startTime && !slot.startPlace && !slot.course && !slot.driver && !slot.rego && !slot.subCompany;
+          if(isEmpty) return;
+          const isSub = (slot.mode||'dc') === 'sub';
+          schMatches.push({
+            Date: dateStr,
+            Rego: isSub ? (slot.subVehicleNote || '') : (slot.rego || ''),
+            Tour_Code: t.TourCode || t.TourID || '',
+            Attraction: slot.course || '',
+            Seats: t.Seats || '',
+            Guide: t.Guide || '',
+            SVC_Charge: 0, OT: 0,
+            Trailer: d.trailer ? 1 : 0,
+            Hotel_Surcharge: 0, Dist_Surcharge: 0, Early: 0, Toll: 0,
+            Start_Time: slot.startTime || '',
+            End_Time: slot.endTime || '',
+            _source: 'sch',
+            _tourId: t.TourID || '',
+            _isSub: isSub,
+            _subCompany: slot.subCompany || ''
+          });
+        });
+      });
+    });
+  }
 
-  const allMatches = [...reportMatches, ...uniqueInv];
-  if(!allMatches.length){ toast('리포트 및 인보이스에서 검색 결과 없음','er'); }
+  // 4) 병합 (중복 제거: 같은 날짜+투어코드+코스 → 리포트 > 인보이스 > 스케줄 우선순위)
+  const seen = new Set();
+  const keyOf = r => (r.Date||'').slice(0,10)+'|'+(r.Tour_Code||'').trim()+'|'+(r.Attraction||'').trim();
+  reportMatches.forEach(r => seen.add(keyOf(r)));
+  const uniqueInv = invMatches.filter(r => { const k = keyOf(r); if(seen.has(k)) return false; seen.add(k); return true; });
+  const uniqueSch = schMatches.filter(r => { const k = keyOf(r); if(seen.has(k)) return false; seen.add(k); return true; });
+
+  const allMatches = [...reportMatches, ...uniqueInv, ...uniqueSch];
+  if(!allMatches.length){ toast('리포트, 인보이스, Schedule 모두에서 검색 결과 없음','er'); }
   _renderSearchResults(allMatches, q);
 }
 
@@ -9771,14 +9820,62 @@ async function _loadAllByDateRange(){
     toast('리포트 데이터 로딩 중...','in');
     try{ await ensureReportsCache(); if(_reportsCache){DB.R=_reportsCache;} }catch(e){}
     reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
-    if(!reports.length){ toast('리포트 데이터를 불러올 수 없습니다.','er'); return; }
   }
-  const matches = reports.filter(r=>{
+  const reportMatches = (reports||[]).filter(r=>{
     const d = (r.Date||'').slice(0,10);
     if(from && d < from) return false;
     if(to   && d > to)   return false;
     return true;
   });
+  // Schedule 시스템도 포함
+  const schMatches = [];
+  if(typeof _schCache !== 'undefined' && _schCache && _schCache.length){
+    _schCache.forEach(t => {
+      if(String(t.Status||'') === 'cancelled') return;
+      let days = [];
+      try{ days = (typeof t.TourPlan === 'string') ? JSON.parse(t.TourPlan||'[]') : (t.TourPlan || []); }catch(e){ return; }
+      if(!Array.isArray(days)) return;
+      days.forEach(d => {
+        const dateStr = String(d.date||'').slice(0,10);
+        if(!dateStr) return;
+        if(from && dateStr < from) return;
+        if(to && dateStr > to) return;
+        ['morning','fullday','evening'].forEach(slotKey => {
+          const slot = d.slots && d.slots[slotKey];
+          if(!slot) return;
+          const isEmpty = !slot.startTime && !slot.startPlace && !slot.course && !slot.driver && !slot.rego && !slot.subCompany;
+          if(isEmpty) return;
+          const isSub = (slot.mode||'dc') === 'sub';
+          schMatches.push({
+            Date: dateStr,
+            Rego: isSub ? (slot.subVehicleNote || '') : (slot.rego || ''),
+            Tour_Code: t.TourCode || t.TourID || '',
+            Attraction: slot.course || '',
+            Seats: t.Seats || '',
+            Guide: t.Guide || '',
+            SVC_Charge: 0, OT: 0,
+            Trailer: d.trailer ? 1 : 0,
+            Hotel_Surcharge: 0, Dist_Surcharge: 0, Early: 0, Toll: 0,
+            Start_Time: slot.startTime || '',
+            End_Time: slot.endTime || '',
+            _source: 'sch',
+            _tourId: t.TourID || '',
+            _isSub: isSub,
+            _subCompany: slot.subCompany || ''
+          });
+        });
+      });
+    });
+  }
+  // 중복 제거 (리포트 우선)
+  const seen = new Set();
+  const keyOf = r => (r.Date||'').slice(0,10)+'|'+(r.Tour_Code||'').trim()+'|'+(r.Attraction||'').trim();
+  reportMatches.forEach(r => seen.add(keyOf(r)));
+  const uniqueSch = schMatches.filter(r => { const k = keyOf(r); if(seen.has(k)) return false; seen.add(k); return true; });
+  const matches = [...reportMatches, ...uniqueSch];
+  if(!matches.length){
+    toast('해당 기간에 데이터 없음','er');
+  }
   _renderSearchResults(matches, '기간: '+_fmtSubInvDate(from)+' ~ '+_fmtSubInvDate(to));
 }
 
@@ -9814,9 +9911,16 @@ function _renderSearchResults(matches, label){
     const toll = Number(r.Toll||0);
     const extras = trailer+hotel+dist+early+toll;
     const isInv = r._source==='inv';
-    const srcBadge = isInv
-      ? '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#e8d5f5;color:#7c3aed;">INV '+r._invNum+'</span>'
-      : '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#d5e8f0;color:#2563eb;">리포트</span>';
+    const isSch = r._source==='sch';
+    let srcBadge;
+    if(isInv){
+      srcBadge = '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#e8d5f5;color:#7c3aed;">INV '+r._invNum+'</span>';
+    } else if(isSch){
+      const subTag = r._isSub ? '🏢' : '🏠';
+      srcBadge = '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#fef3c7;color:#92400e;" title="'+(r._subCompany||'')+'">📅 '+subTag+' Sch</span>';
+    } else {
+      srcBadge = '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#d5e8f0;color:#2563eb;">리포트</span>';
+    }
     html += '<tr style="border-bottom:1px solid var(--brd);'+(i%2?'background:var(--sf1);':'')+'">';
     html += '<td style="padding:4px 6px;text-align:center;"><input type="checkbox" class="tc-sel-chk" data-idx="'+i+'" checked></td>';
     html += '<td style="padding:4px 6px;">'+srcBadge+'</td>';
