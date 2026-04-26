@@ -11023,23 +11023,10 @@ function _buildCashFlowForWeek(targetMonISO) {
     if (dr <= 0) return;
 
     // ★ Due date 계산 — 우선순위:
-    //   1. Invoices 시트의 PeriodTo + 14일 (가장 정확 — 항상 인보이스 자체의 마지막 날짜)
-    //   2. tx.DueDate (저장 시점 값)
-    //   3. tx.FinishDate + 14일
-    let dueISO = '';
-    const invID = String(tx.InvoiceID||'').trim();
-    if (invID && _balInvoices && _balInvoices.length) {
-      const inv = _balInvoices.find(i => String(i.InvNumber||'').trim() === invID);
-      if (inv && inv.PeriodTo) {
-        const ptISO = _tryParseDate(inv.PeriodTo);
-        if (ptISO) {
-          const fd = new Date(ptISO + 'T00:00:00');
-          fd.setDate(fd.getDate() + 14);
-          dueISO = _localISO(fd);
-        }
-      }
-    }
-    if (!dueISO) dueISO = _tryParseDate(tx.DueDate) || '';
+    //   1. tx.DueDate (저장 시점 값 — saveInvoiceToSheet가 lastDate+14로 정확히 저장)
+    //   2. tx.FinishDate + 14일 (DueDate 없는 경우)
+    //   ※ Invoices.PeriodTo는 인보이스 "조회 기간"이지 마지막 일정일이 아님 (사용 금지)
+    let dueISO = _tryParseDate(tx.DueDate) || '';
     if (!dueISO) {
       let finISO = _tryParseDate(tx.FinishDate);
       if (!finISO) finISO = _tryParseDate(tx.StartDate);
