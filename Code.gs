@@ -97,7 +97,13 @@ const MASTER_HEADERS = {
   // ── 인증 토큰 (세션 관리) ──
   'Active_Tokens': ['Token','User','Role','IssuedAt','ExpiresAt','LastUsed','UserAgent'],
   // ── 로그인 실패 추적 (rate limiting) ──
-  'Auth_Failures': ['Name','FailCount','FirstFail','LastFail','LockedUntil']
+  'Auth_Failures': ['Name','FailCount','FirstFail','LastFail','LockedUntil'],
+  // ── 운행 일정 (Schedule, 중기 자동화 핵심 데이터) ──
+  // Status: scheduled / in_progress / completed / invoiced / paid / cancelled
+  // TourPlan: JSON string [{date, course, ot, hotel, pickup, dropoff, note}]
+  'Schedule':   ['TourID','Agency','TourCode','StartDate','EndDate','Pax','Seats','Trailer',
+                 'Guide','GuidePhone','Driver','Rego','FlightIn','FlightOut','Hotel',
+                 'TourPlan','Notes','Status','InvoiceID','Quote','CreatedAt','UpdatedAt']
 };
 
 // ── Tab Colors ──
@@ -196,6 +202,8 @@ const ADMIN_ONLY_ACTIONS = [
   'save_maint_record', 'delete_maint_record',
   'save_invoice_override', 'delete_invoice_override', 'bulk_save_invoice_overrides',
   'save_company_profile',
+  // ── 운행 일정 관리 (Schedule) ──
+  'save_schedule', 'delete_schedule', 'update_schedule_status',
   // 관리자가 주로 쓰지만 드라이버도 가끔 필요할 수 있는 조회는 제외:
   // get_invoices, get_agency_txn, get_sub_txn 등은 일단 드라이버도 허용
   // 추후 엄격하게 할 수 있음
@@ -206,7 +214,9 @@ const ADMIN_ONLY_GET_ACTIONS = [
   'get_agency_txn', 'get_sub_txn', 'get_agency_balances',
   'get_invoices', 'get_all_leave_requests', 'get_roster',
   'get_ledger', 'get_defect_reports',
-  'get_admin_bundle', 'get_audit_log'
+  'get_admin_bundle', 'get_audit_log',
+  // ── 운행 일정 ──
+  'get_schedule', 'get_schedule_stats'
 ];
 
 function _getAuthSheet() {
@@ -1255,6 +1265,21 @@ function doGet(e) {
         return cors(getAuditLog(limit));
       }
 
+      case 'get_schedule': {
+        // 운행 일정 조회 (필터: status, agency, from, to)
+        const filters = {
+          status: e.parameter.status || '',
+          agency: e.parameter.agency || '',
+          from:   e.parameter.from   || '',
+          to:     e.parameter.to     || ''
+        };
+        return cors(getSchedule(filters));
+      }
+
+      case 'get_schedule_stats': {
+        return cors(getScheduleStats());
+      }
+
       case 'get_sub_rates':
         return cors(getSubRatesSheet());
 
@@ -1464,6 +1489,25 @@ function doPost(e) {
       case 'delete_invoice': {
         const r = deleteInvoice(payload.invNumber);
         if (r.ok) appendAuditLog(_user, 'delete_invoice', 'Invoices', payload.invNumber||'', '');
+        return cors(r);
+      }
+
+      // ── Schedule CRUD (운행 일정) ──
+      case 'save_schedule': {
+        const r = saveSchedule(payload.data, _user);
+        if (r.ok) appendAuditLog(_user, 'save_schedule', 'Schedule', r.tourId||'',
+          `${payload.data.Agency||''} ${payload.data.TourCode||''} ${payload.data.StartDate||''}~${payload.data.EndDate||''}`);
+        return cors(r);
+      }
+      case 'delete_schedule': {
+        const r = deleteSchedule(payload.tourId);
+        if (r.ok) appendAuditLog(_user, 'delete_schedule', 'Schedule', payload.tourId||'', '');
+        return cors(r);
+      }
+      case 'update_schedule_status': {
+        const r = updateScheduleStatus(payload.tourId, payload.status, payload.invoiceId);
+        if (r.ok) appendAuditLog(_user, 'update_schedule_status', 'Schedule', payload.tourId||'',
+          `Status→${payload.status}${payload.invoiceId?' Inv:'+payload.invoiceId:''}`);
         return cors(r);
       }
 
@@ -4767,4 +4811,285 @@ function saveInvoiceManualItemsBulk(agency, period, items) {
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Schedule (운행 일정) — 중기 자동화 핵심 시트
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 상태 흐름:
+//   scheduled → in_progress → completed → invoiced → paid
+//                                       ↘ cancelled
+//
+// 자동 상태 전환 (매일 새벽 1시 트리거):
+//   StartDate <= 오늘 <= EndDate    → in_progress
+//   EndDate < 오늘 + 'scheduled'/'in_progress' → completed
+//   인보이스 발행/결제 시 → invoiced/paid (admin.html에서 호출)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SCHEDULE_STATUSES = ['scheduled','in_progress','completed','invoiced','paid','cancelled'];
+
+/**
+ * 운행 일정 조회 (필터링 가능)
+ * filters: { status, agency, from(YYYY-MM-DD), to(YYYY-MM-DD) }
+ */
+function getSchedule(filters) {
+  try {
+    filters = filters || {};
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Schedule');
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { ok: true, rows: [] };
+    const headers = data[0];
+    const DATE_FIELDS = ['StartDate','EndDate','CreatedAt','UpdatedAt'];
+    let rows = [];
+    for (let i = 1; i < data.length; i++) {
+      const obj = {};
+      headers.forEach((h, ci) => {
+        let v = data[i][ci];
+        if (DATE_FIELDS.indexOf(h) !== -1 && v instanceof Date && !isNaN(v)) {
+          v = formatDateForSheet(v);
+        }
+        obj[h] = v;
+      });
+      obj._rowIndex = i + 1;
+      rows.push(obj);
+    }
+    if (filters.status) rows = rows.filter(r => String(r.Status||'').trim() === filters.status);
+    if (filters.agency) rows = rows.filter(r => String(r.Agency||'').trim().toLowerCase() === filters.agency.toLowerCase());
+    if (filters.from)   rows = rows.filter(r => String(r.EndDate||'')   >= filters.from);
+    if (filters.to)     rows = rows.filter(r => String(r.StartDate||'') <= filters.to);
+    rows.sort((a, b) => String(b.StartDate||'').localeCompare(String(a.StartDate||'')));
+    return { ok: true, rows: rows };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * 운행 일정 통계 (대시보드용)
+ */
+function getScheduleStats() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Schedule');
+    if (!sheet) return { ok: true, stats: { total: 0, byStatus: {} } };
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { ok: true, stats: { total: 0, byStatus: {} } };
+    const headers = data[0];
+    const statusIdx = headers.indexOf('Status');
+    const stats = { total: data.length - 1, byStatus: {} };
+    SCHEDULE_STATUSES.forEach(s => stats.byStatus[s] = 0);
+    for (let i = 1; i < data.length; i++) {
+      const s = String(data[i][statusIdx]||'').trim();
+      if (stats.byStatus[s] !== undefined) stats.byStatus[s]++;
+    }
+    return { ok: true, stats: stats };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * 운행 일정 추가/수정
+ * data.TourID 가 있으면 수정, 없으면 추가
+ */
+function saveSchedule(data, user) {
+  try {
+    if (!data) return { ok: false, error: 'data is empty' };
+    if (!data.Agency)    return { ok: false, error: '여행사를 선택하세요' };
+    if (!data.StartDate) return { ok: false, error: '시작일을 입력하세요' };
+    if (!data.EndDate)   return { ok: false, error: '종료일을 입력하세요' };
+
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Schedule');
+    const headers = MASTER_HEADERS['Schedule'];
+    const allData = sheet.getDataRange().getValues();
+    const sheetHeaders = allData[0];
+    const tourIdCol = sheetHeaders.indexOf('TourID');
+    if (tourIdCol < 0) return { ok: false, error: 'TourID column not found' };
+
+    const now = new Date();
+    const sydNow = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
+
+    let existingRow = -1;
+    let existingCreated = '';
+    if (data.TourID) {
+      for (let i = 1; i < allData.length; i++) {
+        if (String(allData[i][tourIdCol]).trim() === String(data.TourID).trim()) {
+          existingRow = i + 1;
+          existingCreated = allData[i][sheetHeaders.indexOf('CreatedAt')] || '';
+          break;
+        }
+      }
+    }
+
+    if (!data.TourID) {
+      const yymm = Utilities.formatDate(now, 'Australia/Sydney', 'yyyyMM');
+      let maxSeq = 0;
+      const prefix = `T${yymm}-`;
+      for (let i = 1; i < allData.length; i++) {
+        const id = String(allData[i][tourIdCol] || '');
+        if (id.indexOf(prefix) === 0) {
+          const seq = parseInt(id.substring(prefix.length), 10) || 0;
+          if (seq > maxSeq) maxSeq = seq;
+        }
+      }
+      data.TourID = `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
+    }
+
+    if (!data.Status) data.Status = 'scheduled';
+    if (!data.CreatedAt) data.CreatedAt = existingCreated || sydNow;
+    data.UpdatedAt = sydNow;
+
+    if (data.Status === 'scheduled' || data.Status === 'in_progress') {
+      const today = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd');
+      const sd = String(data.StartDate||'');
+      const ed = String(data.EndDate||'');
+      if (today >= sd && today <= ed) data.Status = 'in_progress';
+      else if (today > ed) data.Status = 'completed';
+    }
+
+    const rowArr = headers.map(h => data[h] !== undefined ? data[h] : '');
+
+    if (existingRow > 0) {
+      sheet.getRange(existingRow, 1, 1, headers.length).setValues([rowArr]);
+    } else {
+      sheet.appendRow(rowArr);
+    }
+
+    return { ok: true, tourId: data.TourID, updated: existingRow > 0 };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * 운행 일정 삭제
+ */
+function deleteSchedule(tourId) {
+  try {
+    if (!tourId) return { ok: false, error: 'tourId is empty' };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Schedule');
+    if (!sheet) return { ok: false, error: 'Schedule sheet not found' };
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const idCol = headers.indexOf('TourID');
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][idCol]).trim() === String(tourId).trim()) {
+        sheet.deleteRow(i + 1);
+        return { ok: true, deleted: tourId };
+      }
+    }
+    return { ok: false, error: 'TourID not found' };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * 운행 일정 상태 업데이트 (인보이스 발행/결제 시 자동 호출)
+ */
+function updateScheduleStatus(tourId, status, invoiceId) {
+  try {
+    if (!tourId) return { ok: false, error: 'tourId is empty' };
+    if (SCHEDULE_STATUSES.indexOf(status) < 0) return { ok: false, error: 'Invalid status: ' + status };
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Schedule');
+    if (!sheet) return { ok: false, error: 'Schedule sheet not found' };
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const idCol = headers.indexOf('TourID');
+    const stCol = headers.indexOf('Status');
+    const invCol = headers.indexOf('InvoiceID');
+    const upCol = headers.indexOf('UpdatedAt');
+    const now = new Date();
+    const sydNow = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][idCol]).trim() === String(tourId).trim()) {
+        sheet.getRange(i + 1, stCol + 1).setValue(status);
+        if (invoiceId) sheet.getRange(i + 1, invCol + 1).setValue(invoiceId);
+        if (upCol >= 0) sheet.getRange(i + 1, upCol + 1).setValue(sydNow);
+        return { ok: true, tourId: tourId, status: status };
+      }
+    }
+    return { ok: false, error: 'TourID not found' };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * 자동 상태 업데이트 (매일 새벽 1시 트리거)
+ */
+function runScheduleStatusUpdate() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Schedule');
+    if (!sheet) {
+      Logger.log('Schedule sheet not found, skipping');
+      return { ok: true, updated: 0 };
+    }
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { ok: true, updated: 0 };
+    const headers = data[0];
+    const sdCol = headers.indexOf('StartDate');
+    const edCol = headers.indexOf('EndDate');
+    const stCol = headers.indexOf('Status');
+    const upCol = headers.indexOf('UpdatedAt');
+    const now = new Date();
+    const today = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd');
+    const sydNow = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
+    let updated = 0;
+    for (let i = 1; i < data.length; i++) {
+      const sd = String(data[i][sdCol]||'').slice(0, 10);
+      const ed = String(data[i][edCol]||'').slice(0, 10);
+      const st = String(data[i][stCol]||'').trim();
+      let newSt = '';
+      if ((st === 'scheduled' || st === 'in_progress') && today > ed && ed) {
+        newSt = 'completed';
+      } else if (st === 'scheduled' && sd && ed && today >= sd && today <= ed) {
+        newSt = 'in_progress';
+      }
+      if (newSt && newSt !== st) {
+        sheet.getRange(i + 1, stCol + 1).setValue(newSt);
+        if (upCol >= 0) sheet.getRange(i + 1, upCol + 1).setValue(sydNow);
+        updated++;
+      }
+    }
+    Logger.log(`runScheduleStatusUpdate: ${updated} 건 상태 변경`);
+    return { ok: true, updated: updated };
+  } catch (err) {
+    Logger.log('runScheduleStatusUpdate error: ' + err.toString());
+    return { ok: false, error: err.toString() };
+  }
+}
+
+/**
+ * Schedule 자동 상태 전환 트리거 등록 (한 번만)
+ */
+function setupScheduleTrigger() {
+  removeScheduleTrigger();
+  ScriptApp.newTrigger('runScheduleStatusUpdate')
+    .timeBased()
+    .everyDays(1)
+    .atHour(1)
+    .inTimezone('Australia/Sydney')
+    .create();
+  Logger.log('✅ 운행 일정 자동 상태 전환 트리거 등록: 매일 새벽 1시 (Sydney)');
+  return 'Schedule trigger created.';
+}
+
+function removeScheduleTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === 'runScheduleStatusUpdate') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  Logger.log('Removed ' + removed + ' schedule trigger(s).');
+  return removed;
 }
