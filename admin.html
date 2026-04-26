@@ -11398,16 +11398,24 @@ function renderBalWeeklySummary() {
         return bSum - aSum;
       }).forEach(([agency, items]) => {
         const agTotal = roundMoney(items.reduce((s,r) => s+r.balance, 0));
+        const agPaid = roundMoney(items.reduce((s,r) => s+(r.paid||0), 0));
         html += '<div style="margin-bottom:6px;">';
         html += '<div style="display:flex;justify-content:space-between;font-size:11px;font-weight:600;padding:2px 0;">';
         html += '<span style="color:var(--t1);">' + escH(agency) + '</span>';
-        html += '<span style="color:var(--ac);font-family:var(--fn);">' + $f(agTotal) + '</span></div>';
+        // 잔액이 있으면 잔액 표시, 잔액 0이면 받은 금액 표시
+        if (agTotal > 0.01) {
+          html += '<span style="color:var(--ac);font-family:var(--fn);">' + $f(agTotal) + '</span></div>';
+        } else if (agPaid > 0.01) {
+          html += '<span style="color:var(--gn);font-family:var(--fn);">✓ ' + $f(agPaid) + '</span></div>';
+        } else {
+          html += '<span style="color:var(--ac);font-family:var(--fn);">' + $f(agTotal) + '</span></div>';
+        }
         items.forEach(r => {
-          // 잔액 0이면 "완료" 녹색 표시 (드라이버 급여와 동일한 UX)
+          // 잔액 0이면 "받음 $X" 녹색 표시 (드라이버 급여와 동일한 UX)
           if (r.isPaid) {
             html += '<div style="display:flex;justify-content:space-between;padding:1px 0 1px 10px;font-size:10px;color:var(--gn);">';
             html += '<span>' + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')</span>';
-            html += '<span style="font-family:var(--fn);font-weight:700;">완료</span></div>';
+            html += '<span style="font-family:var(--fn);font-weight:700;">✓ 받음 ' + $f(r.paid||r.amount) + '</span></div>';
             return;
           }
           // 토글 ON 시 이번 주 이전 미수금이면 ⚠ 마커
@@ -11429,7 +11437,7 @@ function renderBalWeeklySummary() {
         if (s.isPaid) {
           html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">';
           html += '<span style="color:var(--t3);">' + escH(s.company) + (s.invoiceNo ? ' <span style="font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + '</span>';
-          html += '<span style="font-weight:700;font-family:var(--fn);color:var(--gn);">완료</span></div>';
+          html += '<span style="font-weight:700;font-family:var(--fn);color:var(--gn);">✓ 지급 ' + $f(s.paid||s.amount) + '</span></div>';
           return;
         }
         html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">';
