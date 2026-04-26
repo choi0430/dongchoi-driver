@@ -4705,15 +4705,9 @@ function _smRebuildDays(){
         <span style="background:var(--ac);color:white;border-radius:4px;padding:1px 6px;font-size:10px;">DAY ${i+1}</span>
         <span>${escH(d.date)} (<span style="color:${isWeekend?'#ef4444':'inherit'}">${dow}</span>)</span>
         ${isLastDay && _schDays.length > 1 ? '<span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700;">🛫 마지막날</span>' : ''}
-      </div>
-      <div class="sm-day-row">
-        <div>
-          <div class="sm-day-lbl">호텔 ${isLastDay && _schDays.length > 1 ? '(출국일이면 비워두기)' : '(오늘 묵을 곳)'}</div>
-          <div id="day-hotel-${i}"></div>
-        </div>
-        <label class="sm-day-trailer" for="day-trailer-${i}" style="margin-top:14px;">
+        <label class="sm-day-trailer" for="day-trailer-${i}" style="margin-left:auto;">
           <input type="checkbox" id="day-trailer-${i}" ${d.trailer?'checked':''} onchange="_schDays[${i}].trailer=this.checked">
-          <span>🚐 트레일러 사용</span>
+          <span>🚐 트레일러</span>
         </label>
       </div>
       <div class="sm-slot-toggle-row">${slotToggles}</div>
@@ -4801,17 +4795,6 @@ function _smRebuildDays(){
 
   // 각 일별 + 슬롯별 검색 드롭다운 빌드
   _schDays.forEach((d, i) => {
-    // 호텔 (날짜 단위) — 모든 날에 입력 가능 (마지막 날도 호텔 드롭 가능성 있음)
-    // 자동 전파에서만 마지막 날 제외 (_propagateHotel에서 처리)
-    _schDayCsels['hotel-'+i] = buildSearchSelect('day-hotel-'+i, {
-      items: hotelItems,
-      value: d.hotel || '',
-      placeholder: '호텔 검색',
-      onSelect: (it) => { _propagateHotel(i, it.value); },
-      onClear: () => { _schDays[i].hotel = ''; }
-    });
-    if(d.hotel) _schDayCsels['hotel-'+i].setValue(d.hotel);
-
     // 일자별 가용성 인지 옵션
     const driverItemsDate = buildDriverItemsForDate(d.date);
     const vehItemsDate = buildVehItemsForDate(d.date);
@@ -4858,7 +4841,11 @@ function _smRebuildDays(){
           items: hotelItems,
           value: d.slots[k].startPlace || '',
           placeholder: '호텔 검색',
-          onSelect: (it) => { _schDays[i].slots[k].startPlace = it.value; },
+          onSelect: (it) => {
+            const oldVal = _schDays[i].slots[k].startPlace || '';
+            _schDays[i].slots[k].startPlace = it.value;
+            _propagatePlace(i, k, 'startPlace', it.value, oldVal);
+          },
           onClear: () => { _schDays[i].slots[k].startPlace = ''; }
         });
         if(d.slots[k].startPlace && csel) csel.setValue(d.slots[k].startPlace);
@@ -4870,7 +4857,11 @@ function _smRebuildDays(){
           items: hotelItems,
           value: d.slots[k].endPlace || '',
           placeholder: '호텔 검색',
-          onSelect: (it) => { _schDays[i].slots[k].endPlace = it.value; },
+          onSelect: (it) => {
+            const oldVal = _schDays[i].slots[k].endPlace || '';
+            _schDays[i].slots[k].endPlace = it.value;
+            _propagatePlace(i, k, 'endPlace', it.value, oldVal);
+          },
           onClear: () => { _schDays[i].slots[k].endPlace = ''; }
         });
         if(d.slots[k].endPlace && csel) csel.setValue(d.slots[k].endPlace);
@@ -4884,24 +4875,36 @@ function _smRebuildDays(){
 function toggleSlot(dayIdx, slotKey){
   const d = _schDays[dayIdx];
   if(!d) return;
+  const SLOT_KEYS = ['morning','fullday','evening'];
   if(d.slots[slotKey] === null){
     // 활성화 — 신규 슬롯
     d.slots[slotKey] = _schEmptySlot();
-    // 호텔이 정해져 있으면 자동으로 시작/종료 장소를 호텔로 (편의)
-    if(d.hotel){
-      if(slotKey === 'morning'){
-        d.slots[slotKey].startPlace = d.hotel;
-        d.slots[slotKey].startPlaceType = 'hotel';
+    // 이전 흐름에서 startPlace 자동 추론
+    // 1. 같은 날 이전 슬롯의 endPlace
+    // 2. 이전 날 마지막 슬롯의 endPlace
+    let prevPlace = '', prevType = '';
+    const slotIdx = SLOT_KEYS.indexOf(slotKey);
+    for(let si = slotIdx - 1; si >= 0; si--){
+      const s = d.slots[SLOT_KEYS[si]];
+      if(s && s.endPlace){ prevPlace = s.endPlace; prevType = s.endPlaceType||''; break; }
+    }
+    if(!prevPlace){
+      for(let j = dayIdx - 1; j >= 0; j--){
+        const dPrev = _schDays[j];
+        for(let si = SLOT_KEYS.length - 1; si >= 0; si--){
+          const s = dPrev.slots[SLOT_KEYS[si]];
+          if(s && s.endPlace){ prevPlace = s.endPlace; prevType = s.endPlaceType||''; break; }
+        }
+        if(prevPlace) break;
       }
-      if(slotKey === 'fullday'){
-        d.slots[slotKey].startPlace = d.hotel;
-        d.slots[slotKey].startPlaceType = 'hotel';
-        d.slots[slotKey].endPlace = d.hotel;
-        d.slots[slotKey].endPlaceType = 'hotel';
-      }
-      if(slotKey === 'evening'){
-        d.slots[slotKey].startPlace = d.hotel;
-        d.slots[slotKey].startPlaceType = 'hotel';
+    }
+    if(prevPlace){
+      d.slots[slotKey].startPlace = prevPlace;
+      d.slots[slotKey].startPlaceType = prevType;
+      // fullday/morning은 도착도 같은 곳으로 (호텔→호텔 케이스 자동)
+      if(slotKey !== 'evening'){
+        d.slots[slotKey].endPlace = prevPlace;
+        d.slots[slotKey].endPlaceType = prevType;
       }
     }
   } else {
@@ -4936,25 +4939,96 @@ function _smPlaceTypeRadios(dayIdx, slotKey, fieldType, currentType){
 function _smPlaceInput(dayIdx, slotKey, fieldName, currentValue, currentType, dayHotel){
   // type별로 입력 방식 다름
   if(currentType === 'airport'){
-    // 공항은 자유 입력 (Sydney Domestic, International T1 등)
     return `<input type="text" id="place-inp-${dayIdx}-${slotKey}-${fieldName}" class="profit-finp sm-fld"
       placeholder="예: Sydney INTL T1, M PMT, JQ T2"
       value="${escH(currentValue||'')}"
-      oninput="_schDays[${dayIdx}].slots['${slotKey}'].${fieldName}=this.value">`;
+      oninput="setPlaceValue(${dayIdx},'${slotKey}','${fieldName}',this.value)">`;
   }
   if(currentType === 'hotel'){
-    // 호텔은 검색 드롭다운 (자동으로 그날 호텔과 동기화)
     return `<div id="place-csel-${dayIdx}-${slotKey}-${fieldName}"></div>`;
   }
   if(currentType === 'other'){
-    // 기타는 자유 입력
     return `<input type="text" id="place-inp-${dayIdx}-${slotKey}-${fieldName}" class="profit-finp sm-fld"
       placeholder="장소명 입력"
       value="${escH(currentValue||'')}"
-      oninput="_schDays[${dayIdx}].slots['${slotKey}'].${fieldName}=this.value">`;
+      oninput="setPlaceValue(${dayIdx},'${slotKey}','${fieldName}',this.value)">`;
   }
   // 미선택 — 안내
   return `<div style="padding:6px 10px;background:var(--sf2);border-radius:6px;font-size:11px;color:var(--t3);">위에서 장소 타입 선택</div>`;
+}
+
+// 장소 값 변경 (자유 입력) + 자동 전파
+function setPlaceValue(dayIdx, slotKey, fieldName, value){
+  const slot = _schDays[dayIdx]?.slots?.[slotKey];
+  if(!slot) return;
+  const oldVal = slot[fieldName] || '';
+  slot[fieldName] = value;
+  _propagatePlace(dayIdx, slotKey, fieldName, value, oldVal);
+}
+
+// 장소 자동 전파 로직:
+// - startPlace 변경 → 같은 슬롯 endPlace로 전파 (도착=시작 같은 호텔/장소면 자동)
+// - endPlace 변경 → 다음 날 시작 슬롯들의 startPlace로 전파
+// - 해당 슬롯의 다음 슬롯들도 같은 날 흐름 따라 전파
+// (단, 다음이 비어있거나 이전 값과 같았을 때만)
+function _propagatePlace(dayIdx, slotKey, fieldName, newVal, oldVal){
+  const SLOT_KEYS = ['morning','fullday','evening'];
+  // 우선 같은 날의 다음 단계
+  const sameSlot = _schDays[dayIdx].slots[slotKey];
+  if(!sameSlot) return;
+
+  if(fieldName === 'startPlace'){
+    // 같은 슬롯 endPlace가 비어있거나 이전과 같으면 같은 값으로 채움
+    // (단, 같은 슬롯 안에서 도착 = 시작 동일한 게 흔하니 디폴트로 전파)
+    const curEnd = sameSlot.endPlace || '';
+    if(!curEnd || curEnd === oldVal){
+      sameSlot.endPlace = newVal;
+      // type도 따라감
+      sameSlot.endPlaceType = sameSlot.startPlaceType || '';
+    }
+    // 그 후 슬롯들의 시작/도착도 마찬가지 (오늘 fullday → 오늘 evening 시작 등)
+    let propagating = newVal;
+    let propType = sameSlot.startPlaceType || '';
+    let propOldStart = oldVal;
+    const slotIdx = SLOT_KEYS.indexOf(slotKey);
+    for(let si = slotIdx + 1; si < SLOT_KEYS.length; si++){
+      const next = _schDays[dayIdx].slots[SLOT_KEYS[si]];
+      if(!next) continue;
+      if(!next.startPlace || next.startPlace === propOldStart){
+        next.startPlace = propagating;
+        next.startPlaceType = propType;
+      } else break;
+    }
+  }
+
+  if(fieldName === 'endPlace'){
+    // 다음 날(들)의 첫 슬롯 시작 장소로 전파 — 호텔처럼 "그 다음날 시작 = 오늘 도착"
+    let propagating = newVal;
+    let propType = sameSlot.endPlaceType || '';
+    let propOld = oldVal;
+    for(let j = dayIdx + 1; j < _schDays.length; j++){
+      const dNext = _schDays[j];
+      // 그 날의 첫 활성 슬롯 찾기
+      let firstSlotKey = null;
+      for(const sk of SLOT_KEYS){
+        if(dNext.slots[sk]){ firstSlotKey = sk; break; }
+      }
+      if(!firstSlotKey) break;
+      const target = dNext.slots[firstSlotKey];
+      const cur = target.startPlace || '';
+      if(!cur || cur === propOld){
+        target.startPlace = propagating;
+        target.startPlaceType = propType;
+        // 같은 날 안에서 그 슬롯의 endPlace도 비어있으면 같이 (호텔 → 호텔 케이스)
+        if(!target.endPlace || target.endPlace === propOld){
+          target.endPlace = propagating;
+          target.endPlaceType = propType;
+        }
+      } else break;
+    }
+  }
+
+  _smRebuildDays();
 }
 
 function setPlaceType(dayIdx, slotKey, fieldType, newType){
@@ -4962,20 +5036,50 @@ function setPlaceType(dayIdx, slotKey, fieldType, newType){
   if(!slot) return;
   const fieldName = fieldType.replace('Type',''); // startPlaceType → startPlace
   const oldType = slot[fieldType] || '';
+  const oldVal = slot[fieldName] || '';
   slot[fieldType] = newType;
   // 타입 바꿀 때 자동으로 값 채우거나 비우기
+  let newVal = oldVal;
   if(newType === 'airport' && oldType !== 'airport'){
-    // 기본값 — 빈칸 유지 (사용자가 입력)
-    if(!slot[fieldName] || oldType === 'hotel'){
-      slot[fieldName] = '';
-    }
+    if(oldType === 'hotel') newVal = '';
   } else if(newType === 'hotel'){
-    // 그날 호텔 자동 적용
-    slot[fieldName] = _schDays[dayIdx].hotel || '';
+    // 직전 날의 호텔(=직전날 endPlace 중 hotel 타입)을 자동 적용
+    newVal = _findRecentHotel(dayIdx, slotKey, fieldName) || '';
   } else if(newType === 'other' && oldType === 'hotel'){
-    slot[fieldName] = '';
+    newVal = '';
   }
-  _smRebuildDays();
+  slot[fieldName] = newVal;
+  // 값이 바뀌었으면 전파
+  if(newVal !== oldVal){
+    _propagatePlace(dayIdx, slotKey, fieldName, newVal, oldVal);
+  } else {
+    _smRebuildDays();
+  }
+}
+
+// 같은 일정에서 가까운 시점의 hotel 타입 장소 찾기 (자동 채우기 편의)
+function _findRecentHotel(dayIdx, slotKey, fieldName){
+  const SLOT_KEYS = ['morning','fullday','evening'];
+  // 오늘의 다른 슬롯들 + 어제까지 가서 hotel 타입 장소 찾기
+  // 우선 같은 날 이전 슬롯들
+  const slotIdx = SLOT_KEYS.indexOf(slotKey);
+  for(let si = slotIdx - 1; si >= 0; si--){
+    const s = _schDays[dayIdx].slots[SLOT_KEYS[si]];
+    if(!s) continue;
+    if(s.endPlaceType === 'hotel' && s.endPlace) return s.endPlace;
+    if(s.startPlaceType === 'hotel' && s.startPlace) return s.startPlace;
+  }
+  // 이전 날들
+  for(let j = dayIdx - 1; j >= 0; j--){
+    const dPrev = _schDays[j];
+    for(let si = SLOT_KEYS.length - 1; si >= 0; si--){
+      const s = dPrev.slots[SLOT_KEYS[si]];
+      if(!s) continue;
+      if(s.endPlaceType === 'hotel' && s.endPlace) return s.endPlace;
+      if(s.startPlaceType === 'hotel' && s.startPlace) return s.startPlace;
+    }
+  }
+  return '';
 }
 
 // ═══════════════════════════════════════
@@ -5109,10 +5213,19 @@ async function saveScheduleData(){
   const guideTyped = (_schCsels.guide?.input?.value || '').trim();
   const finalGuide = guide || guideTyped;
 
-  // 날짜별 호텔에서 메인 호텔 추출 (가장 많이 등장하는 호텔)
+  // 메인 호텔 추출 — 슬롯의 hotel 타입 장소들에서 가장 빈번한 호텔
   const hotelCount = {};
   _schDays.forEach(d => {
-    if(d.hotel){ hotelCount[d.hotel] = (hotelCount[d.hotel] || 0) + 1; }
+    ['morning','fullday','evening'].forEach(k => {
+      const s = d.slots && d.slots[k];
+      if(!s) return;
+      if(s.startPlaceType === 'hotel' && s.startPlace){
+        hotelCount[s.startPlace] = (hotelCount[s.startPlace] || 0) + 1;
+      }
+      if(s.endPlaceType === 'hotel' && s.endPlace){
+        hotelCount[s.endPlace] = (hotelCount[s.endPlace] || 0) + 1;
+      }
+    });
   });
   const mainHotel = Object.keys(hotelCount).sort((a,b) => hotelCount[b] - hotelCount[a])[0] || '';
   // 트레일러 사용 여부 (어느 날이든 한 번이라도 체크 됐으면 Y)
