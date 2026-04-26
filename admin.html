@@ -4581,15 +4581,41 @@ function renderSettleDashboard() {
       })()}
       ${Object.keys(driverMap).sort().map(dName => {
         const dd = driverMap[dName];
+        // 드라이버 합계 계산
+        const dTA = dd.items.reduce((s,x)=>s+(x.taAmount||0),0);
+        const dSub = dd.items.reduce((s,x)=>s+(x.subCost?.total||0),0);
+        const dDR = dd.drCost;
+        const dProfit = dd.items.reduce((s,x)=>s+(x.profit||0),0);
         return `<div style="border-bottom:1px solid var(--bd,#eee);">
-          <div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none';">
-            <div>
-              <div style="font-size:13px;font-weight:700;color:var(--t1);">👤 ${escH(dName)}</div>
-              <div style="font-size:11px;color:var(--t3);">${dd.count}건 운행</div>
+          <div style="padding:10px 14px;cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none';">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <div>
+                <div style="font-size:13px;font-weight:700;color:var(--t1);">👤 ${escH(dName)}</div>
+                <div style="font-size:11px;color:var(--t3);">${dd.count}건 운행 · ▼ 펼치기</div>
+              </div>
+              <div style="text-align:right;">
+                <div style="font-size:10px;color:var(--t3);">SUB 지급 합계</div>
+                <div style="font-size:18px;font-weight:800;color:#1e40af;">$${dSub.toLocaleString()}</div>
+              </div>
             </div>
-            <div style="text-align:right;">
-              <div style="font-size:10px;color:var(--t3);">SUB→DR 지급</div>
-              <div style="font-size:15px;font-weight:800;color:var(--ac);">$${dd.drCost.toLocaleString()}</div>
+            <!-- 4개 수치 그리드 -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;font-size:10px;">
+              <div style="background:var(--sf2);border-radius:6px;padding:5px 8px;text-align:center;">
+                <div style="color:var(--t3);font-size:9px;">TA 청구</div>
+                <div style="color:var(--gn);font-weight:700;">$${dTA.toLocaleString()}</div>
+              </div>
+              <div style="background:var(--sf2);border-radius:6px;padding:5px 8px;text-align:center;">
+                <div style="color:var(--t3);font-size:9px;">SUB 지급</div>
+                <div style="color:var(--rd);font-weight:700;">$${dSub.toLocaleString()}</div>
+              </div>
+              <div style="background:var(--sf2);border-radius:6px;padding:5px 8px;text-align:center;">
+                <div style="color:var(--t3);font-size:9px;">DR 지급</div>
+                <div style="color:var(--ac);font-weight:700;">$${dDR.toLocaleString()}</div>
+              </div>
+              <div style="background:var(--sf2);border-radius:6px;padding:5px 8px;text-align:center;">
+                <div style="color:var(--t3);font-size:9px;">DC 순이익</div>
+                <div style="color:${dProfit>=0?'var(--gn)':'var(--rd)'};font-weight:700;">${dProfit>=0?'+':''}$${dProfit.toLocaleString()}</div>
+              </div>
             </div>
           </div>
           <div style="display:none;padding:0 10px 10px;overflow-x:auto;">
@@ -4652,7 +4678,23 @@ function renderSettleDashboard() {
                   <td style="padding:3px 6px;text-align:right;font-weight:700;color:${it.profit>=0?'var(--gn)':'var(--rd)'};">${it.profit>=0?'+':''}$${it.profit.toLocaleString()}</td>
                   <td style="padding:3px 6px;text-align:center;"><button class="btn bgh xs" style="padding:2px 6px;font-size:10px;" onclick="event.stopPropagation();editDailyReportRow(${it._raw?._rowIndex||0})" title="이 운행 기록 수정">✏️</button></td>
                 </tr>`;
-              }).join('')}</tbody>
+              }).join('')}
+              ${(() => {
+                // 합계 행
+                const totTA = dd.items.reduce((s,x)=>s+(x.taAmount||0),0);
+                const totSub = dd.items.reduce((s,x)=>s+(x.subCost?.total||0),0);
+                const totDR = dd.items.reduce((s,x)=>s+(x.drCost||0),0);
+                const totProfit = dd.items.reduce((s,x)=>s+(x.profit||0),0);
+                return `<tr style="background:var(--sf2,#f8f9fa);font-weight:700;border-top:2px solid var(--bd);">
+                  <td colspan="6" style="padding:5px 6px;">합계 (${dd.items.length}건)</td>
+                  <td style="padding:5px 6px;text-align:right;color:var(--gn);">$${totTA.toLocaleString()}</td>
+                  <td style="padding:5px 6px;text-align:right;color:var(--rd);">$${totSub.toLocaleString()}</td>
+                  <td style="padding:5px 6px;text-align:right;">$${totDR.toLocaleString()}</td>
+                  <td style="padding:5px 6px;text-align:right;color:${totProfit>=0?'var(--gn)':'var(--rd)'};">${totProfit>=0?'+':''}$${totProfit.toLocaleString()}</td>
+                  <td style="padding:5px 6px;"></td>
+                </tr>`;
+              })()}
+              </tbody>
             </table>
           </div>
         </div>`;
