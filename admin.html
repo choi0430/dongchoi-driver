@@ -10902,17 +10902,21 @@ function renderBalAgencyList(){
   const list = document.getElementById('bal-agency-list');
   if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">거래 내역이 없습니다</div>'; return; }
 
-  list.innerHTML = balances.map(a=>`
-    <div onclick="openBalDetail('agency','${a.name.replace(/'/g,"\\'")}')" style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
-      <div>
+  list.innerHTML = balances.map(a=>{
+    const safeName = a.name.replace(/'/g,"\\'");
+    return `
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <div onclick="openBalDetail('agency','${safeName}')" style="cursor:pointer;flex:1;">
         <div style="font-weight:700;font-size:13px;">${a.name}</div>
         <div style="font-size:10px;color:var(--t3);margin-top:2px;">DR $${a.dr.toLocaleString('en',{minimumFractionDigits:2})} / CR $${a.cr.toLocaleString('en',{minimumFractionDigits:2})}</div>
       </div>
-      <div style="text-align:right;">
+      <div style="text-align:right;cursor:pointer;" onclick="openBalDetail('agency','${safeName}')">
         <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--or)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
         <div style="font-size:9px;color:var(--t3);">${a.balance>0?'미수금':'정산 완료'}</div>
       </div>
-    </div>`).join('');
+      ${a.balance > 0.01 ? `<button onclick="event.stopPropagation();_quickAddPayment('agency','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:8px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;" title="수금 처리">💰 수금</button>` : ''}
+    </div>`;
+  }).join('');
 }
 
 // ── SUB (OUTSOURCING) BALANCE ──
@@ -11025,17 +11029,23 @@ function renderBalSubList(){
   const list = document.getElementById('bal-sub-list');
   if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">거래 내역이 없습니다</div>'; return; }
 
-  list.innerHTML = balances.map(a=>`
-    <div onclick="openBalDetail('sub','${a.name.replace(/'/g,"\\'")}')" style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div style="font-weight:700;font-size:13px;">${a.name}</div>
-        <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--rd)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
+  list.innerHTML = balances.map(a=>{
+    const safeName = a.name.replace(/'/g,"\\'");
+    return `
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;">
+      <div onclick="openBalDetail('sub','${safeName}')" style="cursor:pointer;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-weight:700;font-size:13px;">${a.name}</div>
+          <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--rd)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px;font-size:10px;color:var(--t3);">
+          <div>외주: DR $${a.dr.toLocaleString()} / CR $${a.cr.toLocaleString()} = <span style="color:${a.outsourcingBal>0?'var(--or)':'var(--gn)'}">$${a.outsourcingBal.toLocaleString()}</span></div>
+          <div>급여: DR $${a.wageDr.toLocaleString()} / CR $${a.wageCr.toLocaleString()} = <span style="color:${a.wageBal>0?'var(--or)':'var(--gn)'}">$${a.wageBal.toLocaleString()}</span></div>
+        </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px;font-size:10px;color:var(--t3);">
-        <div>외주: DR $${a.dr.toLocaleString()} / CR $${a.cr.toLocaleString()} = <span style="color:${a.outsourcingBal>0?'var(--or)':'var(--gn)'}">$${a.outsourcingBal.toLocaleString()}</span></div>
-        <div>급여: DR $${a.wageDr.toLocaleString()} / CR $${a.wageCr.toLocaleString()} = <span style="color:${a.wageBal>0?'var(--or)':'var(--gn)'}">$${a.wageBal.toLocaleString()}</span></div>
-      </div>
-    </div>`).join('');
+      ${a.balance > 0.01 ? `<div style="margin-top:8px;text-align:right;"><button onclick="event.stopPropagation();_quickAddPayment('sub','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;" title="지급 처리">💰 지급</button></div>` : ''}
+    </div>`;
+  }).join('');
 }
 
 // ── DRIVER WAGE BALANCE ──
@@ -11077,17 +11087,21 @@ function renderBalWageList(){
   const list = document.getElementById('bal-wage-list');
   if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">급여 내역이 없습니다</div>'; return; }
 
-  list.innerHTML = balances.map(a=>`
-    <div onclick="openBalDetail('wage','${a.name.replace(/'/g,"\\'")}')" style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
-      <div>
+  list.innerHTML = balances.map(a=>{
+    const safeName = a.name.replace(/'/g,"\\'");
+    return `
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <div onclick="openBalDetail('wage','${safeName}')" style="cursor:pointer;flex:1;">
         <div style="font-weight:700;font-size:13px;">${a.name}</div>
         <div style="font-size:10px;color:var(--t3);margin-top:2px;">발생 $${a.dr.toLocaleString('en',{minimumFractionDigits:2})} / 지급 $${a.cr.toLocaleString('en',{minimumFractionDigits:2})}</div>
       </div>
-      <div style="text-align:right;">
+      <div style="text-align:right;cursor:pointer;" onclick="openBalDetail('wage','${safeName}')">
         <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--or)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
         <div style="font-size:9px;color:var(--t3);">${a.balance>0?'미지급':'정산 완료'}</div>
       </div>
-    </div>`).join('');
+      ${a.balance > 0.01 ? `<button onclick="event.stopPropagation();_quickAddPayment('wage','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:8px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;" title="급여 지급">💰 지급</button>` : ''}
+    </div>`;
+  }).join('');
 }
 
 // ── WEEKLY SUMMARY (주간 수입/지출/순이익 요약) ──
@@ -11659,9 +11673,12 @@ function renderBalWeeklySummary() {
           }
           // 토글 ON 시 이번 주 이전 미수금이면 ⚠ 마커
           const isOverdue = _cfIncludeOverdue && r.dueDate < targetMonISO;
-          html += '<div style="display:flex;justify-content:space-between;padding:1px 0 1px 10px;font-size:10px;color:' + (isOverdue?'#dc2626':'var(--t3)') + ';' + (isOverdue?'font-weight:700;':'') + '">';
-          html += '<span>' + (isOverdue?'⚠ ':'') + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')</span>';
-          html += '<span style="font-family:var(--fn);">' + $f(r.balance) + '</span></div>';
+          const safeAg = (r.agency||'').replace(/'/g,"\\'");
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:1px 0 1px 10px;font-size:10px;color:' + (isOverdue?'#dc2626':'var(--t3)') + ';' + (isOverdue?'font-weight:700;':'') + '">';
+          html += '<span style="flex:1;">' + (isOverdue?'⚠ ':'') + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')</span>';
+          html += '<span style="font-family:var(--fn);">' + $f(r.balance) + '</span>';
+          html += `<button onclick="event.stopPropagation();_quickAddPayment('agency','${safeAg}',${r.balance})" title="이 인보이스 수금 처리" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;">💰</button>`;
+          html += '</div>';
         });
         html += '</div>';
       });
@@ -11679,9 +11696,13 @@ function renderBalWeeklySummary() {
           html += '<span style="font-weight:700;font-family:var(--fn);color:var(--gn);">✓ 지급 ' + $f(s.paid||s.amount) + '</span></div>';
           return;
         }
-        html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">';
-        html += '<span style="color:var(--t2);">' + escH(s.company) + (s.invoiceNo ? ' <span style="color:var(--t3);font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="color:var(--t3);font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + '</span>';
-        html += '<span style="font-weight:600;font-family:var(--fn);color:var(--or);">' + $f(s.balance!==undefined?s.balance:s.amount) + '</span></div>';
+        const safeCo = (s.company||'').replace(/'/g,"\\'");
+        const subBal = s.balance!==undefined?s.balance:s.amount;
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:3px 0;font-size:11px;">';
+        html += '<span style="color:var(--t2);flex:1;">' + escH(s.company) + (s.invoiceNo ? ' <span style="color:var(--t3);font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="color:var(--t3);font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + '</span>';
+        html += '<span style="font-weight:600;font-family:var(--fn);color:var(--or);">' + $f(subBal) + '</span>';
+        html += `<button onclick="event.stopPropagation();_quickAddPayment('sub','${safeCo}',${subBal})" title="이 항목 지급 처리" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;">💰</button>`;
+        html += '</div>';
       });
       html += '</div>';
     }
@@ -11693,10 +11714,11 @@ function renderBalWeeklySummary() {
       html += '<div style="font-size:10px;color:var(--t3);margin-bottom:8px;">\uBC1C\uC0DD ' + $f(cf.totalWageEarned) + ' / \uC9C0\uAE09 ' + $f(cf.totalWagePaid) + ' / \uBBF8\uC9C0\uAE09 <span style="color:var(--rd);font-weight:600;">' + $f(cf.totalWageOut) + '</span></div>';
       cf.driverPay.sort((a,b) => b.remaining - a.remaining).forEach(d => {
         const isOverpaid = d.remaining < 0;
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11px;">';
-        html += '<div><span style="color:var(--t2);">' + escH(d.driver) + '</span>';
+        const safeDrv = (d.driver||'').replace(/'/g,"\\'");
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:3px 0;font-size:11px;">';
+        html += '<div style="flex:1;"><span style="color:var(--t2);">' + escH(d.driver) + '</span>';
         html += ' <span style="font-size:9px;color:var(--t3);">(\uBC1C\uC0DD ' + $f(d.earned) + ')</span></div>';
-        html += '<div style="text-align:right;">';
+        html += '<div style="text-align:right;display:flex;align-items:center;gap:4px;">';
         if (isOverpaid) {
           html += '<span style="font-weight:600;font-family:var(--fn);color:var(--gn);">\uC644\uB8CC</span>';
           html += ' <span style="font-size:9px;color:var(--t3);">\uCD08\uACFC\uC9C0\uAE09 ' + $f(Math.abs(d.remaining)) + '</span>';
@@ -11705,6 +11727,7 @@ function renderBalWeeklySummary() {
         } else {
           html += '<span style="font-weight:600;font-family:var(--fn);color:var(--rd);">' + $f(d.remaining) + '</span>';
           if (d.paid > 0) html += ' <span style="font-size:9px;color:var(--t3);">(\uC9C0\uAE09 ' + $f(d.paid) + ')</span>';
+          html += `<button onclick="event.stopPropagation();_quickAddPayment('wage','${safeDrv}',${d.remaining})" title="이 드라이버 급여 지급" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;margin-left:4px;">💰</button>`;
         }
         html += '</div></div>';
       });
@@ -11984,6 +12007,54 @@ function renderBalDetail(){
 }
 
 // ── TRANSACTION MODAL (ADD/EDIT) ──
+// 빠른 지급/수금 — 모달 띄우고 회사명 + 잔액 자동 prefill
+function _quickAddPayment(type, name, balance){
+  // 모달 열기
+  openBalTxnModal(type, null);
+  // 약간 대기 후 prefill (모달 렌더 대기)
+  setTimeout(() => {
+    try {
+      // 회사/드라이버 이름 prefill
+      if(type === 'agency'){
+        const sel = document.getElementById('btx-agency'); if(sel) sel.value = name;
+      } else if(type === 'sub'){
+        const sel = document.getElementById('btx-subco'); if(sel) sel.value = name;
+      } else if(type === 'wage'){
+        const sel = document.getElementById('btx-driver'); if(sel) sel.value = name;
+      }
+      // CR(지급/수금) 필드에 잔액 자동 입력
+      const crInp = document.getElementById('btx-cr');
+      if(crInp){
+        crInp.value = (balance > 0 ? balance.toFixed(2) : '');
+        crInp.focus();
+        crInp.select();
+      }
+      // 오늘 날짜 prefill
+      const dateInp = document.getElementById('btx-date');
+      if(dateInp && !dateInp.value){
+        const today = new Date();
+        dateInp.value = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+      }
+      // Type 자동 선택
+      const typeSel = document.getElementById('btx-type');
+      if(typeSel){
+        const targetType = type === 'agency' ? 'payment' : type === 'sub' ? 'payment' : 'payment';
+        // 옵션에 해당 값이 있으면 선택
+        const opts = Array.from(typeSel.options || []);
+        const found = opts.find(o => o.value === targetType || o.value.toLowerCase().includes('pay'));
+        if(found) typeSel.value = found.value;
+      }
+      // 모달 타이틀에 안내
+      const title = document.getElementById('bal-txn-title');
+      if(title){
+        title.textContent = type === 'agency' ? `💰 ${name} 수금 처리` :
+                            type === 'sub' ? `💰 ${name} 지급 처리` :
+                            `💰 ${name} 급여 지급`;
+      }
+    } catch(e){ console.warn('quickAddPayment prefill failed:', e); }
+  }, 50);
+}
+
 function openBalTxnModal(type, idx){
   window._balDetailType = type;
   _balEditIdx = idx;
