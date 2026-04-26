@@ -14677,9 +14677,11 @@ function openM(type,idx){
       </select></div></div>`;
   }
   else if(type==='T'){
-    // SUB 회사 목록 (M_Vehicles의 Owner 값 중 Dong Choi 아닌 것)
-    const subOwners = [...new Set((DB.V||[]).map(v=>String(v.Owner||v.SubOwner||'').trim()).filter(o=>o && !DC_OWNERS.includes(o)))].sort();
-    const ownerOpts = ['Dong Choi', ...subOwners].map(o =>
+    // 차량에 등록된 실제 Owner 값들 모두 사용 (DC_OWNERS의 'DONG CHOI PTY LTD' 포함)
+    const allOwners = [...new Set((DB.V||[]).map(v=>String(v.Owner||v.SubOwner||'').trim()).filter(Boolean))].sort();
+    // Dong Choi가 차량 Owner에 없으면 추가
+    if(!allOwners.some(o => /dong choi/i.test(o))) allOwners.unshift('DONG CHOI PTY LTD');
+    const ownerOpts = allOwners.map(o =>
       `<option value="${escH(o)}"${(d.Owner||'')===o?' selected':''}>${escH(o)}</option>`
     ).join('');
     // 날짜 변환: ISO/Date → input type="date" 호환 YYYY-MM-DD
