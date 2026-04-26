@@ -10595,6 +10595,9 @@ async function syncBalanceData(force){
 
     // Driver wage: derive from Daily_Report DR_Cost + wages
     _buildWageTxns();
+    // ★ SUBINV 우선 정책: 같은 SubCompany + 기간이 SUBINV로 발행되면
+    //   그 기간의 LEDGER 거래는 화면 합계에서 자동 제외 (데이터 보존, 표시만 가림)
+    _buildSubInvSuppressionIndex();
     // ★ 자동 정합성 검사: 급여 탭 vs 잔액 탭 불일치 감지 → 콘솔 경고
     try { _wageConsistencyCheck(); } catch(e) { console.warn('wage consistency check:', e); }
     _balLoaded = true;
@@ -10913,9 +10916,68 @@ function renderBalAgencyList(){
 }
 
 // ── SUB (OUTSOURCING) BALANCE ──
+// ═══════════════════════════════════════════════════════════════════════════
+// SUBINV 우선 정책 — LEDGER 가림 인덱스
+// ═══════════════════════════════════════════════════════════════════════════
+// 정책: SUB 회사가 인보이스(D1, D2...)를 발행한 기간에 대해서는
+//       LEDGER 자동 등록분(LEDGER:날짜_차량_투어 prefix)을 화면에서 제외.
+//       데이터는 SUB_Txn에 그대로 보존되지만 합계/리스트에서 안 보임.
+//       이유: SUB 인보이스가 진실(공식 채무), LEDGER는 운행 메모.
+//
+// 인덱스 구조: { SubCompany_lower: [ {from:'YYYY-MM-DD', to:'YYYY-MM-DD'}, ... ] }
+let _subInvSuppressIdx = {};
+
+function _buildSubInvSuppressionIndex(){
+  _subInvSuppressIdx = {};
+  if(!_balSubTxns || !_balSubTxns.length) return;
+
+  // SUBINV 자동 등록분 식별
+  _balSubTxns.forEach(t => {
+    const desc = String(t.Description||'');
+    if(!desc.startsWith('SUBINV:')) return;
+    const subCo = String(t.SubCompany||'').trim().toLowerCase();
+    if(!subCo) return;
+    // FinishDate가 있으면 from~to 범위, 없으면 Date 단일
+    let fromISO = '';
+    let toISO = '';
+    // Remark 형식: "INVNUM (DD/MM/YYYY~DD/MM/YYYY)" — 거기서 기간 추출 시도
+    const remarkMatch = String(t.Remark||'').match(/\((\d{1,2}\/\d{1,2}\/\d{4})\s*[~\-]\s*(\d{1,2}\/\d{1,2}\/\d{4})\)/);
+    if(remarkMatch){
+      const [, f, tt] = remarkMatch;
+      const [df, mf, yf] = f.split('/');
+      const [dt, mt, yt] = tt.split('/');
+      fromISO = `${yf}-${mf.padStart(2,'0')}-${df.padStart(2,'0')}`;
+      toISO = `${yt}-${mt.padStart(2,'0')}-${dt.padStart(2,'0')}`;
+    } else {
+      // FinishDate 또는 Date 사용
+      const finISO = _tryParseDate(t.FinishDate) || _tryParseDate(t.Date);
+      if(finISO){ fromISO = finISO; toISO = finISO; }
+    }
+    if(!fromISO || !toISO) return;
+    if(!_subInvSuppressIdx[subCo]) _subInvSuppressIdx[subCo] = [];
+    _subInvSuppressIdx[subCo].push({from: fromISO, to: toISO});
+  });
+}
+
+// LEDGER 거래가 SUBINV에 의해 가려져야 하는지 확인
+function _isSubLedgerSuppressed(t){
+  const desc = String(t.Description||'');
+  if(!desc.startsWith('LEDGER:')) return false; // SUBINV 본인이나 수동 항목은 가리지 않음
+  const subCo = String(t.SubCompany||'').trim().toLowerCase();
+  if(!subCo) return false;
+  const ranges = _subInvSuppressIdx[subCo];
+  if(!ranges || !ranges.length) return false;
+  // LEDGER 거래의 날짜가 어떤 SUBINV 기간에 속하는지 확인
+  const dateISO = _tryParseDate(t.Date);
+  if(!dateISO) return false;
+  return ranges.some(r => dateISO >= r.from && dateISO <= r.to);
+}
+
 function _subBalances(){
+  // ★ SUBINV 우선 정책: LEDGER가 같은 SubCompany+기간의 SUBINV에 의해 가려진 경우 제외
   const map = {};
   _balSubTxns.forEach(t=>{
+    if(_isSubLedgerSuppressed(t)) return;
     const name = t.SubCompany||'Unknown';
     const cat = t.Category||'Outsourcing';
     if(!map[name]) map[name]={name, dr:0, cr:0, wageDr:0, wageCr:0};
@@ -10937,6 +10999,8 @@ function _subBalances(){
 function renderBalSubList(){
   const search = (document.getElementById('bal-sub-search')?.value||'').toLowerCase();
   const balances = _subBalances().filter(a=> !search || a.name.toLowerCase().includes(search));
+  // 가려진 LEDGER 건수 카운트 (안내용)
+  const suppressedCount = (_balSubTxns||[]).filter(t => _isSubLedgerSuppressed(t)).length;
   const totalBal = balances.reduce((s,a)=>s+a.balance,0);
   const totalDR = balances.reduce((s,a)=>s+a.dr+a.wageDr,0);
   const totalCR = balances.reduce((s,a)=>s+a.cr+a.wageCr,0);
@@ -10956,7 +11020,7 @@ function renderBalSubList(){
         <div style="font-size:15px;font-weight:700;color:${totalBal>0?'var(--rd)':'var(--gn)'};font-family:var(--fn);">$${Math.abs(totalBal).toLocaleString('en',{minimumFractionDigits:2})}</div>
       </div>
     </div>
-    <div style="font-size:10px;color:var(--t3);margin-top:6px;">총 ${balances.length}개 서브 회사</div>`;
+    <div style="font-size:10px;color:var(--t3);margin-top:6px;">총 ${balances.length}개 서브 회사${suppressedCount>0?` <span style="color:#7c3aed;">· SUBINV 우선 정책으로 ${suppressedCount}건 LEDGER 가려짐 (중복 방지)</span>`:''}</div>`;
 
   const list = document.getElementById('bal-sub-list');
   if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">거래 내역이 없습니다</div>'; return; }
@@ -11233,6 +11297,7 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
   });
 
   (_balSubTxns || []).forEach(tx => {
+    if(_isSubLedgerSuppressed(tx)) return; // SUBINV 우선 정책: 가림
     const dr = Number(tx.DR) || 0;
     if (dr <= 0) return;
 
