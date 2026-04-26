@@ -4447,7 +4447,19 @@ function showPage(id){
   if(id === 'me') initMyInfoPage();
   if(id === 'pay') renderPay();
   // Pre Departure 화면 진입 시 운행 중 차량 목록 갱신 (드롭다운 비활성화용)
-  if(id === 'report') refreshActiveRegosForPre();
+  if(id === 'report') {
+    refreshActiveRegosForPre();
+    // ★ Daily Report 단계로 다시 돌아온 경우 (다른 탭 갔다가 옴) — 입력 손실 방지
+    if(currentStep === 2){
+      // 폼 필드가 비어있으면 draft 복원 시도
+      const agencyVal = document.getElementById('dr-agency')?.value || '';
+      const attractionVal = document.getElementById('dr-attraction')?.value || '';
+      // 입력 폼이 비어있는데 draft가 있으면 복원 (탭 전환 등으로 의도치 않게 reset된 경우)
+      if(!agencyVal && !attractionVal && typeof _restoreDailyDraftWhenReady === 'function'){
+        _restoreDailyDraftWhenReady();
+      }
+    }
+  }
   // 공지 페이지 진입 시 모두 읽음 처리
   if(id === 'notices') _markNoticesSeen();
 }
@@ -4544,10 +4556,52 @@ function _attachDraftListeners(){
   if(_draftListenerAttached) return;
   const step2 = document.getElementById('step-2');
   if(!step2) return;
+  // 텍스트/숫자/체크박스/select 변경 시
   step2.addEventListener('input',  ()=>saveDailyDraft(), { passive:true });
   step2.addEventListener('change', ()=>saveDailyDraft(), { passive:true });
+  // ★ 버튼 클릭 (서차지, OT, 식대, 세차 등) — input 이벤트 발생 안하므로 click도 잡음
+  step2.addEventListener('click', (e) => {
+    // 일반 input/textarea 클릭은 이미 input/change 이벤트로 처리됨 — 버튼/csel만 추적
+    const tag = (e.target.tagName||'').toLowerCase();
+    if(tag === 'button' || e.target.closest('.csel') || e.target.closest('[onclick]')){
+      // 약간의 딜레이로 onclick 핸들러 완료 후 저장 (값 변경 후 캡처)
+      setTimeout(()=>saveDailyDraft(), 50);
+    }
+  }, { passive:true });
   _draftListenerAttached = true;
 }
+
+// ★ 백그라운드/탭 전환 시 강제 저장 — 모바일 앱이 종료되기 전에 저장 보장
+(function setupBackgroundDraftSave(){
+  if(window._bgDraftSaveSetup) return;
+  window._bgDraftSaveSetup = true;
+
+  function flushAllDrafts(){
+    try {
+      // Daily Report draft
+      if(typeof saveDailyDraft === 'function' && document.getElementById('step-2')?.style.display !== 'none'){
+        saveDailyDraft();
+      }
+      // EOS draft
+      if(typeof saveEosDraft === 'function' && document.getElementById('step-3')?.style.display !== 'none'){
+        saveEosDraft();
+      }
+    } catch(e) { console.warn('flushAllDrafts error:', e); }
+  }
+
+  // 탭/앱이 백그라운드 갈 때
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'hidden'){
+      flushAllDrafts();
+    }
+  });
+  // 모바일에서 앱이 완전히 종료되거나 탭 닫힐 때
+  window.addEventListener('pagehide', flushAllDrafts);
+  // beforeunload는 모바일에서 신뢰도 낮지만 보조용
+  window.addEventListener('beforeunload', flushAllDrafts);
+  // 모바일 portrait/landscape 전환 같이 페이지 freezing
+  window.addEventListener('blur', flushAllDrafts);
+})();
 
 // ═══════════════════════════════════════
 // SHIFT MANAGEMENT
@@ -4582,6 +4636,38 @@ function renderShiftSection(){
       <div class="shift-rego">${s.rego}${s.trailerNumber ? ' <span style="font-size:13px;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:8px;margin-left:6px;">🚐 ' + s.trailerNumber + '</span>' : ''}</div>
       <div class="shift-detail">${s.seats} · 출발 ${s.startTime} · ${s.startKm.toLocaleString()} km · Daily Report ${s.dailyReports.length}건</div>
       ${_longShiftWarn}
+      ${(() => {
+        // ★ 작성 중인 Daily Report draft 확인
+        try {
+          const raw = localStorage.getItem('dr_draft_' + (currentDriver?.name || 'guest'));
+          if(!raw) return '';
+          const d = JSON.parse(raw);
+          // 48시간 지난 draft는 무시
+          if(Date.now() - (d._ts || 0) > 48*60*60*1000) return '';
+          // 이 shift의 draft인지 확인
+          if(d._shiftId && d._shiftId !== s.id) return '';
+          // 내용 검증 — 빈 draft면 표시 안 함
+          const hasContent = d.agency || d.attraction || d.pickup || d.dropoff || d.tourcode || d.kmStart || d.kmEnd;
+          if(!hasContent) return '';
+          // 시간 표기
+          const elapsed = Math.floor((Date.now() - d._ts) / 60000);
+          const timeStr = elapsed < 1 ? '방금 전' : elapsed < 60 ? elapsed + '분 전' : Math.floor(elapsed/60) + '시간 ' + (elapsed%60) + '분 전';
+          // 미리보기
+          const previewParts = [];
+          if(d.agency) previewParts.push(d.agency);
+          if(d.attraction) previewParts.push(d.attraction);
+          const preview = previewParts.length ? previewParts.join(' · ') : '내용 입력 중';
+          const _escDraftHtml = (s) => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+          return `<div onclick="addDailyReport('${s.id}')" style="cursor:pointer;font-size:12px;color:#fff;font-weight:600;margin:6px 0 0;padding:8px 12px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:10px;box-shadow:0 2px 8px rgba(245,158,11,.3);">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+              <span style="font-size:14px;">📝</span>
+              <span style="font-weight:700;">작성 중인 Daily Report 있음 — 탭하여 이어쓰기 →</span>
+              <span style="margin-left:auto;font-size:10px;opacity:.85;font-weight:400;">${timeStr}</span>
+            </div>
+            <div style="font-size:11px;opacity:.95;font-weight:400;">${_escDraftHtml(preview)}</div>
+          </div>`;
+        } catch(e) { return ''; }
+      })()}
       ${!s.eosStarted ? `<div style="font-size:11px;color:var(--red,#e53e3e);font-weight:600;margin:4px 0 0;padding:5px 8px;background:rgba(229,62,62,0.08);border-radius:8px;">⚠️ 운행 종료 시 End of Shift를 반드시 완료하세요</div>` : ''}
       <div class="shift-actions">
         <button class="shift-btn shift-btn-secondary" data-sid="${s.id}" data-action="daily">+ Daily Report</button>
