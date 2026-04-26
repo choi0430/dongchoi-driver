@@ -6240,14 +6240,14 @@ function renderScheduleCalendar(){
   const inRange = allDays.filter(x => x.date >= startStr && x.date <= endStr);
 
   // 그룹별로 묶기 — 슬롯 단위 평탄화
-  // groups[key][date][slotKey] = { tour, day, slot }
+  // groups[key][date][slotKey] = [ { tour, day, slot }, ... ]  (배열로 — 같은 슬롯에 여러 투어 가능)
   // 활성화된 슬롯(slot !== null)은 비어있어도 표시 — 같은 투어가 가로 묶음으로 보이도록
   const groups = {};
   inRange.forEach(x => {
     const slots = x.day.slots || { morning:null, fullday:null, evening:null };
     ['morning','fullday','evening'].forEach(slotKey => {
       const slot = slots[slotKey];
-      if(!slot) return; // 비활성 슬롯만 스킵 (빈 슬롯은 표시)
+      if(!slot) return;
       let key;
       switch(groupBy){
         case 'guide':  key = x.tour.Guide || '(미지정)'; break;
@@ -6257,24 +6257,28 @@ function renderScheduleCalendar(){
       }
       if(!groups[key]) groups[key] = {};
       if(!groups[key][x.date]) groups[key][x.date] = {};
-      groups[key][x.date][slotKey] = { tour: x.tour, day: x.day, slot: slot };
+      // 배열로 보관 — 같은 슬롯에 여러 투어 가능
+      if(!groups[key][x.date][slotKey]) groups[key][x.date][slotKey] = [];
+      groups[key][x.date][slotKey].push({ tour: x.tour, day: x.day, slot: slot });
     });
   });
 
-  // ★ 같은 그룹 안에서 같은 날짜+슬롯에 여러 투어 → 자동 트랙(레인) 분할
-  // groups[key] = { date: { slotKey: {...} } } → groups[key__트랙번호] 로 분리
-  // groups 구조를 평탄화: 각 그룹의 모든 항목을 모아 트랙 알고리즘 적용
+  // ★ 같은 그룹 안에서 다른 TourID들을 자동 트랙 분할
+  // 같은 TourID는 항상 한 트랙 (여러 날짜에 걸쳐 가로 병합 유지)
   const splitGroups = {};
   Object.keys(groups).forEach(grpKey => {
-    // 그룹 안의 모든 (tourID, dates 범위) 추출 — 한 투어가 여러 날짜에 걸쳐있을 수 있음
+    // 그룹 안의 모든 TourID 별로 일정 정보 수집
     const tourSpans = {}; // tourID → {firstDate, lastDate, items: [{date, slotKey, data}, ...]}
     Object.entries(groups[grpKey]).forEach(([date, slots]) => {
-      Object.entries(slots).forEach(([slotKey, data]) => {
-        const tid = data.tour.TourID;
-        if(!tourSpans[tid]) tourSpans[tid] = {firstDate: date, lastDate: date, items: []};
-        if(date < tourSpans[tid].firstDate) tourSpans[tid].firstDate = date;
-        if(date > tourSpans[tid].lastDate) tourSpans[tid].lastDate = date;
-        tourSpans[tid].items.push({date, slotKey, data});
+      Object.entries(slots).forEach(([slotKey, dataArr]) => {
+        // dataArr는 배열 — 같은 슬롯에 여러 투어가 있을 수 있음
+        dataArr.forEach(data => {
+          const tid = data.tour.TourID;
+          if(!tourSpans[tid]) tourSpans[tid] = {firstDate: date, lastDate: date, items: []};
+          if(date < tourSpans[tid].firstDate) tourSpans[tid].firstDate = date;
+          if(date > tourSpans[tid].lastDate) tourSpans[tid].lastDate = date;
+          tourSpans[tid].items.push({date, slotKey, data});
+        });
       });
     });
     // 트랙 배치 — 첫날 빠른 순으로 정렬, 각 투어를 가장 빨리 빈 트랙에 배치
@@ -6282,29 +6286,33 @@ function renderScheduleCalendar(){
       if(a[1].firstDate !== b[1].firstDate) return a[1].firstDate.localeCompare(b[1].firstDate);
       return a[0].localeCompare(b[0]);
     });
-    const tracks = []; // [{lastDate: 'YYYY-MM-DD', items: [...]}, ...]
+    const tracks = []; // [{lastDate, items: [...]}, ...]
     tourArr.forEach(([tid, span]) => {
-      // 빈 트랙 찾기 (lastDate < firstDate인 트랙)
+      // 빈 트랙 찾기 (트랙의 lastDate < 새 투어의 firstDate)
       let trackIdx = tracks.findIndex(t => t.lastDate < span.firstDate);
       if(trackIdx < 0){
         tracks.push({lastDate: span.lastDate, items: span.items});
-        trackIdx = tracks.length - 1;
       } else {
         tracks[trackIdx].lastDate = span.lastDate;
         tracks[trackIdx].items = tracks[trackIdx].items.concat(span.items);
       }
     });
-    // 트랙이 1개면 원래 키 그대로, 여러 개면 트랙 번호 부여
-    if(tracks.length === 1){
-      splitGroups[grpKey] = groups[grpKey];
+    // 트랙별 그룹 키 생성
+    if(tracks.length === 0){
+      // 안전장치 — 빈 그룹은 통과
+      splitGroups[grpKey] = {};
     } else {
-      console.log(`[Schedule] "${grpKey}" 트랙 ${tracks.length}개 분할:`,
-        tracks.map((t, ti) => `트랙${ti+1}: ${t.items.map(i=>i.date+'/'+i.data.tour.TourID).join(',')}`).join(' | '));
+      const useTrackSuffix = tracks.length > 1;
+      if(useTrackSuffix){
+        console.log(`[Schedule] "${grpKey}" 트랙 ${tracks.length}개 분할:`,
+          tracks.map((t, ti) => `트랙${ti+1}: ${t.items.map(i=>i.date+'/'+i.data.tour.TourID).join(',')}`).join(' | '));
+      }
       tracks.forEach((track, ti) => {
-        const newKey = grpKey + ' (트랙 ' + (ti+1) + ')';
+        const newKey = useTrackSuffix ? (grpKey + ' (트랙 ' + (ti+1) + ')') : grpKey;
         splitGroups[newKey] = {};
         track.items.forEach(({date, slotKey, data}) => {
           if(!splitGroups[newKey][date]) splitGroups[newKey][date] = {};
+          // 같은 트랙 내 같은 날짜+슬롯에 둘 이상은 알고리즘상 발생 안 함 (다른 트랙으로 분리됐으니)
           splitGroups[newKey][date][slotKey] = data;
         });
       });
