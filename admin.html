@@ -143,7 +143,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .mtg{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}
 .mac{display:flex;gap:5px;flex-shrink:0}
 .sgrd{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:13px}
-.sc{background:var(--s1);border:1px solid var(--b2);border-radius:var(--r2);padding:12px;position:relative;overflow:hidden}
+.sc{background:var(--s1);border:1px solid var(--b2);border-radius:var(--r2);padding:12px;position:relative;overflow:hidden;transition:all .15s}
+.sc[style*="cursor:pointer"]:hover{transform:translateY(-2px);box-shadow:var(--dc-shadow-md);border-color:var(--ac)}
+.sc[style*="cursor:pointer"]:active{transform:translateY(0);box-shadow:var(--dc-shadow-sm)}
+.crd[style*="cursor:pointer"]{transition:all .15s}
+.crd[style*="cursor:pointer"]:hover{transform:translateY(-1px);box-shadow:var(--dc-shadow-sm);border-color:var(--ac)}
+.crd[style*="cursor:pointer"]:active{transform:translateY(0)}
 .sc::before{content:"";position:absolute;top:0;left:0;right:0;height:2px}
 .sc.bl::before{background:var(--ac)}.sc.gn::before{background:var(--gn)}.sc.or::before{background:var(--or)}.sc.pu::before{background:var(--pu)}
 .slb{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3);font-family:var(--fd);margin-bottom:4px}
@@ -471,16 +476,146 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     </div>
     <button id="btn-refresh-all" class="btn-refresh" onclick="forceReloadAll()" title="Refresh All (모든 데이터를 시트에서 새로 불러옵니다)" style="margin-top:4px;"><span class="refresh-icon">🔄</span> Refresh All (전체 새로고침)</button>
   </div>
+
+  <!-- 통계 카드 (클릭 가능) -->
   <div class="sgrd">
-    <div class="sc bl"><div class="slb">Vehicles (차량)</div><div class="svl" id="kv">—</div><div class="sss">Registered Vehicles (등록 차량)</div></div>
-    <div class="sc gn"><div class="slb">Drivers (드라이버)</div><div class="svl" id="kd">—</div><div class="sss">Registered Drivers (등록 드라이버)</div></div>
-    <div class="sc or"><div class="slb">Agencies (여행사)</div><div class="svl" id="kc">—</div><div class="sss">Clients (클라이언트)</div></div>
-    <div class="sc pu"><div class="slb">Guides (가이드)</div><div class="svl" id="kg">—</div><div class="sss">Registered Guides (등록 가이드)</div></div>
+    <div class="sc bl" style="cursor:pointer;" onclick="nv('pveh','nveh');rV();setVTab('list')"><div class="slb">Vehicles (차량)</div><div class="svl" id="kv">—</div><div class="sss">Registered Vehicles (등록 차량)</div></div>
+    <div class="sc gn" style="cursor:pointer;" onclick="nv('pdrv','ndrv');rD()"><div class="slb">Drivers (드라이버)</div><div class="svl" id="kd">—</div><div class="sss">Registered Drivers (등록 드라이버)</div></div>
+    <div class="sc or" style="cursor:pointer;" onclick="nv('pcli','ncli');rC()"><div class="slb">Agencies (여행사)</div><div class="svl" id="kc">—</div><div class="sss">Clients (클라이언트)</div></div>
+    <div class="sc pu" style="cursor:pointer;" onclick="nv('pgui','ngui');rG()"><div class="slb">Guides (가이드)</div><div class="svl" id="kg">—</div><div class="sss">Registered Guides (등록 가이드)</div></div>
   </div>
+
+  <!-- ⚠️ 만료 알림 (시급한 것은 위로) -->
   <div class="shd"><div class="stl">⚠️ 만료 알림</div><div id="alct" style="font-size:11px;color:var(--t3)"></div></div>
   <div id="als"></div>
 
-  <div class="shd" style="margin-top:6px"><div class="stl">⚙️ 설정</div></div>
+  <!-- 🚌 운행 (가장 자주 쓰는 그룹 — 상단으로) -->
+  <div class="shd" style="margin-top:14px"><div class="stl">🚌 운행 (Operations)</div><div class="ssb">일일 운행 기록 · 일지 · 단속</div></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pdr','ndr');loadDR()">
+      <div style="font-size:22px;margin-bottom:4px">📋</div>
+      <div style="font-family:var(--fd);font-size:13px;font-weight:700">리포트</div>
+      <div style="font-size:11px;color:var(--t3)">Daily Report</div>
+    </div>
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pshift','nshift');loadShiftReports()">
+      <div style="font-size:22px;margin-bottom:4px">🚌</div>
+      <div style="font-family:var(--fd);font-size:13px;font-weight:700">운행일지</div>
+      <div style="font-size:11px;color:var(--t3)">Shift Logs</div>
+    </div>
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pmot','nmot');rMot()">
+      <div style="font-size:22px;margin-bottom:4px">🚔</div>
+      <div style="font-family:var(--fd);font-size:13px;font-weight:700">MOT</div>
+      <div style="font-size:11px;color:var(--t3)">단속 기록</div>
+    </div>
+  </div>
+
+  <!-- 💵 정산 (Settlement) -->
+  <div class="shd" style="margin-top:10px"><div class="stl">💵 정산 (Settlement)</div><div class="ssb">잔액 · 급여 · 인보이스 · 견적서</div></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pbal','nbal');initBalance()">
+      <div style="font-size:22px;margin-bottom:4px">📊</div>
+      <div style="font-family:var(--fd);font-size:13px;font-weight:700">Balance (잔액)</div>
+      <div style="font-size:11px;color:var(--t3)">여행사 / 차주</div>
+    </div>
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pwage','nwage');rWage()">
+      <div style="font-size:22px;margin-bottom:4px">💵</div>
+      <div style="font-family:var(--fd);font-size:13px;font-weight:700">급여 (Wage)</div>
+      <div style="font-size:11px;color:var(--t3)">드라이버 정산</div>
+    </div>
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pinv','ninv');initInvoice()">
+      <div style="font-size:22px;margin-bottom:4px">🧾</div>
+      <div style="font-family:var(--fd);font-size:13px;font-weight:700">Invoice (인보이스)</div>
+      <div style="font-size:11px;color:var(--t3)">청구서 발행</div>
+    </div>
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pquo','nquo');initQuotation()">
+      <div style="font-size:22px;margin-bottom:4px">📑</div>
+      <div style="font-family:var(--fd);font-size:13px;font-weight:700">Quotation</div>
+      <div style="font-size:11px;color:var(--t3)">견적서 작성</div>
+    </div>
+  </div>
+
+  <!-- 📋 마스터 데이터 -->
+  <div class="shd" style="margin-top:10px"><div class="stl">📋 마스터 (Master Data)</div><div class="ssb">차량 · 드라이버 · 여행사 · 가이드 · 호텔 · 트레일러 · 서브</div></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">
+    <div class="crd" style="padding:10px;cursor:pointer" onclick="nv('pveh','nveh');rV();setVTab('list')">
+      <div style="font-size:20px;margin-bottom:4px">🚌</div>
+      <div style="font-family:var(--fd);font-size:12px;font-weight:700">Vehicles</div>
+      <div style="font-size:10px;color:var(--t3)" id="qv">—</div>
+    </div>
+    <div class="crd" style="padding:10px;cursor:pointer" onclick="nv('pdrv','ndrv');rD()">
+      <div style="font-size:20px;margin-bottom:4px">👤</div>
+      <div style="font-family:var(--fd);font-size:12px;font-weight:700">Drivers</div>
+      <div style="font-size:10px;color:var(--t3)" id="qd">—</div>
+    </div>
+    <div class="crd" style="padding:10px;cursor:pointer" onclick="nv('pcli','ncli');rC()">
+      <div style="font-size:20px;margin-bottom:4px">🏢</div>
+      <div style="font-family:var(--fd);font-size:12px;font-weight:700">Agencies</div>
+      <div style="font-size:10px;color:var(--t3)" id="qc">—</div>
+    </div>
+    <div class="crd" style="padding:10px;cursor:pointer" onclick="nv('pgui','ngui');rG()">
+      <div style="font-size:20px;margin-bottom:4px">🧭</div>
+      <div style="font-family:var(--fd);font-size:12px;font-weight:700">Guides</div>
+      <div style="font-size:10px;color:var(--t3)" id="qg">—</div>
+    </div>
+    <div class="crd" style="padding:10px;cursor:pointer" onclick="nv('phtl','nhtl');rH()">
+      <div style="font-size:20px;margin-bottom:4px">🏨</div>
+      <div style="font-family:var(--fd);font-size:12px;font-weight:700">Hotels</div>
+      <div style="font-size:10px;color:var(--t3)" id="qh">—</div>
+    </div>
+    <div class="crd" style="padding:10px;cursor:pointer" onclick="nv('ptrl','ntrl');rT()">
+      <div style="font-size:20px;margin-bottom:4px">🚐</div>
+      <div style="font-family:var(--fd);font-size:12px;font-weight:700">Trailers</div>
+      <div style="font-size:10px;color:var(--t3)" id="qt">—</div>
+    </div>
+    <div class="crd" style="padding:10px;cursor:pointer" onclick="nv('psub','nsub');rSub()">
+      <div style="font-size:20px;margin-bottom:4px">🤝</div>
+      <div style="font-family:var(--fd);font-size:12px;font-weight:700">Sub</div>
+      <div style="font-size:10px;color:var(--t3)">외주 업체</div>
+    </div>
+    <div class="crd" style="padding:10px;cursor:pointer" onclick="nv('pprc','nprc');rP()">
+      <div style="font-size:20px;margin-bottom:4px">💰</div>
+      <div style="font-family:var(--fd);font-size:12px;font-weight:700">요금표</div>
+      <div style="font-size:10px;color:var(--t3)">여행사별</div>
+    </div>
+  </div>
+
+  <!-- 👥 인사 관리 (Leave + 공지 + SMS) -->
+  <div class="shd" style="margin-top:10px"><div class="stl">👥 인사 / 커뮤니케이션</div><div class="ssb">휴무 · 공지 · SMS</div></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pleave','nleave');loadAdminLeaves()">
+      <div style="font-size:22px;margin-bottom:4px">📅</div>
+      <div style="font-family:var(--fd);font-size:13px;font-weight:700">Leave (휴무)</div>
+      <div style="font-size:11px;color:var(--t3)">휴무 신청 관리</div>
+    </div>
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pnotice','nnotice');renderNoticeAdmin()">
+      <div style="font-size:22px;margin-bottom:4px">📢</div>
+      <div style="font-family:var(--fd);font-size:13px;font-weight:700">공지 (Notices)</div>
+      <div style="font-size:11px;color:var(--t3)">공지사항 관리</div>
+    </div>
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('psms','nsms');renderSMSChecklist()">
+      <div style="font-size:22px;margin-bottom:4px">📋</div>
+      <div style="font-family:var(--fd);font-size:13px;font-weight:700">SMS</div>
+      <div style="font-size:11px;color:var(--t3)">안전관리체계</div>
+    </div>
+  </div>
+
+  <!-- 🛡️ 안전 관리 -->
+  <div class="shd" style="margin-top:10px"><div class="stl">🛡️ 안전 관리 (Safety)</div><div class="ssb">사고 · 결함 보고</div></div>
+  <div style="display:grid;grid-template-columns:1fr;gap:8px">
+    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pinc','ninc');loadAdminIncidents()">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="font-size:22px;">🚨</div>
+        <div>
+          <div style="font-family:var(--fd);font-size:13px;font-weight:700">Incident Reports (사고 보고)</div>
+          <div style="font-size:11px;color:var(--t3)" id="qi">사고/사건 기록 + 결함 리포트</div>
+        </div>
+        <div style="margin-left:auto;font-size:18px;color:var(--t3)">›</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⚙️ 시스템 설정 (가장 아래) -->
+  <div class="shd" style="margin-top:10px"><div class="stl">⚙️ 시스템 설정 (System)</div><div class="ssb">PIN · 회사 정보 · 감사 로그</div></div>
   <div class="crd" style="padding:14px;cursor:pointer;display:flex;align-items:center;gap:12px;margin-bottom:6px" onclick="openChangePinModal()">
     <div style="font-size:24px">🔑</div>
     <div>
@@ -506,43 +641,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div style="margin-left:auto;font-size:18px;color:var(--t3)">›</div>
   </div>
 
-  <div class="shd" style="margin-top:6px"><div class="stl">📋 마스터</div></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pveh','nveh');rV();setVTab('list')"><div style="font-size:20px;margin-bottom:4px">🚌</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Vehicles (차량)</div><div style="font-size:11px;color:var(--t3)" id="qv">—</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pdrv','ndrv');rD()"><div style="font-size:20px;margin-bottom:4px">👤</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Drivers (드라이버)</div><div style="font-size:11px;color:var(--t3)" id="qd">—</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pcli','ncli');rC()"><div style="font-size:20px;margin-bottom:4px">🏢</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Agencies (여행사)</div><div style="font-size:11px;color:var(--t3)" id="qc">—</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pgui','ngui');rG()"><div style="font-size:20px;margin-bottom:4px">🧭</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Guides (가이드)</div><div style="font-size:11px;color:var(--t3)" id="qg">—</div></div>
-  </div>
-
-  <div class="shd" style="margin-top:6px"><div class="stl">💰 요금/서브</div></div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pprc','nprc');rP()"><div style="font-size:20px;margin-bottom:4px">💰</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">요금표</div><div style="font-size:11px;color:var(--t3)">여행사별 요금</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('phtl','nhtl');rH()"><div style="font-size:20px;margin-bottom:4px">🏨</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Hotels (호텔)</div><div style="font-size:11px;color:var(--t3)" id="qh">—</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('ptrl','ntrl');rT()"><div style="font-size:20px;margin-bottom:4px">🚐</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Trailers (트레일러)</div><div style="font-size:11px;color:var(--t3)" id="qt">—</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('psub','nsub');rSub()"><div style="font-size:20px;margin-bottom:4px">🤝</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">서브</div><div style="font-size:11px;color:var(--t3)">외주 업체</div></div>
-  </div>
-
-  <div class="shd" style="margin-top:6px"><div class="stl">🚌 운행</div></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pdr','ndr');loadDR()"><div style="font-size:20px;margin-bottom:4px">📋</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">리포트</div><div style="font-size:11px;color:var(--t3)">Daily Report</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pshift','nshift');loadShiftReports()"><div style="font-size:20px;margin-bottom:4px">🚌</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Shift Logs (운행일지)</div><div style="font-size:11px;color:var(--t3)">Shift Log</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pmot','nmot');rMot()"><div style="font-size:20px;margin-bottom:4px">🚔</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">MOT</div><div style="font-size:11px;color:var(--t3)">단속 기록</div></div>
-  </div>
-
-  <div class="shd" style="margin-top:6px"><div class="stl">💵 Settlement (정산)</div></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pbal','nbal');initBalance()"><div style="font-size:20px;margin-bottom:4px">📊</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Balance (잔액)</div><div style="font-size:11px;color:var(--t3)">Agency/Sub</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pwage','nwage');rWage()"><div style="font-size:20px;margin-bottom:4px">💵</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">급여</div><div style="font-size:11px;color:var(--t3)">Driver Wage</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pinv','ninv');initInvoice()"><div style="font-size:20px;margin-bottom:4px">🧾</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Invoice (인보이스)</div><div style="font-size:11px;color:var(--t3)">Invoice</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pquo','nquo');initQuotation()"><div style="font-size:20px;margin-bottom:4px">📑</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Quotation (견적서)</div><div style="font-size:11px;color:var(--t3)">Quotation</div></div>
-  </div>
-
-  <div class="shd" style="margin-top:6px"><div class="stl">🛡️ Safety & Compliance (안전 관리)</div></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('pinc','ninc');loadAdminIncidents()"><div style="font-size:20px;margin-bottom:4px">🚨</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">Incident Reports</div><div style="font-size:11px;color:var(--t3)" id="qi">사고 보고</div></div>
-    <div class="crd" style="padding:12px;cursor:pointer" onclick="nv('psms','nsms');renderSMSChecklist()"><div style="font-size:20px;margin-bottom:4px">📋</div><div style="font-family:var(--fd);font-size:13px;font-weight:700">SMS Compliance</div><div style="font-size:11px;color:var(--t3)">안전관리체계</div></div>
-  </div>
-
+  <div style="height:30px;"></div>
 </div>
 
 <!-- VEHICLE -->
