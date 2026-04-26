@@ -11,6 +11,11 @@
 <meta name="theme-color" content="#f0f2f5">
 <meta name="color-scheme" content="light only">
 <title>DC Fleet — Driver</title>
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="DC Fleet">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Barlow+Condensed:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -21,6 +26,37 @@
   --yellow:#d97706;--yellow-light:#fffbeb;
   --text:#111827;--muted:#6b7280;--dim:#9ca3af;
   --radius:14px;--sb:env(safe-area-inset-bottom,0px);
+  /* ★ 통합 디자인 토큰 (드라이버 앱 + 관리자 앱 공통) ─── */
+  /* Spacing scale */
+  --dc-space-xs: 4px;
+  --dc-space-sm: 8px;
+  --dc-space-md: 12px;
+  --dc-space-lg: 16px;
+  --dc-space-xl: 24px;
+  --dc-space-2xl: 32px;
+  /* Typography scale */
+  --dc-text-xs: 11px;
+  --dc-text-sm: 12px;
+  --dc-text-base: 14px;
+  --dc-text-md: 16px;
+  --dc-text-lg: 18px;
+  --dc-text-xl: 22px;
+  --dc-text-2xl: 28px;
+  /* Radius scale */
+  --dc-radius-sm: 6px;
+  --dc-radius-md: 10px;
+  --dc-radius-lg: 14px;
+  --dc-radius-xl: 20px;
+  /* Shadow scale */
+  --dc-shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --dc-shadow-md: 0 2px 8px rgba(0,0,0,0.08);
+  --dc-shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
+  /* Status colors (alias for cross-app consistency) */
+  --dc-color-primary: #1a56db;
+  --dc-color-success: #0e9f6e;
+  --dc-color-danger: #e02424;
+  --dc-color-warning: #d97706;
+  --dc-color-info: #6366f1;
 }
 /* 모바일 다크모드 강제 차단 */
 @media (prefers-color-scheme: dark) {
@@ -12014,6 +12050,69 @@ function renderExpiryAlerts(){
     </div>
   </div>
 </div>
+
+<!-- ★ PWA Service Worker 등록 + 알림 권한 ─── -->
+<script>
+(function(){
+  // Service Worker 등록 (HTTPS 또는 localhost에서만)
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('sw.js').then(function(reg){
+        console.log('[PWA] SW registered:', reg.scope);
+        // 새 버전 감지 시 자동 업데이트
+        reg.addEventListener('updatefound', function(){
+          const newWorker = reg.installing;
+          if(newWorker){
+            newWorker.addEventListener('statechange', function(){
+              if(newWorker.state === 'installed' && navigator.serviceWorker.controller){
+                console.log('[PWA] New version available — will update on next reload');
+              }
+            });
+          }
+        });
+      }).catch(function(err){
+        console.warn('[PWA] SW registration failed:', err);
+      });
+    });
+  }
+
+  // 알림 권한 요청 (로그인 후 1회만 자동 요청)
+  window.requestNotificationPermission = function(){
+    if (!('Notification' in window)) {
+      console.warn('[PWA] Notifications not supported');
+      return Promise.resolve('unsupported');
+    }
+    if (Notification.permission === 'granted') return Promise.resolve('granted');
+    if (Notification.permission === 'denied') return Promise.resolve('denied');
+    return Notification.requestPermission().then(function(perm){
+      console.log('[PWA] Notification permission:', perm);
+      return perm;
+    });
+  };
+
+  // 로컬 알림 트리거 (FCM 없이 즉시 알림 가능)
+  window.showLocalNotification = function(title, body, options){
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    options = options || {};
+    try {
+      if (navigator.serviceWorker?.controller) {
+        navigator.serviceWorker.ready.then(function(reg){
+          reg.showNotification(title, {
+            body: body,
+            icon: options.icon,
+            badge: options.badge,
+            tag: options.tag || 'dc-fleet',
+            data: options.data || {},
+            requireInteraction: options.requireInteraction || false,
+          });
+        });
+      } else {
+        new Notification(title, { body: body, icon: options.icon });
+      }
+    } catch(e) { console.warn('[PWA] notification error:', e); }
+  };
+})();
+</script>
 
 </body>
 </html>
