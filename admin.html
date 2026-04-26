@@ -978,37 +978,63 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       </div>
     </div>
 
-    <!-- ── 항공편 (입국 + 출국) ── -->
+    <!-- ── 항공편 (날짜는 시작일/종료일과 동기화) ── -->
     <div style="background:var(--sf2);border-radius:10px;padding:10px;margin-bottom:10px;">
-      <div style="font-size:11px;font-weight:800;color:var(--t1);margin-bottom:8px;">✈️ 항공편</div>
-      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px;margin-bottom:6px;">
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">입국편명</div>
-          <input type="text" id="sm-flightin" class="profit-finp" style="width:100%;box-sizing:border-box;" placeholder="OZ602">
+      <div style="font-size:11px;font-weight:800;color:var(--t1);margin-bottom:8px;">✈️ 항공편 <span style="font-weight:500;color:var(--t3);font-size:10px;">(날짜는 시작일/종료일과 자동 동기화)</span></div>
+
+      <!-- 입국 -->
+      <div style="background:var(--sf);border-radius:6px;padding:8px;margin-bottom:6px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span style="font-size:11px;font-weight:700;color:var(--t2);">🛬 도착 (시작일)</span>
+          <label style="display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer;margin-left:auto;">
+            <input type="radio" name="sm-fi-type" value="intl" checked onchange="onSmFlightInTimeChange()">
+            <span>국제선 (+1시간)</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer;">
+            <input type="radio" name="sm-fi-type" value="dom" onchange="onSmFlightInTimeChange()">
+            <span>국내선 (+30분)</span>
+          </label>
         </div>
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">입국 날짜</div>
-          <input type="date" id="sm-flightin-date" class="profit-finp" style="width:100%;box-sizing:border-box;">
-        </div>
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">입국 시간</div>
-          <input type="time" id="sm-flightin-time" class="profit-finp" style="width:100%;box-sizing:border-box;">
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px;">
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">출국편명</div>
-          <input type="text" id="sm-flightout" class="profit-finp" style="width:100%;box-sizing:border-box;" placeholder="KE401">
-        </div>
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">출국 날짜</div>
-          <input type="date" id="sm-flightout-date" class="profit-finp" style="width:100%;box-sizing:border-box;">
-        </div>
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">출국 시간</div>
-          <input type="time" id="sm-flightout-time" class="profit-finp" style="width:100%;box-sizing:border-box;">
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:6px;">
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">입국편명</div>
+            <input type="text" id="sm-flightin" class="profit-finp" style="width:100%;box-sizing:border-box;" placeholder="OZ602 / VA817">
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">도착 시간 (현지)</div>
+            <input type="time" id="sm-flightin-time" class="profit-finp" style="width:100%;box-sizing:border-box;" onchange="onSmFlightInTimeChange()">
+          </div>
         </div>
       </div>
+
+      <!-- 출국 -->
+      <div style="background:var(--sf);border-radius:6px;padding:8px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span style="font-size:11px;font-weight:700;color:var(--t2);">🛫 출국 (종료일)</span>
+          <label style="display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer;margin-left:auto;">
+            <input type="radio" name="sm-fo-type" value="intl" checked onchange="onSmFlightOutTimeChange()">
+            <span>국제선 (-3시간)</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer;">
+            <input type="radio" name="sm-fo-type" value="dom" onchange="onSmFlightOutTimeChange()">
+            <span>국내선 (-2시간)</span>
+          </label>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:6px;">
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">출국편명</div>
+            <input type="text" id="sm-flightout" class="profit-finp" style="width:100%;box-sizing:border-box;" placeholder="KE402">
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">출발 시간 (현지)</div>
+            <input type="time" id="sm-flightout-time" class="profit-finp" style="width:100%;box-sizing:border-box;" onchange="onSmFlightOutTimeChange()">
+          </div>
+        </div>
+      </div>
+
+      <input type="hidden" id="sm-flightin-date">
+      <input type="hidden" id="sm-flightout-date">
+      <div id="sm-coach-hint" style="display:none;font-size:10px;color:var(--ac);margin-top:6px;font-weight:600;"></div>
     </div>
 
     <!-- ── 일별 세부 일정 (자동 생성) ── -->
@@ -4139,15 +4165,19 @@ function openScheduleModal(tourId){
     _schCsels.guide.setValue(r.Guide || '');
     document.getElementById('sm-guidephone').value = r.GuidePhone || '';
 
-    // 항공편 (FlightIn = "OZ602|2026-04-08|09:30" 식 또는 자유텍스트)
+    // 항공편 (FlightIn = "OZ602|2026-04-08|09:30|intl" 식 또는 자유텍스트)
     const fi = _schParseFlight(r.FlightIn);
     document.getElementById('sm-flightin').value = fi.code;
     document.getElementById('sm-flightin-date').value = fi.date;
     document.getElementById('sm-flightin-time').value = fi.time;
+    const fiRadio = document.querySelector(`input[name="sm-fi-type"][value="${fi.type==='dom'?'dom':'intl'}"]`);
+    if(fiRadio) fiRadio.checked = true;
     const fo = _schParseFlight(r.FlightOut);
     document.getElementById('sm-flightout').value = fo.code;
     document.getElementById('sm-flightout-date').value = fo.date;
     document.getElementById('sm-flightout-time').value = fo.time;
+    const foRadio = document.querySelector(`input[name="sm-fo-type"][value="${fo.type==='dom'?'dom':'intl'}"]`);
+    if(foRadio) foRadio.checked = true;
 
     document.getElementById('sm-quote').value = r.Quote || '';
     document.getElementById('sm-notes').value = r.Notes || '';
@@ -4166,14 +4196,28 @@ function openScheduleModal(tourId){
      'sm-flightout','sm-flightout-date','sm-flightout-time',
      'sm-quote','sm-notes']
       .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
-    const today = new Date().toISOString().slice(0,10);
+    const today = _schToday();
     document.getElementById('sm-start').value = today;
     document.getElementById('sm-end').value = today;
-    _schDays = [{ date: today, hotel:'', driver:'', rego:'', course:'', ot:'', trailer:false }];
+    document.getElementById('sm-flightin-date').value = today;
+    document.getElementById('sm-flightout-date').value = today;
+    // 라디오 기본값: 둘 다 국제선
+    const fi = document.querySelector('input[name="sm-fi-type"][value="intl"]'); if(fi) fi.checked = true;
+    const fo = document.querySelector('input[name="sm-fo-type"][value="intl"]'); if(fo) fo.checked = true;
+    const hint = document.getElementById('sm-coach-hint'); if(hint){ hint.style.display='none'; hint.textContent=''; }
+    _schDays = [{ date: today, hotel:'', driver:'', rego:'', course:'', ot:'', coachTime:'', trailer:false }];
     _smRebuildDays();
   }
 
   modal.style.display = 'flex';
+}
+
+// Sydney 로컬 기준 오늘 (YYYY-MM-DD)
+function _schToday(){
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Sydney', year:'numeric', month:'2-digit', day:'2-digit'
+  });
+  return fmt.format(new Date()); // en-CA → YYYY-MM-DD
 }
 
 function closeScheduleModal(){
@@ -4194,18 +4238,86 @@ function onSmDateChange(){
     document.getElementById('sm-end').value = sd;
     return onSmDateChange();
   }
-  // 기존 데이터 보존하면서 날짜 범위 재구성
+  // 항공편 날짜 자동 동기화 (입국=시작일, 출국=종료일)
+  const fiDate = document.getElementById('sm-flightin-date');
+  const foDate = document.getElementById('sm-flightout-date');
+  if(fiDate) fiDate.value = sd;
+  if(foDate) foDate.value = ed;
+
+  // 기존 데이터 보존하면서 날짜 범위 재구성 (timezone-safe: 문자열 산술)
   const existing = {};
   _schDays.forEach(d => { existing[d.date] = d; });
   const newDays = [];
-  const start = new Date(sd + 'T00:00:00');
-  const end = new Date(ed + 'T00:00:00');
-  for(let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)){
-    const ds = dt.toISOString().slice(0,10);
-    newDays.push(existing[ds] || { date: ds, hotel:'', driver:'', rego:'', course:'', ot:'', trailer:false });
+  let cursor = sd;
+  while(cursor <= ed){
+    newDays.push(existing[cursor] || { date: cursor, hotel:'', driver:'', rego:'', course:'', ot:'', coachTime:'', trailer:false });
+    cursor = _schAddDays(cursor, 1);
   }
   _schDays = newDays;
   _smRebuildDays();
+}
+
+// 도착 시간 또는 국내/국제 선택 변경 → 첫날 코치 부킹 시간 자동 계산
+// 국내선: 도착 + 30분, 국제선: 도착 + 1시간
+function onSmFlightInTimeChange(){
+  const t = document.getElementById('sm-flightin-time').value;
+  if(!t || _schDays.length === 0) return;
+  const isIntl = (document.querySelector('input[name="sm-fi-type"]:checked')?.value || 'intl') === 'intl';
+  const addMin = isIntl ? 60 : 30;
+  const newTime = _addMinutes(t, addMin);
+  _schDays[0].coachTime = newTime;
+  // 첫날 카드의 코치 시간 input 갱신
+  const inp = document.getElementById('day-coach-0');
+  if(inp) inp.value = newTime;
+  // 힌트
+  const hint = document.getElementById('sm-coach-hint');
+  if(hint){
+    hint.textContent = `💡 첫날 픽업: ${isIntl?'국제선 +1시간':'국내선 +30분'} = ${newTime} (수정 가능)`;
+    hint.style.display = 'block';
+  }
+}
+
+// 출국 시간 또는 국내/국제 선택 변경 → 마지막날 코치 부킹 시간 자동 계산
+// 국내선: 출발 - 2시간, 국제선: 출발 - 3시간
+function onSmFlightOutTimeChange(){
+  const t = document.getElementById('sm-flightout-time').value;
+  if(!t || _schDays.length === 0) return;
+  const isIntl = (document.querySelector('input[name="sm-fo-type"]:checked')?.value || 'intl') === 'intl';
+  const subMin = isIntl ? 180 : 120;
+  const newTime = _addMinutes(t, -subMin);
+  const lastIdx = _schDays.length - 1;
+  _schDays[lastIdx].coachTime = newTime;
+  const inp = document.getElementById('day-coach-' + lastIdx);
+  if(inp) inp.value = newTime;
+  const hint = document.getElementById('sm-coach-hint');
+  if(hint){
+    hint.textContent = `💡 마지막날 공항: ${isIntl?'국제선 -3시간':'국내선 -2시간'} = ${newTime} (수정 가능)`;
+    hint.style.display = 'block';
+  }
+}
+
+// HH:MM ± 분 → HH:MM (0:00~23:59 wrap, 음수는 0으로 클램프)
+function _addMinutes(hhmm, mins){
+  const [h, m] = hhmm.split(':').map(Number);
+  let total = h * 60 + m + mins;
+  if(total < 0) total = 0;
+  total = total % (24 * 60);
+  const nh = Math.floor(total / 60);
+  const nm = total % 60;
+  return `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
+}
+
+// timezone-safe 날짜 산술: 'YYYY-MM-DD' + n일 → 'YYYY-MM-DD'
+function _schAddDays(ymd, days){
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m-1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0,10);
+}
+function _schDayOfWeek(ymd){
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m-1, d));
+  return dt.getUTCDay(); // 0=일
 }
 
 function _smRebuildDays(){
@@ -4220,9 +4332,9 @@ function _smRebuildDays(){
 
   const dayOfWeek = ['일','월','화','수','목','금','토'];
   wrap.innerHTML = _schDays.map((d, i) => {
-    const dt = new Date(d.date + 'T00:00:00');
-    const dow = dayOfWeek[dt.getDay()];
-    const isWeekend = dt.getDay() === 0 || dt.getDay() === 6;
+    const dow = dayOfWeek[_schDayOfWeek(d.date)];
+    const dayNum = _schDayOfWeek(d.date);
+    const isWeekend = dayNum === 0 || dayNum === 6;
     return `<div class="sm-day">
       <div class="sm-day-hdr" style="display:flex;align-items:center;gap:6px;">
         <span style="background:var(--ac);color:white;border-radius:4px;padding:1px 6px;font-size:10px;">DAY ${i+1}</span>
@@ -4234,11 +4346,8 @@ function _smRebuildDays(){
           <div id="day-hotel-${i}"></div>
         </div>
         <div>
-          <div class="sm-day-lbl">코스 / 일정</div>
-          <input type="text" class="profit-finp" style="width:100%;box-sizing:border-box;padding:8px 10px;font-size:12px;"
-            placeholder="예: BM, PORT, OPERA"
-            value="${escH(d.course||'')}"
-            oninput="_schDays[${i}].course=this.value">
+          <div class="sm-day-lbl">코스 / 일정 (Attraction)</div>
+          <div id="day-course-${i}"></div>
         </div>
       </div>
       <div class="sm-day-row three">
@@ -4251,73 +4360,165 @@ function _smRebuildDays(){
           <div id="day-rego-${i}"></div>
         </div>
         <div>
+          <div class="sm-day-lbl">코치 부킹 시간</div>
+          <input type="time" id="day-coach-${i}" class="profit-finp" style="width:100%;box-sizing:border-box;padding:8px 10px;font-size:12px;"
+            value="${escH(d.coachTime||'')}"
+            oninput="_schDays[${i}].coachTime=this.value">
+        </div>
+      </div>
+      <div class="sm-day-row" style="grid-template-columns:1fr 1fr;">
+        <div>
           <div class="sm-day-lbl">OT / 추가</div>
           <input type="text" class="profit-finp" style="width:100%;box-sizing:border-box;padding:8px 10px;font-size:12px;"
             placeholder="예: 3HR"
             value="${escH(d.ot||'')}"
             oninput="_schDays[${i}].ot=this.value">
         </div>
+        <label class="sm-day-trailer" for="day-trailer-${i}" style="margin-top:14px;">
+          <input type="checkbox" id="day-trailer-${i}" ${d.trailer?'checked':''} onchange="_schDays[${i}].trailer=this.checked">
+          <span>🚐 트레일러</span>
+        </label>
       </div>
-      <label class="sm-day-trailer" for="day-trailer-${i}">
-        <input type="checkbox" id="day-trailer-${i}" ${d.trailer?'checked':''} onchange="_schDays[${i}].trailer=this.checked">
-        <span>🚐 트레일러 사용 (호텔 변경 / 공항 이동)</span>
-      </label>
     </div>`;
   }).join('');
 
+  // 호텔 옵션 (전체 M_Hotels)
+  const hotelItems = (DB.H||[])
+    .filter(h => h.Hotel_Name)
+    .map(h => ({
+      value: h.Hotel_Name,
+      label: h.Hotel_Name,
+      sub: [h.Surcharge_Area, h.Address].filter(Boolean).join(' · ')
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  // 코스(Attraction) 옵션: 선택된 여행사의 M_PriceClient 기준
+  const agency = (_schCsels.agency?.getValue() || _schCsels.agency?.input?.value || '').trim();
+  let courseList = [];
+  if(agency && DB.PC && DB.PC[agency]){
+    courseList = Object.keys(DB.PC[agency]).filter(Boolean);
+  }
+  // 다른 여행사의 attraction도 sub-suggest (sub로 표시)
+  if(courseList.length === 0 && DB.PC){
+    const allCourses = new Set();
+    Object.values(DB.PC).forEach(ag => {
+      Object.keys(ag||{}).forEach(c => allCourses.add(c));
+    });
+    courseList = [...allCourses];
+  }
+  const courseItems = courseList.sort().map(c => ({ value: c, label: c }));
+
+  // 드라이버 옵션
+  const driverItems = (DB.D||[])
+    .filter(dr => String(dr.Active||'').toUpperCase() !== 'N')
+    .map(dr => ({
+      value: dr.Name_KR || dr.Name_EN || '',
+      label: dr.Name_KR || dr.Name_EN || '',
+      sub: [dr.Name_EN, dr.Mobile].filter(Boolean).join(' · ')
+    }))
+    .filter(it => it.value);
+
+  // 차량 옵션
+  const vehItems = (DB.V||[])
+    .filter(v => String(v.Active||'').toUpperCase() !== 'N')
+    .map(v => ({
+      value: v.Rego,
+      label: v.Rego,
+      sub: [v.Capacity, v.Owner].filter(Boolean).join(' · ')
+    }));
+
   // 각 일별 검색 드롭다운 빌드
   _schDays.forEach((d, i) => {
-    // 호텔 드롭다운 (M_Hotels)
-    const hotelItems = (DB.H||[])
-      .filter(h => h.Hotel_Name)
-      .map(h => ({
-        value: h.Hotel_Name,
-        label: h.Hotel_Name,
-        sub: [h.Surcharge_Area, h.Address].filter(Boolean).join(' · ')
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+    // 호텔 → 변경 시 그 날부터 마지막날까지 자동 전파
     _schDayCsels['hotel-'+i] = buildSearchSelect('day-hotel-'+i, {
       items: hotelItems,
       value: d.hotel || '',
       placeholder: '호텔 검색',
-      onSelect: (it) => { _schDays[i].hotel = it.value; },
+      onSelect: (it) => { _propagateHotel(i, it.value); },
       onClear: () => { _schDays[i].hotel = ''; }
     });
     if(d.hotel) _schDayCsels['hotel-'+i].setValue(d.hotel);
-    // 드라이버 (M_Drivers)
-    const driverItems = (DB.D||[])
-      .filter(dr => String(dr.Active||'').toUpperCase() !== 'N')
-      .map(dr => ({
-        value: dr.Name_KR || dr.Name_EN || '',
-        label: dr.Name_KR || dr.Name_EN || '',
-        sub: [dr.Name_EN, dr.Mobile].filter(Boolean).join(' · ')
-      }))
-      .filter(it => it.value);
+
+    // 코스 (Attraction)
+    _schDayCsels['course-'+i] = buildSearchSelect('day-course-'+i, {
+      items: courseItems,
+      value: d.course || '',
+      placeholder: '코스 검색 (BM, OPERA...)',
+      onSelect: (it) => { _schDays[i].course = it.value; },
+      onClear: () => { _schDays[i].course = ''; }
+    });
+    if(d.course) _schDayCsels['course-'+i].setValue(d.course);
+    // 자유 입력 허용 (입력 시 _schDays에 반영)
+    const courseInp = _schDayCsels['course-'+i].input;
+    if(courseInp){
+      courseInp.addEventListener('input', () => { _schDays[i].course = courseInp.value; });
+    }
+
+    // 드라이버 → 변경 시 그 날부터 마지막날까지 자동 전파
     _schDayCsels['driver-'+i] = buildSearchSelect('day-driver-'+i, {
       items: driverItems,
       value: d.driver || '',
       placeholder: '드라이버',
-      onSelect: (it) => { _schDays[i].driver = it.value; },
+      onSelect: (it) => { _propagateDriver(i, it.value); },
       onClear: () => { _schDays[i].driver = ''; }
     });
     if(d.driver) _schDayCsels['driver-'+i].setValue(d.driver);
-    // 차량 (M_Vehicles)
-    const vehItems = (DB.V||[])
-      .filter(v => String(v.Active||'').toUpperCase() !== 'N')
-      .map(v => ({
-        value: v.Rego,
-        label: v.Rego,
-        sub: [v.Capacity, v.Owner].filter(Boolean).join(' · ')
-      }));
+
+    // 차량 → 변경 시 그 날부터 마지막날까지 자동 전파
     _schDayCsels['rego-'+i] = buildSearchSelect('day-rego-'+i, {
       items: vehItems,
       value: d.rego || '',
       placeholder: '차량',
-      onSelect: (it) => { _schDays[i].rego = it.value; },
+      onSelect: (it) => { _propagateRego(i, it.value); },
       onClear: () => { _schDays[i].rego = ''; }
     });
     if(d.rego) _schDayCsels['rego-'+i].setValue(d.rego);
   });
+}
+
+// ═══════════════════════════════════════
+// 자동 전파 헬퍼: i번째 일자 변경 시 → 그 뒤로도 같이 변경
+// (단, 그 뒤가 비어있거나 이전 값과 동일했던 경우만)
+// ═══════════════════════════════════════
+function _propagateHotel(idx, newVal){
+  const oldVal = _schDays[idx].hotel || '';
+  _schDays[idx].hotel = newVal;
+  for(let j = idx + 1; j < _schDays.length; j++){
+    const cur = _schDays[j].hotel || '';
+    // 비어있거나 이전과 같은 값이면 새 값으로 전파
+    if(!cur || cur === oldVal){
+      _schDays[j].hotel = newVal;
+      if(_schDayCsels['hotel-'+j]) _schDayCsels['hotel-'+j].setValue(newVal);
+    } else {
+      break; // 다른 값으로 명시적으로 바뀌어 있으면 멈춤
+    }
+  }
+}
+function _propagateDriver(idx, newVal){
+  const oldVal = _schDays[idx].driver || '';
+  _schDays[idx].driver = newVal;
+  for(let j = idx + 1; j < _schDays.length; j++){
+    const cur = _schDays[j].driver || '';
+    if(!cur || cur === oldVal){
+      _schDays[j].driver = newVal;
+      if(_schDayCsels['driver-'+j]) _schDayCsels['driver-'+j].setValue(newVal);
+    } else {
+      break;
+    }
+  }
+}
+function _propagateRego(idx, newVal){
+  const oldVal = _schDays[idx].rego || '';
+  _schDays[idx].rego = newVal;
+  for(let j = idx + 1; j < _schDays.length; j++){
+    const cur = _schDays[j].rego || '';
+    if(!cur || cur === oldVal){
+      _schDays[j].rego = newVal;
+      if(_schDayCsels['rego-'+j]) _schDayCsels['rego-'+j].setValue(newVal);
+    } else {
+      break;
+    }
+  }
 }
 
 // ═══════════════════════════════════════
@@ -4334,18 +4535,26 @@ function _schParseDays(tourPlan){
 }
 
 function _schParseFlight(s){
-  if(!s) return { code:'', date:'', time:'' };
-  // "OZ602|2026-04-08|09:30" 형식 우선
+  if(!s) return { code:'', date:'', time:'', type:'intl' };
+  // "OZ602|2026-04-08|09:30|intl" 형식 (4파트) 또는 구버전 3파트
   const parts = String(s).split('|');
-  if(parts.length === 3) return { code: parts[0].trim(), date: parts[1].trim(), time: parts[2].trim() };
+  if(parts.length >= 3){
+    return {
+      code: parts[0].trim(),
+      date: parts[1].trim(),
+      time: parts[2].trim(),
+      type: (parts[3]||'intl').trim() || 'intl'
+    };
+  }
   // 자유 텍스트 (예: "OZ602 0930") - 코드만 보존
-  return { code: String(s).trim(), date:'', time:'' };
+  return { code: String(s).trim(), date:'', time:'', type:'intl' };
 }
 
-function _schSerializeFlight(code, date, time){
+function _schSerializeFlight(code, date, time, type){
   code = (code||'').trim(); date = (date||'').trim(); time = (time||'').trim();
+  type = (type||'intl').trim();
   if(!code && !date && !time) return '';
-  return `${code}|${date}|${time}`;
+  return `${code}|${date}|${time}|${type}`;
 }
 
 // ═══════════════════════════════════════
@@ -4387,12 +4596,14 @@ async function saveScheduleData(){
     FlightIn:   _schSerializeFlight(
       document.getElementById('sm-flightin').value,
       document.getElementById('sm-flightin-date').value,
-      document.getElementById('sm-flightin-time').value
+      document.getElementById('sm-flightin-time').value,
+      document.querySelector('input[name="sm-fi-type"]:checked')?.value || 'intl'
     ),
     FlightOut:  _schSerializeFlight(
       document.getElementById('sm-flightout').value,
       document.getElementById('sm-flightout-date').value,
-      document.getElementById('sm-flightout-time').value
+      document.getElementById('sm-flightout-time').value,
+      document.querySelector('input[name="sm-fo-type"]:checked')?.value || 'intl'
     ),
     Hotel:      mainHotel,
     TourPlan:   JSON.stringify(_schDays),
@@ -4499,12 +4710,11 @@ function _schGetAllDays(){
       // TourPlan이 없으면 시작일~종료일을 자동 생성 (legacy)
       const sd = String(t.StartDate||'').slice(0,10);
       const ed = String(t.EndDate||'').slice(0,10);
-      if(sd && ed){
-        const start = new Date(sd + 'T00:00:00');
-        const end = new Date(ed + 'T00:00:00');
-        for(let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)){
-          const ds = dt.toISOString().slice(0,10);
-          result.push({ date: ds, tour: t, day: { date: ds, hotel: t.Hotel||'', driver: t.Driver||'', rego: t.Rego||'', course:'', ot:'', trailer: false } });
+      if(sd && ed && /^\d{4}-\d{2}-\d{2}$/.test(sd) && /^\d{4}-\d{2}-\d{2}$/.test(ed)){
+        let cursor = sd;
+        while(cursor <= ed){
+          result.push({ date: cursor, tour: t, day: { date: cursor, hotel: t.Hotel||'', driver: t.Driver||'', rego: t.Rego||'', course:'', ot:'', trailer: false } });
+          cursor = _schAddDays(cursor, 1);
         }
       }
     } else {
