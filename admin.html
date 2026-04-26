@@ -6320,8 +6320,9 @@ function renderScheduleCalendar(){
 
   // ★ 같은 그룹 안에서 다른 TourID들을 자동 트랙 분할
   // 같은 TourID는 항상 한 트랙 (여러 날짜에 걸쳐 가로 병합 유지)
-  // ★★ 트랙 인덱스 안정화: 각 그룹의 모든 일정(allDays)에서 가이드/TourID별 트랙 번호 미리 계산
-  //    → 매주 같은 가이드/투어는 같은 트랙 번호 유지 (사용자가 트랙 1↔2 이동 안 보임)
+  // ★★ 트랙 인덱스 안정화: 같은 TourCode는 항상 같은 트랙 번호 사용
+  //    같은 TourCode 일정이 여러 회차로 등록되어도 캘린더 같은 줄에 배치
+  //    매주 같은 TourCode = 같은 트랙 (사용자가 트랙 1↔2 이동 안 보임)
   function _computeStableTrackIndex(grpKey){
     // 같은 그룹의 모든 일정 (현재 보이는 기간 외 포함)
     const allInGroup = (allDays||[]).filter(x => {
@@ -6337,34 +6338,52 @@ function renderScheduleCalendar(){
       }
       return key === grpKey;
     });
-    // TourID별 firstDate 모음
-    const tspans = {};
+
+    // ★ TourCode 단위로 묶음 (TourCode 없으면 TourID로 폴백)
+    // tcKey = TourCode || TourID
+    const tcSpans = {}; // tcKey → {firstDate, lastDate, tourIds: Set, primaryTour}
+    const tidToTcKey = {}; // tourID → tcKey 매핑
     allInGroup.forEach(x => {
       const tid = x.tour.TourID;
-      if(!tspans[tid]) tspans[tid] = {firstDate: x.date, lastDate: x.date, tour: x.tour};
-      if(x.date < tspans[tid].firstDate) tspans[tid].firstDate = x.date;
-      if(x.date > tspans[tid].lastDate) tspans[tid].lastDate = x.date;
+      const tc = String(x.tour.TourCode||'').trim();
+      const tcKey = tc || tid; // TourCode 없으면 TourID 단독
+      tidToTcKey[tid] = tcKey;
+      if(!tcSpans[tcKey]){
+        tcSpans[tcKey] = {firstDate: x.date, lastDate: x.date, tourIds: new Set([tid]), primaryTour: x.tour};
+      } else {
+        tcSpans[tcKey].tourIds.add(tid);
+      }
+      if(x.date < tcSpans[tcKey].firstDate) tcSpans[tcKey].firstDate = x.date;
+      if(x.date > tcSpans[tcKey].lastDate) tcSpans[tcKey].lastDate = x.date;
     });
-    // firstDate → TourCode/Guide → TourID 순으로 정렬 (안정적인 결정성)
-    const tourArr = Object.entries(tspans).sort((a,b) => {
+
+    // firstDate → TourCode → 첫 TourID 순으로 정렬 (안정적인 결정성)
+    const tcArr = Object.entries(tcSpans).sort((a,b) => {
       if(a[1].firstDate !== b[1].firstDate) return a[1].firstDate.localeCompare(b[1].firstDate);
-      const ag = String(a[1].tour.Guide||'') + (a[1].tour.TourCode||'');
-      const bg = String(b[1].tour.Guide||'') + (b[1].tour.TourCode||'');
-      if(ag !== bg) return ag.localeCompare(bg);
       return a[0].localeCompare(b[0]);
     });
-    // 트랙 배치 — 글로벌 일정 기준
+
+    // 트랙 배치 — TourCode 단위로 (같은 TourCode의 모든 회차는 한 트랙)
+    // 단, 같은 TourCode 안에서 회차끼리 시간 겹침이 있을 수 있음 — 그래도 같은 트랙 강제
     const tracks = []; // [{lastDate}]
-    const tourToTrack = {}; // tid → trackIdx
-    tourArr.forEach(([tid, span]) => {
+    const tcToTrack = {}; // tcKey → trackIdx
+    tcArr.forEach(([tcKey, span]) => {
+      // 빈 트랙 찾기 — TourCode 단위 비교
       let trackIdx = tracks.findIndex(t => t.lastDate < span.firstDate);
       if(trackIdx < 0){
         tracks.push({lastDate: span.lastDate});
         trackIdx = tracks.length - 1;
       } else {
-        tracks[trackIdx].lastDate = span.lastDate;
+        // 트랙 재사용 — 마지막 날짜 갱신
+        if(span.lastDate > tracks[trackIdx].lastDate) tracks[trackIdx].lastDate = span.lastDate;
       }
-      tourToTrack[tid] = trackIdx;
+      tcToTrack[tcKey] = trackIdx;
+    });
+
+    // tourToTrack 매핑 — 모든 TourID가 자기 TourCode의 트랙으로
+    const tourToTrack = {};
+    Object.keys(tidToTcKey).forEach(tid => {
+      tourToTrack[tid] = tcToTrack[tidToTcKey[tid]] ?? 0;
     });
     return {tourToTrack, totalTracks: tracks.length};
   }
