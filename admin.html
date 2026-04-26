@@ -1441,6 +1441,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     </div>
   </div>
 
+  <!-- Schedule → 인보이스 자동 매칭 모달 -->
+  <div id="inv-sch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9100;align-items:center;justify-content:center;padding:16px;"></div>
+
   <!-- 인보이스 항목 추가/편집 모달 -->
   <div id="inv-item-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center;padding:16px;">
     <div style="background:var(--sf);border-radius:16px;padding:18px;width:100%;max-width:400px;max-height:90vh;overflow-y:auto;">
@@ -12119,6 +12122,359 @@ function closeInvItemModal() {
   _invItemEditId = null;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 인보이스 - Schedule 자동 매칭 (B 단계)
+// 인보이스 발행 시 그 기간의 Schedule 일정을 자동으로 Manual Items에 추가
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 좌석 키 정규화 ("25S" / "25" → "25")
+function _invSeatKey(s){
+  if(!s) return '21';
+  const m = String(s).match(/(\d+)/);
+  return m ? m[1] : '21';
+}
+
+// 슬롯에서 인보이스 항목 자동 계산
+// 여행사 단가표(DB.PC) + 호텔 서차지 + Early/Late 자동 적용
+// 시나리오 분기:
+//  - mode='dc' + 자사차량+자사D = 일반 TA 청구 (DR이 있으면 DR이 우선이지만 여기선 항상 단가표 기반)
+//  - mode='dc' + SUB 차량 = TA 청구 + SUB 차량 비용 (분리 표기)
+//  - mode='sub' = SUB 통째 (TA 청구 + SUB 비용 분리)
+function _calcSlotInvoiceItem(tour, day, slot, slotKey){
+  const agency = tour.Agency || '';
+  const seats = _invSeatKey(tour.Seats);
+  const course = (slot.course||'').trim();
+  if(!course) return null; // 코스 없이 청구 못함
+
+  const agPC = (typeof DB !== 'undefined' && DB.PC && agency) ? DB.PC[agency] : null;
+  let entry = null;
+  if(agPC){
+    // 정확 매칭 + 케이스/공백 무시
+    entry = agPC[course];
+    if(!entry){
+      const lower = course.toLowerCase();
+      const k = Object.keys(agPC).find(k => k.toLowerCase() === lower);
+      if(k) entry = agPC[k];
+    }
+  }
+  if(!entry) {
+    // 단가표에 코스 없음 — 항목 생성하되 amount=0
+    return {
+      amount: 0,
+      tour: course,
+      _noRate: true,
+      _seatKey: seats
+    };
+  }
+  const seatData = entry[seats] || entry['21'];
+  const baseRate = parseFloat(seatData?.rate) || 0;
+  const otRate = parseFloat(seatData?.ot) || 0;
+
+  // ── 서차지 자동 ──
+  let hotel = 0, dist = 0, trailer = 0, ot = 0;
+
+  // 호텔 서차지: pickup/dropoff가 호텔이고 그 호텔이 Surcharge_Area Y면 적용
+  // M_PriceClient에 Hotel Surcharge 코스가 있으면 그 단가 사용
+  const hotelSurEntry = agPC ? (agPC['Hotel Surcharge'] || agPC['hotel surcharge'] || agPC['Hotel surcharge']) : null;
+  if(hotelSurEntry){
+    const hRate = parseFloat((hotelSurEntry[seats]||hotelSurEntry['21'])?.rate) || 0;
+    const hotels = (typeof DB !== 'undefined' && DB.H) ? DB.H : [];
+    const startIsSurchargeHotel = slot.startPlaceType === 'hotel' && slot.startPlace &&
+      !!hotels.find(h => h.Hotel_Name === slot.startPlace && h.Surcharge_Area);
+    const endIsSurchargeHotel = slot.endPlaceType === 'hotel' && slot.endPlace &&
+      !!hotels.find(h => h.Hotel_Name === slot.endPlace && h.Surcharge_Area);
+    if(startIsSurchargeHotel) hotel += hRate;
+    if(endIsSurchargeHotel) hotel += hRate;
+  }
+
+  // Early/Late surcharge (Airport Transfer rate × 30%, 단 호주로/Plus는 80 고정)
+  // 간단화: Schedule 시점에 정확히 모르므로 자동 0으로 두고 사용자가 수동 조정
+  // (DR이 작성되면 DR 기반 정확한 계산이 들어감)
+  if(slot.startTime){
+    const isEarly = slot.startPlaceType === 'hotel' && slot.endPlaceType === 'airport' && slot.startTime < '06:00';
+    const isLate = slot.startPlaceType === 'airport' && slot.endPlaceType === 'hotel' && slot.startTime >= '23:00';
+    if(isEarly || isLate){
+      const _isHojuro = /호주로|hojuro|plus\s*australia/i.test(agency);
+      const seatNum = parseInt(seats) || 21;
+      if(_isHojuro && seatNum < 40){
+        // $80 고정 → "OT" 칸이 아니라 별도 항목으로 처리하기 어려우니 dist에 임시 (사용자 수정 가능)
+        // 실제 인보이스 schema에는 'early' 컬럼 없음. dist에 넣고 note에 명시.
+        dist += 80;
+      } else {
+        const atEntry = agPC ? (agPC['Airport Transfer'] || agPC['airport transfer']) : null;
+        if(atEntry){
+          const atRate = parseFloat((atEntry[seats]||atEntry['21'])?.rate) || 0;
+          dist += Math.round(atRate * 0.3);
+        }
+      }
+    }
+  }
+
+  // 트레일러 (day.trailer가 true면 별도 항목으로)
+  // Schedule에서는 day 단위 — 슬롯이 여러개면 첫 슬롯에만 (중복 청구 방지)
+  // 호출자에서 "이 슬롯이 그 날의 첫 활성 슬롯인가" 판단해서 trailer를 넣을지 결정
+  // 여기선 trailer 0으로 두고 호출자에서 추가
+
+  return {
+    amount: baseRate,
+    tour: course,
+    seats: seats + 'S',
+    hotel, dist, trailer, ot,
+    _otRate: otRate, // 참고용
+    _seatKey: seats
+  };
+}
+
+// Schedule 가져오기 모달 열기
+async function openInvScheduleImport(){
+  const agency = (document.getElementById('inv-agency')?.value || '').trim();
+  const from = (document.getElementById('inv-from')?.value || '').trim();
+  const to = (document.getElementById('inv-to')?.value || '').trim();
+  if(!agency){ toast('먼저 여행사를 선택하세요','er'); return; }
+  if(!from || !to){ toast('인보이스 기간을 먼저 설정하세요','er'); return; }
+
+  // Schedule이 캐시 안 되어 있으면 로드
+  if(typeof _schCache === 'undefined' || !_schCache || !_schCache.length){
+    if(typeof loadSchedule === 'function'){
+      await loadSchedule();
+    }
+  }
+
+  // 그 기간 + 그 여행사의 일정만 필터
+  const candidates = [];
+  (_schCache || []).forEach(t => {
+    if(String(t.Status||'') === 'cancelled') return;
+    if(String(t.Agency||'').trim().toLowerCase() !== agency.toLowerCase()) return;
+    let days = [];
+    try{ days = (typeof t.TourPlan === 'string') ? JSON.parse(t.TourPlan||'[]') : (t.TourPlan || []); }catch(e){ return; }
+    if(!Array.isArray(days)) return;
+    days.forEach(d => {
+      const dateStr = String(d.date||'').slice(0,10);
+      if(!dateStr) return;
+      if(dateStr < from || dateStr > to) return;
+      ['morning','fullday','evening'].forEach(slotKey => {
+        const slot = d.slots && d.slots[slotKey];
+        if(!slot) return;
+        // 빈 슬롯 (시간/장소/코스 모두 비었으면) 스킵
+        const isEmpty = !slot.startTime && !slot.startPlace && !slot.course && !slot.driver && !slot.rego && !slot.subCompany;
+        if(isEmpty) return;
+        candidates.push({ tour: t, day: d, slot, slotKey, date: dateStr });
+      });
+    });
+  });
+
+  if(!candidates.length){
+    toast(`이 기간(${from} ~ ${to})에 ${agency} 일정이 없습니다`,'er');
+    return;
+  }
+
+  // 정렬: 날짜 + 슬롯 순
+  const slotOrder = { morning:0, fullday:1, evening:2 };
+  candidates.sort((a,b) => {
+    if(a.date !== b.date) return a.date < b.date ? -1 : 1;
+    return slotOrder[a.slotKey] - slotOrder[b.slotKey];
+  });
+
+  // 각 슬롯에 대해 자동 계산값 미리보기
+  // + 이미 Manual Items에 같은 항목이 있는지 체크
+  const existingKey = _invManualKey();
+  const existingItems = _getInvManualItems(existingKey);
+  const existingMap = new Set();
+  existingItems.forEach(it => {
+    // 매칭 키: date + tour(course) + tourcode
+    const k = `${it.date}|${(it.tour||'').toLowerCase()}|${(it.tourcode||'').toLowerCase()}`;
+    existingMap.add(k);
+  });
+
+  _invSchImportData = candidates.map(c => {
+    const calc = _calcSlotInvoiceItem(c.tour, c.day, c.slot, c.slotKey);
+    const isSubMode = (c.slot.mode || 'dc') === 'sub';
+    const tourCode = c.tour.TourCode || c.tour.TourID || '';
+    const dupKey = `${c.date}|${(calc?.tour||'').toLowerCase()}|${tourCode.toLowerCase()}`;
+    const isDup = existingMap.has(dupKey);
+    return {
+      ...c,
+      calc,
+      isSubMode,
+      tourCode,
+      isDup,
+      selected: !isDup // 중복은 기본 선택 해제
+    };
+  });
+
+  // 모달 렌더
+  _renderInvScheduleImportModal();
+}
+
+let _invSchImportData = [];
+
+function _renderInvScheduleImportModal(){
+  const el = document.getElementById('inv-sch-modal');
+  if(!el) return;
+  const items = _invSchImportData;
+
+  let totalAmount = 0;
+  items.forEach(it => {
+    if(!it.selected) return;
+    const c = it.calc || {};
+    totalAmount += (c.amount||0) + (c.hotel||0) + (c.dist||0) + (c.trailer||0) + (c.ot||0);
+  });
+
+  const rowsHtml = items.map((it, idx) => {
+    const c = it.calc || {};
+    const slot = it.slot;
+    const subTotal = (c.amount||0) + (c.hotel||0) + (c.dist||0) + (c.trailer||0) + (c.ot||0);
+    const slotIcon = it.slotKey === 'morning' ? '🌅' : it.slotKey === 'evening' ? '🌙' : '🌞';
+    const modeIcon = it.isSubMode ? '🏢' : '🏠';
+    const dateAU = (typeof _schFmtAU === 'function') ? _schFmtAU(it.date) : it.date;
+    const dupBadge = it.isDup ? '<span style="background:#fef2f2;color:#dc2626;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px;">중복</span>' : '';
+    const noRateBadge = c._noRate ? '<span style="background:#fef3c7;color:#92400e;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px;">단가없음</span>' : '';
+    return `<tr style="border-bottom:1px solid var(--bd);">
+      <td style="padding:6px 4px;text-align:center;"><input type="checkbox" ${it.selected?'checked':''} onchange="_invSchImportData[${idx}].selected=this.checked;_renderInvScheduleImportModal()"></td>
+      <td style="padding:6px 4px;font-size:11px;">${dateAU}</td>
+      <td style="padding:6px 4px;font-size:11px;">${slotIcon} ${modeIcon}</td>
+      <td style="padding:6px 4px;font-size:11px;font-weight:700;">${escH(it.tourCode)}${dupBadge}</td>
+      <td style="padding:6px 4px;font-size:11px;">${escH(c.tour||slot.course||'')}${noRateBadge}</td>
+      <td style="padding:6px 4px;font-size:11px;text-align:center;">${escH(c.seats||'')}</td>
+      <td style="padding:6px 4px;font-size:11px;text-align:right;font-family:var(--fd);">$${(c.amount||0).toLocaleString()}</td>
+      <td style="padding:6px 4px;font-size:11px;text-align:right;color:#dc2626;font-family:var(--fd);">${(c.hotel||0)>0?'$'+(c.hotel).toLocaleString():'-'}</td>
+      <td style="padding:6px 4px;font-size:11px;text-align:right;color:#dc2626;font-family:var(--fd);">${(c.dist||0)>0?'$'+(c.dist).toLocaleString():'-'}</td>
+      <td style="padding:6px 4px;font-size:11px;text-align:right;font-weight:700;font-family:var(--fd);">$${subTotal.toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="background:white;border-radius:14px;padding:20px;max-width:1100px;width:95%;max-height:90vh;display:flex;flex-direction:column;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div>
+          <div style="font-size:16px;font-weight:800;">📅 Schedule → 인보이스 자동 매칭</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:2px;">선택한 일정을 인보이스 수동 항목에 자동 추가합니다. 단가는 M_PriceClient 기준이며 추가/수정 가능합니다.</div>
+        </div>
+        <button onclick="document.getElementById('inv-sch-modal').style.display='none'" style="background:transparent;border:none;font-size:20px;cursor:pointer;">×</button>
+      </div>
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#1e40af;">
+        💡 호텔/공항 서차지 자동 계산 · DR이 있으면 정확한 비용은 DR이 우선 · "단가없음" 항목은 수동 입력 필요
+      </div>
+      <div style="overflow:auto;flex:1;border:1px solid var(--bd);border-radius:8px;">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;">
+          <thead style="background:var(--sf2);position:sticky;top:0;">
+            <tr>
+              <th style="padding:8px 4px;font-weight:700;width:30px;"><input type="checkbox" ${items.every(it=>it.selected)?'checked':''} onchange="_invSchImportData.forEach(it=>it.selected=this.checked);_renderInvScheduleImportModal()"></th>
+              <th style="padding:8px 4px;text-align:left;">날짜</th>
+              <th style="padding:8px 4px;text-align:left;">슬롯</th>
+              <th style="padding:8px 4px;text-align:left;">투어코드</th>
+              <th style="padding:8px 4px;text-align:left;">코스</th>
+              <th style="padding:8px 4px;text-align:center;">인승</th>
+              <th style="padding:8px 4px;text-align:right;">기본료</th>
+              <th style="padding:8px 4px;text-align:right;">호텔</th>
+              <th style="padding:8px 4px;text-align:right;">서차지</th>
+              <th style="padding:8px 4px;text-align:right;">소계</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml || '<tr><td colspan="10" style="padding:20px;text-align:center;color:var(--t3);">매칭된 일정 없음</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;">
+        <div style="font-size:13px;font-weight:700;">선택 합계: <span style="color:var(--ac);">$${totalAmount.toLocaleString()}</span></div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="document.getElementById('inv-sch-modal').style.display='none'" style="padding:8px 16px;border:1px solid var(--bd);background:white;border-radius:6px;font-weight:700;cursor:pointer;">취소</button>
+          <button onclick="applyInvScheduleImport()" style="padding:8px 16px;border:none;background:var(--ac);color:white;border-radius:6px;font-weight:700;cursor:pointer;">선택 항목 추가</button>
+        </div>
+      </div>
+    </div>
+  `;
+  el.style.display = 'flex';
+}
+
+function applyInvScheduleImport(){
+  const selected = _invSchImportData.filter(it => it.selected);
+  if(!selected.length){ toast('선택된 항목 없음','er'); return; }
+
+  const key = _invManualKey();
+  const items = _getInvManualItems(key).slice();
+  const agency = (document.getElementById('inv-agency')?.value || '').trim();
+  const period = (document.getElementById('inv-from')?.value || '').slice(0,7);
+
+  let added = 0;
+  let dayTrailerSeen = {}; // 같은 날 트레일러 중복 방지
+
+  selected.forEach(it => {
+    const c = it.calc || {};
+    const slot = it.slot;
+    const day = it.day;
+    const tourCode = it.tourCode;
+
+    // 트레일러 — 그 날의 첫 슬롯에만 한 번 (중복 방지)
+    let trailer = 0;
+    if(day.trailer && !dayTrailerSeen[it.date]){
+      // M_PriceClient에 'Trailer Surcharge' 코스 있으면 사용
+      const agPC = DB.PC[agency];
+      const trEntry = agPC ? (agPC['Trailer Surcharge'] || agPC['Trailer'] || agPC['trailer surcharge']) : null;
+      if(trEntry){
+        const seats = c._seatKey || '21';
+        trailer = parseFloat((trEntry[seats]||trEntry['21'])?.rate) || 0;
+      }
+      dayTrailerSeen[it.date] = true;
+    }
+
+    // 운영 모드에 따라 노트 prefix
+    const modePrefix = it.isSubMode ? `[SUB:${slot.subCompany||''}] ` : '';
+    const driver = it.isSubMode ? (slot.subDriver||'') : (slot.driver||'');
+    const guide = it.tour.Guide || '';
+
+    const id = 'sch_' + Date.now() + '_' + Math.random().toString(36).slice(2,8) + '_' + added;
+    const item = {
+      id,
+      date: it.date,
+      tour: c.tour || slot.course || '',
+      tourcode: tourCode,
+      rego: it.isSubMode ? '' : (slot.rego || ''),
+      seats: c.seats || (it.tour.Seats || ''),
+      driver: driver,
+      guide: guide,
+      pickup: slot.startPlace || '',
+      dropoff: slot.endPlace || '',
+      start: slot.startTime || '',
+      end: slot.endTime || '',
+      amount: c.amount || 0,
+      ot: c.ot || 0,
+      hotel: c.hotel || 0,
+      trailer: trailer,
+      toll: 0,
+      dist: c.dist || 0,
+      note: modePrefix + `Schedule 자동 (${it.tour.TourID||''})`,
+      _manual: true
+    };
+
+    items.push(item);
+    added++;
+
+    // 서버 저장 (비동기 fire-and-forget)
+    if(agency && period){
+      fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({action:'save_invoice_manual_item', data:{
+          ID:item.id, Agency:agency, Period:period, Date:item.date, Rego:item.rego,
+          Tour:item.tour, Seats:item.seats, TourCode:item.tourcode, Note:item.note,
+          Amount:item.amount, OT:item.ot, Hotel:item.hotel, Dist:item.dist,
+          Trailer:item.trailer, Toll:item.toll, Start:item.start, End:item.end,
+          Driver:item.driver, Guide:item.guide, Pickup:item.pickup, Dropoff:item.dropoff
+        }})
+      }).catch(e => console.warn('save manual item failed:', e));
+    }
+  });
+
+  // 정렬 + 저장
+  items.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  _setInvManualItems(key, items);
+
+  document.getElementById('inv-sch-modal').style.display = 'none';
+  if(typeof renderInvManualList === 'function') renderInvManualList();
+  if(typeof _refreshInvPreview === 'function') _refreshInvPreview();
+  toast(`✅ ${added}건 추가됨`,'ok');
+}
+
+
 function saveInvItem() {
   const errEl = document.getElementById('iim-err');
   const date   = document.getElementById('iim-date')?.value;
@@ -13262,7 +13618,10 @@ function renderInvPreview(rows, agency, from, to) {
       <div style="margin-bottom:8px;padding-top:6px;border-top:1px dashed var(--bd);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
           <div style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.5px;">📝 수동 항목</div>
-          <button onclick="openInvItemModal(null)" style="padding:2px 8px;border:1px solid var(--ac);background:var(--sf);border-radius:6px;font-size:10px;font-weight:700;color:var(--ac);cursor:pointer;">+ Add (추가)</button>
+          <div style="display:flex;gap:4px;">
+            <button onclick="openInvScheduleImport()" style="padding:2px 8px;border:1px solid #7c3aed;background:#ede9fe;border-radius:6px;font-size:10px;font-weight:700;color:#7c3aed;cursor:pointer;" title="Schedule 일정을 자동으로 항목에 추가">📅 Schedule</button>
+            <button onclick="openInvItemModal(null)" style="padding:2px 8px;border:1px solid var(--ac);background:var(--sf);border-radius:6px;font-size:10px;font-weight:700;color:var(--ac);cursor:pointer;">+ Add (추가)</button>
+          </div>
         </div>
         <div id="inv-manual-inline"></div>
       </div>
