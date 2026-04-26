@@ -154,7 +154,20 @@ const TOKEN_TTL_ADMIN_MS  = 1 * 24 * 60 * 60 * 1000;   // 24시간
 // PIN 해시 식별 prefix (이 prefix가 있으면 해시된 값으로 인식)
 const PIN_HASH_PREFIX = 'h1$';
 // PIN 해시 salt (시스템 고유값 — 변경 시 모든 PIN 재설정 필요)
-const PIN_HASH_SECRET = 'DC_FLEET_2026_K7p9Qx2L';
+// PIN 해시 salt (시스템 고유값 — 변경 시 모든 PIN 재설정 필요)
+// ★ 보안: Script Properties에서 조회 (코드에 평문 노출 방지)
+//   설정 방법: Apps Script 에디터 → 프로젝트 설정 (⚙️) → 스크립트 속성 → 추가
+//     속성: PIN_HASH_SECRET
+//     값: DC_FLEET_2026_K7p9Qx2L  (또는 더 강력한 새 secret)
+//   설정 안 하면 폴백 값 사용 (기존 PIN 호환 유지)
+const PIN_HASH_SECRET_FALLBACK = 'DC_FLEET_2026_K7p9Qx2L';
+function _getPinSecret() {
+  try {
+    const v = PropertiesService.getScriptProperties().getProperty('PIN_HASH_SECRET');
+    if (v && v.length > 0) return v;
+  } catch(e) {}
+  return PIN_HASH_SECRET_FALLBACK;
+}
 // Rate limiting: 5회 실패 → 15분 락
 const AUTH_MAX_FAILS = 5;
 const AUTH_LOCK_MS = 15 * 60 * 1000;
@@ -209,7 +222,7 @@ function _getAuthFailSheet() {
 // ── PIN 해시 (SHA-256, salt=secret + name) ─────────────────────────────────
 // 결과 형식: 'h1$' + base64url(sha256(secret + ':' + name + ':' + pin))
 function _hashPin(pin, name) {
-  const input = PIN_HASH_SECRET + ':' + String(name || '').trim() + ':' + String(pin || '');
+  const input = _getPinSecret() + ':' + String(name || '').trim() + ':' + String(pin || '');
   const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input, Utilities.Charset.UTF_8);
   return PIN_HASH_PREFIX + Utilities.base64EncodeWebSafe(bytes).replace(/=+$/, '');
 }
@@ -635,6 +648,156 @@ function migrateAddTrailerSystem() {
   } catch (err) {
     Logger.log('migrateAddTrailerSystem error: ' + err.toString());
     return 'error: ' + err.toString();
+  }
+}
+
+/**
+ * 관리자용: 현재 보안 설정 상태 점검
+ * Apps Script 에디터에서 실행 → Logger 확인
+ */
+function _checkSecuritySetup() {
+  const log = [];
+  log.push('═══════════════════════════════════════');
+  log.push('  Dong Choi 시스템 보안 설정 점검');
+  log.push('═══════════════════════════════════════');
+  log.push('');
+
+  // 1) PIN_HASH_SECRET이 Script Properties에 설정됐는지
+  let secretFromProps = null;
+  try {
+    secretFromProps = PropertiesService.getScriptProperties().getProperty('PIN_HASH_SECRET');
+  } catch(e) {}
+
+  if (secretFromProps && secretFromProps.length > 0) {
+    log.push('✅ PIN_HASH_SECRET: Script Properties에서 조회 (안전)');
+    log.push('   길이: ' + secretFromProps.length + '자');
+    if (secretFromProps === PIN_HASH_SECRET_FALLBACK) {
+      log.push('   ⚠️ 경고: 기본 secret과 동일함 — 새 secret으로 변경 권장');
+    }
+  } else {
+    log.push('🟡 PIN_HASH_SECRET: 폴백 값 사용 중 (코드에 노출됨)');
+    log.push('   조치: Apps Script 프로젝트 설정 → 스크립트 속성 추가');
+    log.push('   속성: PIN_HASH_SECRET');
+    log.push('   값: (예: DC_2026_xK9pQ3vN7mR_secure_2026)');
+  }
+  log.push('');
+
+  // 2) Active_Tokens 시트 점검
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const tokenSheet = ss.getSheetByName('Active_Tokens');
+    if (tokenSheet) {
+      const data = tokenSheet.getDataRange().getValues();
+      const tokenCount = Math.max(0, data.length - 1);
+      log.push('✅ Active_Tokens 시트 확인: ' + tokenCount + '개 토큰');
+    } else {
+      log.push('⚠️ Active_Tokens 시트 없음 (첫 로그인 시 자동 생성됨)');
+    }
+  } catch(e) {
+    log.push('❌ Active_Tokens 점검 실패: ' + e.toString());
+  }
+  log.push('');
+
+  // 3) Auth_Failures 시트 점검 (Rate limiting)
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const failSheet = ss.getSheetByName('Auth_Failures');
+    if (failSheet) {
+      const data = failSheet.getDataRange().getValues();
+      const failCount = Math.max(0, data.length - 1);
+      log.push('✅ Auth_Failures 시트 확인: ' + failCount + '개 기록');
+    } else {
+      log.push('⚠️ Auth_Failures 시트 없음 (첫 실패 시 자동 생성됨)');
+    }
+  } catch(e) {
+    log.push('❌ Auth_Failures 점검 실패: ' + e.toString());
+  }
+  log.push('');
+
+  // 4) 드라이버 PIN 보안 점검
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const drvSheet = ss.getSheetByName('M_Drivers');
+    if (drvSheet) {
+      const data = drvSheet.getDataRange().getValues();
+      const headers = data[0];
+      const pinIdx = headers.indexOf('PIN');
+      const nameIdx = headers.indexOf('Name_KR');
+      const nameEnIdx = headers.indexOf('Name_EN');
+      let totalPins = 0;
+      let hashedPins = 0;
+      let plainPins = 0;
+      let weakPins = 0;
+      const weakSet = new Set(['1234','0000','1111','2222','3333','4444','5555','6666','7777','8888','9999','1212','2020','2024','2025','2026','0123','4321','9876','1004']);
+      for (let i = 1; i < data.length; i++) {
+        const pin = String(data[i][pinIdx] || '').trim();
+        const name = data[i][nameIdx] || data[i][nameEnIdx] || '(이름없음)';
+        if (!pin) continue;
+        totalPins++;
+        if (pin.startsWith('h1$')) {
+          hashedPins++;
+        } else {
+          plainPins++;
+          log.push('   🟡 평문 PIN 사용: ' + name + ' (재로그인 시 자동 해시됨)');
+          if (weakSet.has(pin)) {
+            weakPins++;
+            log.push('     ❌ 흔한 PIN 사용: ' + name + ' = ' + pin);
+          }
+        }
+      }
+      log.push('✅ 드라이버 PIN 점검: 총 ' + totalPins + '개');
+      log.push('   • 해시된 PIN: ' + hashedPins + '개');
+      log.push('   • 평문 PIN: ' + plainPins + '개');
+      if (weakPins > 0) {
+        log.push('   ⚠️ 흔한 PIN 사용: ' + weakPins + '명 — 변경 권장!');
+      }
+    }
+  } catch(e) {
+    log.push('❌ 드라이버 PIN 점검 실패: ' + e.toString());
+  }
+  log.push('');
+  log.push('═══════════════════════════════════════');
+  log.push('점검 완료. 위 권장사항을 검토해주세요.');
+  log.push('═══════════════════════════════════════');
+
+  Logger.log(log.join('\n'));
+  return log.join('\n');
+}
+
+/**
+ * 새 PIN_HASH_SECRET을 Script Properties에 설정 + 모든 PIN 재해시
+ * ⚠️ 주의: 이 함수는 모든 드라이버의 평문 PIN을 새 secret으로 다시 해시함
+ *         이미 해시된 PIN은 영향 없음 (구 secret으로 만들어진 해시는 그대로)
+ * 사용법:
+ *   1) Script Properties에 새 PIN_HASH_SECRET 설정
+ *   2) (선택) 이 함수 실행해서 평문 PIN을 새 secret으로 해시
+ */
+function _migratePlainPinsWithNewSecret() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const drvSheet = ss.getSheetByName('M_Drivers');
+    if (!drvSheet) { Logger.log('M_Drivers 시트 없음'); return; }
+    const data = drvSheet.getDataRange().getValues();
+    const headers = data[0];
+    const pinIdx = headers.indexOf('PIN');
+    const nameIdx = headers.indexOf('Name_KR');
+    const nameEnIdx = headers.indexOf('Name_EN');
+    if (pinIdx < 0) { Logger.log('PIN 컬럼 없음'); return; }
+    let migrated = 0;
+    for (let i = 1; i < data.length; i++) {
+      const pin = String(data[i][pinIdx] || '').trim();
+      const name = String(data[i][nameIdx] || data[i][nameEnIdx] || '').trim();
+      if (!pin || pin.startsWith('h1$') || !name) continue;
+      // 평문 PIN을 새 secret으로 해시 (현재 _getPinSecret()은 이미 새 secret 반환)
+      const hashed = _hashPin(pin, name);
+      drvSheet.getRange(i + 1, pinIdx + 1).setValue(hashed);
+      migrated++;
+      Logger.log('✓ ' + name + ': 평문 → 해시 완료');
+    }
+    Logger.log('=== 마이그레이션 완료: ' + migrated + '개 PIN 해시화 ===');
+    return migrated;
+  } catch(err) {
+    Logger.log('error: ' + err.toString());
   }
 }
 
