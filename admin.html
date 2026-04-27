@@ -4293,6 +4293,181 @@ function _schFindDRForSlot(date, slot){
   return _schDRMatchIndex[fallbackKey] || null;
 }
 
+// ★ DR 매칭 상세 진단 — 어떤 슬롯이 왜 매칭 안 됐는지 분석
+function showDRDiagnostics(tourId){
+  const tour = (_schCache||[]).find(t => t.TourID === tourId);
+  if(!tour) return;
+  const days = _schParseDays(tour.TourPlan);
+  const today = _schToday();
+
+  // DR 캐시에서 같은 일정 후보 찾기 (Agency / TourCode / 기간)
+  const tourCodeUpper = String(tour.TourCode||'').trim().toUpperCase();
+  const agencyUpper = String(tour.Agency||'').trim().toUpperCase();
+  const startD = _schToISO(tour.StartDate);
+  const endD = _schToISO(tour.EndDate);
+  const drsInPeriod = (_drCache||[]).filter(r => {
+    const dateISO = parseToISO(r.Date||'');
+    return dateISO >= startD && dateISO <= endD;
+  });
+  const drsByTourCode = drsInPeriod.filter(r =>
+    String(r.Tour_Code||'').trim().toUpperCase() === tourCodeUpper
+  );
+  const drsByAgency = drsInPeriod.filter(r =>
+    String(r.Agency||'').trim().toUpperCase() === agencyUpper
+  );
+
+  // 슬롯별 진단
+  const slotDiagnostics = [];
+  days.forEach(d => {
+    ['morning','fullday','evening'].forEach(k => {
+      const s = d.slots && d.slots[k];
+      if(!s || _schIsSlotEmpty(s)) return;
+      const slotLabel = k==='morning'?'AM':k==='fullday'?'풀데이':'PM';
+      // sub 모드는 스킵 (자사 운행만 DR 매칭)
+      if(s.mode === 'sub') {
+        slotDiagnostics.push({
+          date: d.date, slot: slotLabel, status: 'sub', icon: '🏢',
+          color: '#6b7280', bg: '#f3f4f6',
+          msg: `서브 외주 (DR 매칭 대상 아님)`,
+          slotData: s
+        });
+        return;
+      }
+      const isPast = d.date < today;
+      const dr = _schFindDRForSlot(d.date, s);
+      if(dr){
+        // 매칭됨 — 차이점 분석
+        const diffs = [];
+        if(s.driver && s.driver !== dr.Driver) diffs.push(`드라이버: 일정="${s.driver}" → DR="${dr.Driver}"`);
+        if(s.course && String(s.course).toUpperCase() !== String(dr.Attraction||'').toUpperCase())
+          diffs.push(`코스: 일정="${s.course}" → DR="${dr.Attraction||'-'}"`);
+        const ot = parseFloat(dr.OT||0);
+        const otStr = ot > 0 ? ` · OT ${ot}HR` : '';
+        slotDiagnostics.push({
+          date: d.date, slot: slotLabel, status: 'matched', icon: '✅',
+          color: '#166534', bg: '#dcfce7',
+          msg: diffs.length ? `매칭됨${otStr} — ⚠ 차이: ${diffs.join(', ')}` : `매칭됨${otStr}`,
+          slotData: s, dr: dr
+        });
+      } else if(!isPast){
+        // 미래 일정 — 아직 운행 안 함
+        slotDiagnostics.push({
+          date: d.date, slot: slotLabel, status: 'future', icon: '📅',
+          color: '#6b7280', bg: '#f3f4f6',
+          msg: `예정 (운행 후 DR 작성)`,
+          slotData: s
+        });
+      } else {
+        // 과거 + 매칭 안 됨 → 원인 분석
+        const reasons = [];
+        if(!s.rego) reasons.push('차량(Rego) 미지정');
+        if(!s.driver) reasons.push('드라이버 미지정');
+
+        // 같은 날 + 같은 차량 DR 있는지?
+        if(s.rego){
+          const sameDayRego = (_drCache||[]).filter(r =>
+            parseToISO(r.Date||'') === d.date &&
+            String(r.Rego||'').trim() === String(s.rego||'').trim()
+          );
+          if(sameDayRego.length > 0){
+            // 차량+날짜는 일치하나 코스 불일치
+            const drCourses = sameDayRego.map(r => r.Attraction||'(코스 없음)').join(', ');
+            reasons.push(`같은 날 같은 차량 DR 있음 (코스: ${drCourses}) — 일정 코스 "${s.course||'(없음)'}"와 불일치`);
+          }
+        }
+
+        // 같은 날 + 같은 드라이버 DR이 다른 차량에 있는지?
+        if(s.driver){
+          const sameDayDriver = (_drCache||[]).filter(r =>
+            parseToISO(r.Date||'') === d.date &&
+            String(r.Driver||'').trim() === String(s.driver||'').trim()
+          );
+          if(sameDayDriver.length > 0){
+            const drRegos = sameDayDriver.map(r => r.Rego||'(차량 없음)').join(', ');
+            reasons.push(`같은 날 같은 드라이버 DR 있음 (차량: ${drRegos}) — 일정 차량 "${s.rego||'(없음)'}"와 불일치`);
+          }
+        }
+
+        // 같은 날 어떤 DR이라도 있는지
+        const anyDR = (_drCache||[]).filter(r => parseToISO(r.Date||'') === d.date);
+        if(anyDR.length === 0 && s.rego){
+          reasons.push('해당 날짜에 작성된 DR 없음 → 미작성');
+        } else if(reasons.length === 0){
+          // 위 이유 다 안 맞고 매칭만 안 됨
+          reasons.push(`같은 날 DR ${anyDR.length}건 있으나 차량/코스 모두 일치하지 않음`);
+        }
+
+        slotDiagnostics.push({
+          date: d.date, slot: slotLabel, status: 'unmatched', icon: '⚠',
+          color: '#dc2626', bg: '#fef2f2',
+          msg: reasons.join(' / '),
+          slotData: s
+        });
+      }
+    });
+  });
+
+  // 모달 빌드
+  let modal = document.getElementById('dr-diag-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'dr-diag-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9300;display:flex;align-items:center;justify-content:center;padding:16px;';
+    modal.onclick = (e) => { if(e.target === modal) modal.style.display='none'; };
+    document.body.appendChild(modal);
+  }
+
+  const slotRows = slotDiagnostics.map(sd => {
+    const dt = sd.date.slice(5).replace('-','/');
+    const carInfo = sd.slotData.rego ? `🚌 ${escH(sd.slotData.rego)}` : '';
+    const drvInfo = sd.slotData.driver ? `👤 ${escH(sd.slotData.driver)}` : '';
+    const courseInfo = sd.slotData.course ? `🗺 ${escH(sd.slotData.course)}` : '';
+    return `
+      <div style="background:${sd.bg};border-left:4px solid ${sd.color};border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:${sd.color};font-weight:800;margin-bottom:4px;">
+          <span style="font-size:14px;">${sd.icon}</span>
+          <span>${dt} · ${sd.slot}</span>
+        </div>
+        <div style="font-size:11px;color:var(--t2);margin-bottom:3px;">
+          ${[carInfo, drvInfo, courseInfo].filter(Boolean).join(' · ')||'(슬롯 정보 없음)'}
+        </div>
+        <div style="font-size:11px;color:${sd.color};line-height:1.4;">
+          ${escH(sd.msg)}
+        </div>
+      </div>`;
+  }).join('') || '<div style="color:var(--t3);text-align:center;padding:20px;font-size:11px;">분석할 슬롯이 없습니다</div>';
+
+  // DR 후보 정보 (헤더)
+  const headerInfo = `
+    <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.6;">
+      매칭 키: <b>날짜 + 차량(Rego) + 코스(Attraction)</b> &nbsp;/&nbsp; fallback: <b>날짜 + 차량</b><br>
+      DR 후보 — TourCode "${escH(tour.TourCode||'')}": <b>${drsByTourCode.length}건</b> /
+      Agency "${escH(tour.Agency||'')}": <b>${drsByAgency.length}건</b> /
+      기간 내 전체: <b>${drsInPeriod.length}건</b>
+    </div>`;
+
+  modal.innerHTML = `
+    <div style="background:var(--sf);border-radius:14px;padding:16px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;font-family:var(--fd);" onclick="event.stopPropagation()">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div>
+          <div style="font-size:14px;font-weight:800;color:var(--t1);">📋 DR 매칭 진단</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:2px;">${escH(tour.Agency||'')} · ${escH(tour.TourCode||tour.TourID)}</div>
+        </div>
+        <button onclick="document.getElementById('dr-diag-modal').style.display='none'" style="background:transparent;border:1px solid var(--b2);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;">닫기</button>
+      </div>
+      ${headerInfo}
+      ${slotRows}
+      <div style="font-size:10px;color:var(--t3);margin-top:10px;padding-top:8px;border-top:1px solid var(--b2);line-height:1.5;">
+        💡 <b>매칭 안되는 흔한 이유</b>:<br>
+        • 드라이버가 DR 작성 시 다른 차량/코스 입력<br>
+        • 일정의 차량/코스가 잘못 입력됨<br>
+        • 운행 후 드라이버가 DR 미작성<br>
+        • 자사 운행이 아닌 서브 외주 (DR 매칭 대상 아님)
+      </div>
+    </div>`;
+  modal.style.display = 'flex';
+}
+
 async function loadSchedule(){
   const cntEl = document.getElementById('sch-cnt');
   if(cntEl) cntEl.textContent = '로딩 중...';
@@ -4410,15 +4585,16 @@ function renderScheduleList(){
     const meta = [pax, seats, trailer].filter(Boolean).join(' · ');
     const people = [guide, driverStr, regoStr].filter(Boolean).join(' · ');
 
-    // DR 매칭 상태 뱃지
+    // DR 매칭 상태 뱃지 — 클릭 시 상세 진단 모달
     let drBadge = '';
     if(totalSlots > 0){
+      const onclickDiag = `onclick="event.stopPropagation();showDRDiagnostics('${escH(r.TourID)}')"`;
       if(matchedSlots === totalSlots){
-        drBadge = `<span style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);">▣ DR완료${totalActualOT>0?` · 실제 OT ${totalActualOT}HR`:''}</span>`;
+        drBadge = `<span ${onclickDiag} style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: DR 매칭 상세">▣ DR완료${totalActualOT>0?` · 실제 OT ${totalActualOT}HR`:''}</span>`;
       } else if(matchedSlots > 0){
-        drBadge = `<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);">▣ ${matchedSlots}/${totalSlots}${totalActualOT>0?` · ${totalActualOT}HR`:''}</span>`;
+        drBadge = `<span ${onclickDiag} style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미매칭 슬롯 보기">▣ ${matchedSlots}/${totalSlots}${totalActualOT>0?` · ${totalActualOT}HR`:''}</span>`;
       } else if(pastUnmatchedCount > 0){
-        drBadge = `<span style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);">⚠ DR 미작성</span>`;
+        drBadge = `<span ${onclickDiag} style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미작성/불일치 진단">⚠ DR 미작성</span>`;
       }
     }
 
