@@ -5334,6 +5334,7 @@ function _smRebuildDays(){
         const _buildSubVehicleItems = (selSubCo) => {
           return (DB.V || [])
             .filter(v => {
+              // Active 체크: 'N'만 제외 (빈값/Y/공백 다 허용)
               if(String(v.Active||'').toUpperCase() === 'N') return false;
               const ow = (v.Owner||'').trim();
               if(!ow || DC_OWNERS.includes(ow)) return false;
@@ -5345,7 +5346,7 @@ function _smRebuildDays(){
             .map(v => ({
               value: v.Rego||'',
               label: '🚐 ' + (v.Rego||''),
-              sub: [v.Owner, v.Seats?(v.Seats+'인승'):''].filter(Boolean).join(' · ')
+              sub: [v.Owner, v.Capacity?(v.Capacity+'인승'):'', v.Make, v.Model].filter(Boolean).join(' · ')
             }))
             .filter(it => it.value);
         };
@@ -5354,16 +5355,20 @@ function _smRebuildDays(){
         const _rebuildSubLists = (newSubCo) => {
           const drvCsel = _schDayCsels['subdrv-'+cellPrefix];
           const vehCsel = _schDayCsels['subveh-'+cellPrefix];
+          console.log(`[Rebuild] cellPrefix=${cellPrefix} subCo="${newSubCo}" drvCsel=${!!drvCsel} vehCsel=${!!vehCsel}`);
           if(drvCsel){
             const newItems = _buildSubDriverItems(newSubCo);
             if(drvCsel.setItems) drvCsel.setItems(newItems);
             else { drvCsel.items = newItems; if(drvCsel._render) drvCsel._render(); }
-            console.log(`[SubDriver Rebuild] ${newSubCo} → ${newItems.length}명`);
+            console.log(`[Rebuild Drv] ${newSubCo} → ${newItems.length}명`,
+              newItems.map(i=>i.value).join(', '));
           }
           if(vehCsel){
             const newItems = _buildSubVehicleItems(newSubCo);
             if(vehCsel.setItems) vehCsel.setItems(newItems);
             else { vehCsel.items = newItems; if(vehCsel._render) vehCsel._render(); }
+            console.log(`[Rebuild Veh] ${newSubCo} → ${newItems.length}대`,
+              newItems.map(i=>i.value).join(', '));
           }
         };
 
@@ -5404,7 +5409,17 @@ function _smRebuildDays(){
         const _selSubCo = (d.slots[k].subCompany||'').trim();
         const subDrvItems = _buildSubDriverItems(_selSubCo);
         if(_selSubCo){
-          console.log(`[SubDriver Init] 서브업체="${_selSubCo}" → ${subDrvItems.length}명 매칭`);
+          // 모든 SUB 드라이버 (Owner 있는 것) 리스트 출력
+          const allSubDrvs = (DB.D||[]).filter(dr => {
+            const ow = String(dr.Owner||'').trim();
+            return ow && !DC_OWNERS.includes(ow);
+          });
+          console.log(`[SubDriver Init] cellPrefix=${cellPrefix} 선택된업체="${_selSubCo}" 매칭=${subDrvItems.length}명`);
+          console.log(`  전체 SUB 드라이버 ${allSubDrvs.length}명:`,
+            allSubDrvs.map(dr => `${dr.Name_KR||dr.Name_EN}(Owner:"${dr.Owner}")`));
+          if(subDrvItems.length === 0 && allSubDrvs.length > 0){
+            console.warn('⚠️ 매칭 안됨! Owner 정확한 일치 확인 필요. 콘솔에서 dcDebugSubData("'+_selSubCo+'") 실행해보세요.');
+          }
         }
         // 서브 차량 csel — 서브 업체에 속한 차량 목록 + 자유 입력
         const subVehItems = _buildSubVehicleItems(_selSubCo);
@@ -6630,6 +6645,32 @@ function schCalToday(){
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// ★ 디버그 헬퍼 — 콘솔에서 직접 호출 가능
+window.dcDebugSubData = function(subCo){
+  const ownerStr = (subCo||'').toString();
+  console.log('=== SUB 데이터 진단 ===');
+  console.log('찾는 서브 업체:', `"${ownerStr}"`);
+  console.log('전체 드라이버 수:', (DB.D||[]).length);
+  console.log('전체 차량 수:', (DB.V||[]).length);
+  // 모든 드라이버의 Owner
+  const allDrvOwners = (DB.D||[]).map(d => `${d.Name_KR||d.Name_EN||'?'}(Owner:"${d.Owner||''}")`);
+  console.log('드라이버 Owner 목록:', allDrvOwners);
+  // 매칭 시도
+  const matchedDrv = (DB.D||[]).filter(d => {
+    const ow = String(d.Owner||'').trim();
+    return ow.toLowerCase() === ownerStr.toLowerCase();
+  });
+  console.log(`매칭된 드라이버 (${matchedDrv.length}명):`, matchedDrv);
+  // 차량
+  const allVehOwners = (DB.V||[]).map(v => `${v.Rego||'?'}(Owner:"${v.Owner||''}")`);
+  console.log('차량 Owner 목록:', allVehOwners);
+  const matchedVeh = (DB.V||[]).filter(v => {
+    const ow = String(v.Owner||'').trim();
+    return ow.toLowerCase() === ownerStr.toLowerCase();
+  });
+  console.log(`매칭된 차량 (${matchedVeh.length}대):`, matchedVeh);
+};
+
 // 캘린더 슬롯 인터랙션 — hover 툴팁 + 단일 클릭 확대 보기
 // ═══════════════════════════════════════════════════════════════════════════
 
