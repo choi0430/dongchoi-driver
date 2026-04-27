@@ -16717,14 +16717,21 @@ async function generateDraftInvoices(force=false){
       const status = String(s.Status||'scheduled').toLowerCase();
       // 이미 발행/결제된 일정은 제외
       if(status === 'invoiced' || status === 'paid' || status === 'cancelled') return false;
-      const endDate = String(s.EndDate||'').slice(0,10) || String(s.StartDate||'').slice(0,10);
-      if(!endDate || endDate >= todayISO) return false; // 아직 안 끝남
+      // ★ EndDate 형식 정규화 (ISO timestamp일 수도, dd/mm/yyyy일 수도, YYYY-MM-DD일 수도)
+      const endDate = parseToISO(s.EndDate || s.StartDate || '');
+      if(!endDate) return false;
+      // 종료일이 오늘 이전(strict)이어야 종료된 일정
+      if(endDate >= todayISO) return false;
       // (Agency, TourCode)가 이미 발행됐으면 제외
       const ag = String(s.Agency||'').trim().toUpperCase();
       const tc = String(s.TourCode||'').trim().toUpperCase();
       if(!ag || !tc) return false;
       if(issuedKeys.has(`${ag}|${tc}`)) return false;
       return true;
+    });
+    console.log(`[Draft] 오늘=${todayISO}, 종료된 미발행 일정 ${endedSchedules.length}건`);
+    endedSchedules.forEach(s => {
+      console.log(`  - ${s.TourID}: ${s.Agency} / ${s.TourCode} / ~${parseToISO(s.EndDate||'')} / ${s.Status}`);
     });
 
     if(endedSchedules.length === 0){
