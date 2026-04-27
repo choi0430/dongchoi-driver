@@ -4289,11 +4289,14 @@ function _schRegoStatus(rego, date, currentTourId){
 async function _schEnsureDRCache(){
   if(typeof _drCache !== 'undefined' && _drCache && _drCache.length) return;
   try{
-    const url = APPS_SCRIPT_URL + '?action=get_reports&user=' + encodeURIComponent(getAdminUser());
+    const url = APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report&user=' + encodeURIComponent(getAdminUser());
     const res = await fetch(url);
     const json = await res.json();
     if(json.ok && json.rows){
       _drCache = json.rows.map((r,i) => ({...r, _rowIndex: i+2}));
+      console.log(`[DR Cache] ${_drCache.length}건 로드됨`);
+    } else {
+      console.warn('[DR Cache] 로드 실패:', json);
     }
   }catch(e){
     console.warn('DR cache load failed:', e);
