@@ -7439,6 +7439,34 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     let subEndPlace = slot.endPlaceType === 'hotel' ? _schShortHotel(slot.endPlace) : (slot.endPlace || '');
     let subEndPlaceFull = slot.endPlace || '';
 
+    // ★ MAX HOUR + 8pm 캡 헬퍼 (코스 기반 종료 시간 계산)
+    const _calcSubEndTime = (startT, course, subCo) => {
+      if(!startT || !course) return '';
+      // 저녁 트랜스퍼는 8pm 캡 예외
+      const isEvening = /dinner|night/i.test(course);
+      // M_PriceSub에서 max_hours 조회
+      let maxHrs = null;
+      try{
+        const ps = (typeof DB !== 'undefined' && DB.PS && DB.PS[subCo]) ? DB.PS[subCo] : null;
+        if(ps && ps[course]){
+          const mh = parseFloat(ps[course].max_hours);
+          if(!isNaN(mh) && mh > 0) maxHrs = mh;
+        }
+      }catch(e){}
+      // MAX HOUR 기반 종료 시간
+      let endT = '';
+      if(maxHrs){
+        endT = _subAddMinutes(startT, maxHrs * 60) || '';
+      }
+      // 8pm 캡 (저녁 트랜스퍼 제외)
+      if(!isEvening){
+        if(!endT || endT > '20:00'){
+          endT = '20:00';
+        }
+      }
+      return endT;
+    };
+
     if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
       const fi = _schParseFlight(tour.FlightIn);
       if(fi.code){
@@ -7449,9 +7477,9 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
         if(!subStartTime && fi.time){
           subStartTime = _subAddMinutes(fi.time, fi.type === 'dom' ? 30 : 60) || '';
         }
-        // 도착 시간 = 시작 + 1시간 (호텔 도착)
+        // 도착 시간 = 일정(공항→투어→호텔) 종료 시간 (MAX HOUR + 8pm 캡)
         if(!subEndTime && subStartTime){
-          subEndTime = _subAddMinutes(subStartTime, 60) || '';
+          subEndTime = _calcSubEndTime(subStartTime, slot.course, slot.subCompany) || '';
         }
       }
     }
@@ -7470,6 +7498,11 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
           subEndTime = _subAddMinutes(fo.time, fo.type === 'dom' ? -60 : -120) || '';
         }
       }
+    }
+    // 일반 슬롯 (호텔→호텔 등): 시작 시간 있고 도착 시간 미입력 시 MAX HOUR + 8pm 캡 적용
+    if(!subEndTime && subStartTime && slot.course &&
+       slot.startPlaceType !== 'airport' && slot.endPlaceType !== 'airport'){
+      subEndTime = _calcSubEndTime(subStartTime, slot.course, slot.subCompany) || '';
     }
 
     return {
@@ -7541,6 +7574,34 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   let dcEndPlace = slot.endPlaceType === 'hotel' ? _schShortHotel(slot.endPlace) : (slot.endPlace || '');
   let dcEndPlaceFull = slot.endPlace || '';
 
+  // ★ MAX HOUR + 8pm 캡 헬퍼 (코스 기반 종료 시간 계산)
+  const _calcDcEndTime = (startT, course, agency) => {
+    if(!startT || !course) return '';
+    // 저녁 트랜스퍼는 8pm 캡 예외
+    const isEvening = /dinner|night/i.test(course);
+    // M_PriceClient에서 max_hours 조회
+    let maxHrs = null;
+    try{
+      const ag = (typeof DB !== 'undefined' && DB.PC && DB.PC[agency]) ? DB.PC[agency] : null;
+      if(ag && ag[course]){
+        const mh = parseFloat(ag[course].max_hours);
+        if(!isNaN(mh) && mh > 0) maxHrs = mh;
+      }
+    }catch(e){}
+    // MAX HOUR 기반 종료 시간
+    let endT = '';
+    if(maxHrs){
+      endT = _addMinutes(startT, maxHrs * 60) || '';
+    }
+    // 8pm 캡 (저녁 트랜스퍼 제외)
+    if(!isEvening){
+      if(!endT || endT > '20:00'){
+        endT = '20:00';
+      }
+    }
+    return endT;
+  };
+
   if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
     const fi = _schParseFlight(tour.FlightIn);
     if(fi.code){
@@ -7551,9 +7612,9 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
       if(!dcStartTime && fi.time){
         dcStartTime = _addMinutes(fi.time, fi.type === 'dom' ? 30 : 60) || '';
       }
-      // 도착 시간 = 시작 시간 + 1시간 (호텔 도착 = 공항→호텔 이동)
+      // 도착 시간 = 일정(공항→투어→호텔) 종료 시간 (MAX HOUR + 8pm 캡)
       if(!dcEndTime && dcStartTime){
-        dcEndTime = _addMinutes(dcStartTime, 60) || '';
+        dcEndTime = _calcDcEndTime(dcStartTime, slot.course, tour && tour.Agency) || '';
       }
     }
   }
@@ -7572,6 +7633,11 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
         dcEndTime = _addMinutes(fo.time, fo.type === 'dom' ? -60 : -120) || '';
       }
     }
+  }
+  // 일반 슬롯 (호텔→호텔 등): 시작 시간 있고 도착 시간 미입력 시 MAX HOUR + 8pm 캡 적용
+  if(!dcEndTime && dcStartTime && slot.course &&
+     slot.startPlaceType !== 'airport' && slot.endPlaceType !== 'airport'){
+    dcEndTime = _calcDcEndTime(dcStartTime, slot.course, tour && tour.Agency) || '';
   }
 
   return {
