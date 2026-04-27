@@ -5027,9 +5027,7 @@ function _smRebuildDays(){
             </div>
             <div>
               <div class="sm-day-lbl">차량 메모 (선택)</div>
-              <input type="text" class="profit-finp sm-fld" placeholder="예: 25S, TV1234"
-                value="${escH(slotData.subVehicleNote||'')}"
-                oninput="_schDays[${i}].slots['${k}'].subVehicleNote=this.value">
+              <div id="slot-subveh-${i}-${k}"></div>
             </div>
           </div>
           <div class="sm-day-row">
@@ -5286,12 +5284,81 @@ function _smRebuildDays(){
           if(ow && !DC_OWNERS.includes(ow)) subCoSet.add(ow);
         });
         const subCoItems = [...subCoSet].sort().map(co => ({ value: co, label: '🏢 ' + co }));
+
+        // ★ 헬퍼: 선택된 서브 업체에 속하는 드라이버/차량 목록 빌드 (재사용)
+        const _buildSubDriverItems = (selSubCo) => {
+          return (DB.D || [])
+            .filter(dr => {
+              if(String(dr.Active||'').toUpperCase() === 'N') return false;
+              const ow = (dr.Owner||'').trim();
+              if(!ow) return false;
+              if(typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(ow)) return false;
+              if(selSubCo){
+                return ow.trim().toLowerCase() === selSubCo.toLowerCase();
+              }
+              return true;
+            })
+            .map(dr => {
+              const ph = dr.Mobile_1 || dr.Mobile || dr.Moblie_2 || '';
+              const name = dr.Name_KR || dr.Name_EN || '';
+              return {
+                value: name,
+                label: name,
+                sub: [dr.Owner, ph].filter(Boolean).join(' · '),
+                _phone: ph
+              };
+            })
+            .filter(it => it.value);
+        };
+        const _buildSubVehicleItems = (selSubCo) => {
+          return (DB.V || [])
+            .filter(v => {
+              if(String(v.Active||'').toUpperCase() === 'N') return false;
+              const ow = (v.Owner||'').trim();
+              if(!ow || DC_OWNERS.includes(ow)) return false;
+              if(selSubCo){
+                return ow.trim().toLowerCase() === selSubCo.toLowerCase();
+              }
+              return true;
+            })
+            .map(v => ({
+              value: v.Rego||'',
+              label: '🚐 ' + (v.Rego||''),
+              sub: [v.Owner, v.Seats?(v.Seats+'인승'):''].filter(Boolean).join(' · ')
+            }))
+            .filter(it => it.value);
+        };
+
+        // ★ 서브 업체 변경 시 드라이버/차량 목록 재빌드 함수
+        const _rebuildSubLists = (newSubCo) => {
+          const drvCsel = _schDayCsels['subdrv-'+cellPrefix];
+          const vehCsel = _schDayCsels['subveh-'+cellPrefix];
+          if(drvCsel){
+            const newItems = _buildSubDriverItems(newSubCo);
+            if(drvCsel.setItems) drvCsel.setItems(newItems);
+            else { drvCsel.items = newItems; if(drvCsel._render) drvCsel._render(); }
+            console.log(`[SubDriver Rebuild] ${newSubCo} → ${newItems.length}명`);
+          }
+          if(vehCsel){
+            const newItems = _buildSubVehicleItems(newSubCo);
+            if(vehCsel.setItems) vehCsel.setItems(newItems);
+            else { vehCsel.items = newItems; if(vehCsel._render) vehCsel._render(); }
+          }
+        };
+
         _schDayCsels['subco-'+cellPrefix] = buildSearchSelect('slot-subco-'+cellPrefix, {
           items: subCoItems,
           value: d.slots[k].subCompany || '',
           placeholder: '서브 업체 검색 (또는 자유 입력)',
-          onSelect: (it) => { _propagateSlotField(i, k, 'subCompany', it.value); },
-          onClear: () => { _schDays[i].slots[k].subCompany = ''; }
+          onSelect: (it) => {
+            _propagateSlotField(i, k, 'subCompany', it.value);
+            // ★ 업체 변경 → 드라이버/차량 목록 즉시 재빌드
+            _rebuildSubLists(it.value);
+          },
+          onClear: () => {
+            _schDays[i].slots[k].subCompany = '';
+            _rebuildSubLists('');
+          }
         });
         if(d.slots[k].subCompany) _schDayCsels['subco-'+cellPrefix].setValue(d.slots[k].subCompany);
         // 자유 입력 동기화 (검색 input 이벤트)
@@ -5300,53 +5367,49 @@ function _smRebuildDays(){
           subCoInp.addEventListener('input', () => {
             _schDays[i].slots[k].subCompany = subCoInp.value;
           });
-          // ★ blur 시 안전장치 — 매칭 안 된 자유 입력도 저장
+          // ★ blur 시 안전장치 — 매칭 안 된 자유 입력도 저장 + 드라이버 목록 재빌드
           subCoInp.addEventListener('blur', () => {
             const v = subCoInp.value.trim();
             if(v && _schDays[i].slots[k].subCompany !== v){
               _schDays[i].slots[k].subCompany = v;
               console.log('[SubCompany Blur 강제 저장]', cellPrefix, '→', v);
             }
+            // 자유 입력 후에도 드라이버 목록 갱신 시도
+            if(v) _rebuildSubLists(v);
           });
         }
 
         // 서브 드라이버: M_Drivers에서 그 SubCo Owner인 드라이버 + 자유 입력
         const _selSubCo = (d.slots[k].subCompany||'').trim();
-        // 디버그: 어떤 드라이버가 어떤 owner를 가지는지 콘솔 로그
+        const subDrvItems = _buildSubDriverItems(_selSubCo);
         if(_selSubCo){
-          const allSubDrivers = (DB.D||[]).filter(dr => {
-            if(String(dr.Active||'').toUpperCase() === 'N') return false;
-            const ow = (dr.Owner||'').trim();
-            return ow && !DC_OWNERS.includes(ow);
-          });
-          console.log('[SubDriver] 선택된 서브업체:', _selSubCo, '/ 전체 SUB 드라이버:',
-            allSubDrivers.map(dr => `${dr.Name_KR||dr.Name_EN}(Owner:"${dr.Owner}")`).join(', '));
+          console.log(`[SubDriver Init] 서브업체="${_selSubCo}" → ${subDrvItems.length}명 매칭`);
         }
-        const subDrvItems = (DB.D || [])
-          .filter(dr => {
-            if(String(dr.Active||'').toUpperCase() === 'N') return false;
-            const ow = (dr.Owner||'').trim();
-            if(!ow) return false;
-            if(typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(ow)) return false;
-            // 선택된 서브 업체와 일치하는 드라이버만 (없으면 모든 서브 드라이버)
-            if(_selSubCo){
-              // 대소문자 무시 + trim 매칭
-              return ow.trim().toLowerCase() === _selSubCo.toLowerCase();
+        // 서브 차량 csel — 서브 업체에 속한 차량 목록 + 자유 입력
+        const subVehItems = _buildSubVehicleItems(_selSubCo);
+        _schDayCsels['subveh-'+cellPrefix] = buildSearchSelect('slot-subveh-'+cellPrefix, {
+          items: subVehItems,
+          value: d.slots[k].subVehicleNote || '',
+          placeholder: '차량 검색 또는 자유 입력 (예: 25S)',
+          onSelect: (it) => {
+            _schDays[i].slots[k].subVehicleNote = it.value;
+          },
+          onClear: () => { _schDays[i].slots[k].subVehicleNote = ''; }
+        });
+        if(d.slots[k].subVehicleNote) _schDayCsels['subveh-'+cellPrefix].setValue(d.slots[k].subVehicleNote);
+        const subVehInp = _schDayCsels['subveh-'+cellPrefix].input;
+        if(subVehInp){
+          subVehInp.addEventListener('input', () => {
+            _schDays[i].slots[k].subVehicleNote = subVehInp.value;
+          });
+          subVehInp.addEventListener('blur', () => {
+            const v = subVehInp.value.trim();
+            if(v && _schDays[i].slots[k].subVehicleNote !== v){
+              _schDays[i].slots[k].subVehicleNote = v;
             }
-            return true;
-          })
-          .map(dr => {
-            // ★ M_Drivers의 실제 컬럼: Mobile_1 (Mobile 아님)
-            const ph = dr.Mobile_1 || dr.Mobile || dr.Moblie_2 || '';
-            const name = dr.Name_KR || dr.Name_EN || '';
-            return {
-              value: name,
-              label: name,
-              sub: [dr.Owner, ph].filter(Boolean).join(' · '),
-              _phone: ph
-            };
-          })
-          .filter(it => it.value);
+          });
+        }
+
         _schDayCsels['subdrv-'+cellPrefix] = buildSearchSelect('slot-subdrv-'+cellPrefix, {
           items: subDrvItems,
           value: d.slots[k].subDriver || '',
