@@ -884,6 +884,14 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
         <option value="driver">드라이버별</option>
       </select>
     </div>
+    <!-- ★ 캘린더 표시 필터 -->
+    <div style="padding:0 14px 8px;display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+      <span style="font-size:10px;color:var(--t3);font-weight:700;">표시:</span>
+      <button id="sch-flt-dc" class="sch-flt-chip on" onclick="toggleSchFilter('dc')">🏠 자사</button>
+      <button id="sch-flt-sub" class="sch-flt-chip on" onclick="toggleSchFilter('sub')">🏢 서브</button>
+      <button id="sch-flt-cancelled" class="sch-flt-chip" onclick="toggleSchFilter('cancelled')">❌ 취소</button>
+      <button id="sch-flt-paid" class="sch-flt-chip on" onclick="toggleSchFilter('paid')">💰 결제완료</button>
+    </div>
     <div id="sch-cal-wrap" style="padding:0 0 80px;overflow-x:auto;-webkit-overflow-scrolling:touch;">
       <div style="padding:40px;text-align:center;color:var(--t3);font-size:12px;">로딩 중...</div>
     </div>
@@ -893,6 +901,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 <style>
 .sch-view-tab,.sch-mode-tab{flex:1;padding:8px 14px;border-radius:8px;border:1px solid var(--b2);background:var(--sf);font-size:12px;font-weight:700;color:var(--t2);cursor:pointer;font-family:var(--fd);}
 .sch-view-tab.on,.sch-mode-tab.on{background:var(--ac);color:white;border-color:var(--ac);}
+.sch-flt-chip{padding:4px 10px;border-radius:12px;border:1px solid var(--b2);background:var(--sf);font-size:10px;font-weight:700;color:var(--t3);cursor:pointer;font-family:var(--fd);opacity:0.5;}
+.sch-flt-chip.on{background:var(--s2);color:var(--t1);border-color:var(--ac);opacity:1;}
 </style>
 
 
@@ -3168,6 +3178,97 @@ function rDash(){
         m:`Investigating Incidents (조사 중): <b>${investigatingInc.length}건</b> <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinc','ninc');loadAdminIncidents()">확인하기 →</span>`});
     }
   }
+
+  // ★ 인보이스 미발행 운행 알림 — 지난 달 + 이번 달 운행 중 인보이스 안 발행된 것
+  try {
+    if(_drCache && _drCache.length){
+      const today = new Date();
+      const thisMonthFirst = new Date(today.getFullYear(), today.getMonth(), 1);
+      const lastMonthFirst = new Date(today.getFullYear(), today.getMonth()-1, 1);
+      const cutoffISO = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+      const lastMonthCutoff = cutoffISO(lastMonthFirst);
+
+      // Agency_Txn에서 invoice 타입 거래 → 발행된 인보이스의 (Agency, TourCode, StartDate~FinishDate) 키
+      const issuedKeys = new Set();
+      (_balAgencyTxns||[]).forEach(t => {
+        if(String(t.Type||'').trim() !== 'invoice') return;
+        const codes = String(t.TourCode||'').split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
+        codes.forEach(c => {
+          issuedKeys.add(`${(t.Agency||'').toUpperCase()}|${c}`);
+        });
+      });
+
+      const uninvoiced = _drCache.filter(r => {
+        const dateISO = parseToISO(r.Date||'');
+        if(!dateISO || dateISO < lastMonthCutoff) return false;
+        if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return false;
+        const tc = String(r.Tour_Code||'').trim().toUpperCase();
+        const ag = String(r.Agency||'').trim().toUpperCase();
+        if(!tc || !ag) return false;
+        const key = `${ag}|${tc}`;
+        return !issuedKeys.has(key);
+      });
+
+      if(uninvoiced.length > 0){
+        const byAg = {};
+        uninvoiced.forEach(r => {
+          const ag = String(r.Agency||'').trim();
+          if(!byAg[ag]) byAg[ag] = 0;
+          byAg[ag]++;
+        });
+        const agStr = Object.entries(byAg).slice(0, 3).map(([a,c])=>`${a} ${c}건`).join(', ');
+        const moreStr = Object.keys(byAg).length > 3 ? ` 외 ${Object.keys(byAg).length-3}곳` : '';
+        als.push({sort:-7500,type:'uninvoiced',
+          bg:'#fff7ed',bc:'#f97316',fc:'#c2410c',
+          icon:'📋',
+          m:`인보이스 미발행 운행: <b>${uninvoiced.length}건</b> (${agStr}${moreStr}) <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinv','ninv');initInvoice()">발행하기 →</span>`});
+      }
+    }
+  } catch(e){ console.warn('uninvoiced alert err:', e); }
+
+  // ★ 누적 미지급 급여 알림 (드라이버별)
+  try {
+    if(typeof _wagesData !== 'undefined' && _wagesData){
+      // 드라이버별 발생 급여 - 지급 합산
+      const driverPay = {}; // driver → {earned, paid}
+      // 발생: Daily_Report에서 (DR_Cost - Night_Owner)
+      if(_drCache){
+        _drCache.forEach(r => {
+          const dn = String(r.Driver||'').trim();
+          if(!dn) return;
+          const earned = (parseFloat(r.DR_Cost||0)||0) - (parseFloat(r.Night_Owner||0)||0);
+          if(!driverPay[dn]) driverPay[dn] = {earned:0, paid:0};
+          driverPay[dn].earned += earned;
+        });
+      }
+      // 지급: Wages 시트
+      if(Array.isArray(_wagesData)){
+        _wagesData.forEach(w => {
+          const dn = String(w.Driver||'').trim();
+          if(!dn) return;
+          if(!driverPay[dn]) driverPay[dn] = {earned:0, paid:0};
+          driverPay[dn].paid += (parseFloat(w.Amount||0)||0);
+        });
+      }
+      // 미지급 합산 + 30일 이상 미지급 카운트
+      let totalUnpaid = 0;
+      let driverCount = 0;
+      Object.entries(driverPay).forEach(([dn, p]) => {
+        const remaining = p.earned - p.paid;
+        if(remaining > 50){ // $50 이상 미지급만 카운트
+          totalUnpaid += remaining;
+          driverCount++;
+        }
+      });
+      if(driverCount >= 2 && totalUnpaid > 1000){
+        als.push({sort:-7000,type:'unpaid_wages',
+          bg:'#fef2f2',bc:'#ef4444',fc:'#b91c1c',
+          icon:'💵',
+          m:`누적 미지급 급여: <b>$${Math.round(totalUnpaid).toLocaleString()}</b> (${driverCount}명) <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pwage','nwage');rWage()">정산하기 →</span>`});
+      }
+    }
+  } catch(e){ console.warn('unpaid wages alert err:', e); }
+
   als.sort((a,b)=>a.sort-b.sort);
   document.getElementById('alct').textContent=als.length+'건';
   document.getElementById('als').innerHTML=als.length
@@ -6083,6 +6184,39 @@ async function deleteScheduleConfirm(){
 // ═══════════════════════════════════════════════════════════════════════════
 let _schCalMode = 'week';        // 'week' or 'month'
 let _schCalAnchor = new Date();  // 표시 중인 기준 날짜
+// ★ 캘린더 표시 필터 — 어떤 일정을 보여줄지
+let _schFilters = (() => {
+  try {
+    const saved = localStorage.getItem('admin_sch_filters');
+    if(saved) return JSON.parse(saved);
+  } catch(e){}
+  return {dc: true, sub: true, cancelled: false, paid: true};
+})();
+
+function toggleSchFilter(kind){
+  _schFilters[kind] = !_schFilters[kind];
+  try { localStorage.setItem('admin_sch_filters', JSON.stringify(_schFilters)); } catch(e){}
+  // 버튼 토글 표시
+  const btn = document.getElementById('sch-flt-' + kind);
+  if(btn){
+    if(_schFilters[kind]) btn.classList.add('on');
+    else btn.classList.remove('on');
+  }
+  renderScheduleCalendar();
+}
+
+// 페이지 로드 후 초기 토글 상태 반영
+window.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    Object.keys(_schFilters).forEach(k => {
+      const btn = document.getElementById('sch-flt-' + k);
+      if(btn){
+        if(_schFilters[k]) btn.classList.add('on');
+        else btn.classList.remove('on');
+      }
+    });
+  }, 100);
+});
 
 function switchScheduleView(mode){
   document.getElementById('sch-view-list').classList.toggle('on', mode === 'list');
@@ -6151,11 +6285,19 @@ function _schGetAllDays(){
 // "ADGE HOTEL SURRY HILLS" → "ADGE"
 // "OAKS RYDE HOTEL" → "OAKS RYDE"
 // "MERITON SUITES PITT STREET" → "MERITON"
-// 규칙: HOTEL/SUITES/INN/MOTEL/RESORT/LODGE 같은 generic 단어 만나면 거기서 끊고 그 앞 단어들만 반환
+// 규칙: M_Hotels.Short_Name 사용자 정의 우선 → stopwords 자동 줄임 fallback
 function _schShortHotel(name){
   if(!name) return '';
   const s = String(name).trim();
-  if(s.length <= 12) return s; // 이미 충분히 짧으면 그대로
+  // ★ 1순위: M_Hotels의 Short_Name 컬럼 (사용자 정의 약어)
+  if(DB.H && DB.H.length){
+    const matched = DB.H.find(h => String(h.Hotel_Name||'').trim().toUpperCase() === s.toUpperCase());
+    if(matched && String(matched.Short_Name||'').trim()){
+      return String(matched.Short_Name).trim();
+    }
+  }
+  // 2순위: 자동 줄임 (stopwords)
+  if(s.length <= 12) return s;
   const stopWords = ['HOTEL','SUITES','INN','MOTEL','RESORT','LODGE','HOUSE','APARTMENT','APARTMENTS','TOWERS','PLAZA','PLACE','RESIDENCE','RESIDENCES'];
   const words = s.split(/\s+/);
   const kept = [];
@@ -6163,7 +6305,6 @@ function _schShortHotel(name){
     if(stopWords.includes(w.toUpperCase())) break;
     kept.push(w);
   }
-  // 결과가 너무 짧으면 (예: 첫 단어가 generic이면) 첫 두 단어 사용
   if(kept.length === 0) return words.slice(0, 2).join(' ');
   return kept.join(' ');
 }
@@ -6292,7 +6433,32 @@ function renderScheduleCalendar(){
   const allDays = _schGetAllDays();
   const startStr = fmtYMD(startDt);
   const endStr = fmtYMD(endDt);
-  const inRange = allDays.filter(x => x.date >= startStr && x.date <= endStr);
+
+  // ★ 사용자 필터 적용
+  const fltDc = _schFilters.dc;
+  const fltSub = _schFilters.sub;
+  const fltCancelled = _schFilters.cancelled;
+  const fltPaid = _schFilters.paid;
+
+  const inRange = allDays.filter(x => {
+    if(x.date < startStr || x.date > endStr) return false;
+    // 취소된 일정 필터
+    const status = String(x.tour.Status||'scheduled').toLowerCase();
+    if(status === 'cancelled' && !fltCancelled) return false;
+    if(status === 'paid' && !fltPaid) return false;
+    // DC/SUB 필터 — 슬롯의 mode 확인
+    const slots = x.day.slots || {};
+    const slotKeys = Object.keys(slots).filter(k => slots[k]);
+    if(slotKeys.length === 0) return false;
+    // 어떤 슬롯이든 표시 조건 충족하면 OK
+    const anyVisible = slotKeys.some(k => {
+      const isSub = slots[k].mode === 'sub';
+      if(isSub && !fltSub) return false;
+      if(!isSub && !fltDc) return false;
+      return true;
+    });
+    return anyVisible;
+  });
 
   // 그룹별로 묶기 — 슬롯 단위 평탄화
   // groups[key][date][slotKey] = [ { tour, day, slot }, ... ]  (배열로 — 같은 슬롯에 여러 투어 가능)
@@ -12880,6 +13046,14 @@ async function saveBalTxn(){
       }
 
       toast('✅ 저장 완료','ok');
+
+      // ★ 수금 처리 시 Schedule.Status = 'paid' 자동 갱신
+      // 조건: CR>0 (수금) + 연결된 인보이스 InvoiceID 있음
+      if(row.CR > 0 && row.InvoiceID){
+        try {
+          await _updateSchedulesAfterPayment(row.InvoiceID, row.Agency);
+        } catch(e){ console.warn('[Schedule Update] 수금 후 paid 갱신 실패:', e); }
+      }
     } catch(e){ toast('저장 실패: '+e.message,'err'); return; }
 
   } else if(type==='sub'){
@@ -15227,12 +15401,161 @@ async function saveInvoiceToSheet() {
     _invDeductions = [];
     console.log('[Invoice] 저장 완료 → 크레딧/수동항목 캐시 초기화:', _resetKey);
 
+    // ★ Schedule.Status 자동 갱신: scheduled/in_progress/completed → invoiced
+    //   인보이스의 TourCode + 날짜 기준으로 매칭되는 Schedule 찾기
+    try {
+      await _updateSchedulesAfterInvoice(invNum, agency, rows, manualItems, from, to);
+    } catch(e){ console.warn('[Schedule Update] 인보이스 발행 후 status 갱신 실패:', e); }
+
     _refreshInvPreview();
   } catch(e) {
     toast('❌ 저장 실패: '+e.message,'er');
   } finally {
     if(btn){ btn.disabled=false; btn.textContent='💾 저장'; }
   }
+}
+
+// ★ 인보이스 발행 후 Schedule status 자동 갱신
+// 매칭 기준: 같은 Agency + 인보이스 항목의 TourCode가 Schedule.TourCode와 일치
+//           + Schedule의 StartDate~EndDate가 인보이스 기간과 겹침
+async function _updateSchedulesAfterInvoice(invNum, agency, rows, manualItems, periodFrom, periodTo){
+  if(!_schCache || !_schCache.length){
+    // Schedule 캐시 없으면 로드
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_schedule');
+      const j = await res.json();
+      if(j.ok && j.rows) _schCache = j.rows;
+    } catch(e){ return; }
+  }
+  if(!_schCache || !_schCache.length) return;
+
+  // 인보이스 항목에서 TourCode 추출
+  const invTourCodes = new Set();
+  rows.forEach(r => {
+    const tc = String(r.Tour_Code||'').trim();
+    if(tc) invTourCodes.add(tc.toUpperCase());
+  });
+  manualItems.forEach(m => {
+    const tc = String(m.tourcode || m.tourCode || '').trim();
+    if(tc) invTourCodes.add(tc.toUpperCase());
+  });
+
+  // 매칭되는 Schedule 찾기
+  const matchedSchedules = _schCache.filter(s => {
+    // Agency 일치
+    if(String(s.Agency||'').trim() !== agency.trim()) return false;
+    // 이미 invoiced/paid는 스킵 (덮어쓰기 방지)
+    const curStatus = String(s.Status||'scheduled').toLowerCase();
+    if(curStatus === 'invoiced' || curStatus === 'paid' || curStatus === 'cancelled') return false;
+    // TourCode 매칭
+    const sTc = String(s.TourCode||'').trim().toUpperCase();
+    if(invTourCodes.size > 0 && !invTourCodes.has(sTc)) {
+      // TourCode 불일치 → 기간 매칭 fallback
+      const sStart = (s.StartDate||'').slice(0,10);
+      const sEnd = (s.EndDate||'').slice(0,10) || sStart;
+      if(!sStart) return false;
+      // 기간 겹침 검사
+      if(sStart > periodTo || sEnd < periodFrom) return false;
+      // 기간 매칭은 너무 광범위할 수 있으니 수동 매칭만 적용
+      return false;
+    }
+    return true;
+  });
+
+  if(matchedSchedules.length === 0){
+    console.log('[Schedule Update] 매칭되는 일정 없음 (Agency:', agency, ', TourCodes:', [...invTourCodes].join(','), ')');
+    return;
+  }
+
+  console.log('[Schedule Update] 인보이스', invNum, '→', matchedSchedules.length, '개 일정 status: invoiced');
+  for(const sch of matchedSchedules){
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({
+          action: 'update_schedule_status',
+          tourId: sch.TourID,
+          status: 'invoiced',
+          invoiceId: invNum,
+          _user: getAdminUser()
+        })
+      });
+      const j = await res.json();
+      if(j.ok){
+        // 메모리 캐시도 즉시 업데이트
+        sch.Status = 'invoiced';
+        sch.InvoiceID = invNum;
+      }
+    } catch(e){ console.warn('[Schedule Update]', sch.TourID, '실패:', e); }
+  }
+  toast(`📅 ${matchedSchedules.length}개 일정이 발행 상태로 변경됨`, 'ok');
+}
+
+// ★ 수금 처리 후 Schedule status = paid 갱신
+// 조건: 인보이스 GrandTotal이 모두 수금됨 (Agency_Txn에서 InvoiceID별 CR 합산)
+async function _updateSchedulesAfterPayment(invoiceId, agency){
+  if(!invoiceId) return;
+  // 1. 해당 인보이스 정보 조회
+  const inv = (_invHistoryCache||[]).find(i => String(i.InvNumber||'').trim() === invoiceId);
+  if(!inv){
+    console.log('[Schedule Update] 인보이스 정보 없음:', invoiceId);
+    return;
+  }
+  const grandTotal = parseFloat(inv.GrandTotal||0)||0;
+  if(grandTotal <= 0) return;
+
+  // 2. Agency_Txn에서 같은 InvoiceID의 모든 CR 합산
+  const totalPaid = (_balAgencyTxns||[])
+    .filter(t => String(t.InvoiceID||'').trim() === invoiceId)
+    .reduce((sum, t) => sum + (parseFloat(t.CR||0)||0), 0);
+
+  // 3. 전액 수금됐는지 검사 (오차 1센트 허용)
+  if(totalPaid + 0.01 < grandTotal){
+    console.log('[Schedule Update] 부분 결제:', invoiceId, '$'+totalPaid.toFixed(2), '/', '$'+grandTotal.toFixed(2));
+    return;
+  }
+
+  // 4. Schedule 캐시 보장
+  if(!_schCache || !_schCache.length){
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_schedule');
+      const j = await res.json();
+      if(j.ok && j.rows) _schCache = j.rows;
+    } catch(e){ return; }
+  }
+
+  // 5. 매칭되는 Schedule 찾기 (InvoiceID 일치)
+  const matchedSchedules = (_schCache||[]).filter(s => {
+    if(String(s.InvoiceID||'').trim() !== invoiceId) return false;
+    const curStatus = String(s.Status||'').toLowerCase();
+    if(curStatus === 'paid' || curStatus === 'cancelled') return false;
+    return true;
+  });
+
+  if(matchedSchedules.length === 0){
+    console.log('[Schedule Update] 인보이스', invoiceId, '에 연결된 미결제 일정 없음');
+    return;
+  }
+
+  console.log('[Schedule Update] 결제 완료', invoiceId, '→', matchedSchedules.length, '개 일정 status: paid');
+  for(const sch of matchedSchedules){
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({
+          action: 'update_schedule_status',
+          tourId: sch.TourID,
+          status: 'paid',
+          _user: getAdminUser()
+        })
+      });
+      const j = await res.json();
+      if(j.ok){
+        sch.Status = 'paid';
+      }
+    } catch(e){ console.warn('[Schedule Update]', sch.TourID, '실패:', e); }
+  }
+  toast(`💰 ${matchedSchedules.length}개 일정이 결제 완료 상태로 변경됨`, 'ok');
 }
 
 // ─── 인보이스 이력 목록 ───
@@ -19385,6 +19708,7 @@ function openM(type,idx){
   }
   else if(type==='H'){
     h=`<div class="fr"><label class="fl">호텔명*</label><input class="fi" id="f0" value="${d.Hotel_Name||''}"></div>
+      <div class="fr"><label class="fl">짧은 이름 (캘린더 표시용)</label><input class="fi" id="f4" placeholder="예: ADGE, OAKS, MERITON" value="${d.Short_Name||''}"></div>
       <div class="fr"><label class="fl">전화번호</label><input class="fi" id="f1" value="${fixPhone(d.Phone)}"></div>
       <div class="fr"><label class="fl">주소</label><textarea class="fta" id="f2" style="min-height:55px">${d.Address||''}</textarea></div>
       <div class="fr"><label class="fl">Surcharge Area</label><div class="fsw"><select class="fs" id="f3">
@@ -19490,7 +19814,7 @@ function saveM(){
     if(!gv('f0')){toast('호텔명 필수','er');return}
     sheetName='M_Hotels';
     obj={_rowIndex:ie?(DB.H[idx]?._rowIndex||null):null,
-         Hotel_Name:gv('f0'),Phone:gv('f1'),Address:gv('f2'),Surcharge_Area:gv('f3')||''};
+         Hotel_Name:gv('f0'),Phone:gv('f1'),Address:gv('f2'),Surcharge_Area:gv('f3')||'',Short_Name:gv('f4')||''};
     ie?DB.H[idx]=obj:DB.H.push(obj);
   } else if(t==='T'){
     if(!gv('f0')){toast('트레일러 번호 필수','er');return}
