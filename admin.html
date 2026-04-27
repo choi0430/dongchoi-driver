@@ -4289,15 +4289,18 @@ function _schBuildDRMatchIndex(){
 // 슬롯과 매칭되는 DR 찾기 (있으면 OT, Time_Start, Time_End 등 사후 데이터 반환)
 function _schFindDRForSlot(date, slot){
   if(!_schDRMatchIndex) return null;
-  const rego = String(slot.rego||'').trim();
+  // ★ slot.rego/course에 emoji prefix(🏠/🏢/🚐 등)가 남아있으면 매칭 실패
+  // 데이터가 contaminated되어도 매칭은 정상 동작하도록 prefix 제거
+  const stripPrefix = s => String(s||'').replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
+  const rego = stripPrefix(slot.rego);
   if(!date || !rego) return null;
-  const att = String(slot.course||'').trim().toUpperCase();
+  const att = stripPrefix(slot.course).toUpperCase();
   // 1. 정확 매칭 (date + rego + course)
   if(att){
     const key = `${date}|${rego}|${att}`;
     if(_schDRMatchIndex[key]) return _schDRMatchIndex[key];
   }
-  // 2. fallback (date + rego만) — 단, 같은 날 같은 차량으로 여러 코스 운행 시 첫 매칭만
+  // 2. fallback (date + rego만)
   const fallbackKey = `${date}|${rego}|`;
   return _schDRMatchIndex[fallbackKey] || null;
 }
