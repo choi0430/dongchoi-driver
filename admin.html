@@ -6845,6 +6845,10 @@ async function deleteScheduleConfirm(){
 // ═══════════════════════════════════════════════════════════════════════════
 let _schCalMode = 'week';        // 'week' or 'month'
 let _schCalAnchor = new Date();  // 표시 중인 기준 날짜
+// ★ TourID별 색상 맵 — 글로벌로 유지하여 주가 바뀌어도 같은 색 사용
+const _schTourColorMap = {};
+let _schTourColorIdx = 0;
+const _schTourColors = ['#dbeafe','#fef3c7','#dcfce7','#fee2e2','#e0e7ff','#fce7f3','#cffafe','#fed7aa','#d9f99d','#f3e8ff'];
 // ★ 캘린더 표시 필터 — 어떤 일정을 보여줄지
 let _schFilters = (() => {
   try {
@@ -7652,16 +7656,15 @@ function renderScheduleCalendar(){
     </div>`;
   }
 
-  // 색상 (TourID 기준 — 같은 투어 = 같은 색)
-  const tourColors = ['#dbeafe','#fef3c7','#dcfce7','#fee2e2','#e0e7ff','#fce7f3','#cffafe','#fed7aa','#d9f99d','#f3e8ff'];
-  const tourColorMap = {};
-  let tCidx = 0;
+  // 색상 (TourID 기준 — 같은 투어 = 같은 색, 글로벌 유지)
+  // ★ 한 번 부여된 색은 페이지 새로고침 전까지 변경 안 됨
+  // 주가 바뀌거나 모드가 바뀌어도 같은 TourID는 같은 색
   function colorForTour(tid){
-    if(tourColorMap[tid] === undefined){
-      tourColorMap[tid] = tourColors[tCidx % tourColors.length];
-      tCidx++;
+    if(_schTourColorMap[tid] === undefined){
+      _schTourColorMap[tid] = _schTourColors[_schTourColorIdx % _schTourColors.length];
+      _schTourColorIdx++;
     }
-    return tourColorMap[tid];
+    return _schTourColorMap[tid];
   }
 
   // ★ 주 경계 끊김 방지 — 같은 TourID가 이전/다음 주에 이어지는지 검사
