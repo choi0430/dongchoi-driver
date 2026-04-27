@@ -7418,6 +7418,15 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     const isTrailer = !!day.trailer;
 
     // ★ 항공편 자동 채우기 (SUB 모드도 동일)
+    const _subFlightArriveTime = (time, type) => {
+      if(!time || !/^\d{2}:\d{2}$/.test(time)) return '';
+      const [h,m] = time.split(':').map(Number);
+      const totalMin = h*60 + m - (type === 'dom' ? 120 : 180);
+      if(totalMin < 0) return '';
+      const nh = Math.floor(totalMin/60), nm = totalMin%60;
+      return `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
+    };
+
     let subStartTime = slot.startTime || '';
     let subStartPlace = slot.startPlaceType === 'hotel' ? _schShortHotel(slot.startPlace) : (slot.startPlace || '');
     let subStartPlaceFull = slot.startPlace || '';
@@ -7428,17 +7437,19 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
       const fi = _schParseFlight(tour.FlightIn);
       if(fi.code){
-        subStartPlace = fi.code;
-        subStartPlaceFull = `${fi.code} ${fi.time||''}`.trim();
+        subStartPlace = `${fi.code} ${fi.time||''}`.trim();
+        subStartPlaceFull = `${fi.code} ${fi.time||''} (${fi.type==='dom'?'국내':'국제'})`.trim();
         if(!subStartTime && fi.time) subStartTime = fi.time;
       }
     }
     if(slot.endPlaceType === 'airport' && tour && tour.FlightOut){
       const fo = _schParseFlight(tour.FlightOut);
       if(fo.code){
-        subEndPlace = fo.code;
-        subEndPlaceFull = `${fo.code} ${fo.time||''}`.trim();
-        if(!subEndTime && fo.time) subEndTime = fo.time;
+        subEndPlace = `${fo.code} ${fo.time||''}`.trim();
+        subEndPlaceFull = `${fo.code} ${fo.time||''} (${fo.type==='dom'?'국내':'국제'})`.trim();
+        if(!subEndTime && fo.time){
+          subEndTime = _subFlightArriveTime(fo.time, fo.type) || fo.time;
+        }
       }
     }
 
@@ -7491,6 +7502,17 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   const isTrailer = !!day.trailer;
 
   // ★ 항공편 자동 채우기: 슬롯 끝점이 공항이면 FlightIn/Out에서 코드/시간 가져오기
+  // 도착(공항 가는 방향): 시간 = 항공편 시간 - 3시간(국제선) / -2시간(국내선)
+  // 출발(공항에서 오는 방향): 시간 = 항공편 시간 그대로
+  const _flightArriveTime = (time, type) => {
+    if(!time || !/^\d{2}:\d{2}$/.test(time)) return '';
+    const [h,m] = time.split(':').map(Number);
+    const totalMin = h*60 + m - (type === 'dom' ? 120 : 180);
+    if(totalMin < 0) return '';
+    const nh = Math.floor(totalMin/60), nm = totalMin%60;
+    return `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
+  };
+
   let dcStartTime = slot.startTime || '';
   let dcStartPlace = slot.startPlaceType === 'hotel' ? _schShortHotel(slot.startPlace) : (slot.startPlace || '');
   let dcStartPlaceFull = slot.startPlace || '';
@@ -7501,17 +7523,20 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
     const fi = _schParseFlight(tour.FlightIn);
     if(fi.code){
-      dcStartPlace = fi.code;
-      dcStartPlaceFull = `${fi.code} ${fi.time||''}`.trim();
+      dcStartPlace = `${fi.code} ${fi.time||''}`.trim();
+      dcStartPlaceFull = `${fi.code} ${fi.time||''} (${fi.type==='dom'?'국내':'국제'})`.trim();
       if(!dcStartTime && fi.time) dcStartTime = fi.time;
     }
   }
   if(slot.endPlaceType === 'airport' && tour && tour.FlightOut){
     const fo = _schParseFlight(tour.FlightOut);
     if(fo.code){
-      dcEndPlace = fo.code;
-      dcEndPlaceFull = `${fo.code} ${fo.time||''}`.trim();
-      if(!dcEndTime && fo.time) dcEndTime = fo.time;
+      dcEndPlace = `${fo.code} ${fo.time||''}`.trim();
+      dcEndPlaceFull = `${fo.code} ${fo.time||''} (${fo.type==='dom'?'국내':'국제'})`.trim();
+      // 공항으로 가는 도착 시간 = 항공편 시간 - 3시간(국제) / -2시간(국내)
+      if(!dcEndTime && fo.time){
+        dcEndTime = _flightArriveTime(fo.time, fo.type) || fo.time;
+      }
     }
   }
 
