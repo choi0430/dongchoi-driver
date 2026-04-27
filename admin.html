@@ -5297,7 +5297,17 @@ function _smRebuildDays(){
         // 자유 입력 동기화 (검색 input 이벤트)
         const subCoInp = _schDayCsels['subco-'+cellPrefix].input;
         if(subCoInp){
-          subCoInp.addEventListener('input', () => { _schDays[i].slots[k].subCompany = subCoInp.value; });
+          subCoInp.addEventListener('input', () => {
+            _schDays[i].slots[k].subCompany = subCoInp.value;
+          });
+          // ★ blur 시 안전장치 — 매칭 안 된 자유 입력도 저장
+          subCoInp.addEventListener('blur', () => {
+            const v = subCoInp.value.trim();
+            if(v && _schDays[i].slots[k].subCompany !== v){
+              _schDays[i].slots[k].subCompany = v;
+              console.log('[SubCompany Blur 강제 저장]', cellPrefix, '→', v);
+            }
+          });
         }
 
         // 서브 드라이버: M_Drivers에서 그 SubCo Owner인 드라이버 + 자유 입력
@@ -5350,7 +5360,20 @@ function _smRebuildDays(){
         if(d.slots[k].subDriver) _schDayCsels['subdrv-'+cellPrefix].setValue(d.slots[k].subDriver);
         const subDrvInp = _schDayCsels['subdrv-'+cellPrefix].input;
         if(subDrvInp){
-          subDrvInp.addEventListener('input', () => { _schDays[i].slots[k].subDriver = subDrvInp.value; });
+          // ★ 자유 입력 동기화 — 키 입력될 때마다 데이터에 저장
+          subDrvInp.addEventListener('input', () => {
+            const v = subDrvInp.value;
+            _schDays[i].slots[k].subDriver = v;
+            console.log('[SubDriver Input]', cellPrefix, '→', v);
+          });
+          // ★ blur 시에도 강제 저장 (마지막 안전장치)
+          subDrvInp.addEventListener('blur', () => {
+            const v = subDrvInp.value.trim();
+            if(v && _schDays[i].slots[k].subDriver !== v){
+              _schDays[i].slots[k].subDriver = v;
+              console.log('[SubDriver Blur 강제 저장]', cellPrefix, '→', v);
+            }
+          });
         }
       }
       // 코스 (자유 입력 가능)
@@ -5977,6 +6000,57 @@ async function saveScheduleData(){
   if(!data.StartDate) return showErr('시작일을 입력하세요');
   if(!data.EndDate)   return showErr('종료일을 입력하세요');
   if(data.EndDate < data.StartDate) return showErr('종료일은 시작일보다 빠를 수 없습니다');
+
+  // ★ 저장 직전 안전망: 모든 csel input의 현재 값을 _schDays에 강제 동기화
+  // 이유: 일부 브라우저/iOS 환경에서 input 이벤트가 누락될 수 있어 마지막 상태 강제 반영
+  try {
+    _schDays.forEach((d, di) => {
+      ['morning','fullday','evening'].forEach(sk => {
+        const slot = d.slots && d.slots[sk];
+        if(!slot) return;
+        const prefix = di + '-' + sk;
+        // 자사 모드
+        if(slot.mode !== 'sub'){
+          ['driver','rego','course','startPlace','endPlace'].forEach(field => {
+            const csel = _schDayCsels[field+'-'+prefix];
+            if(csel && csel.input){
+              const v = csel.input.value.trim();
+              if(v && slot[field] !== v) slot[field] = v;
+            }
+          });
+        } else {
+          // 서브 모드 — 자유 입력 필드들 강제 동기화
+          ['subCompany','subDriver','subVehicleNote','course','startPlace','endPlace'].forEach(field => {
+            const cselKey = field === 'subCompany' ? 'subco' :
+                            field === 'subDriver' ? 'subdrv' :
+                            field === 'subVehicleNote' ? 'subveh' : field;
+            const csel = _schDayCsels[cselKey+'-'+prefix];
+            if(csel && csel.input){
+              const v = csel.input.value.trim();
+              if(v && slot[field] !== v) slot[field] = v;
+            }
+          });
+          // 서브 드라이버 전화번호도 input에서 직접 (csel 아닐 수 있음)
+          const phInp = document.getElementById('slot-subdrvphone-'+prefix);
+          if(phInp){
+            const v = phInp.value.trim();
+            if(v && slot.subDriverPhone !== v) slot.subDriverPhone = v;
+          }
+        }
+        // 시작/종료 시간 (자사/서브 공통)
+        ['startTime','endTime'].forEach(field => {
+          const inp = document.getElementById('slot-'+field+'-'+prefix);
+          if(inp){
+            const v = inp.value.trim();
+            if(v && slot[field] !== v) slot[field] = v;
+          }
+        });
+      });
+    });
+    // TourPlan을 다시 JSON 직렬화 (강제 동기화된 값 반영)
+    data.TourPlan = JSON.stringify(_schDays);
+    console.log('[Schedule Save] 저장 직전 강제 동기화 완료');
+  } catch(e){ console.warn('저장 직전 동기화 오류:', e); }
 
   // ★ 충돌 검사 — 같은 차량/드라이버/가이드가 같은 시간대에 다른 일정에 이미 있는지
   const conflicts = [];
