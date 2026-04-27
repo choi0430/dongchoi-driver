@@ -4314,7 +4314,9 @@ function _schFindDRForSlot(date, slot){
   // ★ slot.rego/course에 emoji prefix(🏠/🏢/🚐 등)가 남아있으면 매칭 실패
   // 데이터가 contaminated되어도 매칭은 정상 동작하도록 prefix 제거
   const stripPrefix = s => String(s||'').replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
-  const rego = stripPrefix(slot.rego);
+  // ★ DC 슬롯은 slot.rego, SUB 슬롯은 slot.subVehicleNote를 Rego로 사용
+  // (SUB 차량도 M_Vehicles에 등록되어 있고 동일 Rego로 DR 작성됨)
+  const rego = stripPrefix(slot.mode === 'sub' ? slot.subVehicleNote : slot.rego);
   if(!date || !rego) return null;
   const att = stripPrefix(slot.course).toUpperCase();
   // 1. 정확 매칭 (date + rego + course)
@@ -4357,8 +4359,12 @@ function showDRDiagnostics(tourId){
       const s = d.slots && d.slots[k];
       if(!s || _schIsSlotEmpty(s)) return;
       const slotLabel = k==='morning'?'AM':k==='fullday'?'풀데이':'PM';
-      // sub 모드는 스킵 (자사 운행만 DR 매칭)
-      if(s.mode === 'sub') {
+      const isPast = d.date < today;
+      const dr = _schFindDRForSlot(d.date, s);
+      // ★ prefix 제거 후 비교 (slot 데이터에 emoji prefix가 남아있을 수 있음)
+      const stripPrefix = str => String(str||'').replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
+      // ★ SUB 모드 + DR 매칭 안 됨 = 외주 (DR 매칭 대상 아님)
+      if(s.mode === 'sub' && !dr) {
         slotDiagnostics.push({
           date: d.date, slot: slotLabel, status: 'sub', icon: '🏢',
           color: '#6b7280', bg: '#f3f4f6',
@@ -4367,14 +4373,12 @@ function showDRDiagnostics(tourId){
         });
         return;
       }
-      const isPast = d.date < today;
-      const dr = _schFindDRForSlot(d.date, s);
-      // ★ prefix 제거 후 비교 (slot 데이터에 emoji prefix가 남아있을 수 있음)
-      const stripPrefix = str => String(str||'').replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
       if(dr){
         // 매칭됨 — 차이점 분석 (prefix 제거 후 비교)
+        const isSubMatched = s.mode === 'sub';
         const diffs = [];
-        const slotDriver = stripPrefix(s.driver);
+        // SUB 매칭 시 driver 비교 대상은 subDriver
+        const slotDriver = stripPrefix(isSubMatched ? s.subDriver : s.driver);
         const drDriver = stripPrefix(dr.Driver);
         if(slotDriver && slotDriver !== drDriver) diffs.push(`드라이버: 일정="${slotDriver}" → DR="${drDriver}"`);
         const slotCourse = stripPrefix(s.course);
@@ -4383,10 +4387,11 @@ function showDRDiagnostics(tourId){
           diffs.push(`코스: 일정="${slotCourse}" → DR="${drCourse||'-'}"`);
         const ot = parseFloat(dr.OT||0);
         const otStr = ot > 0 ? ` · OT ${ot}HR` : '';
+        const subTag = isSubMatched ? ' (외주, 자사 DR 제출)' : '';
         slotDiagnostics.push({
-          date: d.date, slot: slotLabel, status: 'matched', icon: '✅',
+          date: d.date, slot: slotLabel, status: 'matched', icon: isSubMatched ? '🏢✅' : '✅',
           color: '#166534', bg: '#dcfce7',
-          msg: diffs.length ? `매칭됨${otStr} — ⚠ 차이: ${diffs.join(', ')}` : `매칭됨${otStr}`,
+          msg: diffs.length ? `매칭됨${subTag}${otStr} — ⚠ 차이: ${diffs.join(', ')}` : `매칭됨${subTag}${otStr}`,
           slotData: s, dr: dr
         });
       } else if(!isPast){
@@ -4621,16 +4626,16 @@ function renderScheduleList(){
           if(reg) dcRegosSet.add(reg);
         }
         totalSlots++;
-        // SUB 슬롯은 DR 매칭 대상 아님
-        if(s.mode === 'sub'){
-          totalSlots--; // SUB는 DR 매칭 카운트에서 제외
-          return;
-        }
+        // ★ SUB 슬롯도 자사 차량(subVehicleNote가 M_Vehicles에 있음) + 동일 TourCode로 DR 작성되면 매칭 시도
+        // 매칭 안 되면 단순히 totalSlots에서 제외 (외주는 DR 의무 없음)
         const dr = _schFindDRForSlot(d.date, s);
         if(dr){
           matchedSlots++;
           const ot = parseFloat(dr.OT||0);
           if(ot > 0) totalActualOT += ot;
+        } else if(s.mode === 'sub'){
+          // SUB이면서 DR도 없으면 카운트에서 제외 (DR 작성 의무 없는 외주)
+          totalSlots--;
         } else if(d.date < today && (s.driver || s.rego)){
           pastUnmatchedCount++;
         }
