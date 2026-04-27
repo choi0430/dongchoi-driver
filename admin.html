@@ -6608,6 +6608,118 @@ function schCalToday(){
   renderScheduleCalendar();
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 캘린더 슬롯 인터랙션 — hover 툴팁 + 단일 클릭 확대 보기
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _schHoverTimer = null;
+let _schSlotClickTimer = null;
+
+// hover 툴팁: 마우스 올리면 0.3초 후 풀 정보 표시
+function _schSlotHoverShow(el, tourId, dateISO, slotKey){
+  clearTimeout(_schHoverTimer);
+  _schHoverTimer = setTimeout(() => {
+    _schSlotHoverHide();
+    const info = _schGetSlotInfo(tourId, dateISO, slotKey);
+    if(!info) return;
+    const tip = document.createElement('div');
+    tip.id = 'sch-hover-tip';
+    tip.style.cssText = 'position:fixed;z-index:99999;background:#1f2937;color:#fff;padding:10px 14px;border-radius:10px;font-size:12px;font-family:var(--fd);pointer-events:none;max-width:340px;box-shadow:0 8px 24px rgba(0,0,0,.4);line-height:1.5;';
+    tip.innerHTML = info.html;
+    document.body.appendChild(tip);
+    // 위치 — 셀 위쪽 또는 아래쪽
+    const rect = el.getBoundingClientRect();
+    const tipRect = tip.getBoundingClientRect();
+    let left = rect.left + rect.width/2 - tipRect.width/2;
+    if(left < 8) left = 8;
+    if(left + tipRect.width > window.innerWidth - 8) left = window.innerWidth - tipRect.width - 8;
+    let top = rect.top - tipRect.height - 10;
+    if(top < 8) top = rect.bottom + 10;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+  }, 300);
+}
+
+function _schSlotHoverHide(){
+  clearTimeout(_schHoverTimer);
+  const tip = document.getElementById('sch-hover-tip');
+  if(tip) tip.remove();
+}
+
+// 슬롯 정보 추출 — 풀 정보 HTML 반환
+function _schGetSlotInfo(tourId, dateISO, slotKey){
+  const tour = (_schCache||[]).find(t => t.TourID === tourId);
+  if(!tour) return null;
+  const days = _schParseDays(tour.TourPlan);
+  const day = days.find(d => d.date === dateISO) || days[0];
+  if(!day) return null;
+  const slot = day.slots ? day.slots[slotKey] : null;
+  const isSubMode = slot && slot.mode === 'sub';
+
+  // HTML 빌드
+  const lines = [];
+  // 헤더 (Agency + TourCode)
+  lines.push(`<div style="font-weight:800;font-size:13px;margin-bottom:4px;color:#fbbf24;">${escH(tour.Agency||'')} · ${escH(tour.TourCode||tour.TourID)}</div>`);
+  if(tour.Guide) lines.push(`<div style="font-size:11px;color:#d1d5db;margin-bottom:6px;">🧑 ${escH(tour.Guide)}${tour.GuidePhone?' · '+escH(tour.GuidePhone):''}${tour.Pax?' · '+tour.Pax+'명':''}${tour.Seats?'/'+escH(tour.Seats):''}</div>`);
+  // 슬롯 정보
+  if(slot){
+    const slotLabel = slotKey==='morning'?'AM':slotKey==='fullday'?'풀데이':'PM';
+    lines.push(`<div style="border-top:1px solid #374151;padding-top:6px;margin-top:4px;">`);
+    lines.push(`<div style="font-size:10px;color:#9ca3af;margin-bottom:4px;">📅 ${escH(dateISO)} · ${slotLabel}${isSubMode?' · 🏢 SUB':' · 🏠 자사'}</div>`);
+    if(slot.startTime || slot.startPlace) lines.push(`<div>🕐 시작: ${escH(slot.startTime||'-')} ${escH(slot.startPlace||'')}</div>`);
+    if(slot.endTime || slot.endPlace)     lines.push(`<div>🕓 도착: ${escH(slot.endTime||'-')} ${escH(slot.endPlace||'')}</div>`);
+    if(slot.course)                       lines.push(`<div>🗺 코스: ${escH(slot.course)}</div>`);
+    if(isSubMode){
+      if(slot.subCompany) lines.push(`<div>🏢 업체: ${escH(slot.subCompany)}</div>`);
+      if(slot.subVehicleNote) lines.push(`<div>🚐 차량: ${escH(slot.subVehicleNote)}</div>`);
+      if(slot.subDriver) lines.push(`<div>👤 드라이버: ${escH(slot.subDriver)}${slot.subDriverPhone?' · '+escH(slot.subDriverPhone):''}</div>`);
+    } else {
+      if(slot.rego) lines.push(`<div>🚐 차량: ${escH(slot.rego)}</div>`);
+      if(slot.driver) lines.push(`<div>👤 드라이버: ${escH(slot.driver)}</div>`);
+    }
+    lines.push(`</div>`);
+  }
+  if(day.hotel) lines.push(`<div style="font-size:10px;color:#9ca3af;margin-top:6px;">🏨 호텔: ${escH(day.hotel)}</div>`);
+  if(day.trailer) lines.push(`<div style="font-size:10px;color:#fca5a5;margin-top:2px;">🚚 트레일러 사용</div>`);
+  // 도움말
+  lines.push(`<div style="font-size:9px;color:#6b7280;margin-top:8px;border-top:1px solid #374151;padding-top:4px;">클릭: 확대 보기 · 더블클릭: 수정</div>`);
+
+  return { html: lines.join('') };
+}
+
+// 단일 클릭 = 확대 보기 모달 (더블클릭 검출 위해 약간 딜레이)
+function _schSlotPreview(tourId, dateISO, slotKey){
+  // 더블클릭이 곧 올 수 있으니 200ms 대기 — 더블클릭이면 cancel 후 수정 모달
+  if(_schSlotClickTimer){
+    clearTimeout(_schSlotClickTimer);
+    _schSlotClickTimer = null;
+    return; // 더블클릭은 ondblclick 핸들러가 처리
+  }
+  _schSlotClickTimer = setTimeout(() => {
+    _schSlotClickTimer = null;
+    _schSlotHoverHide();
+    const info = _schGetSlotInfo(tourId, dateISO, slotKey);
+    if(!info) return;
+    // 모달 생성
+    let modal = document.getElementById('sch-preview-modal');
+    if(!modal){
+      modal = document.createElement('div');
+      modal.id = 'sch-preview-modal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9200;display:flex;align-items:center;justify-content:center;padding:16px;';
+      modal.onclick = () => modal.style.display = 'none';
+      document.body.appendChild(modal);
+    }
+    modal.innerHTML = `<div style="background:var(--sf);border-radius:14px;padding:16px 18px;max-width:380px;width:100%;font-family:var(--fd);" onclick="event.stopPropagation()">
+      <div style="margin-bottom:10px;">${info.html}</div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button onclick="document.getElementById('sch-preview-modal').style.display='none'" style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--b2);background:var(--sf2);font-size:12px;font-weight:700;cursor:pointer;">닫기</button>
+        <button onclick="document.getElementById('sch-preview-modal').style.display='none';openScheduleModal('${escH(tourId)}','${escH(dateISO)}','${escH(slotKey)}')" style="flex:1;padding:8px 12px;border-radius:8px;border:none;background:var(--ac);color:white;font-size:12px;font-weight:700;cursor:pointer;">📝 수정</button>
+      </div>
+    </div>`;
+    modal.style.display = 'flex';
+  }, 200);
+}
+
 // 일별 데이터 추출 — _schCache에서 모든 일정의 일별 정보를 평탄화
 function _schGetAllDays(){
   // [{date, tour, day}] — 슬롯 인식 가능
@@ -7278,23 +7390,21 @@ function renderScheduleCalendar(){
           const slotEdgeCls = (isSlotLeft?' tour-slot-left':'') + (isSlotRight?' tour-slot-right':'');
           const cls = `sch-slot-cell ${isInv?'invoiced':''}${slotEdgeCls}`;
           // 페어 셀에서 좌/우 끝 마커는 첫 칸/마지막 칸에 적용
-          const onclick = `onclick="event.stopPropagation();openScheduleModal('${escH(item.tour.TourID)}','${escH(ds)}','${escH(slotKey)}')"`;
+          // ★ 단일 클릭 = 확대 보기 / 더블 클릭 = 수정 / hover = 툴팁
+          //   touch 환경에서는 단일 탭 = 확대, 확대 화면에서 [수정] 버튼으로 수정
+          const onclick = `onclick="event.stopPropagation();_schSlotPreview('${escH(item.tour.TourID)}','${escH(ds)}','${escH(slotKey)}')" ondblclick="event.stopPropagation();openScheduleModal('${escH(item.tour.TourID)}','${escH(ds)}','${escH(slotKey)}')" onmouseenter="_schSlotHoverShow(this,'${escH(item.tour.TourID)}','${escH(ds)}','${escH(slotKey)}')" onmouseleave="_schSlotHoverHide()"`;
           const baseTitle = `${escH(item.tour.Agency)} · ${escH(item.tour.TourCode||item.tour.TourID)}`;
-          const title = `title="${baseTitle}"`;
+          const title = ``; // 기본 title 제거 (커스텀 hover 툴팁 사용)
           // 페어인 경우 첫 칸에 left 마커, 둘째 칸에 right 마커
           const cellLeft = (txt, sur) => `<div class="${cls}${!txt?' pending':''}${isSlotLeft?' edge-l':''}${sur?' surcharge':''}" style="background:${bg};" ${onclick} ${title}>${escH(txt) || '·'}</div>`;
           const cellRight = (txt, sur) => `<div class="${cls}${!txt?' pending':''}${isSlotRight?' edge-r':''}${sur?' surcharge':''}" style="background:${bg};" ${onclick} ${title}>${escH(txt) || '·'}</div>`;
           const wideCell = (txt, sur) => `<div class="${cls} wide${!txt?' pending':''}${isSlotLeft?' edge-l':''}${isSlotRight?' edge-r':''}${sur?' surcharge':''}" style="background:${bg};" ${onclick} ${title}>${escH(txt) || '·'}</div>`;
-          // 호텔 등 단축된 텍스트의 경우 title에 풀네임 추가
+          // 호텔 등 단축된 텍스트의 경우 title에 풀네임 추가 (이제 hover 툴팁이 대체)
           const cellLeftFull = (txt, fullTxt, sur) => {
-            const titleTxt = fullTxt && fullTxt !== txt ? `${baseTitle} · ${fullTxt}` : baseTitle;
-            const t = `title="${escH(titleTxt)}"`;
-            return `<div class="${cls}${!txt?' pending':''}${isSlotLeft?' edge-l':''}${sur?' surcharge':''}" style="background:${bg};" ${onclick} ${t}>${escH(txt) || '·'}</div>`;
+            return `<div class="${cls}${!txt?' pending':''}${isSlotLeft?' edge-l':''}${sur?' surcharge':''}" style="background:${bg};" ${onclick}>${escH(txt) || '·'}</div>`;
           };
           const cellRightFull = (txt, fullTxt, sur) => {
-            const titleTxt = fullTxt && fullTxt !== txt ? `${baseTitle} · ${fullTxt}` : baseTitle;
-            const t = `title="${escH(titleTxt)}"`;
-            return `<div class="${cls}${!txt?' pending':''}${isSlotRight?' edge-r':''}${sur?' surcharge':''}" style="background:${bg};" ${onclick} ${t}>${escH(txt) || '·'}</div>`;
+            return `<div class="${cls}${!txt?' pending':''}${isSlotRight?' edge-r':''}${sur?' surcharge':''}" style="background:${bg};" ${onclick}>${escH(txt) || '·'}</div>`;
           };
           switch(rowName){
             case 'startPair': inner += cellLeft(r.startTime, r.surchargeStartTime) + cellRightFull(r.startPlace, r.startPlaceFull, r.surchargeStartPlace); break;
