@@ -1444,6 +1444,17 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 리포트 미리보기 -->
   <div id="inv-preview" style="padding:0 14px 14px"></div>
 
+  <!-- 📝 드래프트 인보이스 (자동 생성 / 검토 대기) -->
+  <div style="padding:0 14px 14px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:12px;font-weight:800;color:var(--t1);letter-spacing:.3px;">📝 드래프트 인보이스 <span id="inv-draft-count" style="background:#f97316;color:white;padding:1px 7px;border-radius:10px;font-size:10px;margin-left:4px;display:none;"></span></div>
+      <button class="btn-refresh" onclick="withRefreshSpin(this,()=>generateDraftInvoices(true))"><span class="refresh-icon">🔄</span> 드래프트 자동 생성</button>
+    </div>
+    <div id="inv-draft-list" style="max-height:400px;overflow-y:auto;">
+      <div style="text-align:center;padding:16px;color:var(--t3);font-size:12px;">'드래프트 자동 생성' 클릭 → 일정이 끝난 TourCode별 인보이스 초안 생성</div>
+    </div>
+  </div>
+
   <!-- 인보이스 발행 이력 -->
   <div style="padding:0 14px 14px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
@@ -3183,12 +3194,10 @@ function rDash(){
   try {
     if(_drCache && _drCache.length){
       const today = new Date();
-      const thisMonthFirst = new Date(today.getFullYear(), today.getMonth(), 1);
       const lastMonthFirst = new Date(today.getFullYear(), today.getMonth()-1, 1);
       const cutoffISO = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
       const lastMonthCutoff = cutoffISO(lastMonthFirst);
 
-      // Agency_Txn에서 invoice 타입 거래 → 발행된 인보이스의 (Agency, TourCode, StartDate~FinishDate) 키
       const issuedKeys = new Set();
       (_balAgencyTxns||[]).forEach(t => {
         if(String(t.Type||'').trim() !== 'invoice') return;
@@ -3210,6 +3219,29 @@ function rDash(){
       });
 
       if(uninvoiced.length > 0){
+        // (Agency, TourCode) 단위로 그룹핑 — 인보이스 발행 단위 기준
+        const tcGroups = new Set();
+        uninvoiced.forEach(r => {
+          const ag = String(r.Agency||'').trim().toUpperCase();
+          const tc = String(r.Tour_Code||'').trim().toUpperCase();
+          tcGroups.add(`${ag}|${tc}`);
+        });
+
+        // 종료된 일정인지 검사 (Schedule.EndDate < today)
+        const todayISO = cutoffISO(today);
+        let endedTourCount = 0;
+        if(_schCache){
+          _schCache.forEach(s => {
+            const status = String(s.Status||'').toLowerCase();
+            if(status === 'invoiced' || status === 'paid' || status === 'cancelled') return;
+            const endDate = String(s.EndDate||s.StartDate||'').slice(0,10);
+            if(!endDate || endDate >= todayISO) return;
+            const ag = String(s.Agency||'').trim().toUpperCase();
+            const tc = String(s.TourCode||'').trim().toUpperCase();
+            if(tcGroups.has(`${ag}|${tc}`)) endedTourCount++;
+          });
+        }
+
         const byAg = {};
         uninvoiced.forEach(r => {
           const ag = String(r.Agency||'').trim();
@@ -3218,10 +3250,11 @@ function rDash(){
         });
         const agStr = Object.entries(byAg).slice(0, 3).map(([a,c])=>`${a} ${c}건`).join(', ');
         const moreStr = Object.keys(byAg).length > 3 ? ` 외 ${Object.keys(byAg).length-3}곳` : '';
+        const drftMsg = endedTourCount > 0 ? ` <b style="color:#dc2626">(종료된 ${endedTourCount}건)</b>` : '';
         als.push({sort:-7500,type:'uninvoiced',
           bg:'#fff7ed',bc:'#f97316',fc:'#c2410c',
           icon:'📋',
-          m:`인보이스 미발행 운행: <b>${uninvoiced.length}건</b> (${agStr}${moreStr}) <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinv','ninv');initInvoice()">발행하기 →</span>`});
+          m:`인보이스 미발행 운행: <b>${uninvoiced.length}건</b>${drftMsg} (${agStr}${moreStr}) <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinv','ninv');initInvoice();setTimeout(()=>generateDraftInvoices(true),500)">드래프트 생성 →</span>`});
       }
     }
   } catch(e){ console.warn('uninvoiced alert err:', e); }
@@ -15569,6 +15602,202 @@ function _normInvDate(d) {
   }
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   return s;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📝 드래프트 인보이스 자동 생성 시스템
+// ═══════════════════════════════════════════════════════════════════════════
+// 워크플로우:
+// 1. 종료된 일정 (EndDate < 오늘, Status: scheduled/in_progress/completed) 검출
+// 2. TourCode별로 그룹핑
+// 3. Daily_Report에서 해당 TourCode + Agency의 운행 매칭
+// 4. 인보이스 항목 자동 계산 (호텔/Early/OT 등)
+// 5. Invoices 시트에 Status='draft'로 저장
+// 6. 인보이스 페이지에 검토 대기 목록 표시
+
+async function generateDraftInvoices(force=false){
+  const draftList = document.getElementById('inv-draft-list');
+  const countBadge = document.getElementById('inv-draft-count');
+  if(!draftList) return;
+
+  draftList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);font-size:12px;">⏳ 종료된 일정 검색 중...</div>';
+
+  try {
+    // 1. Schedule 캐시 보장
+    if(!_schCache || !_schCache.length){
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_schedule');
+      const j = await res.json();
+      if(j.ok && j.rows) _schCache = j.rows;
+    }
+    if(!_schCache || !_schCache.length){
+      draftList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);font-size:12px;">일정이 없습니다.</div>';
+      return;
+    }
+
+    // 2. DR 캐시 보장
+    if(!_drCache){
+      try {
+        const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+        const j = await res.json();
+        if(j.ok && j.rows) _drCache = j.rows.map((r,i)=>({...r, _rowIndex:i+2}));
+      } catch(e){}
+    }
+
+    // 3. 인보이스 이력 보장
+    if(!_invHistoryCache){
+      try {
+        const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+        const j = await res.json();
+        if(j.ok && j.rows) _invHistoryCache = (j.rows||[]).reverse();
+      } catch(e){}
+    }
+
+    // 4. 발행된 인보이스의 (Agency, TourCode) 키 추출 — 중복 생성 방지
+    const issuedKeys = new Set();
+    (_invHistoryCache||[]).forEach(inv => {
+      const status = String(inv.Status||'').toLowerCase();
+      if(status === 'cancelled' || status === 'void') return;
+      // draft도 isssued도 모두 발행된 것으로 간주 (중복 드래프트 안 만듦)
+      try {
+        const items = JSON.parse(inv.Items || '[]');
+        const ag = String(inv.Agency||'').trim().toUpperCase();
+        items.forEach(it => {
+          const tc = String(it.tourcode || it.tour_code || it.Tour_Code || '').trim().toUpperCase();
+          if(ag && tc) issuedKeys.add(`${ag}|${tc}`);
+        });
+      } catch(e){}
+    });
+
+    // 5. 종료된 일정 검출 (오늘 기준)
+    const todayISO = new Date().toISOString().slice(0,10);
+    const endedSchedules = _schCache.filter(s => {
+      const status = String(s.Status||'scheduled').toLowerCase();
+      // 이미 발행/결제된 일정은 제외
+      if(status === 'invoiced' || status === 'paid' || status === 'cancelled') return false;
+      const endDate = String(s.EndDate||'').slice(0,10) || String(s.StartDate||'').slice(0,10);
+      if(!endDate || endDate >= todayISO) return false; // 아직 안 끝남
+      // (Agency, TourCode)가 이미 발행됐으면 제외
+      const ag = String(s.Agency||'').trim().toUpperCase();
+      const tc = String(s.TourCode||'').trim().toUpperCase();
+      if(!ag || !tc) return false;
+      if(issuedKeys.has(`${ag}|${tc}`)) return false;
+      return true;
+    });
+
+    if(endedSchedules.length === 0){
+      draftList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--gn);font-size:12px;">✅ 모든 종료된 일정이 발행됨 (드래프트 필요 없음)</div>';
+      if(countBadge) countBadge.style.display = 'none';
+      return;
+    }
+
+    // 6. (Agency, TourCode) 단위로 그룹핑 — 같은 시리즈는 한 인보이스
+    const draftGroups = {}; // key: "Agency|TourCode" → {agency, tourCode, schedules:[], drs:[]}
+    endedSchedules.forEach(s => {
+      const ag = String(s.Agency||'').trim();
+      const tc = String(s.TourCode||'').trim();
+      const key = `${ag.toUpperCase()}|${tc.toUpperCase()}`;
+      if(!draftGroups[key]){
+        draftGroups[key] = {agency: ag, tourCode: tc, schedules: [], drs: []};
+      }
+      draftGroups[key].schedules.push(s);
+    });
+
+    // 7. 각 그룹에 매칭되는 Daily_Report 찾기
+    Object.values(draftGroups).forEach(grp => {
+      if(!_drCache) return;
+      grp.drs = _drCache.filter(r => {
+        if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return false;
+        const ag = String(r.Agency||'').trim().toUpperCase();
+        const tc = String(r.Tour_Code||'').trim().toUpperCase();
+        return ag === grp.agency.toUpperCase() && tc === grp.tourCode.toUpperCase();
+      });
+    });
+
+    // 8. UI 렌더 — 드래프트 후보 목록
+    _draftCandidates = Object.values(draftGroups);
+    renderDraftCandidates();
+
+  } catch(e){
+    console.error('generateDraftInvoices error:', e);
+    draftList.innerHTML = `<div style="text-align:center;padding:16px;color:var(--rd);font-size:12px;">오류: ${escH(e.message)}</div>`;
+  }
+}
+
+let _draftCandidates = [];
+
+function renderDraftCandidates(){
+  const draftList = document.getElementById('inv-draft-list');
+  const countBadge = document.getElementById('inv-draft-count');
+  if(!draftList) return;
+
+  if(_draftCandidates.length === 0){
+    draftList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--gn);font-size:12px;">✅ 드래프트 필요 없음</div>';
+    if(countBadge) countBadge.style.display = 'none';
+    return;
+  }
+
+  if(countBadge){
+    countBadge.textContent = _draftCandidates.length;
+    countBadge.style.display = 'inline-block';
+  }
+
+  draftList.innerHTML = _draftCandidates.map((g, idx) => {
+    const startDate = g.schedules.map(s => String(s.StartDate||'').slice(0,10)).filter(Boolean).sort()[0] || '';
+    const endDate = g.schedules.map(s => String(s.EndDate||s.StartDate||'').slice(0,10)).filter(Boolean).sort().reverse()[0] || '';
+    const guide = g.schedules[0]?.Guide || '';
+    const drCount = g.drs.length;
+    const period = startDate && endDate ? (startDate === endDate ? startDate : `${startDate} ~ ${endDate}`) : '날짜 없음';
+    return `
+    <div style="background:var(--sf2);border:1px solid var(--b1);border-left:4px solid #f97316;border-radius:10px;padding:10px 12px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:800;font-size:13px;color:var(--t1);">${escH(g.agency)}</div>
+          <div style="font-size:11px;color:var(--t2);margin-top:2px;"><b>${escH(g.tourCode)}</b> · ${escH(period)}${guide?` · 가이드: ${escH(guide)}`:''}</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:3px;">📋 매칭된 운행: <b>${drCount}건</b>${drCount===0?' <span style="color:var(--rd);">⚠️ 매칭 없음</span>':''}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <button onclick="openDraftEditor(${idx})" style="background:#f97316;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;" ${drCount===0?'disabled':''}>📝 검토</button>
+          <button onclick="dismissDraft(${idx})" style="background:transparent;color:var(--t3);border:1px solid var(--b2);border-radius:8px;padding:4px 10px;font-size:10px;cursor:pointer;">건너뛰기</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// 드래프트 검토 → 인보이스 페이지로 이동 + 자동 항목 채움
+function openDraftEditor(idx){
+  const draft = _draftCandidates[idx];
+  if(!draft) return;
+  // 인보이스 폼에 자동 채움
+  const agInp = document.getElementById('inv-agency');
+  const fromInp = document.getElementById('inv-from');
+  const toInp = document.getElementById('inv-to');
+
+  // 기간 계산
+  const startDate = draft.schedules.map(s => String(s.StartDate||'').slice(0,10)).filter(Boolean).sort()[0];
+  const endDate = draft.schedules.map(s => String(s.EndDate||s.StartDate||'').slice(0,10)).filter(Boolean).sort().reverse()[0];
+
+  if(agInp){
+    // csel 시스템 사용 시
+    if(typeof cselSetValue === 'function') cselSetValue('inv-agency', draft.agency);
+    else agInp.value = draft.agency;
+  }
+  if(fromInp && startDate) fromInp.value = startDate;
+  if(toInp && endDate) toInp.value = endDate;
+
+  // 미리보기 갱신
+  if(typeof _refreshInvPreview === 'function') _refreshInvPreview();
+  toast(`📝 ${draft.agency} ${draft.tourCode} 드래프트 로드됨 — 검토 후 발행하세요`, 'ok');
+
+  // 인보이스 폼으로 스크롤
+  document.getElementById('inv-form')?.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// 드래프트 건너뛰기 (현재 세션에서만 숨김)
+function dismissDraft(idx){
+  if(!confirm('이 드래프트를 건너뛰시겠습니까? (다시 자동 생성 시 다시 나타남)')) return;
+  _draftCandidates.splice(idx, 1);
+  renderDraftCandidates();
 }
 
 async function loadInvHistory(forceReload) {
