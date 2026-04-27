@@ -4139,6 +4139,7 @@ let _schDays = [];                  // 모달 일별 일정 데이터
 const _schCsels = {};               // {agency, guide} 검색 드롭다운 인스턴스
 const _schDayCsels = {};            // 일별 호텔/드라이버/차량 드롭다운
 let _schDRMatchIndex = null;        // {date|rego|course → DR row} 매칭 인덱스
+let _schDRMatchByTC = null;         // ★ {date|tourcode|course → DR row} TourCode 보조 인덱스 (Rego 비었을 때)
 let _schLeaveByDate = null;         // {date(YYYY-MM-DD): Set<driverName>}
 let _schBusyDriverByDate = null;    // {date: Map<driverName, [{tourId, tourCode}]>}
 let _schBusyRegoByDate = null;      // {date: Map<rego, [{tourId, tourCode}]>}
@@ -4283,33 +4284,48 @@ async function _schEnsureDRCache(){
 // DR 매칭 인덱스 구축: key = `${date}|${rego}|${attraction-upper}`
 function _schBuildDRMatchIndex(){
   _schDRMatchIndex = {};
+  _schDRMatchByTC = {};  // ★ TourCode + Date + Course 보조 인덱스 (Rego 비어있을 때)
   if(!_drCache) return;
   _drCache.forEach(r => {
     // ★ DR.Date는 dd/mm/yyyy 또는 ISO timestamp 형식 → 반드시 parseToISO 사용
     const date = parseToISO(r.Date||r._iso||'');
     const rego = String(r.Rego||'').trim();
-    const att = String(r.Attraction||'').trim().toUpperCase();
-    if(!date || !rego) return;
-    const key = `${date}|${rego}|${att}`;
-    _schDRMatchIndex[key] = r;
-    // 코스 없이도 매칭할 수 있게 (date+rego만으로) — fallback
-    const fallbackKey = `${date}|${rego}|`;
-    if(!_schDRMatchIndex[fallbackKey]){
-      _schDRMatchIndex[fallbackKey] = r;
+    // ★ 시트 헤더가 Tour/TourCode (신) 또는 Attraction/Tour_Code (구) 둘 다 지원
+    const att = String(r.Tour || r.Attraction || '').trim().toUpperCase();
+    const tc  = String(r.TourCode || r.Tour_Code || '').trim().toUpperCase();
+    if(!date) return;
+    // 1) Rego 기반 인덱스 (기존)
+    if(rego){
+      const key = `${date}|${rego}|${att}`;
+      _schDRMatchIndex[key] = r;
+      const fallbackKey = `${date}|${rego}|`;
+      if(!_schDRMatchIndex[fallbackKey]){
+        _schDRMatchIndex[fallbackKey] = r;
+      }
+    }
+    // 2) TourCode 기반 보조 인덱스 (Rego 비어있어도 매칭 가능)
+    if(tc){
+      const tcKey = `${date}|${tc}|${att}`;
+      _schDRMatchByTC[tcKey] = r;
+      const tcFallback = `${date}|${tc}|`;
+      if(!_schDRMatchByTC[tcFallback]){
+        _schDRMatchByTC[tcFallback] = r;
+      }
     }
   });
-  // ★ 진단용 — 인덱스 크기 콘솔 표시
   const cnt = Object.keys(_schDRMatchIndex).length;
+  const cntTC = Object.keys(_schDRMatchByTC).length;
+  console.log(`[DR Match Index] Rego키 ${cnt}개, TourCode키 ${cntTC}개 (${(_drCache||[]).length}개 DR에서)`);
   if(cnt > 0){
-    console.log(`[DR Match Index] ${cnt}개 키 빌드됨 (${(_drCache||[]).length}개 DR에서)`);
-    // 첫 5개 키 출력 (검증용)
-    const sampleKeys = Object.keys(_schDRMatchIndex).slice(0, 5);
-    console.log('  샘플 키:', sampleKeys);
+    console.log('  Rego 샘플:', Object.keys(_schDRMatchIndex).slice(0, 5));
+  }
+  if(cntTC > 0){
+    console.log('  TourCode 샘플:', Object.keys(_schDRMatchByTC).slice(0, 5));
   }
 }
 
 // 슬롯과 매칭되는 DR 찾기 (있으면 OT, Time_Start, Time_End 등 사후 데이터 반환)
-function _schFindDRForSlot(date, slot){
+function _schFindDRForSlot(date, slot, tour){
   if(!_schDRMatchIndex) return null;
   // ★ slot.rego/course에 emoji prefix(🏠/🏢/🚐 등)가 남아있으면 매칭 실패
   // 데이터가 contaminated되어도 매칭은 정상 동작하도록 prefix 제거
@@ -4317,16 +4333,31 @@ function _schFindDRForSlot(date, slot){
   // ★ DC 슬롯은 slot.rego, SUB 슬롯은 slot.subVehicleNote를 Rego로 사용
   // (SUB 차량도 M_Vehicles에 등록되어 있고 동일 Rego로 DR 작성됨)
   const rego = stripPrefix(slot.mode === 'sub' ? slot.subVehicleNote : slot.rego);
-  if(!date || !rego) return null;
+  if(!date) return null;
   const att = stripPrefix(slot.course).toUpperCase();
-  // 1. 정확 매칭 (date + rego + course)
-  if(att){
+  // 1. Rego 기반 정확 매칭 (date + rego + course)
+  if(rego && att){
     const key = `${date}|${rego}|${att}`;
     if(_schDRMatchIndex[key]) return _schDRMatchIndex[key];
   }
-  // 2. fallback (date + rego만)
-  const fallbackKey = `${date}|${rego}|`;
-  return _schDRMatchIndex[fallbackKey] || null;
+  // 2. Rego 기반 fallback (date + rego만)
+  if(rego){
+    const fallbackKey = `${date}|${rego}|`;
+    if(_schDRMatchIndex[fallbackKey]) return _schDRMatchIndex[fallbackKey];
+  }
+  // 3. ★ TourCode 기반 보조 매칭 (Rego 비어있는 DR도 매칭) — tour 파라미터 필요
+  if(_schDRMatchByTC && tour && tour.TourCode){
+    const tc = String(tour.TourCode).trim().toUpperCase();
+    if(tc){
+      if(att){
+        const tcKey = `${date}|${tc}|${att}`;
+        if(_schDRMatchByTC[tcKey]) return _schDRMatchByTC[tcKey];
+      }
+      const tcFallback = `${date}|${tc}|`;
+      if(_schDRMatchByTC[tcFallback]) return _schDRMatchByTC[tcFallback];
+    }
+  }
+  return null;
 }
 
 // ★ DR 매칭 상세 진단 — 어떤 슬롯이 왜 매칭 안 됐는지 분석
@@ -4346,7 +4377,7 @@ function showDRDiagnostics(tourId){
     return dateISO >= startD && dateISO <= endD;
   });
   const drsByTourCode = drsInPeriod.filter(r =>
-    String(r.Tour_Code||'').trim().toUpperCase() === tourCodeUpper
+    String(r.TourCode || r.Tour_Code || '').trim().toUpperCase() === tourCodeUpper
   );
   const drsByAgency = drsInPeriod.filter(r =>
     String(r.Agency||'').trim().toUpperCase() === agencyUpper
@@ -4360,7 +4391,7 @@ function showDRDiagnostics(tourId){
       if(!s || _schIsSlotEmpty(s)) return;
       const slotLabel = k==='morning'?'AM':k==='fullday'?'풀데이':'PM';
       const isPast = d.date < today;
-      const dr = _schFindDRForSlot(d.date, s);
+      const dr = _schFindDRForSlot(d.date, s, tour);
       // ★ prefix 제거 후 비교 (slot 데이터에 emoji prefix가 남아있을 수 있음)
       const stripPrefix = str => String(str||'').replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
       // ★ SUB 모드 + DR 매칭 안 됨 = 외주 (DR 매칭 대상 아님)
@@ -4382,7 +4413,7 @@ function showDRDiagnostics(tourId){
         const drDriver = stripPrefix(dr.Driver);
         if(slotDriver && slotDriver !== drDriver) diffs.push(`드라이버: 일정="${slotDriver}" → DR="${drDriver}"`);
         const slotCourse = stripPrefix(s.course);
-        const drCourse = stripPrefix(dr.Attraction);
+        const drCourse = stripPrefix(dr.Tour || dr.Attraction);
         if(slotCourse && slotCourse.toUpperCase() !== drCourse.toUpperCase())
           diffs.push(`코스: 일정="${slotCourse}" → DR="${drCourse||'-'}"`);
         const ot = parseFloat(dr.OT||0);
@@ -4416,7 +4447,7 @@ function showDRDiagnostics(tourId){
           );
           if(sameDayRego.length > 0){
             // 차량+날짜는 일치하나 코스 불일치
-            const drCourses = sameDayRego.map(r => r.Attraction||'(코스 없음)').join(', ');
+            const drCourses = sameDayRego.map(r => r.Tour || r.Attraction || '(코스 없음)').join(', ');
             reasons.push(`같은 날 같은 차량 DR 있음 (코스: ${drCourses}) — 일정 코스 "${s.course||'(없음)'}"와 불일치`);
           }
         }
@@ -4628,7 +4659,7 @@ function renderScheduleList(){
         totalSlots++;
         // ★ SUB 슬롯도 자사 차량(subVehicleNote가 M_Vehicles에 있음) + 동일 TourCode로 DR 작성되면 매칭 시도
         // 매칭 안 되면 단순히 totalSlots에서 제외 (외주는 DR 의무 없음)
-        const dr = _schFindDRForSlot(d.date, s);
+        const dr = _schFindDRForSlot(d.date, s, r);
         if(dr){
           matchedSlots++;
           const ot = parseFloat(dr.OT||0);
@@ -5274,8 +5305,11 @@ function _smRebuildDays(){
 
     // 활성 슬롯 입력 폼
     const slotForms = SLOT_KEYS.filter(k => d.slots[k] !== null).map(k => {
-      // DR 매칭 확인
-      const matchedDR = _schFindDRForSlot(d.date, d.slots[k]);
+      // DR 매칭 확인 (TourCode 보조 매칭을 위해 모달의 현재 TourCode 전달)
+      const _smTour = {
+        TourCode: (document.getElementById('sm-tourcode')||{}).value || ''
+      };
+      const matchedDR = _schFindDRForSlot(d.date, d.slots[k], _smTour);
       const today = _schToday();
       let drStatus = '';
       if(matchedDR){
@@ -7555,7 +7589,7 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   const carExtras = [];
   if(day.trailer) carExtras.push('🚐');
   // DR에서 실제 OT 가져오기
-  const dr = _schFindDRForSlot(day.date, slot);
+  const dr = _schFindDRForSlot(day.date, slot, tour);
   if(dr){
     const ot = parseFloat(dr.OT || 0);
     if(ot > 0) carExtras.push(`+${ot}HR`);
