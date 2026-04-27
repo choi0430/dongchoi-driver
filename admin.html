@@ -5308,47 +5308,90 @@ function _smRebuildDays(){
 
         // ★ 헬퍼: 선택된 서브 업체에 속하는 드라이버/차량 목록 빌드 (재사용)
         const _buildSubDriverItems = (selSubCo) => {
-          return (DB.D || [])
-            .filter(dr => {
-              if(String(dr.Active||'').toUpperCase() === 'N') return false;
-              const ow = (dr.Owner||'').trim();
-              if(!ow) return false;
-              if(typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(ow)) return false;
-              if(selSubCo){
-                return ow.trim().toLowerCase() === selSubCo.toLowerCase();
+          const allActive = (DB.D || []).filter(dr => {
+            return String(dr.Active||'').toUpperCase() !== 'N';
+          });
+
+          // SUB 드라이버: Owner 있고 자사가 아닌 드라이버
+          const allSub = allActive.filter(dr => {
+            const ow = (dr.Owner||'').trim();
+            if(!ow) return false;
+            // DC_OWNERS와 lowercase 비교 (대소문자 무관)
+            const isDc = (typeof DC_OWNERS !== 'undefined') &&
+              DC_OWNERS.some(x => String(x||'').trim().toLowerCase() === ow.toLowerCase());
+            return !isDc;
+          });
+
+          let matched;
+          if(!selSubCo){
+            matched = allSub;
+          } else {
+            const sel = selSubCo.trim().toLowerCase();
+            // 1차: 정확 일치
+            matched = allSub.filter(dr => (dr.Owner||'').trim().toLowerCase() === sel);
+            // 2차 (fallback): contains 매칭 (부분 일치)
+            if(matched.length === 0){
+              matched = allSub.filter(dr => {
+                const ow = (dr.Owner||'').trim().toLowerCase();
+                return ow.includes(sel) || sel.includes(ow);
+              });
+              if(matched.length > 0){
+                console.log(`[SubDriver] 정확 일치 0 → contains 매칭 ${matched.length}명 사용`);
               }
-              return true;
-            })
-            .map(dr => {
-              const ph = dr.Mobile_1 || dr.Mobile || dr.Moblie_2 || '';
-              const name = dr.Name_KR || dr.Name_EN || '';
-              return {
-                value: name,
-                label: name,
-                sub: [dr.Owner, ph].filter(Boolean).join(' · '),
-                _phone: ph
-              };
-            })
-            .filter(it => it.value);
+            }
+            // 3차 (마지막 fallback): 매칭 0이면 모든 SUB 드라이버 (자유 선택 가능)
+            if(matched.length === 0 && allSub.length > 0){
+              console.log(`[SubDriver] 매칭 실패 → 모든 SUB 드라이버 ${allSub.length}명 표시 (Owner 확인 필요)`);
+              matched = allSub;
+            }
+          }
+
+          return matched.map(dr => {
+            const ph = dr.Mobile_1 || dr.Mobile || dr.Moblie_2 || '';
+            const name = dr.Name_KR || dr.Name_EN || '';
+            return {
+              value: name,
+              label: name,
+              sub: [dr.Owner, ph].filter(Boolean).join(' · '),
+              _phone: ph
+            };
+          }).filter(it => it.value);
         };
         const _buildSubVehicleItems = (selSubCo) => {
-          return (DB.V || [])
-            .filter(v => {
-              // Active 체크: 'N'만 제외 (빈값/Y/공백 다 허용)
-              if(String(v.Active||'').toUpperCase() === 'N') return false;
-              const ow = (v.Owner||'').trim();
-              if(!ow || DC_OWNERS.includes(ow)) return false;
-              if(selSubCo){
-                return ow.trim().toLowerCase() === selSubCo.toLowerCase();
-              }
-              return true;
-            })
-            .map(v => ({
-              value: v.Rego||'',
-              label: '🚐 ' + (v.Rego||''),
-              sub: [v.Owner, v.Capacity?(v.Capacity+'인승'):'', v.Make, v.Model].filter(Boolean).join(' · ')
-            }))
-            .filter(it => it.value);
+          const allActive = (DB.V || []).filter(v => {
+            return String(v.Active||'').toUpperCase() !== 'N';
+          });
+          // SUB 차량: Owner 있고 자사 아닌 것
+          const allSub = allActive.filter(v => {
+            const ow = (v.Owner||'').trim();
+            if(!ow) return false;
+            const isDc = (typeof DC_OWNERS !== 'undefined') &&
+              DC_OWNERS.some(x => String(x||'').trim().toLowerCase() === ow.toLowerCase());
+            return !isDc;
+          });
+
+          let matched;
+          if(!selSubCo){
+            matched = allSub;
+          } else {
+            const sel = selSubCo.trim().toLowerCase();
+            matched = allSub.filter(v => (v.Owner||'').trim().toLowerCase() === sel);
+            if(matched.length === 0){
+              matched = allSub.filter(v => {
+                const ow = (v.Owner||'').trim().toLowerCase();
+                return ow.includes(sel) || sel.includes(ow);
+              });
+            }
+            if(matched.length === 0 && allSub.length > 0){
+              matched = allSub;
+            }
+          }
+
+          return matched.map(v => ({
+            value: v.Rego||'',
+            label: '🚐 ' + (v.Rego||''),
+            sub: [v.Owner, v.Capacity?(v.Capacity+'인승'):'', v.Make, v.Model].filter(Boolean).join(' · ')
+          })).filter(it => it.value);
         };
 
         // ★ 서브 업체 변경 시 드라이버/차량 목록 재빌드 함수
