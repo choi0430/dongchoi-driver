@@ -3205,12 +3205,34 @@ function rDash(){
       const lastMonthCutoff = cutoffISO(lastMonthFirst);
 
       const issuedKeys = new Set();
+      // ★ 1차: Invoices 시트의 Items JSON에서 발행된 (Agency, TourCode) 추출 (가장 정확)
+      (_invHistoryCache||[]).forEach(inv => {
+        const status = String(inv.Status||'').toLowerCase();
+        if(status === 'cancelled' || status === 'void') return;
+        const ag = String(inv.Agency||'').trim().toUpperCase();
+        if(!ag) return;
+        try {
+          const items = JSON.parse(inv.Items || '[]');
+          items.forEach(it => {
+            const tc = String(it.tourcode || it.tour_code || it.Tour_Code || '').trim().toUpperCase();
+            if(tc) issuedKeys.add(`${ag}|${tc}`);
+          });
+          const manualItems = JSON.parse(inv.ManualItems || '[]');
+          manualItems.forEach(it => {
+            const tc = String(it.tourcode || it.tour_code || it.Tour_Code || '').trim().toUpperCase();
+            if(tc) issuedKeys.add(`${ag}|${tc}`);
+          });
+          // 인보이스 자체의 TourCode 필드 (단일 TourCode 인보이스)
+          const invTC = String(inv.TourCode||'').trim().toUpperCase();
+          if(invTC) issuedKeys.add(`${ag}|${invTC}`);
+        } catch(e){}
+      });
+      // ★ 2차: Agency_Txn invoice 행 (백업)
       (_balAgencyTxns||[]).forEach(t => {
         if(String(t.Type||'').trim() !== 'invoice') return;
         const codes = String(t.TourCode||'').split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
-        codes.forEach(c => {
-          issuedKeys.add(`${(t.Agency||'').toUpperCase()}|${c}`);
-        });
+        const ag = (t.Agency||'').toUpperCase();
+        codes.forEach(c => issuedKeys.add(`${ag}|${c}`));
       });
 
       const uninvoiced = _drCache.filter(r => {
@@ -4560,10 +4582,14 @@ function renderScheduleList(){
     const pax = r.Pax ? `${r.Pax}명` : '';
     const inv = r.InvoiceID ? `<span style="background:#fef3c7;color:#b45309;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);">${escH(r.InvoiceID)}</span>` : '';
 
-    // 슬롯 구조에서 차량/드라이버 추출
+    // 슬롯 구조에서 차량/드라이버 추출 — DC와 SUB 분리 표시
+    const stripPrefix = s => String(s||'').replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
     const days = _schParseDays(r.TourPlan);
-    const driversSet = new Set();
-    const regosSet = new Set();
+    const dcDriversSet = new Set();
+    const dcRegosSet = new Set();
+    const subDriversSet = new Set();   // SUB 캡틴
+    const subCompaniesSet = new Set(); // SUB 회사
+    const subVehiclesSet = new Set();  // SUB 차량
     let hasTrailer = false;
     let totalSlots = 0;
     let matchedSlots = 0;
@@ -4575,9 +4601,25 @@ function renderScheduleList(){
       ['morning','fullday','evening'].forEach(k => {
         const s = d.slots && d.slots[k];
         if(!s || _schIsSlotEmpty(s)) return;
-        if(s.driver) driversSet.add(s.driver);
-        if(s.rego) regosSet.add(s.rego);
+        if(s.mode === 'sub'){
+          const sd = stripPrefix(s.subDriver);
+          const sc = stripPrefix(s.subCompany);
+          const sv = stripPrefix(s.subVehicleNote);
+          if(sd) subDriversSet.add(sd);
+          if(sc) subCompaniesSet.add(sc);
+          if(sv) subVehiclesSet.add(sv);
+        } else {
+          const drv = stripPrefix(s.driver);
+          const reg = stripPrefix(s.rego);
+          if(drv) dcDriversSet.add(drv);
+          if(reg) dcRegosSet.add(reg);
+        }
         totalSlots++;
+        // SUB 슬롯은 DR 매칭 대상 아님
+        if(s.mode === 'sub'){
+          totalSlots--; // SUB는 DR 매칭 카운트에서 제외
+          return;
+        }
         const dr = _schFindDRForSlot(d.date, s);
         if(dr){
           matchedSlots++;
@@ -4589,13 +4631,22 @@ function renderScheduleList(){
       });
     });
 
-    const drivers = [...driversSet];
-    const regos = [...regosSet];
-    const driverStr = drivers.length ? `👤 ${drivers.map(escH).join('/')}` : '';
-    const regoStr   = regos.length ? `🚌 ${regos.map(escH).join('/')}` : '';
+    const dcDrivers = [...dcDriversSet];
+    const dcRegos = [...dcRegosSet];
+    const subDrivers = [...subDriversSet];
+    const subCompanies = [...subCompaniesSet];
+    const subVehicles = [...subVehiclesSet];
+    const driverStr = dcDrivers.length ? `👤 ${dcDrivers.map(escH).join('/')}` : '';
+    const regoStr   = dcRegos.length ? `🚌 ${dcRegos.map(escH).join('/')}` : '';
+    // SUB 표시: 🏢 회사 · 👤 캡틴 · 🚐 차량
+    const subParts = [];
+    if(subCompanies.length) subParts.push(`🏢 ${subCompanies.map(escH).join('/')}`);
+    if(subDrivers.length) subParts.push(`👤 ${subDrivers.map(escH).join('/')}`);
+    if(subVehicles.length) subParts.push(`🚐 ${subVehicles.map(escH).join('/')}`);
+    const subStr = subParts.join(' · ');
     const trailer = hasTrailer ? '🚐 TRL' : '';
     const meta = [pax, seats, trailer].filter(Boolean).join(' · ');
-    const people = [guide, driverStr, regoStr].filter(Boolean).join(' · ');
+    const people = [guide, driverStr, regoStr, subStr].filter(Boolean).join(' · ');
 
     // DR 매칭 상태 뱃지 — 클릭 시 상세 진단 모달
     let drBadge = '';
