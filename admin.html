@@ -4263,7 +4263,8 @@ function _schBuildDRMatchIndex(){
   _schDRMatchIndex = {};
   if(!_drCache) return;
   _drCache.forEach(r => {
-    const date = String(r.Date||r._iso||'').slice(0,10);
+    // ★ DR.Date는 dd/mm/yyyy 또는 ISO timestamp 형식 → 반드시 parseToISO 사용
+    const date = parseToISO(r.Date||r._iso||'');
     const rego = String(r.Rego||'').trim();
     const att = String(r.Attraction||'').trim().toUpperCase();
     if(!date || !rego) return;
@@ -4275,6 +4276,14 @@ function _schBuildDRMatchIndex(){
       _schDRMatchIndex[fallbackKey] = r;
     }
   });
+  // ★ 진단용 — 인덱스 크기 콘솔 표시
+  const cnt = Object.keys(_schDRMatchIndex).length;
+  if(cnt > 0){
+    console.log(`[DR Match Index] ${cnt}개 키 빌드됨 (${(_drCache||[]).length}개 DR에서)`);
+    // 첫 5개 키 출력 (검증용)
+    const sampleKeys = Object.keys(_schDRMatchIndex).slice(0, 5);
+    console.log('  샘플 키:', sampleKeys);
+  }
 }
 
 // 슬롯과 매칭되는 DR 찾기 (있으면 OT, Time_Start, Time_End 등 사후 데이터 반환)
