@@ -4888,7 +4888,7 @@ function onSmDateChange(){
 // 우선순위: morning 슬롯 → 없으면 fullday 슬롯
 // 입국 시간 또는 국내/국제 선택 변경 → 첫날 공항 픽업 시간 자동 계산
 // 미팅 (공항에서 픽업): 항공 도착 시간 + 1시간(국제) / +30분(국내) = 차량 출발 시간(startTime)
-// 우선순위: morning 슬롯 → 없으면 fullday 슬롯
+// 우선순위: morning(샌딩/픽업) → fullday → evening — 활성화된 슬롯 사용
 function onSmFlightInTimeChange(){
   const t = document.getElementById('sm-flightin-time').value;
   if(!t || _schDays.length === 0) return;
@@ -4896,11 +4896,13 @@ function onSmFlightInTimeChange(){
   const addMin = isIntl ? 60 : 30;
   const newTime = _addMinutes(t, addMin);
   const d = _schDays[0];
-  // 활성 슬롯 결정
+  // ★ 첫날 활성 슬롯 우선순위: morning > fullday > evening
   let target = null;
-  if(d.slots.morning){ target = d.slots.morning; }
-  else if(d.slots.fullday){ target = d.slots.fullday; }
-  else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; }
+  let slotName = '';
+  if(d.slots.morning){ target = d.slots.morning; slotName = 'morning'; }
+  else if(d.slots.fullday){ target = d.slots.fullday; slotName = 'fullday'; }
+  else if(d.slots.evening){ target = d.slots.evening; slotName = 'evening'; }
+  else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; slotName = 'fullday(신규)'; }
   // ★ 미팅: 공항이 출발지이므로 startTime(차량 출발)을 자동 계산
   target.startTime = newTime;
   // 시작장소가 비어있으면 공항 자동 (도착 → 공항에서 출발)
@@ -4908,6 +4910,7 @@ function onSmFlightInTimeChange(){
     target.startPlace = isIntl ? 'Sydney INTL' : 'Sydney DOM';
     target.startPlaceType = 'airport';
   }
+  console.log(`[MeetingAuto] 첫날(${d.date}) ${slotName} 슬롯 startTime=${newTime}`);
   _smRebuildDays();
   const hint = document.getElementById('sm-coach-hint');
   if(hint){
@@ -4916,9 +4919,10 @@ function onSmFlightInTimeChange(){
   }
 }
 
-// 출국 시간 또는 국내/국제 선택 변경 → 마지막날 공항 도착 시간 자동 계산
-// 샌딩 (공항으로 데려다 줌): 항공 출발 시간 - 3시간(국제) / -2시간(국내) = 차량 도착 시간(endTime)
-// 우선순위: evening 슬롯 → 없으면 fullday 슬롯
+// 출국 시간 또는 국내/국제 선택 변경 → 마지막날 호텔 출발 시간 자동 계산
+// 샌딩 (공항으로 데려다 줌): 항공 출발 시간 - 3시간(국제) / -2시간(국내) = 호텔 출발 시간(startTime)
+// (사용자 운영 방식: 자동 계산된 시간에 호텔에서 차량 출발 → 공항 도착)
+// 우선순위: evening(트랜스퍼) → fullday → morning(샌딩) — 활성화된 슬롯 사용
 function onSmFlightOutTimeChange(){
   const t = document.getElementById('sm-flightout-time').value;
   if(!t || _schDays.length === 0) return;
@@ -4927,20 +4931,26 @@ function onSmFlightOutTimeChange(){
   const newTime = _addMinutes(t, -subMin);
   const lastIdx = _schDays.length - 1;
   const d = _schDays[lastIdx];
+  // ★ 마지막날의 활성 슬롯 우선순위: evening > fullday > morning
+  //   AM이 샌딩으로 활성화된 케이스도 처리
   let target = null;
-  if(d.slots.evening){ target = d.slots.evening; }
-  else if(d.slots.fullday){ target = d.slots.fullday; }
-  else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; }
-  // ★ 샌딩: 공항이 도착지이므로 endTime(차량 도착)을 자동 계산
-  target.endTime = newTime;
+  let slotName = '';
+  if(d.slots.evening){ target = d.slots.evening; slotName = 'evening'; }
+  else if(d.slots.fullday){ target = d.slots.fullday; slotName = 'fullday'; }
+  else if(d.slots.morning){ target = d.slots.morning; slotName = 'morning'; }
+  else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; slotName = 'fullday(신규)'; }
+  // ★ 샌딩: 호텔에서 차량 출발 시간(startTime) 자동 계산
+  target.startTime = newTime;
+  // 도착지(endPlace)가 비어있으면 공항 자동 입력
   if(!target.endPlace){
     target.endPlace = isIntl ? 'Sydney INTL' : 'Sydney DOM';
     target.endPlaceType = 'airport';
   }
+  console.log(`[SandengAuto] 마지막날(${d.date}) ${slotName} 슬롯 startTime=${newTime}`);
   _smRebuildDays();
   const hint = document.getElementById('sm-coach-hint');
   if(hint){
-    hint.textContent = `💡 마지막날 공항 도착: ${isIntl?'국제선 -3시간':'국내선 -2시간'} = ${newTime} (수정 가능)`;
+    hint.textContent = `💡 마지막날 호텔 출발: ${isIntl?'국제선 -3시간':'국내선 -2시간'} = ${newTime} (수정 가능)`;
     hint.style.display = 'block';
   }
 }
