@@ -7009,6 +7009,75 @@ window.dcDebugCalFilter = function(){
   });
 };
 
+// ★ 트랙 packing 시뮬레이션 — 어떤 일정이 어느 트랙에 배치되는지 확인
+window.dcDebugTracks = function(grpKey){
+  console.log('=== 트랙 배치 시뮬레이션 ===');
+  if(!_schCache || !_schCache.length){ console.log('일정 캐시 없음'); return; }
+  const groupBy = document.getElementById('sch-cal-group')?.value || 'agency';
+
+  // 모든 활성 일정을 그룹별로 묶기
+  const groups = {};
+  _schCache.forEach(t => {
+    if(String(t.Status||'') === 'cancelled') return;
+    const days = _schParseDays(t.TourPlan);
+    if(days.length === 0) return;
+    days.forEach(d => {
+      ['morning','fullday','evening'].forEach(k => {
+        const slot = d.slots && d.slots[k];
+        if(!slot) return;
+        let key;
+        switch(groupBy){
+          case 'guide':  key = t.Guide || '(미지정)'; break;
+          case 'rego':   key = slot.rego || '(미지정)'; break;
+          case 'driver': key = slot.driver || '(미지정)'; break;
+          default:       key = t.Agency || '(미지정)';
+        }
+        if(grpKey && key !== grpKey) return;
+        if(!groups[key]) groups[key] = {};
+        if(!groups[key][d.date]) groups[key][d.date] = [];
+        groups[key][d.date].push({tour: t, slot, slotKey: k});
+      });
+    });
+  });
+
+  Object.entries(groups).forEach(([grp, byDate]) => {
+    console.log(`\n=== 그룹: "${grp}" ===`);
+    // TourCode별 묶음
+    const tcGroups = {};
+    Object.entries(byDate).forEach(([date, items]) => {
+      items.forEach(({tour}) => {
+        const tcKey = String(tour.TourCode||'').trim() || tour.TourID;
+        if(!tcGroups[tcKey]){
+          tcGroups[tcKey] = {firstDate: date, lastDate: date, tours: new Set([tour.TourID])};
+        }
+        tcGroups[tcKey].tours.add(tour.TourID);
+        if(date < tcGroups[tcKey].firstDate) tcGroups[tcKey].firstDate = date;
+        if(date > tcGroups[tcKey].lastDate) tcGroups[tcKey].lastDate = date;
+      });
+    });
+    // 정렬
+    const tcArr = Object.entries(tcGroups).sort((a, b) => {
+      if(a[1].firstDate !== b[1].firstDate) return a[1].firstDate.localeCompare(b[1].firstDate);
+      return a[0].localeCompare(b[0]);
+    });
+    // 트랙 배치
+    const tracks = [];
+    const tcToTrack = {};
+    tcArr.forEach(([tcKey, span]) => {
+      let trackIdx = tracks.findIndex(t => t.lastDate < span.firstDate);
+      if(trackIdx < 0){
+        tracks.push({lastDate: span.lastDate});
+        trackIdx = tracks.length - 1;
+      } else {
+        if(span.lastDate > tracks[trackIdx].lastDate) tracks[trackIdx].lastDate = span.lastDate;
+      }
+      tcToTrack[tcKey] = trackIdx;
+      console.log(`  트랙 ${trackIdx+1}: "${tcKey}" (${span.firstDate} ~ ${span.lastDate}, ${span.tours.size}개 TourID)`);
+    });
+    console.log(`총 ${tracks.length}개 트랙 필요`);
+  });
+};
+
 // 캘린더 슬롯 인터랙션 — hover 툴팁 + 단일 클릭 확대 보기
 // ═══════════════════════════════════════════════════════════════════════════
 
