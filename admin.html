@@ -6945,6 +6945,70 @@ window.dcDebugSubData = function(subCo){
   console.log('마스터 데이터 다시 로드: forceReloadAll() 후 페이지 새로고침');
 };
 
+// ★ 일정 진단 헬퍼 — 캘린더와 리스트 간 차이 분석
+window.dcDebugSchedule = function(searchTerm){
+  console.log('=== Schedule 데이터 진단 ===');
+  console.log('전체 일정 수:', (_schCache||[]).length);
+  if(searchTerm){
+    console.log(`검색어 "${searchTerm}"로 필터:`);
+  }
+  const matched = (_schCache||[]).filter(t => {
+    if(!searchTerm) return true;
+    const s = searchTerm.toLowerCase();
+    return String(t.TourCode||'').toLowerCase().includes(s) ||
+           String(t.Agency||'').toLowerCase().includes(s) ||
+           String(t.Guide||'').toLowerCase().includes(s) ||
+           String(t.TourID||'').toLowerCase().includes(s);
+  });
+  matched.forEach((t, i) => {
+    const days = _schParseDays(t.TourPlan);
+    const slotCount = days.reduce((sum,d) => {
+      if(!d.slots) return sum;
+      return sum + ['morning','fullday','evening'].filter(k => d.slots[k]).length;
+    }, 0);
+    const slotDates = days.map(d => d.date).join(',');
+    console.log(`\n#${i+1} TourID: ${t.TourID}`);
+    console.log(`  Agency: "${t.Agency||''}"`);
+    console.log(`  TourCode: "${t.TourCode||''}"`);
+    console.log(`  Guide: "${t.Guide||''}"`);
+    console.log(`  메타 기간: ${t.StartDate} ~ ${t.EndDate}`);
+    console.log(`  TourPlan 일자 수: ${days.length} | 슬롯 수: ${slotCount}`);
+    console.log(`  TourPlan 날짜들: ${slotDates}`);
+    console.log(`  Status: ${t.Status||'scheduled'}`);
+    if(slotCount > 0){
+      days.forEach(d => {
+        ['morning','fullday','evening'].forEach(k => {
+          const s = d.slots && d.slots[k];
+          if(!s) return;
+          const slot = k==='morning'?'AM':k==='fullday'?'풀':'PM';
+          const info = s.mode==='sub'
+            ? `🏢 ${s.subCompany||'-'} / ${s.subDriver||'-'} / ${s.subVehicleNote||'-'}`
+            : `🏠 ${s.rego||'-'} / ${s.driver||'-'}`;
+          console.log(`    ${d.date} ${slot}: ${info} ${s.startTime||''}-${s.endTime||''} ${s.course||''}`);
+        });
+      });
+    }
+    // 메타 vs 슬롯 날짜 불일치 검사
+    if(slotCount > 0){
+      const minDate = days[0].date;
+      const maxDate = days[days.length-1].date;
+      const startISO = String(t.StartDate||'').slice(0,10);
+      const endISO = String(t.EndDate||'').slice(0,10);
+      if(minDate !== startISO || maxDate !== endISO){
+        console.warn(`  ⚠️ 메타-슬롯 날짜 불일치! 메타: ${startISO}~${endISO}, 슬롯: ${minDate}~${maxDate}`);
+      }
+    }
+  });
+};
+window.dcDebugCalFilter = function(){
+  console.log('=== 캘린더 필터 상태 ===');
+  console.log(_schFilters);
+  console.log('적용된 필터:');
+  Object.entries(_schFilters).forEach(([k, v]) => {
+    console.log(`  ${k}: ${v ? '✓ 표시' : '✗ 숨김'}`);
+  });
+};
+
 // 캘린더 슬롯 인터랙션 — hover 툴팁 + 단일 클릭 확대 보기
 // ═══════════════════════════════════════════════════════════════════════════
 
