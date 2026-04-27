@@ -7417,16 +7417,41 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
       slot.startTime && slot.startTime >= '23:00';
     const isTrailer = !!day.trailer;
 
+    // ★ 항공편 자동 채우기 (SUB 모드도 동일)
+    let subStartTime = slot.startTime || '';
+    let subStartPlace = slot.startPlaceType === 'hotel' ? _schShortHotel(slot.startPlace) : (slot.startPlace || '');
+    let subStartPlaceFull = slot.startPlace || '';
+    let subEndTime = slot.endTime || '';
+    let subEndPlace = slot.endPlaceType === 'hotel' ? _schShortHotel(slot.endPlace) : (slot.endPlace || '');
+    let subEndPlaceFull = slot.endPlace || '';
+
+    if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
+      const fi = _schParseFlight(tour.FlightIn);
+      if(fi.code){
+        subStartPlace = fi.code;
+        subStartPlaceFull = `${fi.code} ${fi.time||''}`.trim();
+        if(!subStartTime && fi.time) subStartTime = fi.time;
+      }
+    }
+    if(slot.endPlaceType === 'airport' && tour && tour.FlightOut){
+      const fo = _schParseFlight(tour.FlightOut);
+      if(fo.code){
+        subEndPlace = fo.code;
+        subEndPlaceFull = `${fo.code} ${fo.time||''}`.trim();
+        if(!subEndTime && fo.time) subEndTime = fo.time;
+      }
+    }
+
     return {
-      startTime: slot.startTime || '',
-      startPlace: slot.startPlaceType === 'hotel' ? _schShortHotel(slot.startPlace) : (slot.startPlace || ''),
-      startPlaceFull: slot.startPlace || '',
+      startTime: subStartTime,
+      startPlace: subStartPlace,
+      startPlaceFull: subStartPlaceFull,
       car: carLine,
       driver: driverLine,
       course: slot.course || '',
-      endTime: slot.endTime || '',
-      endPlace: slot.endPlaceType === 'hotel' ? _schShortHotel(slot.endPlace) : (slot.endPlace || ''),
-      endPlaceFull: slot.endPlace || '',
+      endTime: subEndTime,
+      endPlace: subEndPlace,
+      endPlaceFull: subEndPlaceFull,
       surchargeStartTime: isEarlySurcharge || isLateSurcharge,
       surchargeStartPlace: isStartHotelSurcharge,
       surchargeEndPlace: isEndHotelSurcharge,
@@ -7465,16 +7490,41 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     slot.startTime && slot.startTime >= '23:00';
   const isTrailer = !!day.trailer;
 
+  // ★ 항공편 자동 채우기: 슬롯 끝점이 공항이면 FlightIn/Out에서 코드/시간 가져오기
+  let dcStartTime = slot.startTime || '';
+  let dcStartPlace = slot.startPlaceType === 'hotel' ? _schShortHotel(slot.startPlace) : (slot.startPlace || '');
+  let dcStartPlaceFull = slot.startPlace || '';
+  let dcEndTime = slot.endTime || '';
+  let dcEndPlace = slot.endPlaceType === 'hotel' ? _schShortHotel(slot.endPlace) : (slot.endPlace || '');
+  let dcEndPlaceFull = slot.endPlace || '';
+
+  if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
+    const fi = _schParseFlight(tour.FlightIn);
+    if(fi.code){
+      dcStartPlace = fi.code;
+      dcStartPlaceFull = `${fi.code} ${fi.time||''}`.trim();
+      if(!dcStartTime && fi.time) dcStartTime = fi.time;
+    }
+  }
+  if(slot.endPlaceType === 'airport' && tour && tour.FlightOut){
+    const fo = _schParseFlight(tour.FlightOut);
+    if(fo.code){
+      dcEndPlace = fo.code;
+      dcEndPlaceFull = `${fo.code} ${fo.time||''}`.trim();
+      if(!dcEndTime && fo.time) dcEndTime = fo.time;
+    }
+  }
+
   return {
-    startTime: slot.startTime || '',
-    startPlace: slot.startPlaceType === 'hotel' ? _schShortHotel(slot.startPlace) : (slot.startPlace || ''),
-    startPlaceFull: slot.startPlace || '',
+    startTime: dcStartTime,
+    startPlace: dcStartPlace,
+    startPlaceFull: dcStartPlaceFull,
     car: carLine,
     driver: slot.driver || '',
     course: slot.course || '',
-    endTime: slot.endTime || '',
-    endPlace: slot.endPlaceType === 'hotel' ? _schShortHotel(slot.endPlace) : (slot.endPlace || ''),
-    endPlaceFull: slot.endPlace || '',
+    endTime: dcEndTime,
+    endPlace: dcEndPlace,
+    endPlaceFull: dcEndPlaceFull,
     surchargeStartTime: isEarlySurcharge || isLateSurcharge,
     surchargeStartPlace: isStartHotelSurcharge,
     surchargeEndPlace: isEndHotelSurcharge,
