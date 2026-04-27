@@ -5306,56 +5306,60 @@ function _smRebuildDays(){
         });
         const subCoItems = [...subCoSet].sort().map(co => ({ value: co, label: '🏢 ' + co }));
 
-        // ★ 헬퍼: 선택된 서브 업체에 속하는 드라이버/차량 목록 빌드 (재사용)
+        // ★ 헬퍼: 드라이버 목록 — 모든 활성 드라이버 표시 (자사+서브)
+        // 이유: 자사 드라이버가 서브 차량을 운행하는 케이스도 있음
+        // 정렬: 선택된 서브 업체 소속이 위로, 그 다음 자사, 그 다음 다른 서브
         const _buildSubDriverItems = (selSubCo) => {
           const allActive = (DB.D || []).filter(dr => {
             return String(dr.Active||'').toUpperCase() !== 'N';
+          }).filter(dr => {
+            const name = dr.Name_KR || dr.Name_EN || '';
+            return !!name; // 이름 있는 드라이버만
           });
 
-          // SUB 드라이버: Owner 있고 자사가 아닌 드라이버
-          const allSub = allActive.filter(dr => {
+          // 카테고리 분류 (정렬용)
+          const isDcOwner = (ow) => {
+            const owLower = String(ow||'').trim().toLowerCase();
+            if(!owLower) return true; // Owner 빈값은 자사로 간주
+            return (typeof DC_OWNERS !== 'undefined') &&
+              DC_OWNERS.some(x => String(x||'').trim().toLowerCase() === owLower);
+          };
+
+          const sel = (selSubCo||'').trim().toLowerCase();
+          // 카테고리: 0=선택업체 소속, 1=자사, 2=다른 서브 업체
+          const categorized = allActive.map(dr => {
             const ow = (dr.Owner||'').trim();
-            if(!ow) return false;
-            // DC_OWNERS와 lowercase 비교 (대소문자 무관)
-            const isDc = (typeof DC_OWNERS !== 'undefined') &&
-              DC_OWNERS.some(x => String(x||'').trim().toLowerCase() === ow.toLowerCase());
-            return !isDc;
+            const owLower = ow.toLowerCase();
+            let cat;
+            if(sel && owLower === sel) cat = 0;
+            else if(sel && (owLower.includes(sel) || sel.includes(owLower)) && owLower) cat = 0; // contains 매칭도 우선
+            else if(isDcOwner(ow)) cat = 1;
+            else cat = 2;
+            return {dr, cat, ow};
           });
 
-          let matched;
-          if(!selSubCo){
-            matched = allSub;
-          } else {
-            const sel = selSubCo.trim().toLowerCase();
-            // 1차: 정확 일치
-            matched = allSub.filter(dr => (dr.Owner||'').trim().toLowerCase() === sel);
-            // 2차 (fallback): contains 매칭 (부분 일치)
-            if(matched.length === 0){
-              matched = allSub.filter(dr => {
-                const ow = (dr.Owner||'').trim().toLowerCase();
-                return ow.includes(sel) || sel.includes(ow);
-              });
-              if(matched.length > 0){
-                console.log(`[SubDriver] 정확 일치 0 → contains 매칭 ${matched.length}명 사용`);
-              }
-            }
-            // 3차 (마지막 fallback): 매칭 0이면 모든 SUB 드라이버 (자유 선택 가능)
-            if(matched.length === 0 && allSub.length > 0){
-              console.log(`[SubDriver] 매칭 실패 → 모든 SUB 드라이버 ${allSub.length}명 표시 (Owner 확인 필요)`);
-              matched = allSub;
-            }
-          }
+          // 정렬: 카테고리 → 이름
+          categorized.sort((a, b) => {
+            if(a.cat !== b.cat) return a.cat - b.cat;
+            const an = a.dr.Name_KR || a.dr.Name_EN || '';
+            const bn = b.dr.Name_KR || b.dr.Name_EN || '';
+            return an.localeCompare(bn, 'ko');
+          });
 
-          return matched.map(dr => {
+          return categorized.map(({dr, cat, ow}) => {
             const ph = dr.Mobile_1 || dr.Mobile || dr.Moblie_2 || '';
             const name = dr.Name_KR || dr.Name_EN || '';
+            // 카테고리별 라벨 prefix
+            const prefix = cat === 0 ? '⭐ ' : cat === 1 ? '🏠 ' : '';
+            // 부제: Owner + 전화번호 (Owner 빈값은 "자사"로 표시)
+            const ownerLabel = ow || '자사';
             return {
               value: name,
-              label: name,
-              sub: [dr.Owner, ph].filter(Boolean).join(' · '),
+              label: prefix + name,
+              sub: [ownerLabel, ph].filter(Boolean).join(' · '),
               _phone: ph
             };
-          }).filter(it => it.value);
+          });
         };
         const _buildSubVehicleItems = (selSubCo) => {
           const allActive = (DB.V || []).filter(v => {
