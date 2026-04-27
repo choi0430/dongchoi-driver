@@ -1209,7 +1209,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 .sch-cal-grp{background:var(--sf);padding:8px 10px;font-size:11px;font-weight:800;color:var(--t1);font-family:var(--fd);display:flex;align-items:center;border-left:3px solid var(--ac);}
 .sch-cal-grp-main{background:var(--sf2);}
 .sch-cal-rowlbl{background:var(--sf2);padding:4px 8px;font-size:9px;color:var(--t3);font-weight:700;text-align:right;font-family:var(--fd);display:flex;align-items:center;justify-content:flex-end;border-left:3px solid var(--ac);}
-.sch-cal-cell{background:var(--sf);min-height:28px;display:flex;}
+.sch-cal-cell{background:var(--sf);min-height:32px;display:flex;}
 .sch-cal-cell.empty{background:var(--sf2);}
 
 /* 일정 블록 시각적 묶음 — 같은 일정 안 모든 슬롯 셀 통일 배경 + 외곽선 연결 */
@@ -1240,7 +1240,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 /* Slot sub-cells — 기본 6칸 (3슬롯 × 좌우 2칸), course 행은 3칸 합쳐짐 */
 .sch-slot-row{display:grid;grid-template-columns:repeat(6, 1fr);gap:0;width:100%;height:100%;}
 .sch-slot-row.merged{grid-template-columns:repeat(3, 1fr);}
-.sch-slot-cell{background:var(--sf2);padding:4px 5px;font-size:11px;line-height:1.25;font-family:var(--fd);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;display:flex;align-items:center;justify-content:center;text-align:center;letter-spacing:-0.1px;border-right:1px solid rgba(0,0,0,0.05);font-weight:600;color:#0f172a;}
+/* ★ 가독성 개선: 줄바꿈 허용 + 미니멀 패딩 + 작은 폰트 */
+.sch-slot-cell{background:var(--sf2);padding:3px 3px;font-size:10px;line-height:1.15;font-family:var(--fd);overflow:hidden;cursor:pointer;display:flex;align-items:center;justify-content:center;text-align:center;letter-spacing:-0.2px;border-right:1px solid rgba(0,0,0,0.05);font-weight:600;color:#0f172a;
+  /* 줄바꿈 허용 — 긴 텍스트는 자동으로 두 줄로 표시 */
+  white-space:normal;word-break:break-word;overflow-wrap:break-word;
+  hyphens:auto;
+  /* 셀 자체 높이는 grid가 정함 - 텍스트는 줄바꿈으로 fit */
+}
 .sch-slot-cell:last-child{border-right:none;}
 .sch-slot-cell.wide{}
 .sch-slot-cell.empty{background:var(--sf);opacity:0.3;cursor:default;}
@@ -6782,28 +6788,45 @@ function _schShortHotel(name){
       return String(matched.Short_Name).trim();
     }
   }
-  // 2순위: 자동 줄임 (stopwords)
-  if(s.length <= 12) return s;
+  // 2순위: 자동 줄임 (stopwords + 첫 단어 우선)
+  if(s.length <= 8) return s;
   const stopWords = ['HOTEL','SUITES','INN','MOTEL','RESORT','LODGE','HOUSE','APARTMENT','APARTMENTS','TOWERS','PLAZA','PLACE','RESIDENCE','RESIDENCES'];
   const words = s.split(/\s+/);
+  // stopword 만나면 거기까지만
   const kept = [];
   for(const w of words){
     if(stopWords.includes(w.toUpperCase())) break;
     kept.push(w);
   }
-  if(kept.length === 0) return words.slice(0, 2).join(' ');
-  return kept.join(' ');
+  if(kept.length === 0) kept.push(...words.slice(0, 1));
+  // ★ 첫 단어가 길면 그것만 (더 압축)
+  let result = kept.join(' ');
+  if(result.length > 10){
+    // 첫 단어만 사용 (예: "RYDGES BANKSTOWN" → "RYDGES")
+    result = kept[0];
+  }
+  return result;
 }
 
 // 한 슬롯의 8행 표시 정보 (DR 매칭 시 실제 OT 표시)
 function _schRenderSlotRows(tour, day, slot, slotKey){
   const slotMode = slot.mode || 'dc';
 
-  // 서브 모드: subCompany를 차량 자리에, subDriver를 드라이버 자리에
+  // 서브 모드: 회사명 약어 + 차량 메모 / 드라이버
   if(slotMode === 'sub'){
+    // 회사명을 짧게: 첫 단어만 또는 약어 (YOUNGKEAN KIM → YK KIM, GENTRA LINK → GENTRA)
+    const _shortSubCo = (co) => {
+      if(!co) return '';
+      const words = co.trim().split(/\s+/);
+      if(words.length === 1) return words[0].slice(0, 8);
+      // 두 단어 이상 → 첫 글자(들) + 마지막 단어
+      if(words.length === 2) return words[0].slice(0,3) + ' ' + words[1].slice(0,5);
+      return words.map(w => w[0]).join('') + ' ' + words[words.length-1].slice(0,5);
+    };
+    // 차량 자리: 차량 메모 우선 (없으면 회사 약어)
     let carLine = '';
-    if(slot.subCompany) carLine = '🏢 ' + slot.subCompany;
-    if(slot.subVehicleNote) carLine += (carLine?' ':'') + `(${slot.subVehicleNote})`;
+    if(slot.subVehicleNote) carLine = '🏢 ' + slot.subVehicleNote;
+    else if(slot.subCompany) carLine = '🏢 ' + _shortSubCo(slot.subCompany);
     const driverLine = slot.subDriver || '';
 
     // 서차지 플래그 (서브 모드도 동일하게 검사)
@@ -6835,9 +6858,9 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     };
   }
 
-  // 자사 모드 — 기존 로직
+  // 자사 모드 — Rego만 (capacity 제거 — 너무 김)
   const veh = (DB.V||[]).find(v => v.Rego === slot.rego);
-  const vehLabel = veh && veh.Capacity ? `${veh.Rego}/${veh.Capacity}` : (slot.rego||'');
+  const vehLabel = slot.rego || '';
   const carExtras = [];
   if(day.trailer) carExtras.push('🚐');
   // DR에서 실제 OT 가져오기
