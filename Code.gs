@@ -45,7 +45,7 @@ const MASTER_HEADERS = {
                  'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','Owner','Active'],
   'M_Clients':  ['Name','ClientID','ABN','Mobile','Email','Email_CC','Address','Bank_Name','BSB','Account_Number'],
   'M_Guides':   ['GuideID','Guide_Name','Mobile','Agency','Email','Remarks'],
-  'M_Hotels':   ['Hotel_Name','Phone','Address','Surcharge_Area'],
+  'M_Hotels':   ['Hotel_Name','Phone','Address','Surcharge_Area','Short_Name'],
   'M_Trailers': ['Trailer_Number','Owner','Capacity','Rego_Date','ESafety_Date','Notes','Active'],
   'M_PriceClient': ['Agency','Course','max_hours','seats_21_rate','seats_21_ot',
                     'seats_25_rate','seats_25_ot','seats_40_rate','seats_40_ot',
