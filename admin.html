@@ -5628,21 +5628,15 @@ function _smRebuildDays(){
           });
         }
 
-        // 서브 드라이버: M_Drivers에서 그 SubCo Owner인 드라이버 + 자유 입력
+        // 서브 드라이버: 모든 활성 드라이버 표시 (자사+서브, 카테고리 정렬)
         const _selSubCo = (d.slots[k].subCompany||'').trim();
         const subDrvItems = _buildSubDriverItems(_selSubCo);
-        if(_selSubCo){
-          // 모든 SUB 드라이버 (Owner 있는 것) 리스트 출력
-          const allSubDrvs = (DB.D||[]).filter(dr => {
-            const ow = String(dr.Owner||'').trim();
-            return ow && !DC_OWNERS.includes(ow);
-          });
-          console.log(`[SubDriver Init] cellPrefix=${cellPrefix} 선택된업체="${_selSubCo}" 매칭=${subDrvItems.length}명`);
-          console.log(`  전체 SUB 드라이버 ${allSubDrvs.length}명:`,
-            allSubDrvs.map(dr => `${dr.Name_KR||dr.Name_EN}(Owner:"${dr.Owner}")`));
-          if(subDrvItems.length === 0 && allSubDrvs.length > 0){
-            console.warn('⚠️ 매칭 안됨! Owner 정확한 일치 확인 필요. 콘솔에서 dcDebugSubData("'+_selSubCo+'") 실행해보세요.');
-          }
+        console.log(`[SubDriver Init] cellPrefix=${cellPrefix} subCo="${_selSubCo}" 반환된 드라이버=${subDrvItems.length}명`);
+        if(subDrvItems.length > 0){
+          console.log('  표시될 드라이버 목록:', subDrvItems.map(it => `${it.label} (${it.sub})`));
+        } else {
+          console.warn('⚠️ 드라이버 0명 반환! DB.D 확인 필요. dcDebugSubData("'+_selSubCo+'") 실행해보세요.');
+          console.log('  DB.D 전체 길이:', (DB.D||[]).length);
         }
         // 서브 차량 csel — 서브 업체에 속한 차량 목록 + 자유 입력
         const subVehItems = _buildSubVehicleItems(_selSubCo);
@@ -6482,12 +6476,13 @@ async function _autoRegisterSubDrivers(){
     ['morning','fullday','evening'].forEach(sk => {
       const slot = d.slots && d.slots[sk];
       if(!slot || slot.mode !== 'sub') return;
-      const name = String(slot.subDriver||'').trim();
+      // ★ 라벨 prefix 제거 (⭐ / 🏠 / 🏢 등)
+      let name = String(slot.subDriver||'').trim();
+      name = name.replace(/^[⭐🏠🏢]\s*/, '').trim();
       const owner = String(slot.subCompany||'').trim();
       const phone = String(slot.subDriverPhone||'').trim();
       if(!name || !owner) return;
       const key = name.toLowerCase() + '|' + owner.toLowerCase();
-      // 같은 (name, owner)가 여러 슬롯에 있으면 마지막 phone 사용
       if(!candidates[key] || (phone && !candidates[key].phone)){
         candidates[key] = {name, owner, phone};
       }
@@ -6495,24 +6490,31 @@ async function _autoRegisterSubDrivers(){
   });
   if(Object.keys(candidates).length === 0) return;
 
-  // 마스터에 이미 있는지 확인
-  const existing = new Map(); // key → driver row
+  // ★ 마스터에 이미 있는지 확인 — 이름만으로 매칭 (Owner 무시)
+  // 같은 이름이 마스터에 있으면 신규 등록 안 함 (중복 방지)
+  // (자사 드라이버가 서브 차량 운행하는 케이스 등)
+  const existingByName = new Map(); // lower(name) → driver row
   (DB.D||[]).forEach(dr => {
-    const n = (dr.Name_KR || dr.Name_EN || '').trim().toLowerCase();
-    const o = (dr.Owner||'').trim().toLowerCase();
-    if(n && o) existing.set(n + '|' + o, dr);
+    const n = (dr.Name_KR || '').trim().toLowerCase();
+    const e = (dr.Name_EN || '').trim().toLowerCase();
+    // Name_KR 우선, Name_EN도 매칭
+    if(n) existingByName.set(n, dr);
+    if(e && !existingByName.has(e)) existingByName.set(e, dr);
   });
 
   const toRegister = []; // 신규 등록
   const toUpdatePhone = []; // 전화번호만 추가
   Object.values(candidates).forEach(c => {
-    const key = c.name.toLowerCase() + '|' + c.owner.toLowerCase();
-    const existed = existing.get(key);
+    const nameLower = c.name.toLowerCase();
+    const existed = existingByName.get(nameLower);
     if(!existed){
       toRegister.push(c);
     } else if(c.phone && !((existed.Mobile_1||existed.Mobile||'').trim())){
       // 마스터에는 있지만 전화번호 빈 경우 → 업데이트
       toUpdatePhone.push({...c, _rowIndex: existed._rowIndex});
+    } else {
+      // 이미 있음 → 등록 안 함 (Owner가 다르더라도)
+      console.log(`[Auto-Register] 이미 존재: ${c.name} (Owner:${existed.Owner||'-'}) → 신규 등록 안 함`);
     }
   });
 
@@ -6526,7 +6528,6 @@ async function _autoRegisterSubDrivers(){
                 toRegister.map(c => `• ${c.name} (${c.owner})${c.phone?' / '+c.phone:''}`).join('\n') +
                 `\n\nM_Drivers 마스터에 자동 등록하시겠습니까?`;
     if(!confirm(msg)){
-      // 등록은 거절했어도 전화번호 업데이트는 그대로 진행
       if(toUpdatePhone.length === 0) return;
     }
   }
@@ -6875,23 +6876,31 @@ window.dcDebugSubData = function(subCo){
   console.log('찾는 서브 업체:', `"${ownerStr}"`);
   console.log('전체 드라이버 수:', (DB.D||[]).length);
   console.log('전체 차량 수:', (DB.V||[]).length);
-  // 모든 드라이버의 Owner
-  const allDrvOwners = (DB.D||[]).map(d => `${d.Name_KR||d.Name_EN||'?'}(Owner:"${d.Owner||''}")`);
-  console.log('드라이버 Owner 목록:', allDrvOwners);
+  console.log('DC_OWNERS:', DC_OWNERS);
+  // 모든 드라이버의 전체 정보 (Active, Name, Owner)
+  console.log('==== 드라이버 전체 목록 ====');
+  (DB.D||[]).forEach((d, i) => {
+    console.log(`#${i+1}: Name_KR="${d.Name_KR||''}", Name_EN="${d.Name_EN||''}", Owner="${d.Owner||''}", Active="${d.Active||''}", Mobile_1="${d.Mobile_1||''}"`);
+  });
   // 매칭 시도
   const matchedDrv = (DB.D||[]).filter(d => {
     const ow = String(d.Owner||'').trim();
     return ow.toLowerCase() === ownerStr.toLowerCase();
   });
-  console.log(`매칭된 드라이버 (${matchedDrv.length}명):`, matchedDrv);
+  console.log(`\n매칭된 드라이버 (${matchedDrv.length}명):`, matchedDrv);
   // 차량
-  const allVehOwners = (DB.V||[]).map(v => `${v.Rego||'?'}(Owner:"${v.Owner||''}")`);
-  console.log('차량 Owner 목록:', allVehOwners);
+  console.log('\n==== 차량 목록 ====');
+  (DB.V||[]).forEach((v, i) => {
+    console.log(`#${i+1}: Rego="${v.Rego||''}", Owner="${v.Owner||''}", Active="${v.Active||''}"`);
+  });
   const matchedVeh = (DB.V||[]).filter(v => {
     const ow = String(v.Owner||'').trim();
     return ow.toLowerCase() === ownerStr.toLowerCase();
   });
   console.log(`매칭된 차량 (${matchedVeh.length}대):`, matchedVeh);
+  // ★ 마스터 새로고침 명령 안내
+  console.log('\n==== 새로고침 명령 ====');
+  console.log('마스터 데이터 다시 로드: forceReloadAll() 후 페이지 새로고침');
 };
 
 // 캘린더 슬롯 인터랙션 — hover 툴팁 + 단일 클릭 확대 보기
