@@ -4377,7 +4377,13 @@ function _schFindDRForSlot(date, slot, tour){
 }
 
 // ★ DR 매칭 상세 진단 — 어떤 슬롯이 왜 매칭 안 됐는지 분석
-function showDRDiagnostics(tourId){
+async function showDRDiagnostics(tourId){
+  // ★ DR 캐시 보장 (없으면 로드 후 매칭 인덱스 재빌드)
+  if(!_drCache || _drCache.length === 0){
+    console.log('[DR Diag] DR 캐시 비어있음 — 로드 시도');
+    await _schEnsureDRCache();
+    _schBuildDRMatchIndex();
+  }
   const tour = (_schCache||[]).find(t => t.TourID === tourId);
   if(!tour) return;
   const days = _schParseDays(tour.TourPlan);
@@ -4529,13 +4535,31 @@ function showDRDiagnostics(tourId){
       </div>`;
   }).join('') || '<div style="color:var(--t3);text-align:center;padding:20px;font-size:11px;">분석할 슬롯이 없습니다</div>';
 
+  // 추가 진단: 같은 차량(Rego) DR 건수 / 캐시 첫 행 샘플
+  const tourRegoSet = new Set();
+  days.forEach(d => {
+    ['morning','fullday','evening'].forEach(k => {
+      const s = d.slots && d.slots[k];
+      if(s && s.rego) tourRegoSet.add(String(s.rego).trim());
+    });
+  });
+  const drsByRego = (_drCache||[]).filter(r => tourRegoSet.has(String(r.Rego||'').trim()));
+  const drsInPeriodByRego = drsInPeriod.filter(r => tourRegoSet.has(String(r.Rego||'').trim()));
+  const cacheSize = (_drCache||[]).length;
+  const sampleRow = (_drCache||[])[0];
+  const sampleDateRaw = sampleRow ? String(sampleRow.Date||'') : '';
+  const sampleDateISO = sampleRow ? parseToISO(sampleRow.Date||'') : '';
+  const sampleKeys = sampleRow ? Object.keys(sampleRow).filter(k => !k.startsWith('_')).slice(0,8).join(', ') : '';
+
   // DR 후보 정보 (헤더)
   const headerInfo = `
     <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.6;">
-      매칭 키: <b>날짜 + 차량(Rego) + 코스(Attraction)</b> &nbsp;/&nbsp; fallback: <b>날짜 + 차량</b><br>
+      매칭 키: <b>날짜 + 차량(Rego) + 코스(Attraction)</b> &nbsp;/&nbsp; fallback: <b>날짜 + 차량</b> / <b>날짜 + TourCode</b><br>
       DR 후보 — TourCode "${escH(tour.TourCode||'')}": <b>${drsByTourCode.length}건</b> /
       Agency "${escH(tour.Agency||'')}": <b>${drsByAgency.length}건</b> /
-      기간 내 전체: <b>${drsInPeriod.length}건</b>
+      기간 내 전체: <b>${drsInPeriod.length}건</b><br>
+      <span style="color:#0369a1;">DR 캐시 총 <b>${cacheSize}</b>건 / 일정 차량(${[...tourRegoSet].join(',')||'-'}) 전체 <b>${drsByRego.length}</b>건 / 기간+차량 <b>${drsInPeriodByRego.length}</b>건</span>
+      ${sampleRow?`<br><span style="color:#9ca3af;font-size:9px;">샘플 첫 행: Date="${escH(sampleDateRaw)}" → ISO="${escH(sampleDateISO)}" / 기간=${escH(startD)}~${escH(endD)} / 키: ${escH(sampleKeys)}</span>`:''}
     </div>`;
 
   modal.innerHTML = `
