@@ -4369,12 +4369,18 @@ function showDRDiagnostics(tourId){
       }
       const isPast = d.date < today;
       const dr = _schFindDRForSlot(d.date, s);
+      // ★ prefix 제거 후 비교 (slot 데이터에 emoji prefix가 남아있을 수 있음)
+      const stripPrefix = str => String(str||'').replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
       if(dr){
-        // 매칭됨 — 차이점 분석
+        // 매칭됨 — 차이점 분석 (prefix 제거 후 비교)
         const diffs = [];
-        if(s.driver && s.driver !== dr.Driver) diffs.push(`드라이버: 일정="${s.driver}" → DR="${dr.Driver}"`);
-        if(s.course && String(s.course).toUpperCase() !== String(dr.Attraction||'').toUpperCase())
-          diffs.push(`코스: 일정="${s.course}" → DR="${dr.Attraction||'-'}"`);
+        const slotDriver = stripPrefix(s.driver);
+        const drDriver = stripPrefix(dr.Driver);
+        if(slotDriver && slotDriver !== drDriver) diffs.push(`드라이버: 일정="${slotDriver}" → DR="${drDriver}"`);
+        const slotCourse = stripPrefix(s.course);
+        const drCourse = stripPrefix(dr.Attraction);
+        if(slotCourse && slotCourse.toUpperCase() !== drCourse.toUpperCase())
+          diffs.push(`코스: 일정="${slotCourse}" → DR="${drCourse||'-'}"`);
         const ot = parseFloat(dr.OT||0);
         const otStr = ot > 0 ? ` · OT ${ot}HR` : '';
         slotDiagnostics.push({
