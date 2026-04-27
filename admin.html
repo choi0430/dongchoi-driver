@@ -7423,11 +7423,11 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     const isTrailer = !!day.trailer;
 
     // ★ 항공편 자동 채우기 (SUB 모드도 동일)
-    const _subFlightDepartTime = (time, type) => {
+    const _subAddMinutes = (time, mins) => {
       if(!time || !/^\d{2}:\d{2}$/.test(time)) return '';
       const [h,m] = time.split(':').map(Number);
-      const totalMin = h*60 + m - (type === 'dom' ? 60 : 120);
-      if(totalMin < 0) return '';
+      const totalMin = h*60 + m + mins;
+      if(totalMin < 0 || totalMin >= 24*60) return '';
       const nh = Math.floor(totalMin/60), nm = totalMin%60;
       return `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
     };
@@ -7442,9 +7442,13 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
       const fi = _schParseFlight(tour.FlightIn);
       if(fi.code){
-        // 입국: 코드만
-        subStartPlace = fi.code;
+        // 입국: 코드 + 도착시간
+        subStartPlace = `${fi.code} ${fi.time||''}`.trim();
         subStartPlaceFull = `${fi.code} ${fi.time||''} (${fi.type==='dom'?'국내':'국제'})`.trim();
+        // 시작 시간 = 도착 + 1시간(국제) / +30분(국내)
+        if(!subStartTime && fi.time){
+          subStartTime = _subAddMinutes(fi.time, fi.type === 'dom' ? 30 : 60) || '';
+        }
       }
     }
     if(slot.endPlaceType === 'airport' && tour && tour.FlightOut){
@@ -7455,7 +7459,7 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
         subEndPlaceFull = `${fo.code} ${fo.time||''} (${fo.type==='dom'?'국내':'국제'})`.trim();
         // 도착 시간 = 출발 - 2시간(국제) / -1시간(국내)
         if(!subEndTime && fo.time){
-          subEndTime = _subFlightDepartTime(fo.time, fo.type) || '';
+          subEndTime = _subAddMinutes(fo.time, fo.type === 'dom' ? -60 : -120) || '';
         }
       }
     }
@@ -7509,14 +7513,15 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   const isTrailer = !!day.trailer;
 
   // ★ 항공편 자동 채우기: 슬롯 끝점이 공항이면 FlightIn/Out에서 코드/시간 가져오기
-  // 공항 → 호텔 (입국, FlightIn): 시작 장소에 항공편 코드만 표시 (시간은 비워둠 — 가이드/드라이버가 입력)
-  // 호텔 → 공항 (출국, FlightOut): 도착 시간 = 항공편 시간 - 2시간(국제선) / -1시간(국내선) (호텔 출발 시간)
+  // 입국 (공항 → 호텔, FlightIn): 시작 시간 = 도착시간 + 1시간(국제) / +30분(국내) (수속/짐찾기 후 출발 시간)
+  //                              시작 장소 = "코드 + 도착시간" (예: TW501 09:55)
+  // 출국 (호텔 → 공항, FlightOut): 도착 시간 = 출발시간 - 2시간(국제) / -1시간(국내) (호텔 출발 시간)
   //                              도착 장소 = "코드 + 출발시간" (예: TW502 11:40)
-  const _flightDepartTime = (time, type) => {
+  const _addMinutes = (time, mins) => {
     if(!time || !/^\d{2}:\d{2}$/.test(time)) return '';
     const [h,m] = time.split(':').map(Number);
-    const totalMin = h*60 + m - (type === 'dom' ? 60 : 120);
-    if(totalMin < 0) return '';
+    const totalMin = h*60 + m + mins;
+    if(totalMin < 0 || totalMin >= 24*60) return '';
     const nh = Math.floor(totalMin/60), nm = totalMin%60;
     return `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
   };
@@ -7531,20 +7536,24 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
     const fi = _schParseFlight(tour.FlightIn);
     if(fi.code){
-      // 입국: 코드만 시작 장소에 표시 (시간은 그대로)
-      dcStartPlace = fi.code;
+      // 입국: 시작 장소 = 코드 + 도착시간
+      dcStartPlace = `${fi.code} ${fi.time||''}`.trim();
       dcStartPlaceFull = `${fi.code} ${fi.time||''} (${fi.type==='dom'?'국내':'국제'})`.trim();
+      // 시작 시간 = 도착 + 1시간(국제) / +30분(국내) - 슬롯 미입력 시
+      if(!dcStartTime && fi.time){
+        dcStartTime = _addMinutes(fi.time, fi.type === 'dom' ? 30 : 60) || '';
+      }
     }
   }
   if(slot.endPlaceType === 'airport' && tour && tour.FlightOut){
     const fo = _schParseFlight(tour.FlightOut);
     if(fo.code){
-      // 출국: 도착 장소 = "코드 + 출발시간"
+      // 출국: 도착 장소 = 코드 + 출발시간
       dcEndPlace = `${fo.code} ${fo.time||''}`.trim();
       dcEndPlaceFull = `${fo.code} ${fo.time||''} (${fo.type==='dom'?'국내':'국제'})`.trim();
-      // 도착 시간 = 출발 - 2시간(국제) / -1시간(국내) - 슬롯에 endTime 미입력일 때만
+      // 도착 시간 = 출발 - 2시간(국제) / -1시간(국내) - 슬롯 미입력 시
       if(!dcEndTime && fo.time){
-        dcEndTime = _flightDepartTime(fo.time, fo.type) || '';
+        dcEndTime = _addMinutes(fo.time, fo.type === 'dom' ? -60 : -120) || '';
       }
     }
   }
