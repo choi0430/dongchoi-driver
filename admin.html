@@ -7423,10 +7423,10 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     const isTrailer = !!day.trailer;
 
     // ★ 항공편 자동 채우기 (SUB 모드도 동일)
-    const _subFlightArriveTime = (time, type) => {
+    const _subFlightDepartTime = (time, type) => {
       if(!time || !/^\d{2}:\d{2}$/.test(time)) return '';
       const [h,m] = time.split(':').map(Number);
-      const totalMin = h*60 + m - (type === 'dom' ? 120 : 180);
+      const totalMin = h*60 + m - (type === 'dom' ? 60 : 120);
       if(totalMin < 0) return '';
       const nh = Math.floor(totalMin/60), nm = totalMin%60;
       return `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
@@ -7442,18 +7442,20 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
       const fi = _schParseFlight(tour.FlightIn);
       if(fi.code){
-        subStartPlace = `${fi.code} ${fi.time||''}`.trim();
+        // 입국: 코드만
+        subStartPlace = fi.code;
         subStartPlaceFull = `${fi.code} ${fi.time||''} (${fi.type==='dom'?'국내':'국제'})`.trim();
-        if(!subStartTime && fi.time) subStartTime = fi.time;
       }
     }
     if(slot.endPlaceType === 'airport' && tour && tour.FlightOut){
       const fo = _schParseFlight(tour.FlightOut);
       if(fo.code){
+        // 출국: 코드 + 출발시간
         subEndPlace = `${fo.code} ${fo.time||''}`.trim();
         subEndPlaceFull = `${fo.code} ${fo.time||''} (${fo.type==='dom'?'국내':'국제'})`.trim();
+        // 도착 시간 = 출발 - 2시간(국제) / -1시간(국내)
         if(!subEndTime && fo.time){
-          subEndTime = _subFlightArriveTime(fo.time, fo.type) || fo.time;
+          subEndTime = _subFlightDepartTime(fo.time, fo.type) || '';
         }
       }
     }
@@ -7507,12 +7509,13 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   const isTrailer = !!day.trailer;
 
   // ★ 항공편 자동 채우기: 슬롯 끝점이 공항이면 FlightIn/Out에서 코드/시간 가져오기
-  // 도착(공항 가는 방향): 시간 = 항공편 시간 - 3시간(국제선) / -2시간(국내선)
-  // 출발(공항에서 오는 방향): 시간 = 항공편 시간 그대로
-  const _flightArriveTime = (time, type) => {
+  // 공항 → 호텔 (입국, FlightIn): 시작 장소에 항공편 코드만 표시 (시간은 비워둠 — 가이드/드라이버가 입력)
+  // 호텔 → 공항 (출국, FlightOut): 도착 시간 = 항공편 시간 - 2시간(국제선) / -1시간(국내선) (호텔 출발 시간)
+  //                              도착 장소 = "코드 + 출발시간" (예: TW502 11:40)
+  const _flightDepartTime = (time, type) => {
     if(!time || !/^\d{2}:\d{2}$/.test(time)) return '';
     const [h,m] = time.split(':').map(Number);
-    const totalMin = h*60 + m - (type === 'dom' ? 120 : 180);
+    const totalMin = h*60 + m - (type === 'dom' ? 60 : 120);
     if(totalMin < 0) return '';
     const nh = Math.floor(totalMin/60), nm = totalMin%60;
     return `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
@@ -7528,19 +7531,20 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
     const fi = _schParseFlight(tour.FlightIn);
     if(fi.code){
-      dcStartPlace = `${fi.code} ${fi.time||''}`.trim();
+      // 입국: 코드만 시작 장소에 표시 (시간은 그대로)
+      dcStartPlace = fi.code;
       dcStartPlaceFull = `${fi.code} ${fi.time||''} (${fi.type==='dom'?'국내':'국제'})`.trim();
-      if(!dcStartTime && fi.time) dcStartTime = fi.time;
     }
   }
   if(slot.endPlaceType === 'airport' && tour && tour.FlightOut){
     const fo = _schParseFlight(tour.FlightOut);
     if(fo.code){
+      // 출국: 도착 장소 = "코드 + 출발시간"
       dcEndPlace = `${fo.code} ${fo.time||''}`.trim();
       dcEndPlaceFull = `${fo.code} ${fo.time||''} (${fo.type==='dom'?'국내':'국제'})`.trim();
-      // 공항으로 가는 도착 시간 = 항공편 시간 - 3시간(국제) / -2시간(국내)
+      // 도착 시간 = 출발 - 2시간(국제) / -1시간(국내) - 슬롯에 endTime 미입력일 때만
       if(!dcEndTime && fo.time){
-        dcEndTime = _flightArriveTime(fo.time, fo.type) || fo.time;
+        dcEndTime = _flightDepartTime(fo.time, fo.type) || '';
       }
     }
   }
