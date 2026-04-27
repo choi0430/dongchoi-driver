@@ -5601,6 +5601,9 @@ function _smRebuildDays(){
           placeholder: '서브 업체 검색 (또는 자유 입력)',
           onSelect: (it) => {
             _propagateSlotField(i, k, 'subCompany', it.value);
+            // ★ input 필드 값을 prefix 없는 순수 회사명으로 (라벨에 🏢 포함됨)
+            const coInp = _schDayCsels['subco-'+cellPrefix]?.input;
+            if(coInp) coInp.value = it.value;
             // ★ 업체 변경 → 드라이버/차량 목록 즉시 재빌드
             _rebuildSubLists(it.value);
           },
@@ -5616,12 +5619,17 @@ function _smRebuildDays(){
           subCoInp.addEventListener('input', () => {
             _schDays[i].slots[k].subCompany = subCoInp.value;
           });
-          // ★ blur 시 안전장치 — 매칭 안 된 자유 입력도 저장 + 드라이버 목록 재빌드
+          // ★ blur 시 안전장치 — prefix 제거 + 매칭 안 된 자유 입력도 저장 + 드라이버 목록 재빌드
           subCoInp.addEventListener('blur', () => {
-            const v = subCoInp.value.trim();
+            let v = subCoInp.value.trim();
+            // prefix 제거 (🏢, 🏠, ⭐ 등)
+            v = v.replace(/^[\u2B50\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA]+\s*/u, '').trim();
+            if(v !== subCoInp.value.trim()){
+              subCoInp.value = v;
+            }
             if(v && _schDays[i].slots[k].subCompany !== v){
               _schDays[i].slots[k].subCompany = v;
-              console.log('[SubCompany Blur 강제 저장]', cellPrefix, '→', v);
+              console.log('[SubCompany Blur prefix 제거 후 저장]', cellPrefix, '→', v);
             }
             // 자유 입력 후에도 드라이버 목록 갱신 시도
             if(v) _rebuildSubLists(v);
@@ -5646,6 +5654,9 @@ function _smRebuildDays(){
           placeholder: '차량 검색 또는 자유 입력 (예: 25S)',
           onSelect: (it) => {
             _schDays[i].slots[k].subVehicleNote = it.value;
+            // ★ input 필드 값을 prefix 없는 순수 Rego로 (라벨에 🚐 포함됨)
+            const vehInp = _schDayCsels['subveh-'+cellPrefix]?.input;
+            if(vehInp) vehInp.value = it.value;
           },
           onClear: () => { _schDays[i].slots[k].subVehicleNote = ''; }
         });
@@ -5656,7 +5667,12 @@ function _smRebuildDays(){
             _schDays[i].slots[k].subVehicleNote = subVehInp.value;
           });
           subVehInp.addEventListener('blur', () => {
-            const v = subVehInp.value.trim();
+            let v = subVehInp.value.trim();
+            // prefix 제거 (🚐, 🚌 등)
+            v = v.replace(/^[\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}]+\s*/u, '').trim();
+            if(v !== subVehInp.value.trim()){
+              subVehInp.value = v;
+            }
             if(v && _schDays[i].slots[k].subVehicleNote !== v){
               _schDays[i].slots[k].subVehicleNote = v;
             }
@@ -5669,6 +5685,10 @@ function _smRebuildDays(){
           placeholder: '서브 드라이버 (자유 입력 가능)',
           onSelect: (it) => {
             _schDays[i].slots[k].subDriver = it.value;
+            // ★ input 필드 값을 prefix 없는 순수 이름으로 즉시 갱신 (라벨 prefix 제거)
+            //    이렇게 안 하면 blur 시 라벨이 데이터에 들어가서 마스터 매칭 실패
+            const drvInp = _schDayCsels['subdrv-'+cellPrefix]?.input;
+            if(drvInp) drvInp.value = it.value;
             // ★ 드라이버 선택 시 전화번호 자동 채움 (input 직접 업데이트 — rebuild 안 함)
             if(it._phone){
               _schDays[i].slots[k].subDriverPhone = it._phone;
@@ -5698,11 +5718,18 @@ function _smRebuildDays(){
             console.log('[SubDriver Input]', cellPrefix, '→', v);
           });
           // ★ blur 시에도 강제 저장 (마지막 안전장치)
+          //   단, label prefix(⭐, 🏠, 🏢) 제거 후 저장 — 마스터 매칭에 prefix 들어가면 안 됨
           subDrvInp.addEventListener('blur', () => {
-            const v = subDrvInp.value.trim();
+            let v = subDrvInp.value.trim();
+            // ★ label prefix 제거 (⭐, 🏠, 🏢, 🏨 등 + 공백)
+            v = v.replace(/^[\u2B50\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA]+\s*/u, '').trim();
+            // input 값도 정리
+            if(v !== subDrvInp.value.trim()){
+              subDrvInp.value = v;
+            }
             if(v && _schDays[i].slots[k].subDriver !== v){
               _schDays[i].slots[k].subDriver = v;
-              console.log('[SubDriver Blur 강제 저장]', cellPrefix, '→', v);
+              console.log('[SubDriver Blur prefix 제거 후 저장]', cellPrefix, '→', v);
             }
           });
         }
@@ -6472,15 +6499,30 @@ async function _autoRegisterSubDrivers(){
   if(!_schDays || !_schDays.length) return;
   // 등록 대상 수집 — 중복 제거
   const candidates = {}; // key: lower(name)|lower(owner) → {name, owner, phone}
+  // 이모지 prefix 제거 정규식 (⭐, 🏠, 🏢, 🏨, 🚐, 🚌 등 + 공백)
+  const stripPrefix = (s) => String(s||'').trim()
+    .replace(/^[\u2B50\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}]+\s*/u, '')
+    .trim();
+
   _schDays.forEach(d => {
     ['morning','fullday','evening'].forEach(sk => {
       const slot = d.slots && d.slots[sk];
       if(!slot || slot.mode !== 'sub') return;
-      // ★ 라벨 prefix 제거 (⭐ / 🏠 / 🏢 등)
-      let name = String(slot.subDriver||'').trim();
-      name = name.replace(/^[⭐🏠🏢]\s*/, '').trim();
-      const owner = String(slot.subCompany||'').trim();
+      // ★ name과 owner 둘 다 prefix 제거 (라벨이 데이터에 들어간 경우 정리)
+      const name = stripPrefix(slot.subDriver);
+      const owner = stripPrefix(slot.subCompany);
       const phone = String(slot.subDriverPhone||'').trim();
+
+      // ★ 데이터에도 정리된 값 반영 (저장 시 깨끗한 데이터)
+      if(name && slot.subDriver !== name){
+        console.log('[AutoRegister] subDriver prefix 제거:', slot.subDriver, '→', name);
+        slot.subDriver = name;
+      }
+      if(owner && slot.subCompany !== owner){
+        console.log('[AutoRegister] subCompany prefix 제거:', slot.subCompany, '→', owner);
+        slot.subCompany = owner;
+      }
+
       if(!name || !owner) return;
       const key = name.toLowerCase() + '|' + owner.toLowerCase();
       if(!candidates[key] || (phone && !candidates[key].phone)){
