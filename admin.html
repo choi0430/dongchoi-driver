@@ -5432,6 +5432,25 @@ function _smRebuildDays(){
   }
 
   // 각 일별 + 슬롯별 검색 드롭다운 빌드
+  // ★ 기존 데이터에 라벨 prefix가 들어간 경우 자동 정리 (이전 버그로 인한 잘못된 데이터)
+  const _stripPrefix = (s) => String(s||'').trim()
+    .replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
+  _schDays.forEach((d, i) => {
+    ['morning','fullday','evening'].forEach(k => {
+      const s = d.slots && d.slots[k];
+      if(!s) return;
+      ['rego','driver','subCompany','subDriver','subVehicleNote'].forEach(field => {
+        if(s[field]){
+          const cleaned = _stripPrefix(s[field]);
+          if(cleaned !== s[field]){
+            console.log(`[Modal Open prefix 정리] ${field}: "${s[field]}" → "${cleaned}"`);
+            s[field] = cleaned;
+          }
+        }
+      });
+    });
+  });
+
   _schDays.forEach((d, i) => {
     // 일자별 가용성 인지 옵션
     const driverItemsDate = buildDriverItemsForDate(d.date);
@@ -5449,19 +5468,55 @@ function _smRebuildDays(){
           items: vehItemsDate,
           value: d.slots[k].rego || '',
           placeholder: '차량',
-          onSelect: (it) => { _propagateSlotField(i, k, 'rego', it.value); },
+          onSelect: (it) => {
+            _propagateSlotField(i, k, 'rego', it.value);
+            // ★ input 값을 prefix 제거된 순수 Rego로 (라벨엔 🏠/🏢/⚠️ 포함)
+            const inp = _schDayCsels['rego-'+cellPrefix]?.input;
+            if(inp) inp.value = it.value;
+          },
           onClear: () => { _schDays[i].slots[k].rego = ''; }
         });
         if(d.slots[k].rego) _schDayCsels['rego-'+cellPrefix].setValue(d.slots[k].rego);
+        // ★ 데이터에 prefix가 들어간 경우 자동 정리 + input blur 안전망
+        const regoInp = _schDayCsels['rego-'+cellPrefix]?.input;
+        if(regoInp){
+          regoInp.addEventListener('blur', () => {
+            // prefix 제거 정규식 (🏠, 🏢, ⚠️, 🚫, 🚐, 🚌 등)
+            let v = regoInp.value.trim();
+            v = v.replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
+            if(v !== regoInp.value.trim()) regoInp.value = v;
+            if(v && _schDays[i].slots[k].rego !== v){
+              _schDays[i].slots[k].rego = v;
+              console.log('[Rego Blur prefix 정리]', cellPrefix, '→', v);
+            }
+          });
+        }
         // 드라이버
         _schDayCsels['driver-'+cellPrefix] = buildSearchSelect('slot-driver-'+cellPrefix, {
           items: driverItemsDate,
           value: d.slots[k].driver || '',
           placeholder: '드라이버',
-          onSelect: (it) => { _propagateSlotField(i, k, 'driver', it.value); },
+          onSelect: (it) => {
+            _propagateSlotField(i, k, 'driver', it.value);
+            // ★ input 값을 prefix 제거된 순수 이름으로
+            const inp = _schDayCsels['driver-'+cellPrefix]?.input;
+            if(inp) inp.value = it.value;
+          },
           onClear: () => { _schDays[i].slots[k].driver = ''; }
         });
         if(d.slots[k].driver) _schDayCsels['driver-'+cellPrefix].setValue(d.slots[k].driver);
+        const driverInp = _schDayCsels['driver-'+cellPrefix]?.input;
+        if(driverInp){
+          driverInp.addEventListener('blur', () => {
+            let v = driverInp.value.trim();
+            v = v.replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
+            if(v !== driverInp.value.trim()) driverInp.value = v;
+            if(v && _schDays[i].slots[k].driver !== v){
+              _schDays[i].slots[k].driver = v;
+              console.log('[Driver Blur prefix 정리]', cellPrefix, '→', v);
+            }
+          });
+        }
       } else if(slotMode === 'sub'){
         // 서브 모드: 서브 업체 + 서브 드라이버 (자유 입력 + 자동완성)
         // 서브 업체 source: DB.PS keys + 차량 Owner + 드라이버 Owner (마스터 데이터 모든 곳)
