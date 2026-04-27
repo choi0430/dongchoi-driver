@@ -7262,7 +7262,7 @@ function _schGetSlotInfo(tourId, dateISO, slotKey){
   const lines = [];
   // 헤더 (Agency + TourCode)
   lines.push(`<div style="font-weight:800;font-size:13px;margin-bottom:4px;color:#fbbf24;">${escH(tour.Agency||'')} · ${escH(tour.TourCode||tour.TourID)}</div>`);
-  if(tour.Guide) lines.push(`<div style="font-size:11px;color:#d1d5db;margin-bottom:6px;">🧑 ${escH(tour.Guide)}${tour.GuidePhone?' · '+escH(tour.GuidePhone):''}${tour.Pax?' · '+tour.Pax+'명':''}${tour.Seats?'/'+escH(tour.Seats):''}</div>`);
+  if(tour.Guide) lines.push(`<div style="font-size:11px;color:#d1d5db;margin-bottom:6px;">🧑 ${escH(tour.Guide)}${tour.GuidePhone?' · '+escH(fixPhone(tour.GuidePhone)):''}${tour.Pax?' · '+tour.Pax+'명':''}${tour.Seats?'/'+escH(tour.Seats):''}</div>`);
   // 슬롯 정보
   if(slot){
     const slotLabel = slotKey==='morning'?'AM':slotKey==='fullday'?'풀데이':'PM';
@@ -7504,6 +7504,33 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
        slot.startPlaceType !== 'airport' && slot.endPlaceType !== 'airport'){
       subEndTime = _calcSubEndTime(subStartTime, slot.course, slot.subCompany) || '';
     }
+    // ★ 중간일 기본 시간 자동: 시작/종료 모두 비었을 때 코스 MAX HOUR로 기본 채우기
+    //  - 10시간 코스: 09:00 ~ 19:00
+    //  - 12시간 코스: 07:00 ~ 19:00
+    //  - 5시간(City/Half): 14:00 ~ 19:00
+    //  - 3시간(Dinner Transfer): 18:00 ~ 21:00 (저녁 예외)
+    //  - 그 외: 09:00 ~ MAX HOUR + 8pm 캡
+    // 입국/출국 슬롯(공항 포함)은 위에서 이미 처리되므로 제외
+    if(!subStartTime && !subEndTime && slot.course &&
+       slot.startPlaceType !== 'airport' && slot.endPlaceType !== 'airport'){
+      let maxHrs = null;
+      try{
+        const ps = (typeof DB !== 'undefined' && DB.PS && DB.PS[slot.subCompany]) ? DB.PS[slot.subCompany] : null;
+        if(ps && ps[slot.course]){
+          const mh = parseFloat(ps[slot.course].max_hours);
+          if(!isNaN(mh) && mh > 0) maxHrs = mh;
+        }
+      }catch(e){}
+      const isEvening = /dinner|night/i.test(slot.course);
+      if(isEvening && maxHrs){
+        subStartTime = '18:00';
+        subEndTime = _subAddMinutes(subStartTime, maxHrs * 60) || '21:00';
+      } else if(maxHrs){
+        // 종료 19:00 고정, 시작 = 19 - maxHrs
+        subEndTime = '19:00';
+        subStartTime = _subAddMinutes(subEndTime, -(maxHrs * 60)) || '09:00';
+      }
+    }
 
     return {
       startTime: subStartTime,
@@ -7638,6 +7665,33 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   if(!dcEndTime && dcStartTime && slot.course &&
      slot.startPlaceType !== 'airport' && slot.endPlaceType !== 'airport'){
     dcEndTime = _calcDcEndTime(dcStartTime, slot.course, tour && tour.Agency) || '';
+  }
+  // ★ 중간일 기본 시간 자동: 시작/종료 모두 비었을 때 코스 MAX HOUR로 기본 채우기
+  //  - 10시간 코스: 09:00 ~ 19:00
+  //  - 12시간 코스: 07:00 ~ 19:00
+  //  - 5시간(City/Half): 14:00 ~ 19:00
+  //  - 3시간(Dinner Transfer): 18:00 ~ 21:00 (저녁 예외)
+  //  - 그 외: 09:00 ~ MAX HOUR + 8pm 캡
+  // 입국/출국 슬롯(공항 포함)은 위에서 이미 처리되므로 제외
+  if(!dcStartTime && !dcEndTime && slot.course &&
+     slot.startPlaceType !== 'airport' && slot.endPlaceType !== 'airport'){
+    let maxHrs = null;
+    try{
+      const ag = (typeof DB !== 'undefined' && DB.PC && DB.PC[tour && tour.Agency]) ? DB.PC[tour.Agency] : null;
+      if(ag && ag[slot.course]){
+        const mh = parseFloat(ag[slot.course].max_hours);
+        if(!isNaN(mh) && mh > 0) maxHrs = mh;
+      }
+    }catch(e){}
+    const isEvening = /dinner|night/i.test(slot.course);
+    if(isEvening && maxHrs){
+      dcStartTime = '18:00';
+      dcEndTime = _addMinutes(dcStartTime, maxHrs * 60) || '21:00';
+    } else if(maxHrs){
+      // 종료 19:00 고정, 시작 = 19 - maxHrs
+      dcEndTime = '19:00';
+      dcStartTime = _addMinutes(dcEndTime, -(maxHrs * 60)) || '09:00';
+    }
   }
 
   return {
