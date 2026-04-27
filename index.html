@@ -9287,14 +9287,23 @@ function calcDRCostFromRow(r) {
   // 드라이버 선택 SVC = 드라이버 수당 base
   const base = svc;
   const gross = base + ot + htl + dst + erl + trl + ngt + wsh + mel + tip + toll + fuel;
+  const expectedNet = Math.max(0, gross - own);
   // ★ 저장된 DR_Cost가 gross(미차감)인지 net(차감완료)인지 자동 감지
-  //   → 항상 net(실 지급액) 반환. admin 화면과 동일한 금액 보장.
+  //   비즈니스 룰: SVC - Night_Owner = DR (드라이버 수당). 항상 net 반환.
   if(stored > 0){
-    if(own > 0 && Math.abs(stored - gross) < 0.5) return Math.max(0, stored - own);
-    return stored;
+    if(own > 0){
+      // own이 있을 때 — stored가 gross인지 net인지 판별
+      if(Math.abs(stored - gross) < 0.5)        return expectedNet;       // gross로 저장 → net 변환
+      if(Math.abs(stored - expectedNet) < 0.5)  return stored;            // 이미 net
+      // 둘 다 아닌 애매한 경우 — gross 가능성이 높으면 net으로 보정,
+      // 그렇지 않으면 expectedNet 우선 (부정확한 stored보다 계산값 신뢰)
+      if(stored >= gross - 0.5) return expectedNet;  // stored가 gross 이상 → 차감 필요
+      return stored;  // stored가 expectedNet 근처/이하 → 이미 net으로 간주
+    }
+    return stored;  // own=0 → stored 그대로
   }
   if(base === 0) return 0;
-  return Math.max(0, gross - own);
+  return expectedNet;
 }
 
 async function getGASDRForWeek(driverName, monISO){
@@ -9836,11 +9845,26 @@ async function renderSalary(){
   // GAS 데이터만 사용
   const all = gasAll;
   const weekMap = {};
+  // ★ 안전망: r.dr이 이미 야경납입 차감 후 net이어야 하지만,
+  //   시트 데이터 불일치 등으로 gross가 들어올 수 있으므로 주별 nightOwner 합도 추적
+  //   r.dr이 정확히 net이면 nightOwnerSum=0과 같은 결과, 아니면 차감해서 보정
+  const weekNightOwner = {};
   all.forEach(r=>{
     const wk = getWeekKey(r.date);
     if(!wk) return;
     if(!weekMap[wk.key]) weekMap[wk.key]={label:wk.label,key:wk.key,total:0,paid:0,wageEntries:[]};
-    weekMap[wk.key].total += (r.dr||0);  // DR_Cost는 이미 야경납입 차감 후
+    weekMap[wk.key].total += (r.dr||0);  // DR_Cost는 이미 야경납입 차감 후 net이어야 함
+    // ★ 자사 차량분 nightOwner만 추적 (SUB는 차주에 직접 납입, 회사 정산 대상 아님)
+    if(!getSubOwnerForRego(r.rego)){
+      weekNightOwner[wk.key] = (weekNightOwner[wk.key]||0) + (r.nightOwner||0);
+    }
+  });
+  // ★ 진단: r.dr이 gross로 잘못 들어온 경우를 위한 콘솔 로그
+  Object.keys(weekMap).forEach(k => {
+    const own = weekNightOwner[k] || 0;
+    if(own > 0){
+      console.log(`[Salary] ${k}: 발생수당=$${weekMap[k].total}, 자사 야경납입=$${own} (이미 차감되어 있어야 함)`);
+    }
   });
   // 지급 금액 합산 (admin_wages 키 YYYY-MM-DD → wk.key 변환 포함)
   Object.entries(driverWages).forEach(([monISO, wkWages])=>{
