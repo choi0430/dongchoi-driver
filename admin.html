@@ -5269,7 +5269,7 @@ function _smRebuildDays(){
         if(d.slots[k].driver) _schDayCsels['driver-'+cellPrefix].setValue(d.slots[k].driver);
       } else if(slotMode === 'sub'){
         // 서브 모드: 서브 업체 + 서브 드라이버 (자유 입력 + 자동완성)
-        // 서브 업체: DB.PS의 keys (M_PriceSub의 distinct SubCo + M_SUB 시트에서 합쳐진 마스터)
+        // 서브 업체 source: DB.PS keys + 차량 Owner + 드라이버 Owner (마스터 데이터 모든 곳)
         const subCoSet = new Set();
         Object.keys(DB.PS || {}).forEach(co => {
           const c = (co||'').trim();
@@ -5278,6 +5278,11 @@ function _smRebuildDays(){
         // 차량 Owner에서도 추출 (서브 업체로 등록되지 않았지만 Owner로 사용 중인 경우)
         (DB.V||[]).forEach(v => {
           const ow = (v.Owner||'').trim();
+          if(ow && !DC_OWNERS.includes(ow)) subCoSet.add(ow);
+        });
+        // ★ 드라이버 Owner에서도 추출 (드라이버 마스터에 SUB owner 표시된 경우)
+        (DB.D||[]).forEach(dr => {
+          const ow = (dr.Owner||'').trim();
           if(ow && !DC_OWNERS.includes(ow)) subCoSet.add(ow);
         });
         const subCoItems = [...subCoSet].sort().map(co => ({ value: co, label: '🏢 ' + co }));
@@ -5296,6 +5301,17 @@ function _smRebuildDays(){
         }
 
         // 서브 드라이버: M_Drivers에서 그 SubCo Owner인 드라이버 + 자유 입력
+        const _selSubCo = (d.slots[k].subCompany||'').trim();
+        // 디버그: 어떤 드라이버가 어떤 owner를 가지는지 콘솔 로그
+        if(_selSubCo){
+          const allSubDrivers = (DB.D||[]).filter(dr => {
+            if(String(dr.Active||'').toUpperCase() === 'N') return false;
+            const ow = (dr.Owner||'').trim();
+            return ow && !DC_OWNERS.includes(ow);
+          });
+          console.log('[SubDriver] 선택된 서브업체:', _selSubCo, '/ 전체 SUB 드라이버:',
+            allSubDrivers.map(dr => `${dr.Name_KR||dr.Name_EN}(Owner:"${dr.Owner}")`).join(', '));
+        }
         const subDrvItems = (DB.D || [])
           .filter(dr => {
             if(String(dr.Active||'').toUpperCase() === 'N') return false;
@@ -5303,16 +5319,19 @@ function _smRebuildDays(){
             if(!ow) return false;
             if(typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(ow)) return false;
             // 선택된 서브 업체와 일치하는 드라이버만 (없으면 모든 서브 드라이버)
-            if(d.slots[k].subCompany){
-              return ow.toLowerCase() === d.slots[k].subCompany.toLowerCase();
+            if(_selSubCo){
+              // 대소문자 무시 + trim 매칭
+              return ow.trim().toLowerCase() === _selSubCo.toLowerCase();
             }
             return true;
           })
           .map(dr => {
-            const ph = dr.Mobile || '';
+            // ★ M_Drivers의 실제 컬럼: Mobile_1 (Mobile 아님)
+            const ph = dr.Mobile_1 || dr.Mobile || dr.Moblie_2 || '';
+            const name = dr.Name_KR || dr.Name_EN || '';
             return {
-              value: dr.Name_KR || dr.Name_EN || '',
-              label: dr.Name_KR || dr.Name_EN || '',
+              value: name,
+              label: name,
               sub: [dr.Owner, ph].filter(Boolean).join(' · '),
               _phone: ph
             };
