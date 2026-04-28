@@ -11427,8 +11427,32 @@ let _subInvRowCount = 0;
 let _subInvCourses = ['Blue Mountains','Hunter Valley','City','Airport Transfer','Sending','Port Stephens','Canberra','South Coast','Jervis Bay','Snow Mountains','Illawarra'];
 let _subInvEtcLabels = ['Trailer','Toll','Wash','Early Bird','Distance','Night Tour','Hotel','Melbourne','Fuel','Tip'];
 
+// ★ 코스 옵션: 선택된 SUB 회사의 M_PriceSub에 등록된 attraction만 표시
+//   회사 미선택 시 모든 SUB 회사의 attraction 합집합 사용 (직접입력 가능)
+function _getSubInvCourseOptions(){
+  const subCo = (document.getElementById('sub-inv-company')?.value || '').trim();
+  const courses = new Set();
+  if(typeof DB !== 'undefined' && DB.PS){
+    if(subCo && DB.PS[subCo]){
+      // 선택된 회사: 해당 회사의 attractions만
+      Object.keys(DB.PS[subCo]).forEach(c => { if(c) courses.add(c); });
+    } else {
+      // 미선택: 모든 SUB 회사 attractions 합집합 (편의)
+      Object.values(DB.PS).forEach(coData => {
+        Object.keys(coData||{}).forEach(c => { if(c) courses.add(c); });
+      });
+    }
+  }
+  // 사용자가 + 직접입력으로 추가한 것도 포함
+  _subInvCourses.forEach(c => courses.add(c));
+  return [...courses].sort();
+}
+
 function _buildCourseSelect(id, val){
-  let opts = _subInvCourses.map(c=>`<option value="${c}"${c===val?' selected':''}>${c}</option>`).join('');
+  const courses = _getSubInvCourseOptions();
+  // val이 옵션에 없으면 추가 (기존 데이터 호환)
+  if(val && !courses.includes(val)) courses.unshift(val);
+  let opts = courses.map(c=>`<option value="${c}"${c===val?' selected':''}>${c}</option>`).join('');
   return `<select id="${id}" class="profit-finp" style="width:100px;font-size:10px;padding:3px;" onchange="_onSubInvCourseChange(this)">
     <option value="">— 선택 —</option>${opts}<option value="__add__">+ 직접입력</option></select>`;
 }
@@ -11618,7 +11642,16 @@ async function initSubInvoice(){
 }
 
 function onSubInvCompanyChange(){
-  // SUB 선택 시 해당 SUB 차량만 필터링
+  // SUB 회사 변경 시 모든 코스 드롭다운 다시 빌드 (M_PriceSub 기반)
+  document.querySelectorAll('#sub-inv-items select[id^="sir-tour-"]').forEach(sel => {
+    const id = sel.id;
+    const currentVal = sel.value;
+    const newHtml = _buildCourseSelect(id, currentVal);
+    // outerHTML 교체 (id, onchange 등 모든 속성 보존됨)
+    const tmp = document.createElement('div');
+    tmp.innerHTML = newHtml;
+    sel.parentNode.replaceChild(tmp.firstChild, sel);
+  });
   calcSubInvTotal();
 }
 
