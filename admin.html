@@ -12452,7 +12452,8 @@ function _showSubInvDetail(invNum, editMode){
         <button class="btn bac" onclick="_saveSubInvEdit().catch(e=>toast('❌ 저장 오류: '+e.message,'er'))" style="background:var(--gn);color:#fff;flex:1;">💾 저장</button>
         <button class="btn bac" onclick="closeGenModal();_showSubInvDetail('${invNum.replace(/'/g,"\\'")}');" style="flex:1;">취소</button>
        </div>`
-    : `<div style="display:flex;gap:6px;margin-top:10px;justify-content:center;">
+    : `<div style="display:flex;gap:6px;margin-top:10px;justify-content:center;flex-wrap:wrap;">
+        ${!paid ? `<button class="btn bac sm" onclick="markSubInvPaid('${invNum.replace(/'/g,"\\'")}')" style="background:var(--gn);color:#fff;">💰 지급 처리</button>` : ''}
         <button class="btn bac sm" onclick="closeGenModal();_showSubInvDetail('${invNum.replace(/'/g,"\\'")}',true);">✏️ 수정</button>
         <button class="btn brd sm" onclick="closeGenModal();">✕ 닫기</button>
        </div>`;
@@ -12604,6 +12605,93 @@ async function _saveSubInvEdit(){
   }
 }
 window._saveSubInvEdit = _saveSubInvEdit;
+
+// ═══════════════════════════════════════════════════════════════════
+// SUB 인보이스 지급 처리 — Invoices.Status='paid' + SUB_Txn에 CR 자동 등록
+// (Dong Choi가 SUB 회사에 송금 완료한 경우 사용)
+// ═══════════════════════════════════════════════════════════════════
+async function markSubInvPaid(invNum){
+  const inv = (_invHistoryCache||[]).find(i=>i.InvNumber===invNum);
+  if(!inv){ toast('인보이스를 찾을 수 없습니다','er'); return; }
+
+  const subCompany = (inv.SubCompany||inv.Agency||'').trim();
+  const total = Number(inv.GrandTotal||0);
+  if(!subCompany || total <= 0){ toast('SUB 회사 또는 금액 정보가 없습니다','er'); return; }
+
+  // 지급일 입력 (기본: 오늘)
+  const today = toLocalISO(new Date());
+  const payDate = prompt(`💰 SUB 인보이스 지급 처리\n\n${invNum} — ${subCompany}\n금액: $${total.toLocaleString('en-AU',{minimumFractionDigits:2})}\n\n지급일을 입력하세요 (YYYY-MM-DD):`, today);
+  if(!payDate) return; // 취소
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(payDate)){
+    toast('지급일 형식이 올바르지 않습니다 (YYYY-MM-DD)','er');
+    return;
+  }
+
+  toast('💾 지급 처리 중...','in');
+  let success = 0, errors = [];
+
+  // 1) Invoices 시트의 Status를 'paid'로 업데이트
+  try {
+    const r1 = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'update_invoice_status', invNumber:invNum, status:'paid', field:'PaidDate', _user:getAdminUser()})
+    });
+    const j1 = await r1.json();
+    if(j1.ok){
+      success++;
+      // 로컬 캐시 갱신
+      const cached = (_invHistoryCache||[]).find(i=>i.InvNumber===invNum);
+      if(cached){ cached.Status='paid'; cached.PaidDate=payDate; }
+    } else {
+      errors.push('Invoices 상태 업데이트 실패: '+(j1.error||'unknown'));
+    }
+  } catch(e){
+    errors.push('Invoices 상태 업데이트 오류: '+e.message);
+  }
+
+  // 2) SUB_Txn에 CR 거래 추가 (지급 차감)
+  try {
+    const txnData = {
+      SubCompany: subCompany,
+      Category: 'Outsourcing',
+      Date: payDate,
+      FinishDate: payDate,
+      InvoiceNo: invNum,
+      Description: `PAID:${invNum}`,
+      DR: 0,
+      CR: total,
+      Remark: `지급 완료 (${invNum})`
+    };
+    const r2 = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'add_sub_txn', data:txnData, _user:getAdminUser()})
+    });
+    const j2 = await r2.json();
+    if(j2.ok){
+      success++;
+      // 로컬 캐시 갱신
+      _balSubTxns.push({...txnData, _rowIndex: j2.row||j2.rowIndex});
+    } else {
+      errors.push('SUB_Txn 등록 실패: '+(j2.error||'unknown'));
+    }
+  } catch(e){
+    errors.push('SUB_Txn 등록 오류: '+e.message);
+  }
+
+  if(success === 2){
+    toast(`✅ ${invNum} 지급 처리 완료 ($${total.toLocaleString()})`, 'ok');
+    closeGenModal();
+    // 화면 갱신
+    if(typeof renderSubInvHistory === 'function') renderSubInvHistory();
+    if(typeof renderBalSubList === 'function') renderBalSubList();
+    if(typeof renderDashboard === 'function') renderDashboard();
+  } else if(success === 1){
+    toast(`⚠️ 일부만 처리됨 (${success}/2): ${errors.join(', ')}`, 'er');
+  } else {
+    toast(`❌ 지급 처리 실패: ${errors.join(', ')}`, 'er');
+  }
+}
+window.markSubInvPaid = markSubInvPaid;
 
 // ═══════════════════════════════════════════════════════════════════
 // BALANCE MODULE (거래처 잔액 관리: 여행사 / 외주 SUB / 드라이버)
