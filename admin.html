@@ -11748,6 +11748,12 @@ async function _searchByTourCode(){
   // ★ 공백/하이픈/특수문자 제거 — "0421 PAP 21 JQ-618" ≡ "0421PAP21JQ618"
   const qNorm = q.replace(/[\s\-_\.]/g, '');
 
+  // ★ 투어코드 필드 모든 변형 통합 추출 (Tour_Code / TourCode / tourcode / tourCode / tour_code)
+  const _pickTourCode = (r) => {
+    if(!r) return '';
+    return String(r.Tour_Code || r.TourCode || r.tourcode || r.tourCode || r.tour_code || '').trim();
+  };
+
   // 1) 드라이버 리포트(DB.R) 검색
   let reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
   if(!reports.length){
@@ -11756,7 +11762,7 @@ async function _searchByTourCode(){
     reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
   }
   const reportMatches = reports.filter(r=>{
-    const tc = (r.Tour_Code||'').trim().toUpperCase();
+    const tc = _pickTourCode(r).toUpperCase();
     const guide = (r.Guide||'').trim().toUpperCase();
     const tcNorm = tc.replace(/[\s\-_\.]/g, '');
     const guideNorm = guide.replace(/[\s\-_\.]/g, '');
@@ -11776,7 +11782,9 @@ async function _searchByTourCode(){
     let items = [];
     try{ items = JSON.parse(inv.Items||'[]'); }catch(e){}
     items.forEach(it=>{
-      const tc = (it.tourCode||'').trim().toUpperCase();
+      // ★ 모든 투어코드 필드 변형 통합 (tourCode/tourcode/Tour_Code/TourCode/tour_code)
+      const tcRaw = String(it.tourCode || it.tourcode || it.Tour_Code || it.TourCode || it.tour_code || '').trim();
+      const tc = tcRaw.toUpperCase();
       const tcNorm = tc.replace(/[\s\-_\.]/g, '');
       if(!tc.includes(q) && !tcNorm.includes(qNorm)) return;
       const d = (it.date||'').slice(0,10);
@@ -11786,7 +11794,7 @@ async function _searchByTourCode(){
       invMatches.push({
         Date: it.date||'',
         Rego: it.rego||'',
-        Tour_Code: it.tourCode||'',
+        Tour_Code: tcRaw,
         Attraction: it.tour||'',
         Seats: it.seats||'',
         SVC_Charge: it.amount||0,
@@ -11897,8 +11905,11 @@ function _renderSearchResults(matches, label){
   const box = document.getElementById('sub-inv-search-result');
   if(!matches.length){
     box.style.display='block';
-    const samples = [...new Set((DB.R||[]).map(r=>(r.Tour_Code||'').trim()).filter(Boolean))].slice(0,10);
-    const sampleHtml = samples.length ? '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB 투어코드 예시: '+samples.join(', ')+'</div>' : '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB.R 총 '+((DB.R||[]).length)+'건, Tour_Code 있는 건: '+((DB.R||[]).filter(r=>r.Tour_Code).length)+'건</div>';
+    // ★ 모든 투어코드 필드 변형 통합
+    const _pickTC = r => String(r.Tour_Code || r.TourCode || r.tourcode || r.tourCode || r.tour_code || '').trim();
+    const samples = [...new Set((DB.R||[]).map(_pickTC).filter(Boolean))].slice(0,10);
+    const tcCount = (DB.R||[]).filter(r => _pickTC(r)).length;
+    const sampleHtml = samples.length ? '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB 투어코드 예시: '+samples.join(', ')+'</div>' : '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB.R 총 '+((DB.R||[]).length)+'건, Tour_Code 있는 건: '+tcCount+'건</div>';
     box.innerHTML='<div style="padding:10px;font-size:11px;color:var(--t3);">검색 결과 없음 ('+label+')'+sampleHtml+'</div>';
     return;
   }
