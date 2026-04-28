@@ -1228,8 +1228,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
 .sch-cal-hdr-merge.tour-block.tour-left{border-left:2px solid var(--ac);}
 .sch-cal-hdr-merge.tour-block.tour-right{border-right:2px solid var(--ac);}
-/* 도착 행(맨 아래)의 모든 활성 슬롯에 하단 테두리 — 박스 완성 */
-.sch-cal-row.sch-cal-track-end .sch-slot-cell:not(.empty){border-bottom:2px solid var(--ac);}
+/* ★ 도착 행 하단 테두리 제거 — 트랙 구분선과 중복되어 시각적 노이즈
+   대신 운행 박스의 좌/우 세로선(.tour-left/.tour-right)만 유지 */
+.sch-cal-row.sch-cal-track-end .sch-slot-cell:not(.empty){border-bottom:none;}
 
 /* ★ 트랙 경계 굵은 구분선 — 트랙 사이/표 외곽을 굵게 처리해 시각적 구분
    1) 표 외곽(.sch-cal-table)에 굵은 보더 — 일정 아래 빈 줄 차단
@@ -8006,13 +8007,17 @@ function _renderScheduleMonthGrid(wrap, periodEl){
   const lastOfMonth = new Date(year, month + 1, 0);
   periodEl.textContent = `${month+1}월 ${year}`;
 
-  // 그리드 시작: 그 달 1일이 속한 주의 일요일(또는 월요일)
-  // 우리는 일요일 시작으로 표시 (호주식)
+  // 그리드 시작: 그 달 1일이 속한 주의 월요일 (한국식)
   const gridStart = new Date(firstOfMonth);
-  gridStart.setDate(gridStart.getDate() - gridStart.getDay()); // 일요일로 이동
-  // 그리드 끝: 마지막 주 토요일
+  // dow: 0=일,1=월,...,6=토 → 월요일까지 거꾸로 가기
+  const startDow = gridStart.getDay();
+  const startOffset = startDow === 0 ? -6 : 1 - startDow;
+  gridStart.setDate(gridStart.getDate() + startOffset);
+  // 그리드 끝: 마지막 주 일요일
   const gridEnd = new Date(lastOfMonth);
-  gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()));
+  const endDow = gridEnd.getDay();
+  const endOffset = endDow === 0 ? 0 : 7 - endDow;
+  gridEnd.setDate(gridEnd.getDate() + endOffset);
   const totalDays = Math.round((gridEnd - gridStart) / (1000*60*60*24)) + 1; // 35 또는 42
 
   // 필터 적용
@@ -8057,15 +8062,16 @@ function _renderScheduleMonthGrid(wrap, periodEl){
   };
 
   const today = fmtYMD(new Date());
-  const dayHeaders = ['일','월','화','수','목','금','토'];
+  // 한국식 월요일 시작: 월/화/수/목/금/토(파랑)/일(빨강)
+  const dayHeaders = ['월','화','수','목','금','토','일'];
+  const dayHeaderColors = ['var(--t2)','var(--t2)','var(--t2)','var(--t2)','var(--t2)','#3b82f6','var(--rd)'];
 
   // 헤더 행
   let html = `
     <div style="padding:6px 14px 0;">
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px;">`;
   dayHeaders.forEach((d, i) => {
-    const color = i === 0 ? 'var(--rd)' : (i === 6 ? '#3b82f6' : 'var(--t2)');
-    html += `<div style="text-align:center;font-size:11px;font-weight:700;color:${color};padding:6px 0;">${d}</div>`;
+    html += `<div style="text-align:center;font-size:11px;font-weight:700;color:${dayHeaderColors[i]};padding:6px 0;">${d}</div>`;
   });
   html += `</div>`;
 
