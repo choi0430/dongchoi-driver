@@ -11793,6 +11793,30 @@ async function _searchByTourCode(){
     }
     return true;
   });
+  // ★ 리포트 매칭 행에 SUB 정산 금액(calcSubReport) 미리 부착 — 표시/행 추가 시 사용
+  //    SUB 인보이스는 SUB↔Dong Choi 간 정산이므로 DR(드라이버)/TA(여행사) 금액이 아닌 SUB 금액이 맞음
+  const _enrichedReportMatches = reportMatches.map(r => {
+    let calc = null;
+    try { calc = calcSubReport(r); } catch(e){}
+    if(calc && calc.isSub && calc.subCost){
+      // _subAmt: SUB 기본 요율, _subOt: SUB OT, _subExtras: 호텔+거리+트레일러 (SUB 금액 기준)
+      return {
+        ...r,
+        _subAmt: Number(calc.subCost.base) || 0,
+        _subOt: Number(calc.subCost.ot) || 0,
+        _subHotel: Number(calc.subCost.hotel) || 0,
+        _subDist: Number(calc.subCost.dist) || 0,
+        _subTrailer: Number(calc.subCost.trailer) || 0,
+        _subExtras: (Number(calc.subCost.hotel)||0) + (Number(calc.subCost.dist)||0) + (Number(calc.subCost.trailer)||0),
+        _subTotal: Number(calc.subCost.total) || 0,
+        _hasSub: true
+      };
+    }
+    return r; // SUB 차량 아니면 원본 그대로
+  });
+  // reportMatches를 보강된 버전으로 교체
+  reportMatches.length = 0;
+  reportMatches.push(..._enrichedReportMatches);
 
   // 2) SUB 인보이스 이력 항목 검색 → 리포트 형식으로 변환
   // ★ SUB 인보이스만 대상 (여행사 인보이스의 Items는 다른 필드 구조라 잘못 잡힘)
@@ -11984,11 +12008,13 @@ function _renderSearchResults(matches, label){
   html += '</tr></thead><tbody>';
   matches.forEach((r,i)=>{
     const dt = _fmtSubInvDate(r.Date||'');
-    const svc = Number(r.SVC_Charge||0);
-    const ot = Number(r.OT||0);
-    const trailer = Number(r.Trailer||0);
-    const hotel = Number(r.Hotel_Surcharge||0);
-    const dist = Number(r.Dist_Surcharge||0);
+    // ★ SUB 인보이스 발행은 SUB↔Dong Choi 간 정산이므로 SUB 금액 우선 사용
+    //   _hasSub=true이면 calcSubReport로 미리 계산된 SUB 금액 사용, 아니면 raw SVC_Charge fallback
+    const svc = r._hasSub ? Number(r._subAmt||0) : Number(r.SVC_Charge||0);
+    const ot  = r._hasSub ? Number(r._subOt||0)  : Number(r.OT||0);
+    const trailer = r._hasSub ? Number(r._subTrailer||0) : Number(r.Trailer||0);
+    const hotel   = r._hasSub ? Number(r._subHotel||0)   : Number(r.Hotel_Surcharge||0);
+    const dist    = r._hasSub ? Number(r._subDist||0)    : Number(r.Dist_Surcharge||0);
     const early = Number(r.Early||0);
     const toll = Number(r.Toll||0);
     const extras = trailer+hotel+dist+early+toll;
@@ -12069,11 +12095,12 @@ function _addSubInvRowFromReport(r){
     return '<option value="'+v.Rego+'"'+sel+'>'+label+'</option>';
   }).join('');
 
-  const svc = Number(r.SVC_Charge||0);
-  const ot = Number(r.OT||0);
-  const trailer = Number(r.Trailer||0);
-  const hotel = Number(r.Hotel_Surcharge||0);
-  const dist = Number(r.Dist_Surcharge||0);
+  // ★ SUB 인보이스 발행은 SUB↔Dong Choi 간 정산이므로 SUB 금액 우선 사용
+  const svc = r._hasSub ? Number(r._subAmt||0) : Number(r.SVC_Charge||0);
+  const ot  = r._hasSub ? Number(r._subOt||0)  : Number(r.OT||0);
+  const trailer = r._hasSub ? Number(r._subTrailer||0) : Number(r.Trailer||0);
+  const hotel   = r._hasSub ? Number(r._subHotel||0)   : Number(r.Hotel_Surcharge||0);
+  const dist    = r._hasSub ? Number(r._subDist||0)    : Number(r.Dist_Surcharge||0);
   const early = Number(r.Early||0);
   const toll = Number(r.Toll||0);
   const extras = trailer+hotel+dist+early+toll;
