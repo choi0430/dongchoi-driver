@@ -17571,7 +17571,13 @@ function renderDraftCandidates(){
 // 드래프트 검토 → 인보이스 페이지로 이동 + 자동 항목 채움
 function openDraftEditor(idx){
   const draft = _draftCandidates[idx];
-  if(!draft) return;
+  if(!draft){
+    console.warn('[Draft] 드래프트 데이터 없음:', idx);
+    toast('❌ 드래프트 데이터를 찾을 수 없습니다','er');
+    return;
+  }
+  console.log('[Draft] 검토 시작:', draft.agency, draft.tourCode, draft);
+
   // 인보이스 폼에 자동 채움
   const agInp = document.getElementById('inv-agency');
   const fromInp = document.getElementById('inv-from');
@@ -17581,20 +17587,68 @@ function openDraftEditor(idx){
   const startDate = draft.schedules.map(s => String(s.StartDate||'').slice(0,10)).filter(Boolean).sort()[0];
   const endDate = draft.schedules.map(s => String(s.EndDate||s.StartDate||'').slice(0,10)).filter(Boolean).sort().reverse()[0];
 
-  if(agInp){
-    // csel 시스템 사용 시
-    if(typeof cselSetValue === 'function') cselSetValue('inv-agency', draft.agency);
-    else agInp.value = draft.agency;
+  if(!agInp){
+    console.error('[Draft] inv-agency 셀렉트 없음 — 인보이스 페이지가 아닙니다');
+    toast('❌ 인보이스 페이지에서만 사용 가능합니다','er');
+    return;
   }
-  if(fromInp && startDate) fromInp.value = startDate;
-  if(toInp && endDate) toInp.value = endDate;
+
+  // 여행사 채움 (csel 시스템 우선, 폴백 native)
+  if(typeof cselSetValue === 'function'){
+    cselSetValue('inv-agency', draft.agency);
+  } else {
+    agInp.value = draft.agency;
+  }
+  // change 이벤트 강제 트리거 (onInvAgencyChange 호출)
+  agInp.dispatchEvent(new Event('change', {bubbles:true}));
+
+  if(fromInp && startDate){
+    fromInp.value = startDate;
+    fromInp.dispatchEvent(new Event('change', {bubbles:true}));
+  }
+  if(toInp && endDate){
+    toInp.value = endDate;
+    toInp.dispatchEvent(new Event('change', {bubbles:true}));
+  }
+
+  // 투어코드도 자동 선택 (드롭다운에 해당 코드가 있으면)
+  setTimeout(() => {
+    const tcSel = document.getElementById('inv-tourcode');
+    if(tcSel && draft.tourCode){
+      const opt = [...tcSel.options].find(o => o.value === draft.tourCode);
+      if(opt){
+        tcSel.value = draft.tourCode;
+        tcSel.dispatchEvent(new Event('change', {bubbles:true}));
+      } else {
+        console.log('[Draft] 투어코드 옵션 없음, 전체로 표시:', draft.tourCode);
+      }
+    }
+  }, 300);
 
   // 미리보기 갱신
-  if(typeof _refreshInvPreview === 'function') _refreshInvPreview();
+  if(typeof _refreshInvPreview === 'function'){
+    setTimeout(() => _refreshInvPreview(), 350);
+  }
+
   toast(`📝 ${draft.agency} ${draft.tourCode} 드래프트 로드됨 — 검토 후 발행하세요`, 'ok');
 
-  // 인보이스 폼으로 스크롤
-  document.getElementById('inv-form')?.scrollIntoView({behavior:'smooth', block:'start'});
+  // 인보이스 폼 영역으로 스크롤 (실제 존재하는 ID 사용)
+  // inv-agency 셀렉트가 폼의 시작점이므로 그 부모 컨테이너로 스크롤
+  setTimeout(() => {
+    const target = agInp.closest('.crd') || agInp.parentElement?.parentElement || agInp;
+    if(target && typeof target.scrollIntoView === 'function'){
+      target.scrollIntoView({behavior:'smooth', block:'start'});
+    }
+    // 시각적 강조 — 폼 영역에 잠시 하이라이트
+    const formContainer = agInp.closest('.crd');
+    if(formContainer){
+      formContainer.style.transition = 'box-shadow 0.4s';
+      formContainer.style.boxShadow = '0 0 0 3px #f97316, 0 8px 24px rgba(249,115,22,0.3)';
+      setTimeout(() => {
+        formContainer.style.boxShadow = '';
+      }, 1800);
+    }
+  }, 200);
 }
 
 // 드래프트 건너뛰기 (현재 세션에서만 숨김)
