@@ -17234,25 +17234,26 @@ async function _updateSchedulesAfterInvoice(invNum, agency, rows, manualItems, p
   });
 
   // 매칭되는 Schedule 찾기
+  // ★ 매칭 기준 강화: pickTourCode 헬퍼 사용 + 공백/하이픈 정규화 + 정확 매칭 우선
+  const _normalize = s => String(s||'').trim().toUpperCase().replace(/[\s\-_\.]/g, '');
+  const invTourCodesNormalized = new Set([...invTourCodes].map(_normalize));
+  const agencyTrim = String(agency||'').trim().toLowerCase();
+
   const matchedSchedules = _schCache.filter(s => {
-    // Agency 일치
-    if(String(s.Agency||'').trim() !== agency.trim()) return false;
-    // 이미 invoiced/paid는 스킵 (덮어쓰기 방지)
+    // Agency 일치 (대소문자 무시)
+    if(String(s.Agency||'').trim().toLowerCase() !== agencyTrim) return false;
+    // 이미 invoiced/paid/cancelled는 스킵 (덮어쓰기 방지)
     const curStatus = String(s.Status||'scheduled').toLowerCase();
     if(curStatus === 'invoiced' || curStatus === 'paid' || curStatus === 'cancelled') return false;
-    // TourCode 매칭
-    const sTc = String(s.TourCode||'').trim().toUpperCase();
-    if(invTourCodes.size > 0 && !invTourCodes.has(sTc)) {
-      // TourCode 불일치 → 기간 매칭 fallback
-      const sStart = (s.StartDate||'').slice(0,10);
-      const sEnd = (s.EndDate||'').slice(0,10) || sStart;
-      if(!sStart) return false;
-      // 기간 겹침 검사
-      if(sStart > periodTo || sEnd < periodFrom) return false;
-      // 기간 매칭은 너무 광범위할 수 있으니 수동 매칭만 적용
-      return false;
-    }
-    return true;
+    // TourCode 매칭 — 모든 필드 변형 지원 (pickTourCode)
+    const sTc = pickTourCode(s).toUpperCase();
+    const sTcNorm = _normalize(sTc);
+    if(invTourCodes.size === 0) return false; // 인보이스에 TourCode 없으면 매칭 불가
+    // 정확 일치
+    if(invTourCodes.has(sTc)) return true;
+    // 정규화 일치 (공백/하이픈 차이 무시)
+    if(invTourCodesNormalized.has(sTcNorm)) return true;
+    return false;
   });
 
   if(matchedSchedules.length === 0){
@@ -17317,13 +17318,47 @@ async function _updateSchedulesAfterPayment(invoiceId, agency){
     } catch(e){ return; }
   }
 
-  // 5. 매칭되는 Schedule 찾기 (InvoiceID 일치)
-  const matchedSchedules = (_schCache||[]).filter(s => {
+  // 5. 매칭되는 Schedule 찾기
+  // 1차: InvoiceID 일치 (인보이스 발행 시 자동 연결된 경우)
+  // 2차: Agency + TourCode 매칭 (InvoiceID가 비어있는 경우 fallback)
+  let matchedSchedules = (_schCache||[]).filter(s => {
     if(String(s.InvoiceID||'').trim() !== invoiceId) return false;
     const curStatus = String(s.Status||'').toLowerCase();
     if(curStatus === 'paid' || curStatus === 'cancelled') return false;
     return true;
   });
+
+  // 1차에서 못 찾으면 인보이스 항목의 TourCode로 재매칭 (InvoiceID가 없어도 잡기)
+  if(matchedSchedules.length === 0){
+    let invItems = [];
+    try {
+      invItems = JSON.parse(inv.Items||'[]');
+      const manualItems = JSON.parse(inv.ManualItems||'[]');
+      invItems = [...invItems, ...manualItems];
+    } catch(e){}
+    const invTourCodes = new Set();
+    invItems.forEach(it => {
+      const tc = pickItemTourCode(it).toUpperCase();
+      if(tc) invTourCodes.add(tc);
+    });
+    if(invTourCodes.size > 0){
+      const _normalize = s => String(s||'').trim().toUpperCase().replace(/[\s\-_\.]/g, '');
+      const invTourCodesNormalized = new Set([...invTourCodes].map(_normalize));
+      const agencyTrim = String(agency||'').trim().toLowerCase();
+      matchedSchedules = (_schCache||[]).filter(s => {
+        if(String(s.Agency||'').trim().toLowerCase() !== agencyTrim) return false;
+        const curStatus = String(s.Status||'').toLowerCase();
+        if(curStatus === 'paid' || curStatus === 'cancelled') return false;
+        const sTc = pickTourCode(s).toUpperCase();
+        if(invTourCodes.has(sTc)) return true;
+        if(invTourCodesNormalized.has(_normalize(sTc))) return true;
+        return false;
+      });
+      if(matchedSchedules.length > 0){
+        console.log('[Schedule Update] InvoiceID 매칭 실패 → TourCode fallback 매칭:', matchedSchedules.length, '건');
+      }
+    }
+  }
 
   if(matchedSchedules.length === 0){
     console.log('[Schedule Update] 인보이스', invoiceId, '에 연결된 미결제 일정 없음');
@@ -17339,12 +17374,14 @@ async function _updateSchedulesAfterPayment(invoiceId, agency){
           action: 'update_schedule_status',
           tourId: sch.TourID,
           status: 'paid',
+          invoiceId: invoiceId,  // ★ InvoiceID도 함께 기록 (TourCode fallback 매칭된 경우 빈 InvoiceID 채움)
           _user: getAdminUser()
         })
       });
       const j = await res.json();
       if(j.ok){
         sch.Status = 'paid';
+        if(invoiceId) sch.InvoiceID = invoiceId;
       }
     } catch(e){ console.warn('[Schedule Update]', sch.TourID, '실패:', e); }
   }
@@ -18498,6 +18535,10 @@ function openPartialPayment(invNumber, agency, grandTotal, alreadyPaid) {
             body: JSON.stringify({action:'update_invoice_status', invNumber, status:'paid', field:'PaidDate', _user:getAdminUser()})
           });
           toast(`✅ ${invNumber} 전액 수금 완료 — 결제완료 처리됨`,'ok');
+          // ★ Schedule.Status = 'paid' 자동 갱신
+          try {
+            await _updateSchedulesAfterPayment(invNumber, agency);
+          } catch(e3){ console.warn('[Schedule] 결제 후 paid 갱신 실패:', e3); }
         } catch(e2) { console.warn('[PP] auto-paid error:', e2); }
       } else {
         // 부분수금 → partial 상태
