@@ -11923,7 +11923,17 @@ function _renderSearchResults(matches, label){
   }
   // 날짜순 정렬
   matches.sort((a,b)=>(a.Date||'').localeCompare(b.Date||''));
+  // ★ 출처별 카운트
+  const reportCount = matches.filter(m => !m._source).length;
+  const invCount = matches.filter(m => m._source==='inv').length;
+  const schCount = matches.filter(m => m._source==='sch').length;
   let html = '<div style="padding:6px 8px;font-size:11px;font-weight:700;color:var(--t1);">🔎 '+label+' — '+matches.length+'건 발견</div>';
+  // ★ 출처별 안내 + INV가 있으면 경고
+  if(invCount > 0 && reportCount === 0 && schCount === 0){
+    html += '<div style="padding:6px 10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-bottom:6px;font-size:11px;color:#92400e;">⚠️ <b>이미 발행된 인보이스(INV) 항목만 검색됨</b> — 드라이버 리포트(Daily_Report)나 일정(Schedule)에 매칭되는 운행이 없습니다. 같은 항목을 다시 발행하면 중복이 됩니다. 새로 발행하시려면 위 SUB 회사·기간을 다시 확인하거나 항목을 수동으로 추가하세요.</div>';
+  } else if(invCount > 0){
+    html += '<div style="padding:4px 8px;background:#f5f3ff;border-radius:4px;margin-bottom:4px;font-size:10px;color:#7c3aed;">ℹ️ 리포트 '+reportCount+'건 · 인보이스 '+invCount+'건(이미 발행, 기본 체크 해제) · 일정 '+schCount+'건</div>';
+  }
   html += '<div style="max-height:260px;overflow-y:auto;border:1px solid var(--brd);border-radius:6px;">';
   html += '<table style="width:100%;border-collapse:collapse;font-size:10px;">';
   html += '<thead><tr style="background:var(--sf2);position:sticky;top:0;">';
@@ -11947,15 +11957,18 @@ function _renderSearchResults(matches, label){
     const isSch = r._source==='sch';
     let srcBadge;
     if(isInv){
-      srcBadge = '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#e8d5f5;color:#7c3aed;">INV '+r._invNum+'</span>';
+      srcBadge = '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#e8d5f5;color:#7c3aed;" title="이미 발행된 인보이스 — 다시 추가하면 중복 발행됩니다">INV '+r._invNum+' ⚠️</span>';
     } else if(isSch){
       const subTag = r._isSub ? '🏢' : '🏠';
       srcBadge = '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#fef3c7;color:#92400e;" title="'+(r._subCompany||'')+'">📅 '+subTag+' Sch</span>';
     } else {
       srcBadge = '<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:#d5e8f0;color:#2563eb;">리포트</span>';
     }
-    html += '<tr style="border-bottom:1px solid var(--brd);'+(i%2?'background:var(--sf1);':'')+'">';
-    html += '<td style="padding:4px 6px;text-align:center;"><input type="checkbox" class="tc-sel-chk" data-idx="'+i+'" checked></td>';
+    // ★ 이미 발행된 인보이스 항목은 기본적으로 체크 해제 (중복 발행 방지)
+    const checkedAttr = isInv ? '' : 'checked';
+    const rowStyle = isInv ? 'opacity:0.6;' : '';
+    html += '<tr style="border-bottom:1px solid var(--brd);'+rowStyle+(i%2?'background:var(--sf1);':'')+'">';
+    html += '<td style="padding:4px 6px;text-align:center;"><input type="checkbox" class="tc-sel-chk" data-idx="'+i+'" '+checkedAttr+'></td>';
     html += '<td style="padding:4px 6px;">'+srcBadge+'</td>';
     html += '<td style="padding:4px 6px;">'+dt+'</td>';
     html += '<td style="padding:4px 6px;">'+(r.Rego||'')+'</td>';
