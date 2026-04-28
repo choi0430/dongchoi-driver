@@ -11653,6 +11653,43 @@ function addSubInvRow(){
 }
 
 /* ── 투어코드 검색 → 리포트 자동 불러오기 ── */
+// ★ Schedule 슬롯 → 인보이스 후보 행 변환 (SUB는 M_PriceSub에서 자동 요율 조회)
+function _buildSchMatch(tour, day, slot, dateStr){
+  const isSub = (slot.mode||'dc') === 'sub';
+  let svcRate = 0, otRate = 0;
+  if(isSub){
+    const subCo = (slot.subCompany||'').trim();
+    const course = (slot.course||'').trim();
+    const seatsStr = String(tour.Seats||'').trim();
+    const capNum = parseInt(seatsStr.replace(/\D/g,''),10) || 21;
+    const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
+    const ps = (typeof DB!=='undefined' && DB.PS && DB.PS[subCo]) ? DB.PS[subCo] : null;
+    if(ps && ps[course] && ps[course][capKey]){
+      svcRate = parseFloat(ps[course][capKey].rate)||0;
+      otRate = parseFloat(ps[course][capKey].ot)||0;
+    }
+  }
+  return {
+    Date: dateStr,
+    Rego: isSub ? (slot.subVehicleNote || '') : (slot.rego || ''),
+    Tour_Code: tour.TourCode || tour.TourID || '',
+    Attraction: slot.course || '',
+    Seats: tour.Seats || '',
+    Guide: tour.Guide || '',
+    SVC_Charge: svcRate,
+    OT: 0,
+    _otRate: otRate,
+    Trailer: day.trailer ? 1 : 0,
+    Hotel_Surcharge: 0, Dist_Surcharge: 0, Early: 0, Toll: 0,
+    Start_Time: slot.startTime || '',
+    End_Time: slot.endTime || '',
+    _source: 'sch',
+    _tourId: tour.TourID || '',
+    _isSub: isSub,
+    _subCompany: slot.subCompany || ''
+  };
+}
+
 async function _searchByTourCode(){
   const q = (document.getElementById('sub-inv-tc-search')?.value||'').trim().toUpperCase();
   if(!q){ toast('투어코드 또는 가이드를 입력하세요','er'); return; }
@@ -11737,24 +11774,7 @@ async function _searchByTourCode(){
           if(!slot) return;
           const isEmpty = !slot.startTime && !slot.startPlace && !slot.course && !slot.driver && !slot.rego && !slot.subCompany;
           if(isEmpty) return;
-          const isSub = (slot.mode||'dc') === 'sub';
-          schMatches.push({
-            Date: dateStr,
-            Rego: isSub ? (slot.subVehicleNote || '') : (slot.rego || ''),
-            Tour_Code: t.TourCode || t.TourID || '',
-            Attraction: slot.course || '',
-            Seats: t.Seats || '',
-            Guide: t.Guide || '',
-            SVC_Charge: 0, OT: 0,
-            Trailer: d.trailer ? 1 : 0,
-            Hotel_Surcharge: 0, Dist_Surcharge: 0, Early: 0, Toll: 0,
-            Start_Time: slot.startTime || '',
-            End_Time: slot.endTime || '',
-            _source: 'sch',
-            _tourId: t.TourID || '',
-            _isSub: isSub,
-            _subCompany: slot.subCompany || ''
-          });
+          schMatches.push(_buildSchMatch(t, d, slot, dateStr));
         });
       });
     });
@@ -11806,24 +11826,7 @@ async function _loadAllByDateRange(){
           if(!slot) return;
           const isEmpty = !slot.startTime && !slot.startPlace && !slot.course && !slot.driver && !slot.rego && !slot.subCompany;
           if(isEmpty) return;
-          const isSub = (slot.mode||'dc') === 'sub';
-          schMatches.push({
-            Date: dateStr,
-            Rego: isSub ? (slot.subVehicleNote || '') : (slot.rego || ''),
-            Tour_Code: t.TourCode || t.TourID || '',
-            Attraction: slot.course || '',
-            Seats: t.Seats || '',
-            Guide: t.Guide || '',
-            SVC_Charge: 0, OT: 0,
-            Trailer: d.trailer ? 1 : 0,
-            Hotel_Surcharge: 0, Dist_Surcharge: 0, Early: 0, Toll: 0,
-            Start_Time: slot.startTime || '',
-            End_Time: slot.endTime || '',
-            _source: 'sch',
-            _tourId: t.TourID || '',
-            _isSub: isSub,
-            _subCompany: slot.subCompany || ''
-          });
+          schMatches.push(_buildSchMatch(t, d, slot, dateStr));
         });
       });
     });
@@ -12223,211 +12226,23 @@ function renderSubInvHistory(){
     const itemsTotal = itms.reduce((s,i)=>s+Number(i.total||0),0);
     const displayTotal = itemsTotal > 0 ? itemsTotal : Number(inv.GrandTotal||0);
     const invIdx = inv.InvNumber||'';
-    // ★ 기지급 합계 (SUB_Txn에서 InvoiceNo 매칭된 CR)
-    const alreadyPaid = (_balSubTxns||[])
-      .filter(t => String(t.InvoiceNo||'').trim() === invIdx)
-      .reduce((s,t) => s + (Number(t.CR)||0), 0);
-    const remaining = Math.max(0, displayTotal - alreadyPaid);
-    const isPartial = !paid && alreadyPaid > 0.01;
-    const statusLabel = paid ? 'PAID' : (isPartial ? '부분지급' : '미지급');
-    const statusBg = paid ? 'var(--gn)' : (isPartial ? 'var(--bl)' : 'var(--or)');
-    const subCo = (inv.SubCompany||inv.Agency||'').replace(/'/g,"\\'");
-    return `<div class="crd" style="padding:8px 10px;margin-bottom:6px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="dismissNewItem('nsub_inv','${invIdx.replace(/'/g,"\\'")}');_showSubInvDetail('${invIdx.replace(/'/g,"\\'")}')">
+    return `<div class="crd" style="padding:8px 10px;margin-bottom:6px;cursor:pointer;" onclick="dismissNewItem('nsub_inv','${invIdx.replace(/'/g,"\\'")}');_showSubInvDetail('${invIdx.replace(/'/g,"\\'")}')">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
           <span style="font-size:12px;font-weight:700;color:var(--ac);">${inv.InvNumber}${newBadgeHtml('nsub_inv',inv.InvNumber||'')}</span>
           <span style="font-size:11px;font-weight:600;margin-left:6px;">${inv.SubCompany||inv.Agency||''}</span>
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700;background:${statusBg};color:#fff;">${statusLabel}</span>
+          <span style="font-size:9px;padding:1px 6px;border-radius:4px;font-weight:700;background:${paid?'var(--gn)':'var(--or)'};color:#fff;">${paid?'PAID':'미지급'}</span>
           <span style="font-size:13px;font-weight:700;color:${paid?'var(--gn)':'var(--ac)'};">$${displayTotal.toLocaleString()}</span>
         </div>
       </div>
-      <div style="font-size:10px;color:var(--t3);margin-top:2px;cursor:pointer;" onclick="_showSubInvDetail('${invIdx.replace(/'/g,"\\'")}')">${from}~${to} | 수령: ${issued} ${inv.EmailSentDate?'| ✉️ '+_fmtSubInvDate(inv.EmailSentDate):''}${alreadyPaid>0?` | 기지급 $${alreadyPaid.toLocaleString()}`:''}</div>
-      ${!paid ? `<div style="display:flex;gap:4px;margin-top:6px;">
-        <button onclick="event.stopPropagation();openSubPartialPayment('${invIdx.replace(/'/g,"\\'")}','${subCo}',${displayTotal},${alreadyPaid})" style="font-size:10px;padding:3px 8px;border-radius:8px;border:1px solid #fed7aa;background:#fff7ed;color:#9a3412;cursor:pointer;font-weight:600;">💵 결제 입력</button>
-        <button onclick="event.stopPropagation();markSubInvFullyPaid('${invIdx.replace(/'/g,"\\'")}','${subCo}',${displayTotal},${alreadyPaid})" style="font-size:10px;padding:3px 8px;border-radius:8px;border:1px solid #86efac;background:#f0fdf4;color:#166534;cursor:pointer;font-weight:600;">✅ 전액 결제</button>
-      </div>` : ''}
+      <div style="font-size:10px;color:var(--t3);margin-top:2px;">${from}~${to} | 수령: ${issued} ${inv.EmailSentDate?'| ✉️ '+_fmtSubInvDate(inv.EmailSentDate):''}</div>
     </div>`;
   }).join('');
 }
 
 let _subInvEditData = null; // 현재 편집중인 인보이스
-
-// ─────────────────────────────────────────
-// SUB 인보이스 결제 처리
-// - 결제 입력: SUB_Txn에 CR 행 등록 + Invoices.Status 업데이트
-// - 전액 시 'paid', 부분 시 'partial'
-// - SUB_Txn의 InvoiceNo 컬럼으로 매칭하여 잔액 자동 계산
-// ─────────────────────────────────────────
-function openSubPartialPayment(invNumber, subCompany, grandTotal, alreadyPaid) {
-  const remaining = roundMoney(Math.max(0, grandTotal - alreadyPaid));
-  if (remaining <= 0) { toast('이미 전액 결제 완료된 인보이스입니다.','ok'); return; }
-
-  // 몇 차 결제인지 (SUB_Txn에서 동일 InvoiceNo의 결제 행 수)
-  const prevCount = (_balSubTxns||[]).filter(t =>
-    String(t.InvoiceNo||'').trim() === invNumber &&
-    Number(t.CR||0) > 0
-  ).length;
-  const nextNum = prevCount + 1;
-
-  // 모달 오버레이
-  const overlay = document.createElement('div');
-  overlay.id = 'spp-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;';
-  overlay.innerHTML = `
-    <div style="background:var(--sf);border-radius:16px;padding:20px;width:92%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,.25);">
-      <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:12px;">💵 SUB 인보이스 결제 등록</div>
-      <div style="font-size:12px;color:var(--t2);margin-bottom:10px;">
-        <b>${invNumber}</b> · ${subCompany}<br>
-        총액 <b>$${grandTotal.toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
-        &nbsp;|&nbsp; 기지급 <b>$${roundMoney(alreadyPaid).toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
-        &nbsp;|&nbsp; <span style="color:var(--or);font-weight:700;">잔액 $${remaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
-      </div>
-
-      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">결제 금액 ($)</label>
-      <input id="spp-amount" type="number" step="0.01" min="0.01" max="${remaining}" value="${remaining}"
-        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:14px;font-weight:700;box-sizing:border-box;margin-bottom:10px;">
-
-      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">결제일</label>
-      <input id="spp-date" type="date" value="${toLocalISO(new Date())}"
-        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
-
-      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">결제 방법</label>
-      <select id="spp-method" style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
-        <option value="이체">이체 (Bank Transfer)</option>
-        <option value="현금">현금 (Cash)</option>
-        <option value="수표">수표 (Cheque)</option>
-        <option value="기타">기타 (Other)</option>
-      </select>
-
-      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">메모 (선택)</label>
-      <input id="spp-note" type="text" placeholder="메모 입력 (선택)"
-        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:14px;">
-
-      <div style="display:flex;gap:8px;">
-        <button id="spp-cancel-btn" style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--b2);background:var(--sf2);color:var(--t2);font-size:13px;font-weight:700;cursor:pointer;">취소</button>
-        <button id="spp-save-btn" style="flex:1;padding:10px;border-radius:10px;border:none;background:var(--or);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">💵 결제 등록</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-
-  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
-  document.getElementById('spp-cancel-btn').onclick = () => overlay.remove();
-
-  document.getElementById('spp-save-btn').onclick = async () => {
-    const amtInput = parseFloat(document.getElementById('spp-amount').value);
-    if (!amtInput || amtInput <= 0) { toast('⚠️ 금액을 입력하세요','warn'); return; }
-    if (amtInput > remaining + 0.01) { toast('⚠️ 잔액보다 큰 금액입니다','warn'); return; }
-    const payAmt = roundMoney(amtInput);
-    const payDate = document.getElementById('spp-date').value || toLocalISO(new Date());
-    const method = document.getElementById('spp-method').value;
-    const note = document.getElementById('spp-note').value.trim();
-    const remark = `${nextNum}차 결제 (${invNumber}) [${method}]${note ? ' - '+note : ''}`;
-
-    document.getElementById('spp-save-btn').disabled = true;
-    document.getElementById('spp-save-btn').textContent = '저장 중...';
-
-    try {
-      const txnData = {
-        SubCompany: subCompany,
-        Category:   'Outsourcing',
-        Date:       payDate,
-        InvoiceNo:  invNumber,
-        Description: 'SUBINV-PAY:' + invNumber + ':' + nextNum,
-        DR:         0,
-        CR:         payAmt,
-        FinishDate: payDate,
-        Remark:     remark
-      };
-      const res = await fetch(APPS_SCRIPT_URL, {
-        method:'POST', headers:{'Content-Type':'text/plain'},
-        body: JSON.stringify({action:'add_sub_txn', data:txnData, _user:getAdminUser()})
-      });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error||'등록 실패');
-
-      // 캐시 업데이트
-      _balSubTxns.push({...txnData, _rowIndex:json.row||json.rowIndex});
-
-      // 전액 결제 여부 확인
-      const totalPaid = roundMoney(alreadyPaid + payAmt);
-      if (totalPaid >= grandTotal - 0.01) {
-        try {
-          await fetch(APPS_SCRIPT_URL, {
-            method:'POST', headers:{'Content-Type':'text/plain'},
-            body: JSON.stringify({action:'update_invoice_status', invNumber, status:'paid', field:'PaidDate', _user:getAdminUser()})
-          });
-          toast(`✅ ${invNumber} 전액 결제 완료`,'ok');
-        } catch(e2) { console.warn('[SUB-PP] auto-paid error:', e2); }
-      } else {
-        try {
-          await fetch(APPS_SCRIPT_URL, {
-            method:'POST', headers:{'Content-Type':'text/plain'},
-            body: JSON.stringify({action:'update_invoice_status', invNumber, status:'partial', field:'', _user:getAdminUser()})
-          });
-        } catch(e2) { console.warn('[SUB-PP] partial status error:', e2); }
-        toast(`💵 ${invNumber} 결제 $${payAmt.toLocaleString('en-AU',{minimumFractionDigits:2})} 등록 완료 (잔액 $${roundMoney(grandTotal-totalPaid).toLocaleString('en-AU',{minimumFractionDigits:2})})`,'ok');
-      }
-
-      overlay.remove();
-      _invHistoryCache = null;
-      await loadInvHistory(true);
-      // SUB 인보이스 이력 + 잔액 탭 동기화
-      if(typeof renderSubInvHistory==='function') renderSubInvHistory();
-      if(typeof _balLoaded !== 'undefined') _balLoaded = false;
-      if(typeof renderBalanceTab==='function') renderBalanceTab();
-    } catch(e) {
-      toast('❌ '+e.message,'er');
-      document.getElementById('spp-save-btn').disabled = false;
-      document.getElementById('spp-save-btn').textContent = '💵 결제 등록';
-    }
-  };
-}
-
-// 전액 결제 1-클릭
-async function markSubInvFullyPaid(invNumber, subCompany, grandTotal, alreadyPaid){
-  const remaining = roundMoney(Math.max(0, grandTotal - alreadyPaid));
-  if(remaining <= 0){ toast('이미 전액 결제 완료된 인보이스입니다.','ok'); return; }
-  if(!confirm(`${invNumber} 잔액 $${remaining.toLocaleString('en-AU',{minimumFractionDigits:2})} 전액 결제로 등록할까요?\n\n오늘 날짜로 SUB_Txn에 CR 등록 후 Status='paid'로 변경됩니다.`)) return;
-  const today = toLocalISO(new Date());
-  const prevCount = (_balSubTxns||[]).filter(t =>
-    String(t.InvoiceNo||'').trim() === invNumber && Number(t.CR||0) > 0
-  ).length;
-  const nextNum = prevCount + 1;
-  const txnData = {
-    SubCompany: subCompany,
-    Category:   'Outsourcing',
-    Date:       today,
-    InvoiceNo:  invNumber,
-    Description:'SUBINV-PAY:' + invNumber + ':' + nextNum,
-    DR:         0,
-    CR:         remaining,
-    FinishDate: today,
-    Remark:     `전액 결제 (${invNumber}) [이체]`
-  };
-  try{
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method:'POST', headers:{'Content-Type':'text/plain'},
-      body: JSON.stringify({action:'add_sub_txn', data:txnData, _user:getAdminUser()})
-    });
-    const json = await res.json();
-    if(!json.ok) throw new Error(json.error||'등록 실패');
-    _balSubTxns.push({...txnData, _rowIndex:json.row||json.rowIndex});
-    await fetch(APPS_SCRIPT_URL, {
-      method:'POST', headers:{'Content-Type':'text/plain'},
-      body: JSON.stringify({action:'update_invoice_status', invNumber, status:'paid', field:'PaidDate', _user:getAdminUser()})
-    });
-    toast(`✅ ${invNumber} 전액 결제 완료`,'ok');
-    _invHistoryCache = null;
-    await loadInvHistory(true);
-    if(typeof renderSubInvHistory==='function') renderSubInvHistory();
-    if(typeof _balLoaded !== 'undefined') _balLoaded = false;
-    if(typeof renderBalanceTab==='function') renderBalanceTab();
-  }catch(e){
-    toast('❌ '+e.message,'er');
-  }
-}
 
 function _showSubInvDetail(invNum, editMode){
   const inv = (_invHistoryCache||[]).find(i=>i.InvNumber===invNum);
@@ -17229,55 +17044,31 @@ async function generateDraftInvoices(force=false){
       } catch(e){}
     });
 
-    // 5. 종료된 일정 검출 (오늘 기준) 또는 DR이 모든 슬롯에 작성된 일정
+    // 5. 종료된 일정 검출 (오늘 기준)
     const todayISO = new Date().toISOString().slice(0,10);
-    // DR 매칭 인덱스 보장 (DR완료 판단용)
-    if(_drCache && (!_schDRMatchIndex || Object.keys(_schDRMatchIndex).length===0)){
-      _schBuildDRMatchIndex();
-    }
-    // 일정의 모든 슬롯이 DR 매칭되었는지 검사하는 헬퍼
-    const _schAllDRMatched = (s) => {
-      try {
-        const days = _schParseDays(s.TourPlan);
-        let totalSlots = 0, matchedSlots = 0;
-        days.forEach(d => {
-          ['morning','fullday','evening'].forEach(k => {
-            const slot = d.slots && d.slots[k];
-            if(!slot || _schIsSlotEmpty(slot)) return;
-            // SUB 모드 + DR 매칭 안 되면 카운트에서 제외 (외주는 DR 의무 없음)
-            const dr = _schFindDRForSlot(d.date, slot, s);
-            if(slot.mode === 'sub' && !dr) return;
-            totalSlots++;
-            if(dr) matchedSlots++;
-          });
-        });
-        return totalSlots > 0 && matchedSlots === totalSlots;
-      } catch(e){ return false; }
-    };
     const endedSchedules = _schCache.filter(s => {
       const status = String(s.Status||'scheduled').toLowerCase();
       // 이미 발행/결제된 일정은 제외
       if(status === 'invoiced' || status === 'paid' || status === 'cancelled') return false;
+      // ★ EndDate 형식 정규화 (ISO timestamp일 수도, dd/mm/yyyy일 수도, YYYY-MM-DD일 수도)
+      const endDate = parseToISO(s.EndDate || s.StartDate || '');
+      if(!endDate) return false;
+      // 종료일이 오늘 이전(strict)이어야 종료된 일정
+      if(endDate >= todayISO) return false;
+      // (Agency, TourCode)가 이미 발행됐으면 제외
       const ag = String(s.Agency||'').trim().toUpperCase();
       const tc = String(s.TourCode||'').trim().toUpperCase();
       if(!ag || !tc) return false;
       if(issuedKeys.has(`${ag}|${tc}`)) return false;
-      // ★ EndDate 형식 정규화 (ISO timestamp일 수도, dd/mm/yyyy일 수도, YYYY-MM-DD일 수도)
-      const endDate = parseToISO(s.EndDate || s.StartDate || '');
-      // 조건 1: 종료일이 오늘 이전 (기존)
-      const isEnded = endDate && endDate < todayISO;
-      // 조건 2: DR이 모든 슬롯에 작성됨 (신규) — 진행 중이라도 DR 완료 시 드래프트
-      const isDRComplete = _schAllDRMatched(s);
-      return isEnded || isDRComplete;
+      return true;
     });
-    console.log(`[Draft] 오늘=${todayISO}, 드래프트 후보 ${endedSchedules.length}건 (종료일 < 오늘 또는 DR완료)`);
+    console.log(`[Draft] 오늘=${todayISO}, 종료된 미발행 일정 ${endedSchedules.length}건`);
     endedSchedules.forEach(s => {
-      const isDR = _schAllDRMatched(s);
-      console.log(`  - ${s.TourID}: ${s.Agency} / ${s.TourCode} / ~${parseToISO(s.EndDate||'')} / ${s.Status}${isDR?' [DR완료]':''}`);
+      console.log(`  - ${s.TourID}: ${s.Agency} / ${s.TourCode} / ~${parseToISO(s.EndDate||'')} / ${s.Status}`);
     });
 
     if(endedSchedules.length === 0){
-      draftList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--gn);font-size:12px;">✅ 드래프트 필요 없음 (종료된 일정 + DR완료 일정 모두 발행됨)</div>';
+      draftList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--gn);font-size:12px;">✅ 모든 종료된 일정이 발행됨 (드래프트 필요 없음)</div>';
       if(countBadge) countBadge.style.display = 'none';
       return;
     }
