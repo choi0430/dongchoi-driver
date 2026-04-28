@@ -11764,11 +11764,18 @@ async function _searchByTourCode(){
   // ★ 투어코드는 전역 헬퍼 pickTourCode 사용 (Tour_Code / TourCode / tourcode / tourCode / tour_code 통합)
 
   // 1) 드라이버 리포트(DB.R) 검색
+  // ★ 캐시 우선순위 — 가장 많은 데이터 보유한 캐시 사용 (DB.R/_reportsCache/_drCache 중)
+  //   탭 전환 또는 늦은 로딩으로 일부 캐시만 채워진 케이스 대응
   let reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
   if(!reports.length){
     toast('리포트 데이터 로딩 중...','in');
     try{ await ensureReportsCache(); if(_reportsCache){DB.R=_reportsCache;} }catch(e){}
     reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
+  }
+  // ★ 추가 안전장치: _drCache가 더 크면 그걸 사용 (캐시 동기화 어긋남 방지)
+  if(typeof _drCache !== 'undefined' && _drCache && _drCache.length > reports.length){
+    console.log(`[SUB Inv Search] _drCache(${_drCache.length}건)가 reports(${reports.length}건)보다 큼 — _drCache 사용`);
+    reports = _drCache;
   }
   const reportMatches = reports.filter(r=>{
     const tc = pickTourCode(r).toUpperCase();
@@ -11890,6 +11897,10 @@ async function _loadAllByDateRange(){
     try{ await ensureReportsCache(); if(_reportsCache){DB.R=_reportsCache;} }catch(e){}
     reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
   }
+  // ★ _drCache가 더 크면 그걸 사용 (캐시 동기화 어긋남 방지)
+  if(typeof _drCache !== 'undefined' && _drCache && _drCache.length > reports.length){
+    reports = _drCache;
+  }
   const reportMatches = (reports||[]).filter(r=>{
     // ★ Daily_Report Date는 dd/mm/yyyy 형식이 많아 ISO로 정규화 후 비교
     const d = parseToISO(r.Date||'') || (r._isoDate||'') || (r.Date||'').slice(0,10);
@@ -11936,10 +11947,16 @@ function _renderSearchResults(matches, label){
   const box = document.getElementById('sub-inv-search-result');
   if(!matches.length){
     box.style.display='block';
-    // ★ 모든 투어코드 필드 변형 통합 (전역 pickTourCode 사용)
-    const samples = [...new Set((DB.R||[]).map(pickTourCode).filter(Boolean))].slice(0,10);
-    const tcCount = (DB.R||[]).filter(r => pickTourCode(r)).length;
-    const sampleHtml = samples.length ? '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB 투어코드 예시: '+samples.join(', ')+'</div>' : '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB.R 총 '+((DB.R||[]).length)+'건, Tour_Code 있는 건: '+tcCount+'건</div>';
+    // ★ 가장 큰 캐시에서 샘플 추출 (DB.R/_reportsCache/_drCache 중 가장 많은 것)
+    const _allCaches = [
+      typeof DB!=='undefined' && DB.R ? DB.R : null,
+      typeof _reportsCache!=='undefined' ? _reportsCache : null,
+      typeof _drCache!=='undefined' ? _drCache : null
+    ].filter(Boolean);
+    const _bigCache = _allCaches.sort((a,b)=>b.length-a.length)[0] || [];
+    const samples = [...new Set(_bigCache.map(pickTourCode).filter(Boolean))].slice(0,10);
+    const tcCount = _bigCache.filter(r => pickTourCode(r)).length;
+    const sampleHtml = samples.length ? '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB 투어코드 예시 ('+_bigCache.length+'건 중): '+samples.join(', ')+'</div>' : '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB 총 '+_bigCache.length+'건, Tour_Code 있는 건: '+tcCount+'건</div>';
     box.innerHTML='<div style="padding:10px;font-size:11px;color:var(--t3);">검색 결과 없음 ('+label+')'+sampleHtml+'</div>';
     return;
   }
