@@ -11778,7 +11778,9 @@ async function _searchByTourCode(){
     // 원본 또는 정규화 버전 모두 시도
     if(!tc.includes(q) && !guide.includes(q) && !tcNorm.includes(qNorm) && !guideNorm.includes(qNorm)) return false;
     if(from||to){
-      const d = (r.Date||'').slice(0,10);
+      // ★ Daily_Report Date는 dd/mm/yyyy 형식이 많아 ISO로 정규화 후 비교
+      //   from/to는 input[type=date]에서 와서 yyyy-mm-dd
+      const d = parseToISO(r.Date||'') || (r._isoDate||'') || (r.Date||'').slice(0,10);
       if(from && d < from) return false;
       if(to   && d > to)   return false;
     }
@@ -11799,7 +11801,8 @@ async function _searchByTourCode(){
       const tc = tcRaw.toUpperCase();
       const tcNorm = tc.replace(/[\s\-_\.]/g, '');
       if(!tc.includes(q) && !tcNorm.includes(qNorm)) return;
-      const d = (it.date||'').slice(0,10);
+      // ★ 인보이스 Items의 date도 dd/mm/yyyy일 수 있어 ISO로 정규화
+      const d = parseToISO(it.date||'') || (it.date||'').slice(0,10);
       if(from && d < from) return;
       if(to   && d > to) return;
       // ★ 금액 추출 — 여러 필드 변형 시도 (amount/base/baseRate/svc/SVC_Charge/total)
@@ -11888,7 +11891,8 @@ async function _loadAllByDateRange(){
     reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
   }
   const reportMatches = (reports||[]).filter(r=>{
-    const d = (r.Date||'').slice(0,10);
+    // ★ Daily_Report Date는 dd/mm/yyyy 형식이 많아 ISO로 정규화 후 비교
+    const d = parseToISO(r.Date||'') || (r._isoDate||'') || (r.Date||'').slice(0,10);
     if(from && d < from) return false;
     if(to   && d > to)   return false;
     return true;
@@ -12064,7 +12068,7 @@ function _addSubInvRowFromReport(r){
   else if(early && !trailer && !hotel && !dist && !toll) etcLabel='Early Bird';
   else if(dist && !trailer && !hotel && !early && !toll) etcLabel='Distance';
 
-  const dateVal = (r.Date||'').slice(0,10); // YYYY-MM-DD for input[type=date]
+  const dateVal = parseToISO(r.Date||'') || (r.Date||'').slice(0,10); // YYYY-MM-DD for input[type=date]
   const tcVal = pickTourCode(r);
   const tourVal = (r.Attraction||'').trim();
   const seatsVal = (r.Seats||'').trim();
