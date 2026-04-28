@@ -9287,22 +9287,20 @@ function calcDRCostFromRow(r) {
   // 드라이버 선택 SVC = 드라이버 수당 base
   const base = svc;
   const gross = base + ot + htl + dst + erl + trl + ngt + wsh + mel + tip + toll + fuel;
-  const expectedNet = Math.max(0, gross - own);
+  // ★ 개인 야경 등 base=0 + 회사납입 발생 시 음수 가능 (드라이버가 회사에 빚)
+  const expectedNet = gross - own;
   // ★ 저장된 DR_Cost가 gross(미차감)인지 net(차감완료)인지 자동 감지
-  //   비즈니스 룰: SVC - Night_Owner = DR (드라이버 수당). 항상 net 반환.
-  if(stored > 0){
+  //   비즈니스 룰: SVC - Night_Owner = DR. 음수도 허용.
+  if(!isNaN(stored)){
     if(own > 0){
-      // own이 있을 때 — stored가 gross인지 net인지 판별
       if(Math.abs(stored - gross) < 0.5)        return expectedNet;       // gross로 저장 → net 변환
-      if(Math.abs(stored - expectedNet) < 0.5)  return stored;            // 이미 net
-      // 둘 다 아닌 애매한 경우 — gross 가능성이 높으면 net으로 보정,
-      // 그렇지 않으면 expectedNet 우선 (부정확한 stored보다 계산값 신뢰)
-      if(stored >= gross - 0.5) return expectedNet;  // stored가 gross 이상 → 차감 필요
-      return stored;  // stored가 expectedNet 근처/이하 → 이미 net으로 간주
+      if(Math.abs(stored - expectedNet) < 0.5)  return stored;            // 이미 net (음수 가능)
+      if(stored >= gross - 0.5) return expectedNet;                       // gross 이상 → 차감 필요
+      return stored;                                                      // 그 외 stored 유지
     }
     return stored;  // own=0 → stored 그대로
   }
-  if(base === 0) return 0;
+  if(base === 0 && own === 0) return 0;
   return expectedNet;
 }
 
