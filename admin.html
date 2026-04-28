@@ -7134,8 +7134,12 @@ function setScheduleCalMode(mode){
   document.getElementById('sch-cal-mode-week').classList.toggle('on', mode === 'week');
   document.getElementById('sch-cal-mode-month').classList.toggle('on', mode === 'month');
   // 일간 모드는 그룹별 표시가 의미 없으므로 선택자 숨김
+  // 월간 그리드 모드도 그룹 무관 (캘린더 단일 뷰)
   const groupSel = document.getElementById('sch-cal-group');
-  if(groupSel) groupSel.style.display = (mode === 'day') ? 'none' : '';
+  if(groupSel) groupSel.style.display = (mode === 'day' || mode === 'month') ? 'none' : '';
+  // 가로 스크롤 — 주간만 필요 (월간 그리드/일간 카드는 세로 스크롤)
+  const wrap = document.getElementById('sch-cal-wrap');
+  if(wrap) wrap.style.overflowX = (mode === 'week') ? 'auto' : 'visible';
   renderScheduleCalendar();
 }
 
@@ -7989,6 +7993,187 @@ function _renderScheduleDayView(wrap, periodEl){
 }
 
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 월간 그리드 뷰 — 진짜 캘린더 (7열 × 5-6행)
+// 각 날짜 셀에 그날 운행 요약 + 클릭 시 일간 뷰로 점프
+// ═══════════════════════════════════════════════════════════════════════════
+function _renderScheduleMonthGrid(wrap, periodEl){
+  const fmtYMD = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  const anchor = new Date(_schCalAnchor);
+  const year = anchor.getFullYear();
+  const month = anchor.getMonth(); // 0-indexed
+  const firstOfMonth = new Date(year, month, 1);
+  const lastOfMonth = new Date(year, month + 1, 0);
+  periodEl.textContent = `${month+1}월 ${year}`;
+
+  // 그리드 시작: 그 달 1일이 속한 주의 일요일(또는 월요일)
+  // 우리는 일요일 시작으로 표시 (호주식)
+  const gridStart = new Date(firstOfMonth);
+  gridStart.setDate(gridStart.getDate() - gridStart.getDay()); // 일요일로 이동
+  // 그리드 끝: 마지막 주 토요일
+  const gridEnd = new Date(lastOfMonth);
+  gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()));
+  const totalDays = Math.round((gridEnd - gridStart) / (1000*60*60*24)) + 1; // 35 또는 42
+
+  // 필터 적용
+  const showDC = !document.getElementById('sch-flt-dc') || document.getElementById('sch-flt-dc').classList.contains('on');
+  const showSub = !document.getElementById('sch-flt-sub') || document.getElementById('sch-flt-sub').classList.contains('on');
+  const showCancelled = document.getElementById('sch-flt-cancelled')?.classList.contains('on');
+  const showPaid = !document.getElementById('sch-flt-paid') || document.getElementById('sch-flt-paid').classList.contains('on');
+
+  // 모든 일정 슬롯을 날짜별로 그룹핑
+  const allDays = _schGetAllDays();
+  const byDate = {}; // {YYYY-MM-DD: {dc:N, sub:N, items:[{tour, slot, isSub, ...}]}}
+  allDays.forEach(x => {
+    const tour = x.tour;
+    const status = String(tour.Status||'scheduled').toLowerCase();
+    if(!showCancelled && status === 'cancelled') return;
+    if(!showPaid && status === 'paid') return;
+    ['morning', 'fullday', 'evening'].forEach(slotKey => {
+      const slot = x.day.slots && x.day.slots[slotKey];
+      if(!slot || _schIsSlotEmpty(slot)) return;
+      const isSub = slot.mode === 'sub';
+      if(!showDC && !isSub) return;
+      if(!showSub && isSub) return;
+      if(!byDate[x.date]) byDate[x.date] = { dc:0, sub:0, paid:0, items:[] };
+      if(isSub) byDate[x.date].sub++;
+      else byDate[x.date].dc++;
+      if(status === 'paid') byDate[x.date].paid++;
+      byDate[x.date].items.push({ tour, slot, isSub, status });
+    });
+  });
+
+  // 상태별 색상 (작은 점)
+  const statusDot = (s) => {
+    const m = {
+      scheduled:    '#818cf8',
+      in_progress:  '#10b981',
+      completed:    '#22c55e',
+      invoiced:     '#f59e0b',
+      paid:         '#06b6d4',
+      cancelled:    '#ef4444'
+    };
+    return m[s] || '#94a3b8';
+  };
+
+  const today = fmtYMD(new Date());
+  const dayHeaders = ['일','월','화','수','목','금','토'];
+
+  // 헤더 행
+  let html = `
+    <div style="padding:6px 14px 0;">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px;">`;
+  dayHeaders.forEach((d, i) => {
+    const color = i === 0 ? 'var(--rd)' : (i === 6 ? '#3b82f6' : 'var(--t2)');
+    html += `<div style="text-align:center;font-size:11px;font-weight:700;color:${color};padding:6px 0;">${d}</div>`;
+  });
+  html += `</div>`;
+
+  // 셀 그리드
+  html += `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">`;
+  for(let i = 0; i < totalDays; i++){
+    const cellDate = new Date(gridStart);
+    cellDate.setDate(cellDate.getDate() + i);
+    const cellStr = fmtYMD(cellDate);
+    const isCurMonth = cellDate.getMonth() === month;
+    const isToday = cellStr === today;
+    const isWeekend = cellDate.getDay() === 0 || cellDate.getDay() === 6;
+    const dayInfo = byDate[cellStr];
+    const dayCount = dayInfo ? (dayInfo.dc + dayInfo.sub) : 0;
+
+    // 셀 색깔
+    const bg = !isCurMonth ? 'transparent' :
+               isToday ? '#fef3c7' :
+               'var(--sf)';
+    const dateColor = !isCurMonth ? 'var(--t3)' :
+                      cellDate.getDay() === 0 ? 'var(--rd)' :
+                      cellDate.getDay() === 6 ? '#3b82f6' :
+                      'var(--t1)';
+    const opacity = isCurMonth ? '1' : '0.45';
+
+    // 운행 미니 카드 (최대 3개까지, 그 이상은 +N)
+    let miniCards = '';
+    if(dayInfo){
+      const sortedItems = [...dayInfo.items].sort((a,b) => {
+        const aT = a.slot.startTime || '99:99';
+        const bT = b.slot.startTime || '99:99';
+        return aT.localeCompare(bT);
+      });
+      const maxShow = 3;
+      sortedItems.slice(0, maxShow).forEach(it => {
+        const tour = it.tour;
+        const dot = statusDot(it.status);
+        const accent = it.isSub ? '#f59e0b' : '#3b82f6';
+        const label = (tour.Agency || '').slice(0, 8);
+        const tcShort = (tour.TourCode || '').slice(0, 10);
+        miniCards += `
+          <div style="font-size:9px;background:${bg==='transparent'?'rgba(255,255,255,0.5)':'var(--sf2)'};border-left:2px solid ${accent};border-radius:3px;padding:1px 4px;margin-bottom:2px;display:flex;align-items:center;gap:3px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            <span style="width:5px;height:5px;border-radius:50%;background:${dot};flex-shrink:0;"></span>
+            <span style="overflow:hidden;text-overflow:ellipsis;color:var(--t1);font-weight:600;">${escH(label)}${tcShort?` <span style="color:var(--t3);font-weight:400;">${escH(tcShort)}</span>`:''}</span>
+          </div>`;
+      });
+      if(sortedItems.length > maxShow){
+        miniCards += `<div style="font-size:9px;color:var(--t3);text-align:center;padding:1px 4px;font-weight:600;">+${sortedItems.length - maxShow} 건</div>`;
+      }
+    }
+
+    // 카운트 배지 (우측 상단)
+    let countBadge = '';
+    if(dayInfo && dayCount > 0){
+      countBadge = `<div style="display:flex;gap:2px;font-size:8px;">`;
+      if(dayInfo.dc > 0) countBadge += `<span style="background:#dbeafe;color:#1e40af;padding:0 4px;border-radius:6px;font-weight:700;">${dayInfo.dc}</span>`;
+      if(dayInfo.sub > 0) countBadge += `<span style="background:#fef3c7;color:#92400e;padding:0 4px;border-radius:6px;font-weight:700;">${dayInfo.sub}</span>`;
+      countBadge += `</div>`;
+    }
+
+    const cellClick = isCurMonth ? `onclick="_schJumpToDay('${cellStr}')"` : '';
+    const cursor = isCurMonth ? 'pointer' : 'default';
+    html += `
+      <div ${cellClick} style="min-height:90px;background:${bg};border:1px solid ${isToday?'#fbbf24':'var(--b1)'};border-radius:6px;padding:4px 4px 6px;cursor:${cursor};opacity:${opacity};display:flex;flex-direction:column;transition:transform 0.1s, box-shadow 0.1s;"
+        ${isCurMonth ? `onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';" onmouseout="this.style.transform='';this.style.boxShadow='';"` : ''}>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+          <div style="font-size:11px;font-weight:${isToday?'800':'700'};color:${dateColor};font-family:var(--fd);">
+            ${cellDate.getDate()}${isToday?'<span style="font-size:8px;margin-left:3px;">TODAY</span>':''}
+          </div>
+          ${countBadge}
+        </div>
+        <div style="flex:1;overflow:hidden;">${miniCards}</div>
+      </div>`;
+  }
+  html += `</div></div>`;
+
+  // 범례
+  html += `
+    <div style="padding:10px 14px 80px;font-size:10px;color:var(--t3);">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <span style="font-weight:700;">범례:</span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:#3b82f6;border-radius:2px;vertical-align:middle;margin-right:3px;"></span>자사</span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:#f59e0b;border-radius:2px;vertical-align:middle;margin-right:3px;"></span>서브</span>
+        <span style="margin-left:8px;font-weight:700;">상태:</span>
+        <span><span style="display:inline-block;width:7px;height:7px;background:#818cf8;border-radius:50%;vertical-align:middle;margin-right:3px;"></span>예정</span>
+        <span><span style="display:inline-block;width:7px;height:7px;background:#10b981;border-radius:50%;vertical-align:middle;margin-right:3px;"></span>진행중</span>
+        <span><span style="display:inline-block;width:7px;height:7px;background:#22c55e;border-radius:50%;vertical-align:middle;margin-right:3px;"></span>완료</span>
+        <span><span style="display:inline-block;width:7px;height:7px;background:#f59e0b;border-radius:50%;vertical-align:middle;margin-right:3px;"></span>발행</span>
+        <span><span style="display:inline-block;width:7px;height:7px;background:#06b6d4;border-radius:50%;vertical-align:middle;margin-right:3px;"></span>결제</span>
+        <span style="margin-left:8px;color:var(--t3);">💡 셀 클릭 시 일간 뷰로 이동</span>
+      </div>
+    </div>`;
+
+  wrap.innerHTML = html;
+  // 월간 모드는 가로 스크롤 불필요
+  wrap.style.overflowX = 'visible';
+}
+
+// 월간 셀 클릭 → 일간 뷰로 점프
+function _schJumpToDay(dateStr){
+  if(!dateStr) return;
+  const d = new Date(dateStr + 'T00:00:00');
+  if(isNaN(d.getTime())) return;
+  _schCalAnchor = d;
+  setScheduleCalMode('day');
+}
+
+
 function renderScheduleCalendar(){
   const wrap = document.getElementById('sch-cal-wrap');
   const periodEl = document.getElementById('sch-cal-period');
@@ -7997,6 +8182,10 @@ function renderScheduleCalendar(){
   // ★ 일간 모드: 별도 렌더링 함수로 위임 (타임라인 형식)
   if(_schCalMode === 'day'){
     return _renderScheduleDayView(wrap, periodEl);
+  }
+  // ★ 월간 모드: 진짜 캘린더 그리드 (7열 × 5-6행, 셀 클릭 시 일간 점프)
+  if(_schCalMode === 'month'){
+    return _renderScheduleMonthGrid(wrap, periodEl);
   }
 
   const groupBy = document.getElementById('sch-cal-group')?.value || 'agency';
