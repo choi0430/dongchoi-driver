@@ -3127,7 +3127,7 @@ function _buildTcContextFromCache(){
   const ctxMap = {}; // { TOURCODE: { date, guide, agency, attraction, count } }
   const cache = (typeof _drReportsCache !== 'undefined' && _drReportsCache) ? _drReportsCache : [];
   cache.forEach(r => {
-    const tc = String(r.Tour_Code||'').trim().toUpperCase();
+    const tc = pickTourCode(r).toUpperCase();
     if(!tc) return;
     const date = r._isoDate || parseToISO(r.Date||'') || r.Date || '';
     if(!ctxMap[tc]){
@@ -6186,7 +6186,7 @@ function renderTodayReports(){
     timeStart: parseSheetTime(r.Time_Start),
     timeEnd:   parseSheetTime(r.Time_End),
     guide:     r.Guide||'',
-    tourcode:  r.Tour_Code||'',
+    tourcode:  pickTourCode(r),
     dr:        calcDRCostFromRow(r),
     total:     parseFloat(r.Total_TA||0),
   }));
@@ -8865,6 +8865,17 @@ function _renderDefectPage() {
     </div>`).join('');
 }
 
+// 투어코드 필드 변형 통합 추출 — Daily_Report (Tour_Code), Schedule (TourCode),
+// 인보이스 Items (tourcode/tourCode), 레거시 (tour_code) 모두 지원.
+function pickTourCode(r){
+  if(!r) return '';
+  return String(r.Tour_Code || r.TourCode || r.tourcode || r.tourCode || r.tour_code || r.Tourcode || '').trim();
+}
+function pickItemTourCode(it){
+  if(!it) return '';
+  return String(it.tourcode || it.tourCode || it.Tour_Code || it.TourCode || it.tour_code || '').trim();
+}
+
 // 범용 날짜 → ISO(YYYY-MM-DD) 변환 (UTC timestamp 포함)
 function parseToISO(ds){
   // 내부 날짜 비교/정렬용 YYYY-MM-DD 변환 (표시용 아님)
@@ -9239,7 +9250,7 @@ function cleanupLocalDuplicates(gasRows) {
   try {
     const driverName = currentDriver?.name || '';
     if(!driverName) return;
-    const mkKey = r => `${fmtDate(r.Date||r.date||'')}_${r.Rego||r.rego||''}_${r.Agency||r.agency||''}_${r.Attraction||r.attraction||''}_${r.Tour_Code||r.tourcode||''}`;
+    const mkKey = r => `${fmtDate(r.Date||r.date||'')}_${r.Rego||r.rego||''}_${r.Agency||r.agency||''}_${r.Attraction||r.attraction||''}_${pickTourCode(r)||r.tourcode||''}`;
     const mkKeyLocal = r => `${r.date||''}_${r.rego||''}_${r.agency||''}_${r.attraction||''}_${r.tourcode||''}`;
     // GAS 키 세트 (이 드라이버 것만)
     const gasKeys = new Set(
@@ -9373,7 +9384,7 @@ async function renderPay(){
     fuel:        parseFloat(r.Fuel||0),
     fuelPersonal: r.Fuel_Personal==='Y',
     guide:       r.Guide||'',
-    tourcode:    r.Tourcode||r.Tour_Code||'',
+    tourcode:    pickTourCode(r),
     remarks:     r.Remarks||'',
     timeStart:   (()=>{ const v=r.Time_Start||r.DR_Start||''; return (v&&!v.includes('1899'))?v:''; })(),
     timeEnd:     (()=>{ const v=r.Time_End||r.DR_End||''; return (v&&!v.includes('1899'))?v:''; })(),
@@ -11552,7 +11563,7 @@ async function loadSubInvReports(){
       const d = parseToISO(r.Date)||r.Date||'';
       const cost = calcSubCostFromReport(r, subName);
       return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;">
-        <input type="checkbox" class="si-chk" data-idx="${i}" data-total="${cost.total}" data-date="${d}" data-rego="${r.Rego||''}" data-tour="${r.Attraction||''}" data-seats="${r.Seats||''}" data-tc="${r.Tour_Code||''}" data-base="${cost.base}" data-ot="${cost.ot}" data-hotel="${cost.hotel}" data-dist="${cost.dist}" data-trailer="${cost.trailer}" data-nightowner="${cost.nightOwner}" checked onchange="calcSubInvDriverTotal()" style="margin-top:3px;">
+        <input type="checkbox" class="si-chk" data-idx="${i}" data-total="${cost.total}" data-date="${d}" data-rego="${r.Rego||''}" data-tour="${r.Attraction||''}" data-seats="${r.Seats||''}" data-tc="${pickTourCode(r)}" data-base="${cost.base}" data-ot="${cost.ot}" data-hotel="${cost.hotel}" data-dist="${cost.dist}" data-trailer="${cost.trailer}" data-nightowner="${cost.nightOwner}" checked onchange="calcSubInvDriverTotal()" style="margin-top:3px;">
         <div style="flex:1;">
           <div style="font-size:12px;font-weight:700;">${d} — ${r.Agency||''}</div>
           <div style="font-size:11px;color:var(--muted);">${r.Attraction||''} | ${r.Rego||''} | ${r.Seats||''} | 🚗${r.Driver||''}</div>
