@@ -2860,6 +2860,19 @@ function nv(pg,ni){
 // ═══════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════
+// 투어코드 필드 변형 통합 추출 — Daily_Report (Tour_Code), Schedule (TourCode),
+// 인보이스 Items (tourcode/tourCode), 레거시 (tour_code) 모두 지원.
+// 검색/필터/매칭/그룹핑 등 데이터 누락이 결과에 영향을 주는 곳에서 사용.
+// 표시 전용 출력에서는 굳이 사용 안 해도 됨 (이전 시점에 정규화됐다고 가정).
+function pickTourCode(r){
+  if(!r) return '';
+  return String(r.Tour_Code || r.TourCode || r.tourcode || r.tourCode || r.tour_code || '').trim();
+}
+function pickItemTourCode(it){
+  if(!it) return '';
+  return String(it.tourcode || it.tourCode || it.Tour_Code || it.TourCode || it.tour_code || '').trim();
+}
+
 // 범용 날짜 → ISO(YYYY-MM-DD) 변환 (UTC timestamp 포함)
 function parseToISO(ds){
   // 내부 날짜 비교/정렬용 YYYY-MM-DD 변환 (표시용 아님)
@@ -3233,12 +3246,12 @@ function rDash(){
         try {
           const items = JSON.parse(inv.Items || '[]');
           items.forEach(it => {
-            const tc = String(it.tourcode || it.tour_code || it.Tour_Code || '').trim().toUpperCase();
+            const tc = pickItemTourCode(it).toUpperCase();
             if(tc) issuedKeys.add(`${ag}|${tc}`);
           });
           const manualItems = JSON.parse(inv.ManualItems || '[]');
           manualItems.forEach(it => {
-            const tc = String(it.tourcode || it.tour_code || it.Tour_Code || '').trim().toUpperCase();
+            const tc = pickItemTourCode(it).toUpperCase();
             if(tc) issuedKeys.add(`${ag}|${tc}`);
           });
           // 인보이스 자체의 TourCode 필드 (단일 TourCode 인보이스)
@@ -3258,7 +3271,7 @@ function rDash(){
         const dateISO = parseToISO(r.Date||'');
         if(!dateISO || dateISO < lastMonthCutoff) return false;
         if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return false;
-        const tc = String(r.Tour_Code||'').trim().toUpperCase();
+        const tc = pickTourCode(r).toUpperCase();
         const ag = String(r.Agency||'').trim().toUpperCase();
         if(!tc || !ag) return false;
         const key = `${ag}|${tc}`;
@@ -3270,7 +3283,7 @@ function rDash(){
         const tcGroups = new Set();
         uninvoiced.forEach(r => {
           const ag = String(r.Agency||'').trim().toUpperCase();
-          const tc = String(r.Tour_Code||'').trim().toUpperCase();
+          const tc = pickTourCode(r).toUpperCase();
           tcGroups.add(`${ag}|${tc}`);
         });
 
@@ -9435,10 +9448,10 @@ async function onSettleTourCodeSearch(){
         return;
       }
     }
-    // 투어코드 또는 가이드 매칭되는 SUB 행만 필터링 (공백/하이픈 무시)
+    // 투어코드 또는 가이드 매칭되는 SUB 행만 필터링 (공백/하이픈 무시, 모든 필드 변형 지원)
     const tcNorm = tc.replace(/[\s\-_\.]/g, '');
     const matched = _drCache.filter(r => {
-      const code = (r.Tour_Code||'').toUpperCase();
+      const code = pickTourCode(r).toUpperCase();
       const guide = (r.Guide||'').toUpperCase();
       const codeNorm = code.replace(/[\s\-_\.]/g, '');
       const guideNorm = guide.replace(/[\s\-_\.]/g, '');
@@ -9448,7 +9461,7 @@ async function onSettleTourCodeSearch(){
       .map(r => {
         const calc = calcSubReport(r);
         const iso = parseToISO(r.Date||'')||r.Date||'';
-        return { ...calc, date: iso, tourCode: r.Tour_Code||'', seats: r.Seats||'', _raw: r };
+        return { ...calc, date: iso, tourCode: pickTourCode(r), seats: r.Seats||'', _raw: r };
       })
       .filter(d => d.isSub && !d.isPrivate);
     renderSettleDashboard();
@@ -10950,10 +10963,10 @@ async function onSdpTourCodeSearch(){
         return;
       }
     }
-    // 투어코드 매칭 + SUB 행만 필터링 → calcSubReport 적용 → 그루핑
+    // 투어코드 매칭 + SUB 행만 필터링 → calcSubReport 적용 → 그루핑 (모든 필드 변형 지원)
     const tcNorm = tc.replace(/[\s\-_\.]/g, '');
     const matched = _drCache.filter(r => {
-      const code = (r.Tour_Code||'').toUpperCase();
+      const code = pickTourCode(r).toUpperCase();
       const guide = (r.Guide||'').toUpperCase();
       const codeNorm = code.replace(/[\s\-_\.]/g, '');
       const guideNorm = guide.replace(/[\s\-_\.]/g, '');
@@ -10963,7 +10976,7 @@ async function onSdpTourCodeSearch(){
       .map(r => {
         const calc = calcSubReport(r);
         const iso = parseToISO(r.Date||'')||r.Date||'';
-        return { ...calc, date: iso, tourCode: r.Tour_Code||'', seats: r.Seats||'', _raw: r };
+        return { ...calc, date: iso, tourCode: pickTourCode(r), seats: r.Seats||'', _raw: r };
       })
       .filter(d => d.isSub && !d.isPrivate);
     // _sdpData 형식으로 그루핑
@@ -11498,13 +11511,13 @@ function _onSubInvCourseChange(sel){
 let _subInvTourCodes = [];
 function _collectTourCodes(){
   const codes = new Set(_subInvTourCodes);
-  // 리포트 데이터에서 투어코드 수집
-  (DB.R||[]).forEach(r=>{ const c=(r.Tour_Code||'').trim(); if(c) codes.add(c); });
+  // 리포트 데이터에서 투어코드 수집 (모든 필드 변형 지원)
+  (DB.R||[]).forEach(r=>{ const c=pickTourCode(r); if(c) codes.add(c); });
   // 인보이스 이력에서도 수집
   (_invHistoryCache||[]).forEach(inv=>{
     try{
       const items = JSON.parse(inv.Items||'[]');
-      items.forEach(i=>{ const c=(i.tourCode||'').trim(); if(c) codes.add(c); });
+      items.forEach(i=>{ const c=pickItemTourCode(i); if(c) codes.add(c); });
     }catch(e){}
   });
   _subInvTourCodes = [...codes].sort();
@@ -11514,9 +11527,9 @@ function _collectTourCodes(){
 // ★ 투어코드별 컨텍스트 정보 (가이드/날짜) — 가장 최근 데이터 기준
 function _collectTourCodeInfo(){
   const info = {}; // { code: { guide, date } }
-  // 리포트 데이터 — 가장 최근 날짜의 가이드 사용
+  // 리포트 데이터 — 가장 최근 날짜의 가이드 사용 (모든 필드 변형 지원)
   (DB.R||[]).forEach(r => {
-    const code = String(r.Tour_Code||'').trim();
+    const code = pickTourCode(r);
     if(!code) return;
     const date = String(r._iso || r.Date || '').slice(0,10);
     const guide = String(r.Guide||'').trim();
@@ -11577,7 +11590,7 @@ function _onSubInvTCChange(sel){
     const guideEl = document.getElementById('sir-guide-'+rowId);
     if(guideEl){
       const reports = (DB.R&&DB.R.length) ? DB.R : (_drCache||[]);
-      const match = reports.find(r => (r.Tour_Code||'').trim().toUpperCase() === tc.toUpperCase());
+      const match = reports.find(r => pickTourCode(r).toUpperCase() === tc.toUpperCase());
       if(match && match.Guide){
         guideEl.value = match.Guide;
       } else {
@@ -11748,11 +11761,7 @@ async function _searchByTourCode(){
   // ★ 공백/하이픈/특수문자 제거 — "0421 PAP 21 JQ-618" ≡ "0421PAP21JQ618"
   const qNorm = q.replace(/[\s\-_\.]/g, '');
 
-  // ★ 투어코드 필드 모든 변형 통합 추출 (Tour_Code / TourCode / tourcode / tourCode / tour_code)
-  const _pickTourCode = (r) => {
-    if(!r) return '';
-    return String(r.Tour_Code || r.TourCode || r.tourcode || r.tourCode || r.tour_code || '').trim();
-  };
+  // ★ 투어코드는 전역 헬퍼 pickTourCode 사용 (Tour_Code / TourCode / tourcode / tourCode / tour_code 통합)
 
   // 1) 드라이버 리포트(DB.R) 검색
   let reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
@@ -11762,7 +11771,7 @@ async function _searchByTourCode(){
     reports = (DB.R&&DB.R.length) ? DB.R : (_reportsCache||_drCache||[]);
   }
   const reportMatches = reports.filter(r=>{
-    const tc = _pickTourCode(r).toUpperCase();
+    const tc = pickTourCode(r).toUpperCase();
     const guide = (r.Guide||'').trim().toUpperCase();
     const tcNorm = tc.replace(/[\s\-_\.]/g, '');
     const guideNorm = guide.replace(/[\s\-_\.]/g, '');
@@ -11840,7 +11849,7 @@ async function _searchByTourCode(){
 
   // 4) 병합 (중복 제거: 같은 날짜+투어코드+코스 → 리포트 > 인보이스 > 스케줄 우선순위)
   const seen = new Set();
-  const keyOf = r => (r.Date||'').slice(0,10)+'|'+(r.Tour_Code||'').trim()+'|'+(r.Attraction||'').trim();
+  const keyOf = r => (r.Date||'').slice(0,10)+'|'+pickTourCode(r)+'|'+(r.Attraction||'').trim();
   reportMatches.forEach(r => seen.add(keyOf(r)));
   const uniqueInv = invMatches.filter(r => { const k = keyOf(r); if(seen.has(k)) return false; seen.add(k); return true; });
   const uniqueSch = schMatches.filter(r => { const k = keyOf(r); if(seen.has(k)) return false; seen.add(k); return true; });
@@ -11891,7 +11900,7 @@ async function _loadAllByDateRange(){
   }
   // 중복 제거 (리포트 우선)
   const seen = new Set();
-  const keyOf = r => (r.Date||'').slice(0,10)+'|'+(r.Tour_Code||'').trim()+'|'+(r.Attraction||'').trim();
+  const keyOf = r => (r.Date||'').slice(0,10)+'|'+pickTourCode(r)+'|'+(r.Attraction||'').trim();
   reportMatches.forEach(r => seen.add(keyOf(r)));
   const uniqueSch = schMatches.filter(r => { const k = keyOf(r); if(seen.has(k)) return false; seen.add(k); return true; });
   const matches = [...reportMatches, ...uniqueSch];
@@ -11905,10 +11914,9 @@ function _renderSearchResults(matches, label){
   const box = document.getElementById('sub-inv-search-result');
   if(!matches.length){
     box.style.display='block';
-    // ★ 모든 투어코드 필드 변형 통합
-    const _pickTC = r => String(r.Tour_Code || r.TourCode || r.tourcode || r.tourCode || r.tour_code || '').trim();
-    const samples = [...new Set((DB.R||[]).map(_pickTC).filter(Boolean))].slice(0,10);
-    const tcCount = (DB.R||[]).filter(r => _pickTC(r)).length;
+    // ★ 모든 투어코드 필드 변형 통합 (전역 pickTourCode 사용)
+    const samples = [...new Set((DB.R||[]).map(pickTourCode).filter(Boolean))].slice(0,10);
+    const tcCount = (DB.R||[]).filter(r => pickTourCode(r)).length;
     const sampleHtml = samples.length ? '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB 투어코드 예시: '+samples.join(', ')+'</div>' : '<div style="margin-top:4px;font-size:10px;color:var(--t3);">DB.R 총 '+((DB.R||[]).length)+'건, Tour_Code 있는 건: '+tcCount+'건</div>';
     box.innerHTML='<div style="padding:10px;font-size:11px;color:var(--t3);">검색 결과 없음 ('+label+')'+sampleHtml+'</div>';
     return;
@@ -12026,7 +12034,7 @@ function _addSubInvRowFromReport(r){
   else if(dist && !trailer && !hotel && !early && !toll) etcLabel='Distance';
 
   const dateVal = (r.Date||'').slice(0,10); // YYYY-MM-DD for input[type=date]
-  const tcVal = (r.Tour_Code||'').trim();
+  const tcVal = pickTourCode(r);
   const tourVal = (r.Attraction||'').trim();
   const seatsVal = (r.Seats||'').trim();
   // OT 시간 자동 추출 (Start_Time ~ End_Time)
@@ -12847,7 +12855,7 @@ async function _syncDailyReportSubToSubTxn(){
       const subCost = (calc.subCost?.total) || 0;
       if(subCost <= 0) return;
 
-      const tourCode = (r.Tour_Code||'').trim();
+      const tourCode = pickTourCode(r);
       const drsubKey = `DRSUB:${dateISO}_${rego}_${tourCode}`;
       if(existingKeys.has(drsubKey)) return;
 
@@ -13124,7 +13132,7 @@ function _buildSubInvSuppressionIndex(){
         const dateISO = parseToISO(String(dateRaw));
         if(!dateISO) return;
         const rego = String(it.rego || it.Rego || '').trim();
-        const tourCode = String(it.tourCode || it.tour_code || it.Tour_Code || '').trim();
+        const tourCode = pickItemTourCode(it);
         // 두 가지 키로 등록 — rego 매칭 + tourCode 매칭 (어느 쪽이든 매치 시 가림)
         if(rego) _subInvExactKeys.add(dateISO + '|R|' + rego);
         if(tourCode) _subInvExactKeys.add(dateISO + '|T|' + tourCode);
@@ -14099,7 +14107,7 @@ function renderBalDetail(){
           const _all = [..._itms, ..._manItms];
           _invInfoMap[invNum] = {
             guides: [...new Set(_all.map(it=>(it.guide||'').trim()).filter(Boolean))],
-            tourcodes: [...new Set(_all.map(it=>(it.tourcode||it.tourCode||'').trim()).filter(Boolean))]
+            tourcodes: [...new Set(_all.map(it=>pickItemTourCode(it)).filter(Boolean))]
           };
         } catch(e){}
       });
@@ -14332,7 +14340,7 @@ function openBalTxnModal(type, idx){
         const _pI = (json) => { try { return (json && typeof json==='string' && json.trim().startsWith('[')) ? JSON.parse(json) : []; } catch(e){ return []; } };
         const allIt = [..._pI(linkedInv.Items), ..._pI(linkedInv.ManualItems)];
         const itDates = allIt.map(it => parseToISO(String(it.date||it.Date||''))).filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
-        const itCodes = [...new Set(allIt.map(it => it.tourCode||it.Tour_Code||it.tour||it.Tour||it.Attraction||'').filter(Boolean))];
+        const itCodes = [...new Set(allIt.map(it => it.tourCode||it.tourcode||it.Tour_Code||it.TourCode||it.tour||it.Tour||it.Attraction||'').filter(Boolean))];
         const itGuides = [...new Set(allIt.map(it => (it.guide||'').trim()).filter(Boolean))];
 
         if(!existing.Date && linkedInv.IssuedDate) existing.Date = String(linkedInv.IssuedDate);
@@ -16067,9 +16075,9 @@ async function loadInvReports() {
   // ★ SUB 인보이스 항목 병합 (중복 제거 후 추가)
   const subRows = _subInvItemsToRows(agency, from, to);
   if (subRows.length) {
-    const existKeys = new Set(rows.map(r => (r._iso||'').slice(0,10)+'|'+String(r.Tour_Code||'').trim().toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase()));
+    const existKeys = new Set(rows.map(r => (r._iso||'').slice(0,10)+'|'+pickTourCode(r).toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase()));
     const uniqueSub = subRows.filter(r => {
-      const key = (r._iso||'').slice(0,10)+'|'+String(r.Tour_Code||'').trim().toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase();
+      const key = (r._iso||'').slice(0,10)+'|'+pickTourCode(r).toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase();
       if (existKeys.has(key)) return false;
       existKeys.add(key);
       return true;
@@ -16083,7 +16091,7 @@ async function loadInvReports() {
     // 투어코드별 가이드/날짜 매핑 (가장 최근 데이터 기준)
     const tcInfo = {}; // { code: {guide, date} }
     rows.forEach(r => {
-      const code = String(r.Tour_Code||'').trim();
+      const code = pickTourCode(r);
       if(!code) return;
       const date = String(r._iso || r.Date || '').slice(0,10);
       const guide = String(r.Guide||'').trim();
@@ -16105,7 +16113,7 @@ async function loadInvReports() {
   // ★ 투어코드 필터 적용
   const selectedTC = document.getElementById('inv-tourcode')?.value;
   if(selectedTC){
-    rows = rows.filter(r => String(r.Tour_Code||'').trim() === selectedTC);
+    rows = rows.filter(r => pickTourCode(r) === selectedTC);
   }
 
   // ★ 수정 모드: 저장된 인보이스 항목만 표시
@@ -16193,15 +16201,15 @@ function _buildInvRows(agency, from, to) {
   // ★ SUB 인보이스 항목 병합 (중복 제거)
   const subRows = _subInvItemsToRows(agency, from, to);
   if (subRows.length) {
-    const existKeys = new Set(rows.map(r => (r._iso||'').slice(0,10)+'|'+String(r.Tour_Code||'').trim().toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase()));
+    const existKeys = new Set(rows.map(r => (r._iso||'').slice(0,10)+'|'+pickTourCode(r).toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase()));
     subRows.forEach(r => {
-      const key = (r._iso||'').slice(0,10)+'|'+String(r.Tour_Code||'').trim().toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase();
+      const key = (r._iso||'').slice(0,10)+'|'+pickTourCode(r).toUpperCase()+'|'+String(r.Attraction||'').trim().toUpperCase();
       if (!existKeys.has(key)) { existKeys.add(key); rows.push(r); }
     });
   }
   // ★ 투어코드 필터 적용
   const selectedTC = document.getElementById('inv-tourcode')?.value;
-  if(selectedTC) rows = rows.filter(r => String(r.Tour_Code||'').trim() === selectedTC);
+  if(selectedTC) rows = rows.filter(r => pickTourCode(r) === selectedTC);
 
   // ★ 수정 모드: 저장된 인보이스 항목만 표시 (나머지 필터링)
   if (_editItemFilter) {
@@ -16431,7 +16439,7 @@ function renderInvPreview(rows, agency, from, to) {
         orderedRows = sorted;
       } else if (_invGroupMode === 'tour') {
         const tours = {};
-        orderedRows.forEach(({r,ri}) => { const key = r.Tour_Code||r.Attraction||'Other'; if(!tours[key]) tours[key]=[]; tours[key].push({r,ri}); });
+        orderedRows.forEach(({r,ri}) => { const key = pickTourCode(r)||r.Attraction||'Other'; if(!tours[key]) tours[key]=[]; tours[key].push({r,ri}); });
         const sorted = [];
         Object.keys(tours).sort().forEach(tc => {
           const trows = tours[tc];
@@ -16715,7 +16723,7 @@ async function saveInvoiceToSheet() {
     const _extra = c.earlyTA+c.hotel+c.dist+(c.parkingFee||0)+(c.trailerVal||0)+(c.nightTA||0)+(c.tipVal||0)+(c.mealVal||0)+(c.tollVal||0)+(c.etcTA||0);
     return {
       date: r._iso, rego: r.Rego, tour: r.Attraction, seats: r.Seats, driver: r.Driver, guide: r.Guide||'',
-      tourcode: r.Tour_Code||'', pickup: r.Pickup||'', dropoff: r.Dropoff||'',
+      tourcode: pickTourCode(r), pickup: r.Pickup||'', dropoff: r.Dropoff||'',
       timeStart: r._timeStart||'', timeEnd: r._timeEnd||'',
       base: ov.base !== undefined ? ov.base : c.baseRate,
       ot:   ov.ot   !== undefined ? ov.ot   : c.ot,
@@ -16741,8 +16749,8 @@ async function saveInvoiceToSheet() {
     ...manualItems.map(m=>(m.guide||'').trim()).filter(Boolean)
   ])];
   const _invTourCodes = [...new Set([
-    ..._allRows.filter(r=>!r._manual).map(r=>(r.Tour_Code||'').trim()).filter(Boolean),
-    ...manualItems.map(m=>(m.tourcode||m.tourCode||'').trim()).filter(Boolean)
+    ..._allRows.filter(r=>!r._manual).map(r=>pickTourCode(r)).filter(Boolean),
+    ...manualItems.map(m=>pickItemTourCode(m)).filter(Boolean)
   ])];
 
   // 항목 JSON 안전 직렬화 — 49000자 넘으면 경고 + 데이터 보존
@@ -16818,8 +16826,8 @@ async function saveInvoiceToSheet() {
       const todayStr = toLocalISO(new Date());
       const _allTxnItems = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)]);
       const _txnCodes = [...new Set([
-        ..._allTxnItems.map(r=>String(r.Tour_Code||'').trim()).filter(Boolean),
-        ...manualItems.map(m=>(m.tourcode||m.tourCode||'').trim()).filter(Boolean)
+        ..._allTxnItems.map(r=>pickTourCode(r)).filter(Boolean),
+        ...manualItems.map(m=>pickItemTourCode(m)).filter(Boolean)
       ])];
       const txnTourCode = _txnCodes.join(', ');
       const _txnGuides = [...new Set([
@@ -16928,11 +16936,11 @@ async function _updateSchedulesAfterInvoice(invNum, agency, rows, manualItems, p
   // 인보이스 항목에서 TourCode 추출
   const invTourCodes = new Set();
   rows.forEach(r => {
-    const tc = String(r.Tour_Code||'').trim();
+    const tc = pickTourCode(r);
     if(tc) invTourCodes.add(tc.toUpperCase());
   });
   manualItems.forEach(m => {
-    const tc = String(m.tourcode || m.tourCode || '').trim();
+    const tc = pickItemTourCode(m);
     if(tc) invTourCodes.add(tc.toUpperCase());
   });
 
@@ -17125,7 +17133,7 @@ async function generateDraftInvoices(force=false){
         const items = JSON.parse(inv.Items || '[]');
         const ag = String(inv.Agency||'').trim().toUpperCase();
         items.forEach(it => {
-          const tc = String(it.tourcode || it.tour_code || it.Tour_Code || '').trim().toUpperCase();
+          const tc = pickItemTourCode(it).toUpperCase();
           if(ag && tc) issuedKeys.add(`${ag}|${tc}`);
         });
       } catch(e){}
@@ -17178,7 +17186,7 @@ async function generateDraftInvoices(force=false){
       grp.drs = _drCache.filter(r => {
         if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return false;
         const ag = String(r.Agency||'').trim().toUpperCase();
-        const tc = String(r.Tour_Code||'').trim().toUpperCase();
+        const tc = pickTourCode(r).toUpperCase();
         return ag === grp.agency.toUpperCase() && tc === grp.tourCode.toUpperCase();
       });
     });
@@ -17376,7 +17384,7 @@ function _renderInvHistPage() {
       const _manItms = typeof inv.ManualItems === 'string' && inv.ManualItems.trim().startsWith('[') ? JSON.parse(inv.ManualItems) : [];
       const _all = [..._itms, ..._manItms];
       _guides = [...new Set(_all.map(it => (it.guide||'').trim()).filter(Boolean))];
-      _tourcodes = [...new Set(_all.map(it => (it.tourcode||it.tourCode||'').trim()).filter(Boolean))];
+      _tourcodes = [...new Set(_all.map(it => pickItemTourCode(it)).filter(Boolean))];
     } catch(e) {}
     const guideHTML = _guides.length ? `<span style="font-size:10px;color:var(--t2);"><b>👤</b> ${_guides.map(g=>escH(g)).join(', ')}</span>` : '';
     const tcHTML = _tourcodes.length ? `<span style="font-size:10px;color:var(--t2);"><b>🏷</b> ${_tourcodes.map(t=>escH(t)).join(', ')}</span>` : '';
@@ -18385,7 +18393,7 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
   const _fmtAmt = v => '$'+v.toLocaleString("en-AU", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
   // ── 공통 투어코드/가이드 분석: 모든 행이 동일하면 상단에 한 번만 표시 ──
-  const _allTourCodes = rows.map(r => (r.Tour_Code||'').trim()).filter(Boolean);
+  const _allTourCodes = rows.map(r => pickTourCode(r)).filter(Boolean);
   const _allGuides    = rows.map(r => (r.Guide||'').trim()).filter(Boolean);
   const _commonTC    = (_allTourCodes.length > 0 && new Set(_allTourCodes).size === 1) ? _allTourCodes[0] : null;
   const _commonGuide = (_allGuides.length > 0 && new Set(_allGuides).size === 1) ? _allGuides[0] : null;
@@ -18498,7 +18506,7 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
       }).join('');
     } else if (_invGroupMode === 'tour') {
       const tours = {};
-      rows.forEach(r => { const key = r.Tour_Code||r.Attraction||'Other'; if(!tours[key]) tours[key]=[]; tours[key].push(r); });
+      rows.forEach(r => { const key = pickTourCode(r)||r.Attraction||'Other'; if(!tours[key]) tours[key]=[]; tours[key].push(r); });
       return Object.keys(tours).sort().map(tc => {
         const trows = tours[tc]; const tTotal = trows.reduce((s,r)=>s+calcInvRow(r).total,0);
         // 가이드 목록 추출 (중복 제거)
@@ -18959,7 +18967,7 @@ async function emailInvoice() {
   const actualTo   = isoDates.length > 0 ? isoDates[isoDates.length - 1] : to;
 
   // ★ 투어코드 추출
-  const _tourCodes = [...new Set(rows.map(r=>(r.Tour_Code||'').trim()).filter(Boolean))];
+  const _tourCodes = [...new Set(rows.map(r=>pickTourCode(r)).filter(Boolean))];
   const _tcStr = _tourCodes.length ? ' [' + _tourCodes.join(', ') + ']' : '';
   const subject = `Tax Invoice ${invNum} — ${agency} (${fd(actualFrom)} – ${fd(actualTo)})${_tcStr}`;
   const body =
