@@ -17229,31 +17229,55 @@ async function generateDraftInvoices(force=false){
       } catch(e){}
     });
 
-    // 5. 종료된 일정 검출 (오늘 기준)
+    // 5. 종료된 일정 검출 (오늘 기준) 또는 DR이 모든 슬롯에 작성된 일정
     const todayISO = new Date().toISOString().slice(0,10);
+    // DR 매칭 인덱스 보장 (DR완료 판단용)
+    if(_drCache && (!_schDRMatchIndex || Object.keys(_schDRMatchIndex).length===0)){
+      _schBuildDRMatchIndex();
+    }
+    // 일정의 모든 슬롯이 DR 매칭되었는지 검사하는 헬퍼
+    const _schAllDRMatched = (s) => {
+      try {
+        const days = _schParseDays(s.TourPlan);
+        let totalSlots = 0, matchedSlots = 0;
+        days.forEach(d => {
+          ['morning','fullday','evening'].forEach(k => {
+            const slot = d.slots && d.slots[k];
+            if(!slot || _schIsSlotEmpty(slot)) return;
+            // SUB 모드 + DR 매칭 안 되면 카운트에서 제외 (외주는 DR 의무 없음)
+            const dr = _schFindDRForSlot(d.date, slot, s);
+            if(slot.mode === 'sub' && !dr) return;
+            totalSlots++;
+            if(dr) matchedSlots++;
+          });
+        });
+        return totalSlots > 0 && matchedSlots === totalSlots;
+      } catch(e){ return false; }
+    };
     const endedSchedules = _schCache.filter(s => {
       const status = String(s.Status||'scheduled').toLowerCase();
       // 이미 발행/결제된 일정은 제외
       if(status === 'invoiced' || status === 'paid' || status === 'cancelled') return false;
-      // ★ EndDate 형식 정규화 (ISO timestamp일 수도, dd/mm/yyyy일 수도, YYYY-MM-DD일 수도)
-      const endDate = parseToISO(s.EndDate || s.StartDate || '');
-      if(!endDate) return false;
-      // 종료일이 오늘 이전(strict)이어야 종료된 일정
-      if(endDate >= todayISO) return false;
-      // (Agency, TourCode)가 이미 발행됐으면 제외
       const ag = String(s.Agency||'').trim().toUpperCase();
       const tc = String(s.TourCode||'').trim().toUpperCase();
       if(!ag || !tc) return false;
       if(issuedKeys.has(`${ag}|${tc}`)) return false;
-      return true;
+      // ★ EndDate 형식 정규화 (ISO timestamp일 수도, dd/mm/yyyy일 수도, YYYY-MM-DD일 수도)
+      const endDate = parseToISO(s.EndDate || s.StartDate || '');
+      // 조건 1: 종료일이 오늘 이전 (기존)
+      const isEnded = endDate && endDate < todayISO;
+      // 조건 2: DR이 모든 슬롯에 작성됨 (신규) — 진행 중이라도 DR 완료 시 드래프트
+      const isDRComplete = _schAllDRMatched(s);
+      return isEnded || isDRComplete;
     });
-    console.log(`[Draft] 오늘=${todayISO}, 종료된 미발행 일정 ${endedSchedules.length}건`);
+    console.log(`[Draft] 오늘=${todayISO}, 드래프트 후보 ${endedSchedules.length}건 (종료일 < 오늘 또는 DR완료)`);
     endedSchedules.forEach(s => {
-      console.log(`  - ${s.TourID}: ${s.Agency} / ${s.TourCode} / ~${parseToISO(s.EndDate||'')} / ${s.Status}`);
+      const isDR = _schAllDRMatched(s);
+      console.log(`  - ${s.TourID}: ${s.Agency} / ${s.TourCode} / ~${parseToISO(s.EndDate||'')} / ${s.Status}${isDR?' [DR완료]':''}`);
     });
 
     if(endedSchedules.length === 0){
-      draftList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--gn);font-size:12px;">✅ 모든 종료된 일정이 발행됨 (드래프트 필요 없음)</div>';
+      draftList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--gn);font-size:12px;">✅ 드래프트 필요 없음 (종료된 일정 + DR완료 일정 모두 발행됨)</div>';
       if(countBadge) countBadge.style.display = 'none';
       return;
     }
