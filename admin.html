@@ -11427,8 +11427,10 @@ let _subInvRowCount = 0;
 let _subInvCourses = ['Blue Mountains','Hunter Valley','City','Airport Transfer','Sending','Port Stephens','Canberra','South Coast','Jervis Bay','Snow Mountains','Illawarra'];
 let _subInvEtcLabels = ['Trailer','Toll','Wash','Early Bird','Distance','Night Tour','Hotel','Melbourne','Fuel','Tip'];
 
-// ★ 코스 옵션: 선택된 SUB 회사의 M_PriceSub에 등록된 attraction만 표시
-//   회사 미선택 시 모든 SUB 회사의 attraction 합집합 사용 (직접입력 가능)
+// ★ 코스 옵션: 선택된 SUB 회사의 M_PriceSub에 등록된 attraction + 직접입력으로 추가한 코스
+//   회사 미선택 시 모든 SUB 회사의 attraction 합집합 사용
+//   _subInvCustomCourses[subCo] = [...] 회사별 직접입력 누적
+let _subInvCustomCourses = {};  // {subCo: [course1, course2]}
 function _getSubInvCourseOptions(){
   const subCo = (document.getElementById('sub-inv-company')?.value || '').trim();
   const courses = new Set();
@@ -11436,14 +11438,18 @@ function _getSubInvCourseOptions(){
     if(subCo && DB.PS[subCo]){
       // 선택된 회사: 해당 회사의 attractions만
       Object.keys(DB.PS[subCo]).forEach(c => { if(c) courses.add(c); });
+      // 해당 회사에 직접입력으로 추가한 코스도 포함
+      (_subInvCustomCourses[subCo]||[]).forEach(c => courses.add(c));
     } else {
       // 미선택: 모든 SUB 회사 attractions 합집합 (편의)
       Object.values(DB.PS).forEach(coData => {
         Object.keys(coData||{}).forEach(c => { if(c) courses.add(c); });
       });
+      // 모든 회사의 직접입력도 포함
+      Object.values(_subInvCustomCourses).forEach(arr => arr.forEach(c => courses.add(c)));
     }
   }
-  // 사용자가 + 직접입력으로 추가한 것도 포함
+  // 레거시 _subInvCourses (회사 미지정 직접입력) 호환
   _subInvCourses.forEach(c => courses.add(c));
   return [...courses].sort();
 }
@@ -11454,14 +11460,24 @@ function _buildCourseSelect(id, val){
   if(val && !courses.includes(val)) courses.unshift(val);
   let opts = courses.map(c=>`<option value="${c}"${c===val?' selected':''}>${c}</option>`).join('');
   return `<select id="${id}" class="profit-finp" style="width:100px;font-size:10px;padding:3px;" onchange="_onSubInvCourseChange(this)">
-    <option value="">— 선택 —</option>${opts}<option value="__add__">+ 직접입력</option></select>`;
+    <option value="">— 선택 —</option>${opts}<option value="__add__" style="color:#0369a1;font-weight:700;">➕ 직접입력</option></select>`;
 }
 function _onSubInvCourseChange(sel){
   if(sel.value==='__add__'){
-    const v = prompt('새 코스명을 입력하세요:');
+    const subCo = (document.getElementById('sub-inv-company')?.value || '').trim();
+    const promptMsg = subCo
+      ? `${subCo} 회사용 새 코스명을 입력하세요:\n(M_PriceSub에 없는 코스로, 가격은 수동 입력)`
+      : '새 코스명을 입력하세요:';
+    const v = prompt(promptMsg);
     if(v && v.trim()){
       const name = v.trim();
-      if(!_subInvCourses.includes(name)) _subInvCourses.push(name);
+      // 회사별 직접입력 코스에 추가
+      if(subCo){
+        if(!_subInvCustomCourses[subCo]) _subInvCustomCourses[subCo] = [];
+        if(!_subInvCustomCourses[subCo].includes(name)) _subInvCustomCourses[subCo].push(name);
+      } else {
+        if(!_subInvCourses.includes(name)) _subInvCourses.push(name);
+      }
       // 현재 select에 옵션 추가 후 선택
       const opt = document.createElement('option'); opt.value=name; opt.textContent=name;
       sel.insertBefore(opt, sel.querySelector('option[value="__add__"]'));
@@ -11474,6 +11490,7 @@ function _onSubInvCourseChange(sel){
           s.insertBefore(o2, s.querySelector('option[value="__add__"]'));
         }
       });
+      toast(`코스 "${name}" 추가됨${subCo?' ('+subCo+')':''}`,'ok');
     } else { sel.value=''; }
   }
 }
