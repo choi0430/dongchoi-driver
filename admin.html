@@ -14141,7 +14141,29 @@ function renderBalDetail(){
     html += '</tbody></table>';
 
   } else if(type==='sub'){
-    rows = _balSubTxns.filter(t=>(t.SubCompany||'')=== name).sort((a,b)=>parseToISO(a.Date||'').localeCompare(parseToISO(b.Date||'')));
+    // ★ 전체 리스트(_subBalances)와 동일한 가림 정책 적용:
+    //   1) SUBINV 우선: LEDGER/DRSUB가 같은 SubCompany+기간의 SUBINV에 가려지면 제외
+    //   2) DRSUB 우선: 같은 날짜+차량의 LEDGER가 DRSUB에 가려지면 제외
+    const _drsubKeysHere = new Set();
+    _balSubTxns.forEach(t => {
+      if((t.SubCompany||'') !== name) return;
+      const desc = String(t.Description||'');
+      if(desc.startsWith('DRSUB:')){
+        const m = desc.match(/^DRSUB:(\d{4}-\d{2}-\d{2})_([^_]+)/);
+        if(m) _drsubKeysHere.add(m[1] + '|' + m[2]);
+      }
+    });
+    const allRows = _balSubTxns.filter(t=>(t.SubCompany||'')=== name);
+    let suppressedCount = 0;
+    rows = allRows.filter(t => {
+      if(_isSubLedgerSuppressed(t)){ suppressedCount++; return false; }
+      const desc = String(t.Description||'');
+      if(desc.startsWith('LEDGER:')){
+        const m = desc.match(/^LEDGER:(\d{4}-\d{2}-\d{2})_([^_]+)/);
+        if(m && _drsubKeysHere.has(m[1] + '|' + m[2])){ suppressedCount++; return false; }
+      }
+      return true;
+    }).sort((a,b)=>parseToISO(a.Date||'').localeCompare(parseToISO(b.Date||'')));
     const dr = rows.reduce((s,r)=>s+(Number(r.DR)||0),0);
     const cr = rows.reduce((s,r)=>s+(Number(r.CR)||0),0);
     document.getElementById('bal-detail-summary').innerHTML = `
@@ -14149,7 +14171,8 @@ function renderBalDetail(){
         <span style="color:var(--ac);">DR $${dr.toLocaleString('en',{minimumFractionDigits:2})}</span>
         <span style="color:var(--gn);">CR $${cr.toLocaleString('en',{minimumFractionDigits:2})}</span>
         <span style="color:${(dr-cr)>0?'var(--rd)':'var(--gn)'};">잔액 $${(dr-cr).toLocaleString('en',{minimumFractionDigits:2})}</span>
-      </div>`;
+      </div>
+      ${suppressedCount > 0 ? `<div style="font-size:10px;color:#7c3aed;margin-top:4px;">ℹ️ SUBINV/DRSUB 우선 정책으로 ${suppressedCount}건 가려짐 (중복 방지)</div>` : ''}`;
     html = `<table style="width:100%;font-size:11px;border-collapse:collapse;">
       <thead><tr style="border-bottom:1px solid var(--b2);color:var(--t3);font-size:10px;">
         <th style="text-align:left;padding:6px 4px;">Date (날짜)</th>
