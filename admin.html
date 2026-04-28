@@ -11786,8 +11786,11 @@ async function _searchByTourCode(){
   });
 
   // 2) SUB 인보이스 이력 항목 검색 → 리포트 형식으로 변환
+  // ★ SUB 인보이스만 대상 (여행사 인보이스의 Items는 다른 필드 구조라 잘못 잡힘)
   const invMatches = [];
   (_invHistoryCache||[]).forEach(inv=>{
+    const isSubInv = inv.Source === 'SUB' || (typeof _isSubInvNumber === 'function' && _isSubInvNumber(inv.InvNumber||''));
+    if(!isSubInv) return; // 여행사 인보이스는 건너뜀
     let items = [];
     try{ items = JSON.parse(inv.Items||'[]'); }catch(e){}
     items.forEach(it=>{
@@ -11799,6 +11802,12 @@ async function _searchByTourCode(){
       const d = (it.date||'').slice(0,10);
       if(from && d < from) return;
       if(to   && d > to) return;
+      // ★ 금액 추출 — 여러 필드 변형 시도 (amount/base/baseRate/svc/SVC_Charge/total)
+      const amtVal = Number(it.amount || it.base || it.baseRate || it.svc || it.SVC_Charge || 0);
+      const otVal = Number(it.ot || it.OT || 0);
+      const totalVal = Number(it.total || 0);
+      // amount/base가 0이지만 total이 있으면 total - ot - etc로 역산
+      const finalAmt = amtVal > 0 ? amtVal : Math.max(0, totalVal - otVal - Number(it.etc||0));
       // 리포트 형식으로 변환
       invMatches.push({
         Date: it.date||'',
@@ -11806,8 +11815,8 @@ async function _searchByTourCode(){
         Tour_Code: tcRaw,
         Attraction: it.tour||'',
         Seats: it.seats||'',
-        SVC_Charge: it.amount||0,
-        OT: it.ot||0,
+        SVC_Charge: finalAmt,
+        OT: otVal,
         Trailer: 0, Hotel_Surcharge: 0, Dist_Surcharge: 0, Early: 0, Toll: 0,
         Start_Time: '', End_Time: '',
         _source: 'inv',
@@ -11855,6 +11864,15 @@ async function _searchByTourCode(){
   const uniqueSch = schMatches.filter(r => { const k = keyOf(r); if(seen.has(k)) return false; seen.add(k); return true; });
 
   const allMatches = [...reportMatches, ...uniqueInv, ...uniqueSch];
+  // ★ 디버그 로그 — 검색이 왜 안 되는지 콘솔에서 추적 가능
+  console.log('[SUB Inv Search]', {
+    query: q, qNorm, from, to,
+    reportMatches: reportMatches.length,
+    invMatches: invMatches.length,
+    schMatches: schMatches.length,
+    drCacheSize: reports.length,
+    sampleTourCodes: [...new Set(reports.slice(0,200).map(r=>pickTourCode(r)).filter(Boolean))].slice(0,15)
+  });
   if(!allMatches.length){ toast('리포트, 인보이스, Schedule 모두에서 검색 결과 없음','er'); }
   _renderSearchResults(allMatches, q);
 }
