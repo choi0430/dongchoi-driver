@@ -14408,13 +14408,26 @@ function renderBalSubList(){
 }
 
 // ── DRIVER WAGE BALANCE ──
+// ★ 자사 차량 운행분 (자사 지급) + SUB 차량 운행분 (차주 지급) 분리
 function _wageBalances(){
+  const dcOwner = (typeof DC_OWNERS !== 'undefined' && DC_OWNERS[0]) ? DC_OWNERS[0] : 'DONG CHOI PTY LTD';
   const map = {};
   _balWageTxns.forEach(t=>{
     const name = t.driver||'Unknown';
-    if(!map[name]) map[name]={name, dr:0, cr:0};
-    if(t.type==='DR') map[name].dr += Number(t.amount)||0;
-    else map[name].cr += Number(t.amount)||0;
+    if(!map[name]) map[name]={name, dr:0, cr:0, subDr:0, subPayers:{}};
+    const txPayer = t.payer || dcOwner;
+    if(t.type==='DR'){
+      if(txPayer === dcOwner){
+        // 자사 차량 운행 — 자사가 지급할 책임
+        map[name].dr += Number(t.amount)||0;
+      } else {
+        // SUB 차량 운행 — 차주가 자기 직원에게 직접 지급
+        map[name].subDr += Number(t.amount)||0;
+        map[name].subPayers[txPayer] = (map[name].subPayers[txPayer] || 0) + (Number(t.amount)||0);
+      }
+    } else {
+      map[name].cr += Number(t.amount)||0;
+    }
   });
   return Object.values(map).map(a=>({...a, balance: a.dr - a.cr})).sort((a,b)=>b.balance-a.balance);
 }
@@ -14429,36 +14442,48 @@ function renderBalWageList(){
   document.getElementById('bal-wage-summary').innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
       <div style="background:var(--acd);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:10px;text-align:center;">
-        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 발생 (DR)</div>
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">\uC790\uC0AC \uCC28\uB7C9 \uBC1C\uC0DD (DR)</div>
         <div style="font-size:15px;font-weight:700;color:var(--ac);font-family:var(--fn);">$${totalDR.toLocaleString('en',{minimumFractionDigits:2})}</div>
       </div>
       <div style="background:var(--gnd);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:10px;text-align:center;">
-        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">총 지급 (CR)</div>
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">\uC790\uC0AC \uC9C0\uAE09 (CR)</div>
         <div style="font-size:15px;font-weight:700;color:var(--gn);font-family:var(--fn);">$${totalCR.toLocaleString('en',{minimumFractionDigits:2})}</div>
       </div>
       <div style="background:${totalBal>0?'var(--ord)':'var(--gnd)'};border:1px solid ${totalBal>0?'rgba(249,115,22,.2)':'rgba(34,197,94,.2)'};border-radius:10px;padding:10px;text-align:center;">
-        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">미지급 잔액</div>
+        <div style="font-size:10px;color:var(--t3);margin-bottom:2px;">\uC790\uC0AC \uBBF8\uC9C0\uAE09 \uC794\uC561</div>
         <div style="font-size:15px;font-weight:700;color:${totalBal>0?'var(--or)':'var(--gn)'};font-family:var(--fn);">$${Math.abs(totalBal).toLocaleString('en',{minimumFractionDigits:2})}</div>
       </div>
     </div>
-    <div style="font-size:10px;color:var(--t3);margin-top:6px;">총 ${balances.length}명 드라이버</div>`;
+    <div style="font-size:10px;color:var(--t3);margin-top:6px;">\uCD1D ${balances.length}\uBA85 \uB4DC\uB77C\uC774\uBC84 · 🚐 SUB \uCC28\uB7C9 \uC6B4\uD589\uBD84\uC740 \uCC28\uC8FC \uC9C1\uC811 \uC9C0\uAE09 (\uC790\uC0AC \uC788\uC9C0 \uC548 \uD568)</div>`;
 
   const list = document.getElementById('bal-wage-list');
   if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">급여 내역이 없습니다</div>'; return; }
 
   list.innerHTML = balances.map(a=>{
     const safeName = a.name.replace(/'/g,"\\'");
+    // ★ SUB 차량 운행 분 — 차주별 받을 돈 (자사 cashflow 외)
+    const subPayers = a.subPayers || {};
+    const subList = Object.entries(subPayers).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+    const subBreakdownHtml = subList.length > 0 ? `
+      <div style="margin-top:6px;padding:6px 8px;background:#faf5ff;border-left:3px solid #c4b5fd;border-radius:4px;">
+        <div style="font-size:9px;color:#6d28d9;font-weight:700;margin-bottom:3px;">🚐 SUB \uCC28\uB7C9 \uC6B4\uD589 \uBC1B\uC744 \uB3C8 (\uCC28\uC8FC \uC9C1\uC811 \uC9C0\uAE09)</div>
+        ${subList.map(([payer, amt]) => `<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t2);"><span>${escH(payer)}</span><span style="font-family:var(--fn);font-weight:600;color:#7c3aed;">$${amt.toLocaleString('en',{minimumFractionDigits:2})}</span></div>`).join('')}
+      </div>` : '';
+    const isDcOnly = !subList.length;
     return `
-    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
-      <div onclick="openBalDetail('wage','${safeName}')" style="cursor:pointer;flex:1;">
-        <div style="font-weight:700;font-size:13px;">${a.name}</div>
-        <div style="font-size:10px;color:var(--t3);margin-top:2px;">발생 $${a.dr.toLocaleString('en',{minimumFractionDigits:2})} / 지급 $${a.cr.toLocaleString('en',{minimumFractionDigits:2})}</div>
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <div onclick="openBalDetail('wage','${safeName}')" style="cursor:pointer;flex:1;">
+          <div style="font-weight:700;font-size:13px;">${a.name}</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:2px;">\uC790\uC0AC \uCC28\uB7C9 \uBC1C\uC0DD $${a.dr.toLocaleString('en',{minimumFractionDigits:2})} / \uC9C0\uAE09 $${a.cr.toLocaleString('en',{minimumFractionDigits:2})}</div>
+        </div>
+        <div style="text-align:right;cursor:pointer;" onclick="openBalDetail('wage','${safeName}')">
+          <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--or)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
+          <div style="font-size:9px;color:var(--t3);">${a.balance>0?'\uC790\uC0AC \uBBF8\uC9C0\uAE09':'\uC790\uC0AC \uC815\uC0B0\uC644\uB8CC'}</div>
+        </div>
+        ${a.balance > 0.01 ? `<button onclick="event.stopPropagation();_quickAddPayment('wage','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:8px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;" title="자사 급여 지급">💰 \uC9C0\uAE09</button>` : ''}
       </div>
-      <div style="text-align:right;cursor:pointer;" onclick="openBalDetail('wage','${safeName}')">
-        <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--or)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
-        <div style="font-size:9px;color:var(--t3);">${a.balance>0?'미지급':'정산 완료'}</div>
-      </div>
-      ${a.balance > 0.01 ? `<button onclick="event.stopPropagation();_quickAddPayment('wage','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:8px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;" title="급여 지급">💰 지급</button>` : ''}
+      ${subBreakdownHtml}
     </div>`;
   }).join('');
 }
@@ -21629,13 +21654,14 @@ async function renderWage(){
     let sumHtml = _weekSummaryCard(escH(ST.wageDriver)+' — '+getWeekLabel(ST.wageWeek), drTotal, surcharges, totalPaid, ownReports.length);
     if(subDRTotal > 0){
       const subLines = Object.values(subGroups).sort((a,b)=>b.total-a.total).map(sg=>
-        `<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="font-size:11px;color:var(--t3);">SUB·${escH(sg.name)} (${sg.count}건)</span><span style="font-size:12px;font-weight:700;color:#7c3aed;">$${sg.total.toLocaleString()}</span></div>`
+        `<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="font-size:11px;color:var(--t3);">🚐 ${escH(sg.name)} \uCC28\uC8FC (${sg.count}\uAC74)</span><span style="font-size:12px;font-weight:700;color:#7c3aed;">$${sg.total.toLocaleString()}</span></div>`
       ).join('');
       sumHtml += `<div style="background:linear-gradient(135deg,#ede9fe,#f3e8ff);border:1.5px solid #c4b5fd;border-radius:12px;padding:12px 14px;margin-top:8px;">
-        <div style="font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:6px;">🤝 SUB 차량 운행분 (회사 지급 대상 아님 — SUB에서 별도 지급)</div>
+        <div style="font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:6px;">🚐 SUB \uCC28\uB7C9 \uC6B4\uD589 \uBC1B\uC744 \uB3C8 — \uCC28\uC8FC\uAC00 \uC9C1\uC811 \uC9C0\uAE09</div>
+        <div style="font-size:10px;color:#6d28d9;margin-bottom:6px;opacity:0.8;">\uC790\uC0AC\uAC00 \uC544\uB2CC \uD574\uB2F9 \uCC28\uC8FC\uC5D0\uAC8C \uBC1B\uC544\uC57C \uD560 \uAE08\uC561\uC785\uB2C8\uB2E4</div>
         ${subLines}
         <div style="border-top:1px solid #c4b5fd;margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;">
-          <span style="font-size:11px;font-weight:700;color:#6d28d9;">SUB 합계</span>
+          <span style="font-size:11px;font-weight:700;color:#6d28d9;">SUB \uD569\uACC4</span>
           <span style="font-size:14px;font-weight:800;color:#6d28d9;">$${subDRTotal.toLocaleString()}</span>
         </div>
       </div>`;
@@ -21655,7 +21681,7 @@ async function renderWage(){
     ownReports.forEach(r=>{ html += _reportRow(r); });
   }
   if(subReports.length > 0){
-    html += '<div style="font-size:11px;font-weight:700;color:#7c3aed;margin:10px 0 6px;">🤝 SUB 차량 리포트 ('+subReports.length+'건 · 회사 지급 제외)</div>';
+    html += '<div style="font-size:11px;font-weight:700;color:#7c3aed;margin:10px 0 6px;">🚐 SUB \uCC28\uB7C9 \uB9AC\uD3EC\uD2B8 ('+subReports.length+'\uAC74 · \uCC28\uC8FC \uC9C1\uC811 \uC9C0\uAE09)</div>';
     subReports.forEach(r=>{ html += _reportRow(r); });
   }
 
@@ -21722,6 +21748,10 @@ function _calcDRFromReport(r){
 // 자사 차량 운행: payer = 자사 ('DONG CHOI PTY LTD')
 // SUB 차량 운행: payer = 차주 회사명 (예: 'YOUNGKEAN KIM')
 //
+// 판정 우선순위: SubOwner (있으면 SUB 차량 명시) → Owner fallback
+//   - SubOwner가 채워져 있으면 = SUB 차량 (필드값 = 차주 이름)
+//   - SubOwner 비어있으면 = 자사 차량 (Owner는 차종 등 다른 정보일 수도)
+//
 // 사용처: 드라이버 급여 탭, 잔액 관리, 차주별 분배 보고서 등
 // ═══════════════════════════════════════════════════════════════════════════
 function getDriverPayerForReport(r){
@@ -21730,11 +21760,13 @@ function getDriverPayerForReport(r){
   if(!r || !r.Rego) return dcDefault;
   const veh = (typeof DB !== 'undefined' && DB.V) ? DB.V.find(v => v.Rego === r.Rego) : null;
   if(!veh) return dcDefault;
+  // SubOwner 우선 — SUB 차량은 SubOwner에 차주 명시
+  const subOwner = (veh.SubOwner||'').trim();
+  if(subOwner) return subOwner;
+  // SubOwner 없으면 Owner 검사 (자사 외이면 SUB 차량)
   const owner = (veh.Owner||'').trim();
   if(!owner) return dcDefault;
-  // 자사 차량
   if(typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(owner)) return dcDefault;
-  // SUB 차량 → 차주가 지급
   return owner;
 }
 
