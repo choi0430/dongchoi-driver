@@ -14049,6 +14049,7 @@ function _buildWageTxns(){
 
   // ① Daily_Report 기반 드라이버 발생 수당 (표준 API 사용)
   //    ★ 마이너스(개인 야경 납입) 포함 — 집계 시 자동으로 차감 효과
+  //    ★ payer 정보 — 자사 차량은 자사가, SUB 차량은 차주가 지급 주체
   const drRows = _reportsCache || [];
   drRows.forEach(r=>{
     const driver = String(r.Driver||'').trim();
@@ -14056,7 +14057,8 @@ function _buildWageTxns(){
     const earned = calcDriverNetPay(r);
     if(earned === 0) return;  // 0은 건너뜀, 음수는 포함 (납입 차감)
     const isoDate = r._isoDate || parseToISO(r.Date||'');
-    txns.push({type:'DR', driver, date:isoDate, desc:(r.Attraction||r.Tour_Code||r.Agency||'운행'), amount:earned, source:'dr_report'});
+    const payer = (typeof getDriverPayerForReport === 'function') ? getDriverPayerForReport(r) : '';
+    txns.push({type:'DR', driver, date:isoDate, desc:(r.Attraction||r.Tour_Code||r.Agency||'운행'), amount:earned, source:'dr_report', payer, rego: r.Rego||''});
   });
 
   // ② Ledger 기반 (MyDr) — 추가 정산이 있을 경우 (중복 방지: DR_Report에 없는 건만)
@@ -14312,7 +14314,7 @@ function _subBalances(){
     }
     const name = t.SubCompany||'Unknown';
     const cat = t.Category||'Outsourcing';
-    if(!map[name]) map[name]={name, dr:0, cr:0, wageDr:0, wageCr:0};
+    if(!map[name]) map[name]={name, dr:0, cr:0, wageDr:0, wageCr:0, driverWages:{}};
     if(cat==='Wage'){
       map[name].wageDr += Number(t.DR)||0;
       map[name].wageCr += Number(t.CR)||0;
@@ -14321,10 +14323,28 @@ function _subBalances(){
       map[name].cr += Number(t.CR)||0;
     }
   });
+
+  // ★ 차주별 드라이버 분배 — 자사 외 차량(SUB 차량)으로 운행한 DR을 차주별 + 드라이버별 합산
+  //   차주가 자기 직원에게 지급해야 할 금액
+  if(typeof _balWageTxns !== 'undefined' && _balWageTxns){
+    const dcOwner = (typeof DC_OWNERS !== 'undefined' && DC_OWNERS[0]) ? DC_OWNERS[0] : 'DONG CHOI PTY LTD';
+    _balWageTxns.forEach(tx => {
+      if(tx.type !== 'DR') return;
+      const payer = tx.payer || dcOwner;
+      if(payer === dcOwner) return; // 자사 차량은 제외
+      const driver = tx.driver || 'Unknown';
+      if(!map[payer]) map[payer]={name:payer, dr:0, cr:0, wageDr:0, wageCr:0, driverWages:{}};
+      if(!map[payer].driverWages) map[payer].driverWages = {};
+      map[payer].driverWages[driver] = (map[payer].driverWages[driver] || 0) + (Number(tx.amount) || 0);
+    });
+  }
+
   return Object.values(map).map(a=>{
     const outsourcingBal = a.dr - a.cr;
     const wageBal = a.wageDr - a.wageCr;
-    return {...a, outsourcingBal, wageBal, balance: outsourcingBal + wageBal};
+    // 차주가 분배해야 할 드라이버 급여 합계
+    const driverWageTotal = Object.values(a.driverWages||{}).reduce((s,v)=>s+v, 0);
+    return {...a, outsourcingBal, wageBal, balance: outsourcingBal + wageBal, driverWageTotal};
   }).sort((a,b)=>b.balance-a.balance);
 }
 
@@ -14360,6 +14380,15 @@ function renderBalSubList(){
 
   list.innerHTML = balances.map(a=>{
     const safeName = a.name.replace(/'/g,"\\'");
+    // ★ 차주가 자기 직원 드라이버에게 분배해야 할 금액
+    const driverWages = a.driverWages || {};
+    const driverList = Object.entries(driverWages).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+    const driverWageHtml = driverList.length > 0 ? `
+      <div style="margin-top:8px;padding:8px;background:#faf5ff;border:1px dashed #c4b5fd;border-radius:8px;">
+        <div style="font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:4px;">🚐 \uC774 \uCC28\uC8FC\uAC00 \uC9C1\uC6D0\uC5D0\uAC8C \uBD84\uBC30\uD560 \uAE08\uC561 (\uC790\uC0AC \uC2DC\uC2A4\uD15C \uC0C1 \uACC4\uC0B0)</div>
+        ${driverList.map(([drv, amt]) => `<div style="display:flex;justify-content:space-between;font-size:10px;padding:2px 0;color:var(--t2);"><span>${escH(drv)}</span><span style="font-family:var(--fn);font-weight:600;color:#7c3aed;">$${amt.toLocaleString('en',{minimumFractionDigits:2})}</span></div>`).join('')}
+        <div style="display:flex;justify-content:space-between;font-size:10px;padding:4px 0 0 0;margin-top:4px;border-top:1px solid #c4b5fd;font-weight:700;color:#7c3aed;"><span>\uD569\uACC4 (\uCC38\uACE0)</span><span style="font-family:var(--fn);">$${(a.driverWageTotal||0).toLocaleString('en',{minimumFractionDigits:2})}</span></div>
+      </div>` : '';
     return `
     <div style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;">
       <div onclick="openBalDetail('sub','${safeName}')" style="cursor:pointer;">
@@ -14372,6 +14401,7 @@ function renderBalSubList(){
           <div>급여: DR $${a.wageDr.toLocaleString()} / CR $${a.wageCr.toLocaleString()} = <span style="color:${a.wageBal>0?'var(--or)':'var(--gn)'}">$${a.wageBal.toLocaleString()}</span></div>
         </div>
       </div>
+      ${driverWageHtml}
       ${a.balance > 0.01 ? `<div style="margin-top:8px;text-align:right;"><button onclick="event.stopPropagation();_quickAddPayment('sub','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;" title="지급 처리">💰 지급</button></div>` : ''}
     </div>`;
   }).join('');
@@ -14692,15 +14722,28 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
   });
 
   // ── 3. Driver Wages (work dates in target week) ──
-  const driverTotals = {}; // driver → { dr, cr }
+  // ★ 자사가 직접 지급해야 할 드라이버 급여만 포함 (자사 차량 운행 DR)
+  // SUB 차량 운행은 차주가 자기 직원에게 지급하므로 자사 cashflow에서 제외
+  const dcOwner = (typeof DC_OWNERS !== 'undefined' && DC_OWNERS[0]) ? DC_OWNERS[0] : 'DONG CHOI PTY LTD';
+  const driverTotals = {}; // driver → { dr, cr, subDr, subPayers }
   (_balWageTxns || []).forEach(tx => {
     const dateISO = _tryParseDate(tx.date);
     if (!dateISO) return;
     if (dateISO < filterStartS || dateISO > sunS) return;
 
     const name = tx.driver || 'Unknown';
-    if (!driverTotals[name]) driverTotals[name] = { dr: 0, cr: 0 };
-    if (tx.type === 'DR') driverTotals[name].dr += (Number(tx.amount) || 0);
+    if (!driverTotals[name]) driverTotals[name] = { dr: 0, cr: 0, subDr: 0, subPayers: {} };
+    const txPayer = tx.payer || dcOwner;
+    if (tx.type === 'DR') {
+      if (txPayer === dcOwner) {
+        // 자사 차량 운행 → 자사가 지급 책임
+        driverTotals[name].dr += (Number(tx.amount) || 0);
+      } else {
+        // SUB 차량 운행 → 차주가 지급 책임 (자사 cashflow 외)
+        driverTotals[name].subDr += (Number(tx.amount) || 0);
+        driverTotals[name].subPayers[txPayer] = (driverTotals[name].subPayers[txPayer] || 0) + (Number(tx.amount) || 0);
+      }
+    }
     if (tx.type === 'CR') driverTotals[name].cr += (Number(tx.amount) || 0);
   });
 
@@ -14710,7 +14753,20 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
         driver: name,
         earned: roundMoney(v.dr),
         paid: roundMoney(v.cr),
-        remaining: roundMoney(v.dr - v.cr)
+        remaining: roundMoney(v.dr - v.cr),
+        subEarned: roundMoney(v.subDr),
+        subPayers: v.subPayers
+      });
+    } else if (v.subDr > 0) {
+      // 자사 운행 없이 SUB만 있는 경우도 표시 (정보용, 자사 cashflow 영향 없음)
+      driverPay.push({
+        driver: name,
+        earned: 0,
+        paid: roundMoney(v.cr),
+        remaining: 0,
+        subEarned: roundMoney(v.subDr),
+        subPayers: v.subPayers,
+        _subOnly: true
       });
     }
   });
@@ -15060,11 +15116,25 @@ function renderBalWeeklySummary() {
       cf.driverPay.sort((a,b) => b.remaining - a.remaining).forEach(d => {
         const isOverpaid = d.remaining < 0;
         const safeDrv = (d.driver||'').replace(/'/g,"\\'");
+        const subOnly = d._subOnly === true;
         html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:3px 0;font-size:11px;">';
         html += '<div style="flex:1;"><span style="color:var(--t2);">' + escH(d.driver) + '</span>';
-        html += ' <span style="font-size:9px;color:var(--t3);">(\uBC1C\uC0DD ' + $f(d.earned) + ')</span></div>';
+        if (!subOnly) {
+          html += ' <span style="font-size:9px;color:var(--t3);">(\uBC1C\uC0DD ' + $f(d.earned) + ')</span>';
+        }
+        // ★ SUB 차주별 분배 정보 표시
+        if (d.subEarned && d.subEarned > 0) {
+          const subBreakdown = Object.entries(d.subPayers||{})
+            .map(([payer, amt]) => `${escH(payer)}: $${$f(amt)}`)
+            .join(' · ');
+          html += `<div style="font-size:9px;color:#7c3aed;margin-top:2px;">🚐 SUB \uC6B4\uD589 \uBC1B\uC744 \uB3C8 (\uCC28\uC8FC \uC9C0\uAE09): ${subBreakdown}</div>`;
+        }
+        html += '</div>';
         html += '<div style="text-align:right;display:flex;align-items:center;gap:4px;">';
-        if (isOverpaid) {
+        if (subOnly) {
+          // SUB 운행만 있음 — 자사가 지급할 게 없으므로 표시만
+          html += `<span style="font-size:10px;color:var(--t3);">\uCC28\uC8FC \uC9C0\uAE09</span>`;
+        } else if (isOverpaid) {
           html += '<span style="font-weight:600;font-family:var(--fn);color:var(--gn);">\uC644\uB8CC</span>';
           html += ' <span style="font-size:9px;color:var(--t3);">\uCD08\uACFC\uC9C0\uAE09 ' + $f(Math.abs(d.remaining)) + '</span>';
         } else if (d.remaining === 0 && d.paid > 0) {
@@ -21614,18 +21684,6 @@ async function renderWage(){
 
 // ── DR 비용 계산 (공용) ──────────────────────────────
 function _calcDRFromReport(r){
-  // ★ SUB 운행 제외 — SUB 차량으로 운행한 DR은 자사 직원 급여 계산 대상이 아님
-  //   해당 드라이버는 SUB 회사 직원이므로 SUB 회사가 직접 지급
-  //   판정: M_Vehicles에서 차량 Owner가 자사(DC_OWNERS)가 아니면 SUB 차량
-  if(r && r.Rego){
-    const veh = (typeof DB !== 'undefined' && DB.V) ? DB.V.find(v => v.Rego === r.Rego) : null;
-    if(veh){
-      const owner = (veh.Owner||'').trim();
-      if(owner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(owner)){
-        return 0; // SUB 차량 운행 → 급여 0 (SUB 회사가 직접 지급)
-      }
-    }
-  }
   const stored=parseFloat(r.DR_Cost);
   const own=parseFloat(r.Night_Owner)||0;
   const svc=parseFloat(r.SVC_Charge)||0;
@@ -21653,6 +21711,36 @@ function _calcDRFromReport(r){
   if(base===0 && own>0) return -own; // 개인 야경: 기본 수당 없고 납입만
   if(base===0) return 0;
   return gross - own; // 마이너스 허용
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 드라이버 급여 지급 주체(Payer) 판정 표준 API
+// ═══════════════════════════════════════════════════════════════════════════
+// 운영 모델: 자사가 차주에게 SUB 비용 통째 지급 (드라이버 급여 포함).
+//   차주가 자기 차량 운전한 드라이버에게 분배.
+//
+// 자사 차량 운행: payer = 자사 ('DONG CHOI PTY LTD')
+// SUB 차량 운행: payer = 차주 회사명 (예: 'YOUNGKEAN KIM')
+//
+// 사용처: 드라이버 급여 탭, 잔액 관리, 차주별 분배 보고서 등
+// ═══════════════════════════════════════════════════════════════════════════
+function getDriverPayerForReport(r){
+  // 기본값 = 자사
+  const dcDefault = (typeof DC_OWNERS !== 'undefined' && DC_OWNERS[0]) ? DC_OWNERS[0] : 'DONG CHOI PTY LTD';
+  if(!r || !r.Rego) return dcDefault;
+  const veh = (typeof DB !== 'undefined' && DB.V) ? DB.V.find(v => v.Rego === r.Rego) : null;
+  if(!veh) return dcDefault;
+  const owner = (veh.Owner||'').trim();
+  if(!owner) return dcDefault;
+  // 자사 차량
+  if(typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(owner)) return dcDefault;
+  // SUB 차량 → 차주가 지급
+  return owner;
+}
+
+// 자사가 직접 지급해야 하는 DR인지 (자사 차량 운행)
+function isDirectPayDR(r){
+  return getDriverPayerForReport(r) === ((typeof DC_OWNERS !== 'undefined' && DC_OWNERS[0]) || 'DONG CHOI PTY LTD');
 }
 
 // ── 주간 서차지 합계 계산 ──────────────────────────────
