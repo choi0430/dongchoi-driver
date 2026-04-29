@@ -7837,10 +7837,29 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
       !!hotels.find(h => h.Hotel_Name === slot.startPlace && h.Surcharge_Area);
     const isEndHotelSurcharge = _endIsHotel && slot.endPlace &&
       !!hotels.find(h => h.Hotel_Name === slot.endPlace && h.Surcharge_Area);
-    // EARLY: 06:00 이전 출발 (시작 장소가 공항이 아닌 경우만 — 도착 픽업이면 EARLY 아님)
-    const isEarlySurcharge = slot.startTime && slot.startTime < '06:00' && !_startIsAirport;
+    // ★ slot.startTime/endTime이 비어있으면 항공편 정보로 폴백
+    let _effStartTime = slot.startTime || '';
+    let _effEndTime = slot.endTime || '';
+    if(!_effStartTime && tour){
+      if(_endIsHotel && tour.FlightIn){
+        const fi = _schParseFlight(tour.FlightIn);
+        if(fi.time) _effStartTime = _addMinutes(fi.time, fi.type === 'dom' ? 30 : 60) || '';
+      }
+      if(!_effStartTime && _endIsAirport && tour.FlightOut){
+        const fo = _schParseFlight(tour.FlightOut);
+        if(fo.time) _effStartTime = _addMinutes(fo.time, fo.type === 'dom' ? -120 : -180) || '';
+      }
+    }
+    if(!_effEndTime && tour){
+      if(_endIsAirport && tour.FlightOut){
+        const fo = _schParseFlight(tour.FlightOut);
+        if(fo.time) _effEndTime = _addMinutes(fo.time, fo.type === 'dom' ? -60 : -120) || '';
+      }
+    }
+    // EARLY: 06:00 이전 출발 (시작 장소가 공항이 아닌 경우만)
+    const isEarlySurcharge = _effStartTime && _effStartTime < '06:00' && !_startIsAirport;
     // LATE: 23:00 이후 도착 (도착 장소가 공항이 아닌 경우만)
-    const isLateSurcharge = slot.endTime && slot.endTime >= '23:00' && !_endIsAirport;
+    const isLateSurcharge = _effEndTime && _effEndTime >= '23:00' && !_endIsAirport;
     const isTrailer = !!day.trailer;
 
     // ★ 항공편 자동 채우기 (SUB 모드도 동일)
@@ -8014,11 +8033,41 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     !!hotels.find(h => h.Hotel_Name === slot.startPlace && h.Surcharge_Area);
   const isEndHotelSurcharge = _endIsHotel && slot.endPlace &&
     !!hotels.find(h => h.Hotel_Name === slot.endPlace && h.Surcharge_Area);
-  // EARLY: 06:00 이전 출발 (호텔/공항/기타 무관 — 시간만으로 판정)
-  // 단 시작 장소가 공항인 경우는 제외 (도착 픽업이라 EARLY 아님)
-  const isEarlySurcharge = slot.startTime && slot.startTime < '06:00' && !_startIsAirport;
-  // LATE: 23:00 이후 도착 (시간만으로 판정 — 도착 장소가 공항이 아닐 때)
-  const isLateSurcharge = slot.endTime && slot.endTime >= '23:00' && !_endIsAirport;
+
+  // ★ EARLY/LATE 서차지 — slot.startTime/endTime이 비어있어도 항공편으로부터 자동 계산
+  //   FlightOut: 출국 시간 - 3시간(국제) / -2시간(국내) = 호텔 출발 시간 (샌딩 시작)
+  //   FlightIn:  도착 시간 + 1시간(국제) / +30분(국내) = 차량 출발 시간 (미팅 시작)
+  let _effStartTime = slot.startTime || '';
+  let _effEndTime = slot.endTime || '';
+  if(!_effStartTime && tour){
+    // 도착(공항→호텔)인 경우 FlightIn 사용
+    if(_endIsHotel && tour.FlightIn){
+      const fi = _schParseFlight(tour.FlightIn);
+      if(fi.time){
+        _effStartTime = _addMinutes(fi.time, fi.type === 'dom' ? 30 : 60) || '';
+      }
+    }
+    // 출국(호텔→공항)인 경우 FlightOut 사용
+    if(!_effStartTime && _endIsAirport && tour.FlightOut){
+      const fo = _schParseFlight(tour.FlightOut);
+      if(fo.time){
+        _effStartTime = _addMinutes(fo.time, fo.type === 'dom' ? -120 : -180) || '';
+      }
+    }
+  }
+  if(!_effEndTime && tour){
+    if(_endIsAirport && tour.FlightOut){
+      const fo = _schParseFlight(tour.FlightOut);
+      if(fo.time){
+        _effEndTime = _addMinutes(fo.time, fo.type === 'dom' ? -60 : -120) || '';
+      }
+    }
+  }
+
+  // EARLY: 06:00 이전 출발 (시작이 공항이 아닐 때)
+  const isEarlySurcharge = _effStartTime && _effStartTime < '06:00' && !_startIsAirport;
+  // LATE: 23:00 이후 도착 (도착이 공항이 아닐 때)
+  const isLateSurcharge = _effEndTime && _effEndTime >= '23:00' && !_endIsAirport;
   const isTrailer = !!day.trailer;
 
   // ★ 항공편 자동 채우기: 슬롯 끝점이 공항이면 FlightIn/Out에서 코드/시간 가져오기
