@@ -1007,6 +1007,15 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
         </div>
       </div>
 
+      <!-- ★ 트레일러 필요 (일정 전체) — 체크 시 자동으로 짐 이동 패턴 슬롯에 트레일러 표시 -->
+      <div style="margin-bottom:6px;">
+        <label for="sm-trailer-needed" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--sf2);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;color:var(--t2);">
+          <input type="checkbox" id="sm-trailer-needed" onchange="_smApplyTrailerAutoFromHeader()" style="margin:0;cursor:pointer;">
+          <span>🚐 트레일러 필요</span>
+          <span style="font-size:9px;color:var(--t3);font-weight:400;margin-left:auto;">체크 시: 공항↔호텔 / 다른 호텔로 이동하는 날 자동 표시</span>
+        </label>
+      </div>
+
       <div style="display:grid;grid-template-columns:3fr 2fr;gap:6px;">
         <div>
           <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">가이드</div>
@@ -5051,6 +5060,13 @@ function openScheduleModal(tourId, focusDate, focusSlot){
     document.getElementById('sm-end').value = _schToISO(r.EndDate);
     document.getElementById('sm-pax').value = r.Pax || '';
     document.getElementById('sm-seats').value = r.Seats || '';
+    // 트레일러 필요 헤더 체크박스 — 저장된 Trailer 또는 슬롯 중 하나라도 trailer이면 체크
+    const trCb = document.getElementById('sm-trailer-needed');
+    if(trCb){
+      trCb.checked = (String(r.Trailer||'').toUpperCase() === 'Y');
+      // 체크되어 있으면 자동 적용 (단, 이미 슬롯별로 trailer 체크된 게 있으면 그건 보존)
+      // → 호출은 _schDays가 채워진 후에 (아래 _schParseDays 다음)
+    }
     _schCsels.guide.setValue(r.Guide || '');
     document.getElementById('sm-guidephone').value = fixPhone(r.GuidePhone || '');
 
@@ -5091,6 +5107,9 @@ function openScheduleModal(tourId, focusDate, focusSlot){
      'sm-flightout','sm-flightout-date','sm-flightout-time',
      'sm-quote','sm-notes']
       .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+    // 트레일러 체크박스 초기화
+    const trCbNew = document.getElementById('sm-trailer-needed');
+    if(trCbNew) trCbNew.checked = false;
     const today = _schToday();
     document.getElementById('sm-start').value = today;
     document.getElementById('sm-end').value = today;
@@ -5453,6 +5472,63 @@ function _schDayOfWeek(ymd){
   const [y, m, d] = ymd.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m-1, d));
   return dt.getUTCDay(); // 0=일
+}
+
+// ★ 헤더 트레일러 체크박스 → 일정 전체 트레일러 자동 적용
+//   룰:
+//   - 체크 시: 짐 이동 패턴이 있는 날만 d.trailer = true
+//     · 공항 ↔ 호텔 (양방향)
+//     · 호텔 A ↔ 호텔 B (다른 호텔)
+//   - 같은 호텔 내 이동, 또는 그 외 패턴: d.trailer = false
+//   - 체크 해제 시: 모든 d.trailer = false (사용자가 개별 슬롯에서 다시 켤 수 있음)
+function _smApplyTrailerAutoFromHeader(){
+  const cb = document.getElementById('sm-trailer-needed');
+  if(!cb) return;
+  const isChecked = cb.checked;
+  if(!_schDays || _schDays.length === 0) return;
+  const hotels = (typeof DB !== 'undefined' && DB.H) ? DB.H : [];
+  const _isHotel = (type, place) => {
+    if(type === 'hotel') return true;
+    if(!place) return false;
+    return !!hotels.find(h => h.Hotel_Name === place) || /hotel|호텔/i.test(String(place));
+  };
+  const _isAirport = (type, place) => {
+    if(type === 'airport') return true;
+    if(!place) return false;
+    return /\b[A-Z]{2,3}\d{2,4}\b/.test(String(place)) || /\b(INTL|DOM|airport|공항)\b/i.test(String(place));
+  };
+
+  _schDays.forEach(d => {
+    if(!isChecked){
+      d.trailer = false;
+      return;
+    }
+    // 체크된 경우: 짐 이동 패턴이 있는 날만 true
+    let needsForThisDay = false;
+    ['morning','fullday','evening'].forEach(k => {
+      const s = d.slots && d.slots[k];
+      if(!s) return;
+      const sIsAirport = _isAirport(s.startPlaceType, s.startPlace);
+      const eIsAirport = _isAirport(s.endPlaceType, s.endPlace);
+      const sIsHotel = _isHotel(s.startPlaceType, s.startPlace);
+      const eIsHotel = _isHotel(s.endPlaceType, s.endPlace);
+      // 공항 ↔ 호텔
+      if((sIsAirport && eIsHotel) || (sIsHotel && eIsAirport)){
+        needsForThisDay = true;
+        return;
+      }
+      // 호텔 ↔ 호텔 (다른 호텔)
+      if(sIsHotel && eIsHotel){
+        const sp = String(s.startPlace || '').trim();
+        const ep = String(s.endPlace || '').trim();
+        if(sp && ep && sp !== ep){
+          needsForThisDay = true;
+        }
+      }
+    });
+    d.trailer = needsForThisDay;
+  });
+  _smRebuildDays();
 }
 
 // ★ 중간 날(첫날/마지막날 제외) 슬롯 시작/도착 시간 자동 입력
