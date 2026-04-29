@@ -7831,12 +7831,16 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     };
     const _startIsHotel = _looksLikeHotel(slot.startPlaceType, slot.startPlace);
     const _endIsHotel = _looksLikeHotel(slot.endPlaceType, slot.endPlace);
+    const _startIsAirport = _looksLikeAirport(slot.startPlaceType, slot.startPlace);
+    const _endIsAirport = _looksLikeAirport(slot.endPlaceType, slot.endPlace);
     const isStartHotelSurcharge = _startIsHotel && slot.startPlace &&
       !!hotels.find(h => h.Hotel_Name === slot.startPlace && h.Surcharge_Area);
     const isEndHotelSurcharge = _endIsHotel && slot.endPlace &&
       !!hotels.find(h => h.Hotel_Name === slot.endPlace && h.Surcharge_Area);
-    const isEarlySurcharge = _startIsHotel && slot.startTime && slot.startTime < '06:00';
-    const isLateSurcharge = _endIsHotel && slot.endTime && slot.endTime >= '23:00';
+    // EARLY: 06:00 이전 출발 (시작 장소가 공항이 아닌 경우만 — 도착 픽업이면 EARLY 아님)
+    const isEarlySurcharge = slot.startTime && slot.startTime < '06:00' && !_startIsAirport;
+    // LATE: 23:00 이후 도착 (도착 장소가 공항이 아닌 경우만)
+    const isLateSurcharge = slot.endTime && slot.endTime >= '23:00' && !_endIsAirport;
     const isTrailer = !!day.trailer;
 
     // ★ 항공편 자동 채우기 (SUB 모드도 동일)
@@ -8010,10 +8014,11 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     !!hotels.find(h => h.Hotel_Name === slot.startPlace && h.Surcharge_Area);
   const isEndHotelSurcharge = _endIsHotel && slot.endPlace &&
     !!hotels.find(h => h.Hotel_Name === slot.endPlace && h.Surcharge_Area);
-  // EARLY: 호텔에서 새벽(<06:00) 출발 (공항 샌딩 또는 일반 투어 모두 해당)
-  const isEarlySurcharge = _startIsHotel && slot.startTime && slot.startTime < '06:00';
-  // LATE: 늦은 도착 (>=23:00) 호텔로 복귀 (공항 픽업 또는 일반 투어 모두 해당)
-  const isLateSurcharge = _endIsHotel && slot.endTime && slot.endTime >= '23:00';
+  // EARLY: 06:00 이전 출발 (호텔/공항/기타 무관 — 시간만으로 판정)
+  // 단 시작 장소가 공항인 경우는 제외 (도착 픽업이라 EARLY 아님)
+  const isEarlySurcharge = slot.startTime && slot.startTime < '06:00' && !_startIsAirport;
+  // LATE: 23:00 이후 도착 (시간만으로 판정 — 도착 장소가 공항이 아닐 때)
+  const isLateSurcharge = slot.endTime && slot.endTime >= '23:00' && !_endIsAirport;
   const isTrailer = !!day.trailer;
 
   // ★ 항공편 자동 채우기: 슬롯 끝점이 공항이면 FlightIn/Out에서 코드/시간 가져오기
