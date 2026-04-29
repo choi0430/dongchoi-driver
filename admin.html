@@ -21927,9 +21927,12 @@ function _reportRow(r){
   const dateStr = fd(r._iso||r.Date||'');
   const _rwSub = (()=>{ const v=(DB.V||[]).find(x=>x.Rego===(r.Rego||'').trim()); return v?(v.SubOwner||'').trim():''; })();
   // ★ 클릭 가능한 카드 — 상세 모달 띄움
-  const reportId = r.ID || r._rowIndex || (r.Date+'_'+r.Rego+'_'+r.Driver);
-  const safeId = String(reportId).replace(/'/g, "\\'");
-  return '<div onclick="showWageReportDetail(\''+safeId+'\')" style="background:'+(_rwSub?'#f5f3ff':'var(--sf2)')+';border-radius:10px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:background .15s;'+(_rwSub?'border-left:3px solid #7c3aed;':'')+'" onmouseover="this.style.background=\''+(_rwSub?'#ede9fe':'#e8edf4')+'\'" onmouseout="this.style.background=\''+(_rwSub?'#f5f3ff':'var(--sf2)')+'\'">'+
+  // 안전한 ID — base64 인코딩으로 escape 문제 방지
+  const idStr = String(r.ID || r._rowIndex || (r.Date+'|'+r.Rego+'|'+r.Driver));
+  const safeId = btoa(unescape(encodeURIComponent(idStr))).replace(/=+$/, '');
+  const bgColor = _rwSub ? '#f5f3ff' : 'var(--sf2)';
+  const bgHover = _rwSub ? '#ede9fe' : '#e8edf4';
+  return '<div data-rid="'+safeId+'" onclick="showWageReportDetail(this.dataset.rid)" style="background:'+bgColor+';border-radius:10px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:background .15s;'+(_rwSub?'border-left:3px solid #7c3aed;':'')+'" onmouseover="this.style.background=\''+bgHover+'\'" onmouseout="this.style.background=\''+bgColor+'\'">'+
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'+
       '<div style="flex:1;min-width:0;">'+
         (dateStr?'<div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="background:#1e40af;color:#fff;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;letter-spacing:.3px;">📅 '+escH(dateStr)+'</span>'+(_rwSub?'<span style="background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;">SUB·'+escH(_rwSub)+'</span>':'')+'</div>':'')+
@@ -21953,14 +21956,29 @@ function _reportRow(r){
 // ─────────────────────────────────────────────────────
 // 급여 탭 리포트 상세 모달 — 운행 카드 탭 시 전체 내역 표시
 // ─────────────────────────────────────────────────────
-function showWageReportDetail(reportId){
-  // 캐시에서 매칭
+function showWageReportDetail(reportIdEncoded){
+  // base64 디코드
+  let reportId;
+  try {
+    reportId = decodeURIComponent(escape(atob(reportIdEncoded)));
+  } catch(e) {
+    reportId = reportIdEncoded; // 디코드 실패 시 그대로
+  }
+
+  // 캐시에서 매칭 — 다양한 방식 시도
   const rows = _reportsCache || [];
   const r = rows.find(x => {
-    const id = x.ID || x._rowIndex || (x.Date+'_'+x.Rego+'_'+x.Driver);
-    return String(id) === String(reportId);
+    if(x.ID && String(x.ID) === reportId) return true;
+    if(x._rowIndex !== undefined && String(x._rowIndex) === reportId) return true;
+    const composite = (x.Date||'')+'|'+(x.Rego||'')+'|'+(x.Driver||'');
+    if(composite === reportId) return true;
+    return false;
   });
-  if(!r){ alert('리포트를 찾을 수 없습니다'); return; }
+  if(!r){
+    console.warn('[showWageReportDetail] not found:', reportId);
+    alert('리포트를 찾을 수 없습니다');
+    return;
+  }
 
   const tS = r._timeStart||parseSheetTime(r.Time_Start);
   const tE = r._timeEnd||parseSheetTime(r.Time_End);
