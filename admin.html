@@ -5278,10 +5278,20 @@ function onSmFlightInTimeChange(){
   else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; slotName = 'fullday(신규)'; }
   // ★ 미팅: 공항이 출발지이므로 startTime(차량 출발)을 자동 계산
   target.startTime = newTime;
-  // 시작장소가 비어있으면 공항 자동 (도착 → 공항에서 출발)
+  // 시작장소가 비어있으면 항공편 코드 + 도착시간으로 자동 채움
+  // (예: "JQ403 09:40") — 코드 또는 시간 둘 중 하나만 있으면 그것만 채움
   if(!target.startPlace){
-    target.startPlace = isIntl ? 'Sydney INTL' : 'Sydney DOM';
-    target.startPlaceType = 'airport';
+    const flCode = (document.getElementById('sm-flightin')?.value || '').trim();
+    const flTime = t; // 위에서 사용한 도착 시간
+    const placeStr = `${flCode} ${flTime}`.trim();
+    if(placeStr){
+      target.startPlace = placeStr;
+      target.startPlaceType = 'airport';
+    } else {
+      // 폴백: 항공편 입력 전이면 일반 라벨
+      target.startPlace = isIntl ? 'Sydney INTL' : 'Sydney DOM';
+      target.startPlaceType = 'airport';
+    }
   }
   console.log(`[MeetingAuto] 첫날(${d.date}) ${slotName} 슬롯 startTime=${newTime}`);
   _smRebuildDays();
@@ -5316,8 +5326,17 @@ function onSmFlightOutTimeChange(){
   target.startTime = newTime;
   // 도착지(endPlace)가 비어있으면 공항 자동 입력
   if(!target.endPlace){
-    target.endPlace = isIntl ? 'Sydney INTL' : 'Sydney DOM';
-    target.endPlaceType = 'airport';
+    const flCode = (document.getElementById('sm-flightout')?.value || '').trim();
+    const flTime = t; // 위에서 사용한 출발 시간
+    const placeStr = `${flCode} ${flTime}`.trim();
+    if(placeStr){
+      target.endPlace = placeStr;
+      target.endPlaceType = 'airport';
+    } else {
+      // 폴백: 항공편 입력 전이면 일반 라벨
+      target.endPlace = isIntl ? 'Sydney INTL' : 'Sydney DOM';
+      target.endPlaceType = 'airport';
+    }
   }
   console.log(`[SandengAuto] 마지막날(${d.date}) ${slotName} 슬롯 startTime=${newTime}`);
   _smRebuildDays();
