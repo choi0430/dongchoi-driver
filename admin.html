@@ -5001,12 +5001,38 @@ function openScheduleModal(tourId, focusDate, focusSlot){
     if(invBtn) invBtn.style.display = 'block';
     // ★ 안전한 채우기: csel은 items에서 매칭 실패하면 빈값으로 만들어 버림
     //   → setValue 호출 후, items에 없는 값이라도 input에 강제로 표시
-    const agencyVal = String(r.Agency || '').trim();
-    const tourCodeVal = String(r.TourCode || '').trim();
+    let agencyVal = String(r.Agency || '').trim();
+    let tourCodeVal = String(r.TourCode || '').trim();
+
+    // ★ 데이터 손상 감지: Agency 칸에 TourCode가 붙어 저장된 케이스 자동 분리
+    //   (예: "Tour Hojuro Pty Ltd0501-YB-143-KE" → Agency: "Tour Hojuro Pty Ltd", TourCode: "0501-YB-143-KE")
+    //   조건: 1) TourCode 칸이 비어있고
+    //         2) Agency 칸 끝에 TourCode 패턴 (영숫자-하이픈 조합 6자 이상)이 붙어 있음
+    if(!tourCodeVal && agencyVal){
+      // 알려진 여행사명을 prefix로 매칭 시도 (DB.C 우선)
+      const knownAgencies = (DB.C||[]).map(c => String(c.Name||'').trim()).filter(Boolean)
+        .sort((a,b) => b.length - a.length); // 긴 이름 먼저 매칭
+      for(const ag of knownAgencies){
+        if(agencyVal.startsWith(ag) && agencyVal.length > ag.length){
+          const tail = agencyVal.slice(ag.length).trim();
+          // tail이 TourCode 형태인지 검사 (대문자/숫자/하이픈 위주, 6자 이상)
+          if(/^[A-Z0-9\-_]{4,}$/i.test(tail.replace(/\s/g,''))){
+            console.warn(`[Schedule Edit] Agency 손상 감지 → 자동 분리: "${agencyVal}" → Agency="${ag}", TourCode="${tail}"`);
+            agencyVal = ag;
+            tourCodeVal = tail;
+            // 화면에서 사용자에게 안내 (저장 시 정상 분리 저장)
+            toast(`⚠️ Agency 칸에 투어코드가 붙어있어 자동 분리했습니다 (저장 시 정정됨)`, 'warn');
+            break;
+          }
+        }
+      }
+    }
+
     console.log('[Schedule Edit] 데이터 채우기:', {
       tourId: r.TourID, agency: agencyVal, tourCode: tourCodeVal,
       hasAgencyCsel: !!_schCsels.agency,
-      agencyInDB: (DB.C||[]).some(c => c.Name === agencyVal)
+      agencyInDB: (DB.C||[]).some(c => c.Name === agencyVal),
+      originalAgency: r.Agency, originalTourCode: r.TourCode
     });
     if(_schCsels.agency){
       try { _schCsels.agency.setValue(agencyVal); } catch(e){ console.warn('agency setValue 실패', e); }
