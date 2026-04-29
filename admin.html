@@ -8768,29 +8768,53 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
     // 인접 주의 트랙 정보 미리 조회
     const neighborTracks = _getNeighborWeekTourCodeTrack(grpKey);
 
+    // ★ 시간 단위 비교 헬퍼 — 같은 날 다른 시간대 일정을 한 트랙에 묶기 위함
+    //   slot.startTime이 있으면 그 시간을, 없으면 슬롯별 디폴트(morning=06:00, fullday=08:00, evening=18:00) 사용
+    //   slot.endTime이 있으면 그 시간을, 없으면 슬롯별 디폴트(morning=12:00, fullday=20:00, evening=23:59) 사용
+    const _slotDefaults = {
+      morning: {st: '06:00', et: '12:00'},
+      fullday: {st: '08:00', et: '20:00'},
+      evening: {st: '18:00', et: '23:59'}
+    };
+    const _toDateTime = (date, time) => date + 'T' + (time || '00:00');
+    const _slotStartDT = (date, slotKey, slot) => {
+      const t = (slot && slot.startTime) || _slotDefaults[slotKey]?.st || '00:00';
+      return _toDateTime(date, t);
+    };
+    const _slotEndDT = (date, slotKey, slot) => {
+      const t = (slot && slot.endTime) || _slotDefaults[slotKey]?.et || '23:59';
+      return _toDateTime(date, t);
+    };
+
     // 1) 현재 주의 일정에서 TourCode/TourID 단위로 묶음
     //    tcKey = TourCode || TourID — 같은 TourCode 회차들은 한 단위로 트랙 배치
-    const tcGroups = {}; // tcKey → {firstDate, lastDate, items, preferredTrack}
+    //    firstDateTime/lastDateTime — 시간 단위 비교용
+    const tcGroups = {}; // tcKey → {firstDate, lastDate, firstDateTime, lastDateTime, items, preferredTrack}
     Object.entries(groups[grpKey]).forEach(([date, slots]) => {
       Object.entries(slots).forEach(([slotKey, dataArr]) => {
         dataArr.forEach(data => {
           const tid = data.tour.TourID;
           const tc = String(data.tour.TourCode||'').trim();
           const tcKey = tc || tid;
+          const slot = data.slot || {};
+          const stDT = _slotStartDT(date, slotKey, slot);
+          const etDT = _slotEndDT(date, slotKey, slot);
           if(!tcGroups[tcKey]){
             // 인접 주의 같은 TourCode 트랙 → 선호 트랙
             const nb = neighborTracks[tcKey];
             const preferredTrack = nb ? (nb.prevTrack ?? nb.nextTrack) : -1;
-            tcGroups[tcKey] = {firstDate: date, lastDate: date, items: [], preferredTrack};
+            tcGroups[tcKey] = {firstDate: date, lastDate: date, firstDateTime: stDT, lastDateTime: etDT, items: [], preferredTrack};
           }
           if(date < tcGroups[tcKey].firstDate) tcGroups[tcKey].firstDate = date;
           if(date > tcGroups[tcKey].lastDate) tcGroups[tcKey].lastDate = date;
+          if(stDT < tcGroups[tcKey].firstDateTime) tcGroups[tcKey].firstDateTime = stDT;
+          if(etDT > tcGroups[tcKey].lastDateTime) tcGroups[tcKey].lastDateTime = etDT;
           tcGroups[tcKey].items.push({date, slotKey, data});
         });
       });
     });
 
-    // 2) 정렬 우선순위: preferredTrack 있는 항목 → 작은 트랙 번호 순 → firstDate 순
+    // 2) 정렬 우선순위: preferredTrack 있는 항목 → 작은 트랙 번호 순 → firstDateTime 순
     //    이렇게 하면 인접 주에 트랙 0이었던 TourCode가 먼저 배치되어 트랙 0 차지
     const tcArr = Object.entries(tcGroups).sort((a,b) => {
       const aPref = a[1].preferredTrack;
@@ -8798,18 +8822,19 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
       // 둘 다 preferredTrack 있으면 작은 번호 순
       if(aPref >= 0 && bPref >= 0){
         if(aPref !== bPref) return aPref - bPref;
-        return a[1].firstDate.localeCompare(b[1].firstDate);
+        return a[1].firstDateTime.localeCompare(b[1].firstDateTime);
       }
       // preferredTrack 있는 쪽이 먼저 (안정성 우선)
       if(aPref >= 0 && bPref < 0) return -1;
       if(bPref >= 0 && aPref < 0) return 1;
-      // 둘 다 없으면 firstDate 순
-      if(a[1].firstDate !== b[1].firstDate) return a[1].firstDate.localeCompare(b[1].firstDate);
+      // 둘 다 없으면 firstDateTime 순
+      if(a[1].firstDateTime !== b[1].firstDateTime) return a[1].firstDateTime.localeCompare(b[1].firstDateTime);
       return a[0].localeCompare(b[0]);
     });
 
     // 3) 그리디 트랙 배치 — preferredTrack이 있으면 그 트랙 우선 시도
-    const tracks = []; // [{lastDate, items: [...]}, ...]
+    //    ★ 시간 단위 비교: tracks[i].lastDateTime <= span.firstDateTime 이면 같은 트랙 OK
+    const tracks = []; // [{lastDateTime, items: [...]}, ...]
     tcArr.forEach(([tcKey, span]) => {
       let trackIdx = -1;
       // preferredTrack이 있고 그 트랙이 비어있으면 우선 사용
@@ -8818,24 +8843,24 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
         if(span.preferredTrack >= tracks.length){
           // 빈 트랙 자리까지 채워야 함 (intermediate 트랙 placeholder)
           while(tracks.length < span.preferredTrack){
-            tracks.push({lastDate: '', items: []});
+            tracks.push({lastDateTime: '', items: []});
           }
-          tracks.push({lastDate: span.lastDate, items: span.items});
+          tracks.push({lastDateTime: span.lastDateTime, items: span.items});
           trackIdx = span.preferredTrack;
-        } else if(tracks[span.preferredTrack].lastDate < span.firstDate || tracks[span.preferredTrack].items.length === 0){
+        } else if(tracks[span.preferredTrack].lastDateTime <= span.firstDateTime || tracks[span.preferredTrack].items.length === 0){
           // 비어있거나 시간 안 겹치면 그 트랙 사용
-          if(span.lastDate > tracks[span.preferredTrack].lastDate) tracks[span.preferredTrack].lastDate = span.lastDate;
+          if(span.lastDateTime > tracks[span.preferredTrack].lastDateTime) tracks[span.preferredTrack].lastDateTime = span.lastDateTime;
           tracks[span.preferredTrack].items = tracks[span.preferredTrack].items.concat(span.items);
           trackIdx = span.preferredTrack;
         }
       }
       if(trackIdx < 0){
-        // preferredTrack 못 사용 → 일반 그리디
-        trackIdx = tracks.findIndex(t => t.lastDate < span.firstDate);
+        // preferredTrack 못 사용 → 일반 그리디 (시간 단위 비교)
+        trackIdx = tracks.findIndex(t => t.lastDateTime <= span.firstDateTime);
         if(trackIdx < 0){
-          tracks.push({lastDate: span.lastDate, items: span.items});
+          tracks.push({lastDateTime: span.lastDateTime, items: span.items});
         } else {
-          if(span.lastDate > tracks[trackIdx].lastDate) tracks[trackIdx].lastDate = span.lastDate;
+          if(span.lastDateTime > tracks[trackIdx].lastDateTime) tracks[trackIdx].lastDateTime = span.lastDateTime;
           tracks[trackIdx].items = tracks[trackIdx].items.concat(span.items);
         }
       }
