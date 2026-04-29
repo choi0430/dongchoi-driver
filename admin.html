@@ -21926,7 +21926,10 @@ function _reportRow(r){
 
   const dateStr = fd(r._iso||r.Date||'');
   const _rwSub = (()=>{ const v=(DB.V||[]).find(x=>x.Rego===(r.Rego||'').trim()); return v?(v.SubOwner||'').trim():''; })();
-  return '<div style="background:'+(_rwSub?'#f5f3ff':'var(--sf2)')+';border-radius:10px;padding:10px 12px;margin-bottom:6px;'+(_rwSub?'border-left:3px solid #7c3aed;':'')+'">'+
+  // ★ 클릭 가능한 카드 — 상세 모달 띄움
+  const reportId = r.ID || r._rowIndex || (r.Date+'_'+r.Rego+'_'+r.Driver);
+  const safeId = String(reportId).replace(/'/g, "\\'");
+  return '<div onclick="showWageReportDetail(\''+safeId+'\')" style="background:'+(_rwSub?'#f5f3ff':'var(--sf2)')+';border-radius:10px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:background .15s;'+(_rwSub?'border-left:3px solid #7c3aed;':'')+'" onmouseover="this.style.background=\''+(_rwSub?'#ede9fe':'#e8edf4')+'\'" onmouseout="this.style.background=\''+(_rwSub?'#f5f3ff':'var(--sf2)')+'\'">'+
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'+
       '<div style="flex:1;min-width:0;">'+
         (dateStr?'<div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="background:#1e40af;color:#fff;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px;letter-spacing:.3px;">📅 '+escH(dateStr)+'</span>'+(_rwSub?'<span style="background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;">SUB·'+escH(_rwSub)+'</span>':'')+'</div>':'')+
@@ -21940,11 +21943,133 @@ function _reportRow(r){
       '<div style="text-align:right;flex-shrink:0;margin-left:8px;">'+
         '<div style="font-size:15px;font-weight:800;color:'+(drCost<0?'var(--rd)':'var(--gn)')+';">'+(drCost<0?'-$'+Math.abs(drCost).toLocaleString():'$'+drCost.toLocaleString())+'</div>'+
         (nightOwn>0?'<div style="font-size:10px;color:'+(_rwSub?'#7c3aed':'var(--rd)')+';font-weight:700;">'+(_rwSub?'차주('+escH(_rwSub)+')납입':'회사납입')+' -$'+nightOwn.toLocaleString()+'</div>':'')+
-        '<div style="font-size:10px;color:var(--t3);margin-top:1px;">실수령</div>'+
+        '<div style="font-size:10px;color:var(--t3);margin-top:1px;">실수령 · 탭하면 상세 ▸</div>'+
       '</div>'+
     '</div>'+
     (surItems.length>0?'<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:6px;">'+surItems.map(i=>'<span style="font-size:9px;background:'+i.c+'14;border:1px solid '+i.c+'33;border-radius:4px;padding:1px 5px;font-weight:700;color:'+i.c+';">'+i.l+' $'+i.v+'</span>').join('')+'</div>':'')+
   '</div>';
+}
+
+// ─────────────────────────────────────────────────────
+// 급여 탭 리포트 상세 모달 — 운행 카드 탭 시 전체 내역 표시
+// ─────────────────────────────────────────────────────
+function showWageReportDetail(reportId){
+  // 캐시에서 매칭
+  const rows = _reportsCache || [];
+  const r = rows.find(x => {
+    const id = x.ID || x._rowIndex || (x.Date+'_'+x.Rego+'_'+x.Driver);
+    return String(id) === String(reportId);
+  });
+  if(!r){ alert('리포트를 찾을 수 없습니다'); return; }
+
+  const tS = r._timeStart||parseSheetTime(r.Time_Start);
+  const tE = r._timeEnd||parseSheetTime(r.Time_End);
+  const dur = calcDuration(tS,tE);
+  const drCost = _calcDRFromReport(r);
+  const nightOwn = parseFloat(r.Night_Owner)||0;
+  const kmS = r.KM_Start||r.Start_KM||'';
+  const kmE = r.KM_End||r.End_KM||'';
+  const kmDiff = kmS&&kmE?Math.abs(parseInt(kmE)-parseInt(kmS)):0;
+  const dateStr = fd(r._iso||r.Date||'');
+  const _rSub = (()=>{ const v=(DB.V||[]).find(x=>x.Rego===(r.Rego||'').trim()); return v?(v.SubOwner||'').trim():''; })();
+
+  // 모든 수당 항목 집계
+  const items = [];
+  const svc = parseFloat(r.SVC_Charge)||0;
+  if(svc) items.push({l:'기본 수당 (SVC)', v:svc, c:'#16a34a', sign:'+'});
+  if((parseFloat(r.OT)||0)>0) items.push({l:'OT (초과근무)', v:parseFloat(r.OT), c:'#3b82f6', sign:'+'});
+  if((parseFloat(r.Hotel_Surcharge)||0)>0) items.push({l:'호텔 서차지', v:parseFloat(r.Hotel_Surcharge), c:'#8b5cf6', sign:'+'});
+  if((parseFloat(r.Dist_Surcharge)||0)>0) items.push({l:'거리 서차지', v:parseFloat(r.Dist_Surcharge), c:'#0ea5e9', sign:'+'});
+  if((parseFloat(r.Early)||0)>0) items.push({l:'조기 출발', v:parseFloat(r.Early), c:'#f59e0b', sign:'+'});
+  if((parseFloat(r.Trailer)||0)>0) items.push({l:'트레일러', v:parseFloat(r.Trailer), c:'#64748b', sign:'+'});
+  if((parseFloat(r.Night_DR)||0)>0) items.push({l:'야간 투어', v:parseFloat(r.Night_DR), c:'#a5b4fc', sign:'+'});
+  if((parseFloat(r.Wash)||0)>0) items.push({l:'세차', v:parseFloat(r.Wash), c:'#10b981', sign:'+'});
+  if((parseFloat(r.Meal)||0)>0) items.push({l:'식비', v:parseFloat(r.Meal), c:'#10b981', sign:'+'});
+  if((parseFloat(r.Tip)||0)>0) items.push({l:'팁', v:parseFloat(r.Tip), c:'#eab308', sign:'+'});
+  if(r.Toll_Personal==='Y'&&(parseFloat(r.Toll)||0)>0) items.push({l:'톨비 (개인)', v:parseFloat(r.Toll), c:'#78716c', sign:'+'});
+  if(r.Fuel_Personal==='Y'&&(parseFloat(r.Fuel)||0)>0) items.push({l:'연료 (개인)', v:parseFloat(r.Fuel), c:'#78716c', sign:'+'});
+  if(nightOwn > 0) items.push({l:_rSub?('차주('+_rSub+') 납입'):'회사 납입 차감', v:nightOwn, c:'#dc2626', sign:'-'});
+
+  // 모달 HTML
+  const headerColor = _rSub ? 'linear-gradient(135deg,#6d28d9,#4f46e5)' : 'linear-gradient(135deg,#1e40af,#4f46e5)';
+  const html = `
+    <div id="wage-detail-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this) closeWageReportDetail()">
+      <div style="background:white;border-radius:16px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+        <!-- 헤더 -->
+        <div style="background:${headerColor};color:white;padding:20px;border-radius:16px 16px 0 0;position:relative;">
+          <button onclick="closeWageReportDetail()" style="position:absolute;top:12px;right:12px;background:rgba(255,255,255,.2);border:none;color:white;width:30px;height:30px;border-radius:50%;font-size:16px;cursor:pointer;">✕</button>
+          <div style="font-size:11px;opacity:.85;margin-bottom:4px;">📅 ${escH(dateStr)} ${_rSub?' · 🚐 SUB·'+escH(_rSub):''}</div>
+          <div style="font-size:18px;font-weight:800;margin-bottom:2px;">${escH(r.Agency||'')}</div>
+          <div style="font-size:13px;opacity:.9;">${escH(r.Attraction||'')}</div>
+          <div style="font-size:24px;font-weight:900;margin-top:10px;">${drCost<0?'-$'+Math.abs(drCost).toLocaleString():'$'+drCost.toLocaleString()}</div>
+          <div style="font-size:11px;opacity:.85;">실수령 (DR Cost)</div>
+        </div>
+
+        <!-- 운행 정보 -->
+        <div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;">
+          <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:8px;">🚌 운행 정보</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;font-size:12px;">
+            <div><span style="color:#6b7280;">차량:</span> <strong>${escH(r.Rego||'-')}</strong>${r.Seats?' ('+escH(r.Seats)+')':''}</div>
+            <div><span style="color:#6b7280;">드라이버:</span> <strong>${escH(r.Driver||'-')}</strong></div>
+            ${tS?`<div><span style="color:#6b7280;">시작:</span> <strong>${escH(tS)}</strong></div>`:''}
+            ${tE?`<div><span style="color:#6b7280;">종료:</span> <strong>${escH(tE)}</strong></div>`:''}
+            ${dur?`<div style="grid-column:1/-1;"><span style="color:#6b7280;">근무 시간:</span> <strong style="color:#3b82f6;">${escH(dur)}</strong></div>`:''}
+            ${kmS?`<div><span style="color:#6b7280;">시작 KM:</span> <strong>${escH(kmS)}</strong></div>`:''}
+            ${kmE?`<div><span style="color:#6b7280;">종료 KM:</span> <strong>${escH(kmE)}</strong></div>`:''}
+            ${kmDiff?`<div style="grid-column:1/-1;"><span style="color:#6b7280;">주행 거리:</span> <strong style="background:#dcfce7;color:#16a34a;padding:1px 6px;border-radius:3px;">+${kmDiff} km</strong></div>`:''}
+            ${r.Pickup?`<div style="grid-column:1/-1;"><span style="color:#6b7280;">픽업:</span> <strong>${escH(r.Pickup)}</strong></div>`:''}
+            ${r.Dropoff?`<div style="grid-column:1/-1;"><span style="color:#6b7280;">드롭오프:</span> <strong>${escH(r.Dropoff)}</strong></div>`:''}
+            ${r.Guide?`<div><span style="color:#6b7280;">가이드:</span> <strong>${escH(r.Guide)}</strong></div>`:''}
+            ${r.Tour_Code?`<div><span style="color:#6b7280;">투어 코드:</span> <strong>${escH(r.Tour_Code)}</strong></div>`:''}
+          </div>
+        </div>
+
+        <!-- 수당 내역 -->
+        <div style="padding:16px 20px;">
+          <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:8px;">💰 수당 내역</div>
+          ${items.length === 0 ? '<div style="padding:12px;text-align:center;color:#9ca3af;font-size:12px;">수당 내역이 없습니다</div>' :
+            items.map(it => `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:${it.c}0a;border-left:3px solid ${it.c};border-radius:4px;margin-bottom:4px;">
+                <span style="font-size:12px;color:#374151;">${escH(it.l)}</span>
+                <span style="font-size:13px;font-weight:700;color:${it.c};">${it.sign}$${it.v.toLocaleString()}</span>
+              </div>
+            `).join('')
+          }
+          <div style="display:flex;justify-content:space-between;padding:10px;background:#f9fafb;border-radius:6px;margin-top:8px;border:1px solid #e5e7eb;">
+            <span style="font-size:13px;font-weight:800;color:#1f2937;">실수령 합계</span>
+            <span style="font-size:15px;font-weight:900;color:${drCost<0?'#dc2626':'#16a34a'};">${drCost<0?'-$'+Math.abs(drCost).toLocaleString():'$'+drCost.toLocaleString()}</span>
+          </div>
+        </div>
+
+        ${r.Remarks ? `
+        <div style="padding:0 20px 16px;">
+          <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:6px;">📝 비고</div>
+          <div style="padding:10px;background:#fef3c7;border-radius:6px;font-size:12px;color:#78350f;white-space:pre-wrap;">${escH(r.Remarks)}</div>
+        </div>` : ''}
+
+        ${_rSub ? `
+        <div style="padding:0 20px 16px;">
+          <div style="background:#faf5ff;border:1px dashed #c4b5fd;border-radius:8px;padding:10px;font-size:11px;color:#6d28d9;">
+            🚐 <strong>SUB 차량 운행</strong> — ${escH(_rSub)} 차주가 직접 드라이버에게 지급
+          </div>
+        </div>` : ''}
+
+        <!-- 푸터 액션 -->
+        <div style="padding:12px 20px 20px;border-top:1px solid #e5e7eb;display:flex;gap:8px;">
+          <button onclick="closeWageReportDetail()" style="flex:1;background:#f3f4f6;color:#374151;border:none;padding:12px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">닫기</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  document.body.appendChild(wrap.firstElementChild);
+}
+
+function closeWageReportDetail(){
+  const ov = document.getElementById('wage-detail-overlay');
+  if(ov) ov.remove();
 }
 
 // ── 전체 기간 보기 ──────────────────────────────────────
