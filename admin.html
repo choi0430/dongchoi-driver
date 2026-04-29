@@ -8776,16 +8776,24 @@ function renderScheduleCalendar(){
       if(x.date !== adjacentDate) return false;
       if(x.tour.TourID !== tourID) return false;
       // 그룹 키 매칭 — 트랙 분할로 키가 변경됐을 수 있으니 원본 그룹 기반으로
-      const baseGrpKey = grpKey.replace(/ \(트랙 \d+\)$/, '');
+      // 통합 모드: '트랙 1' / '트랙 2' / ... 또는 '__all__' (분할 안 됐을 때)
+      // 다른 모드: '여행사 (트랙 1)' / '여행사' / 등
+      let baseGrpKey;
+      if(groupBy === 'unified'){
+        baseGrpKey = '__all__'; // 통합 모드는 모든 셀이 같은 가상 그룹
+      } else {
+        baseGrpKey = grpKey.replace(/ \(트랙 \d+\)$/, '');
+      }
       const slots = x.day.slots || {};
       const anySlot = ['morning','fullday','evening'].map(k => slots[k]).find(s => s);
       if(!anySlot) return false;
       let key;
       switch(groupBy){
-        case 'guide':  key = x.tour.Guide || '(미지정)'; break;
-        case 'rego':   key = anySlot.rego || '(미지정)'; break;
-        case 'driver': key = anySlot.driver || '(미지정)'; break;
-        default:       key = x.tour.Agency || '(미지정)';
+        case 'unified': key = '__all__'; break;
+        case 'guide':   key = x.tour.Guide || '(미지정)'; break;
+        case 'rego':    key = anySlot.rego || '(미지정)'; break;
+        case 'driver':  key = anySlot.driver || '(미지정)'; break;
+        default:        key = x.tour.Agency || '(미지정)';
       }
       return key === baseGrpKey;
     });
