@@ -21555,10 +21555,13 @@ async function rWage(){
   const dSel = document.getElementById('wage-driver-sel');
   if(!dSel) return;
   const drivers = DB.D.map(d=>({name:d.Name_KR||d.Name_EN, en:d.Name_EN}));
-  // ★ 현재 dropdown의 값(사용자 선택)이 유효하면 그것을 우선 사용
-  const currentVal = dSel.value;
-  if(currentVal && drivers.some(d=>d.name===currentVal)){
-    ST.wageDriver = currentVal;
+  // ★ ST.wageDriver(명시적 선택, 예: selectWageDriver) 우선
+  //   없으면 select의 현재 값(사용자가 직접 dropdown 선택) 사용
+  if(!ST.wageDriver || !drivers.some(d=>d.name===ST.wageDriver)){
+    const currentVal = dSel.value;
+    if(currentVal && drivers.some(d=>d.name===currentVal)){
+      ST.wageDriver = currentVal;
+    }
   }
   dSel.innerHTML = drivers.map(d=>'<option value="'+escH(d.name)+'">'+escH(d.name)+'</option>').join('');
   if(!ST.wageDriver && drivers.length>0) ST.wageDriver = drivers[0].name;
