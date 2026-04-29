@@ -15936,20 +15936,40 @@ function _calcSlotSubCost(tour, day, slot, slotKey){
   }
   if(!subCo) return null; // 자사 케이스
 
+  // ★ 트레일러 사용료 정산 — 차량 소유주 ≠ 트레일러 소유주이면 ±$30
+  //   day.trailer가 true이고 day.trailerNumber가 있으면 트레일러 사용 중
+  //   - 트레일러가 SUB 소유: SUB가 본인 트레일러 사용 → 차감 없음
+  //   - 트레일러가 자사(DC) 소유, SUB 차량 사용: SUB가 자사 트레일러 빌림 → SUB 지급액에서 -$30
+  //   - 트레일러가 다른 SUB 소유 (드물지만): -$30 (이 경우 별도 트레일러 소유주 정산은 수동)
+  let trailerAdjust = 0;
+  let trailerInfo = null;
+  if(day && day.trailer && day.trailerNumber){
+    const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
+    if(tr){
+      const trOwner = String(tr.Owner||'').trim();
+      // SUB 차량 소유주가 SUB 자체이고 트레일러 소유주가 SUB와 다르면 차감
+      if(trOwner && trOwner !== subCo){
+        trailerAdjust = -30;
+        trailerInfo = { trailerNumber: tr.Trailer_Number, trailerOwner: trOwner, type: 'borrowed_from_other' };
+      }
+    }
+  }
+
   // DB.PS[subCo][course][seats] 단가 조회
   const psCo = (typeof DB !== 'undefined' && DB.PS) ? DB.PS[subCo] : null;
-  if(!psCo) return { subCo, amount: 0, course, seats, ot: 0, _noRate: true };
+  if(!psCo) return { subCo, amount: trailerAdjust, course, seats, ot: 0, _noRate: true, trailerAdjust, trailerInfo };
   let entry = psCo[course];
   if(!entry){
     const lower = course.toLowerCase();
     const k = Object.keys(psCo).find(k => k.toLowerCase() === lower);
     if(k) entry = psCo[k];
   }
-  if(!entry) return { subCo, amount: 0, course, seats, ot: 0, _noRate: true };
+  if(!entry) return { subCo, amount: trailerAdjust, course, seats, ot: 0, _noRate: true, trailerAdjust, trailerInfo };
   const seatData = entry[seats] || entry['21'];
-  const amount = parseFloat(seatData?.rate) || 0;
+  const baseAmount = parseFloat(seatData?.rate) || 0;
   const otRate = parseFloat(seatData?.ot) || 0;
-  return { subCo, amount, course, seats, ot: 0, _otRate: otRate };
+  const amount = baseAmount + trailerAdjust; // 운임 - 트레일러 사용료
+  return { subCo, amount, baseAmount, course, seats, ot: 0, _otRate: otRate, trailerAdjust, trailerInfo };
 }
 
 // 슬롯에서 인보이스 항목 자동 계산
@@ -16158,7 +16178,25 @@ function _renderInvScheduleImportModal(){
       if(sc._noRate){
         subCostHtml = `<span style="color:#92400e;" title="${escH(sc.subCo)} 단가표 없음">⚠ ${escH(sc.subCo)}</span>`;
       } else {
-        subCostHtml = `<span style="color:#7c3aed;font-weight:700;" title="${escH(sc.subCo)}">$${(sc.amount||0).toLocaleString()}</span>`;
+        const trAdj = sc.trailerAdjust || 0;
+        const trInfo = sc.trailerInfo;
+        if(trAdj !== 0 && trInfo){
+          subCostHtml = `<span style="color:#7c3aed;font-weight:700;" title="${escH(sc.subCo)}: 운임 $${(sc.baseAmount||0).toLocaleString()} ${trAdj > 0 ? '+' : ''}$${trAdj} 트레일러(${trInfo.trailerNumber} ${trInfo.trailerOwner} 빌림)">$${(sc.amount||0).toLocaleString()}<br><span style="font-size:9px;color:#dc2626;font-weight:600;">🚐 -$30</span></span>`;
+        } else {
+          subCostHtml = `<span style="color:#7c3aed;font-weight:700;" title="${escH(sc.subCo)}">$${(sc.amount||0).toLocaleString()}</span>`;
+        }
+      }
+    } else {
+      // 자사 운행이지만 트레일러는 SUB 소유 → 별도 +$30 지급 거래
+      const day = it.day, slot = it.slot;
+      if(day && day.trailer && day.trailerNumber){
+        const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
+        if(tr){
+          const trOwner = String(tr.Owner||'').trim();
+          if(trOwner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(trOwner)){
+            subCostHtml = `<span style="color:#16a34a;font-weight:700;" title="${escH(trOwner)}에게 트레일러 ${tr.Trailer_Number} 사용료 지급">🚐 +$30<br><span style="font-size:9px;color:var(--t3);">${escH(trOwner)}</span></span>`;
+          }
+        }
       }
     }
     return `<tr style="border-bottom:1px solid var(--bd);">
@@ -16305,17 +16343,47 @@ function applyInvScheduleImport(){
 
     // ★ SUB 비용 자동 정산 — Sub_Txn에 DR(지급할 비용) 거래 추가
     if(it.subCalc && !it.subCalc._noRate && (it.subCalc.amount||0) > 0){
+      // 트레일러 사용료 차감 표시 (있으면 description에 명시)
+      const trAdj = it.subCalc.trailerAdjust || 0;
+      const trInfo = it.subCalc.trailerInfo;
+      let descSuffix = it.isSubMode ? ' [SUB통째]' : ' [DC운행]';
+      if(trAdj !== 0 && trInfo){
+        descSuffix += ` (트레일러 ${trInfo.trailerNumber} ${trInfo.trailerOwner} 빌림: ${trAdj > 0 ? '+' : ''}$${trAdj})`;
+      }
       subTxnsToCreate.push({
         SubCompany: it.subCalc.subCo,
         Category: 'service',
         Date: it.date,
         InvoiceNo: '',  // SUB가 인보이스 발행 시 채워짐, 또는 수동 입력
-        Description: `${item.tour} (${tourCode}) - ${it.subCalc.seats}S` + (it.isSubMode ? ' [SUB통째]' : ' [DC운행]'),
+        Description: `${item.tour} (${tourCode}) - ${it.subCalc.seats}S` + descSuffix,
         DR: it.subCalc.amount,
         CR: 0,
-        Remark: `Schedule 자동 (${it.tour.TourID||''})`
+        Remark: `Schedule 자동 (${it.tour.TourID||''})${trAdj !== 0 ? ' · 트레일러 정산 포함' : ''}`
       });
       subAdded++;
+    } else if(!it.subCalc) {
+      // ★ 자사 운행이지만 트레일러는 SUB 소유인 경우 → SUB에게 +$30 지급 거래 생성
+      const day = it.day, slot = it.slot;
+      if(day && day.trailer && day.trailerNumber){
+        const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
+        if(tr){
+          const trOwner = String(tr.Owner||'').trim();
+          // 트레일러 소유주가 자사가 아니면 SUB에게 지급
+          if(trOwner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(trOwner)){
+            subTxnsToCreate.push({
+              SubCompany: trOwner,
+              Category: 'service',
+              Date: it.date,
+              InvoiceNo: '',
+              Description: `트레일러 ${tr.Trailer_Number} 사용료 (${item.tour} ${tourCode})`,
+              DR: 30,
+              CR: 0,
+              Remark: `Schedule 자동 (${it.tour.TourID||''}) · 트레일러 빌림 정산`
+            });
+            subAdded++;
+          }
+        }
+      }
     }
   });
 
