@@ -879,6 +879,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
       <button id="sch-cal-mode-week" class="sch-mode-tab on" onclick="setScheduleCalMode('week')">주간</button>
       <button id="sch-cal-mode-month" class="sch-mode-tab" onclick="setScheduleCalMode('month')">월간</button>
       <select id="sch-cal-group" onchange="renderScheduleCalendar()" style="margin-left:auto;padding:5px 8px;border-radius:6px;border:1px solid var(--b2);background:var(--sf);font-size:11px;font-family:var(--fb);">
+        <option value="unified" selected>통합 (TourCode별)</option>
         <option value="agency">여행사별</option>
         <option value="guide">가이드별</option>
         <option value="rego">차량별</option>
@@ -7289,6 +7290,9 @@ let _schCalAnchor = new Date();  // 표시 중인 기준 날짜
 // ★ TourID별 색상 맵 — 글로벌로 유지하여 주가 바뀌어도 같은 색 사용
 const _schTourColorMap = {};
 let _schTourColorIdx = 0;
+// ★ Agency별 색상 맵 — 통합 모드에서 여행사별 시각 구분용
+const _schAgencyColorMap = {};
+let _schAgencyColorIdx = 0;
 const _schTourColors = ['#dbeafe','#fef3c7','#dcfce7','#fee2e2','#e0e7ff','#fce7f3','#cffafe','#fed7aa','#d9f99d','#f3e8ff'];
 // ★ 캘린더 표시 필터 — 어떤 일정을 보여줄지
 let _schFilters = (() => {
@@ -8495,10 +8499,11 @@ function renderScheduleCalendar(){
       if(!slot) return;
       let key;
       switch(groupBy){
-        case 'guide':  key = x.tour.Guide || '(미지정)'; break;
-        case 'rego':   key = slot.rego || '(미지정)'; break;
-        case 'driver': key = slot.driver || '(미지정)'; break;
-        default:       key = x.tour.Agency || '(미지정)';
+        case 'unified': key = '__all__'; break; // 모든 일정을 한 그룹으로
+        case 'guide':   key = x.tour.Guide || '(미지정)'; break;
+        case 'rego':    key = slot.rego || '(미지정)'; break;
+        case 'driver':  key = slot.driver || '(미지정)'; break;
+        default:        key = x.tour.Agency || '(미지정)';
       }
       if(!groups[key]) groups[key] = {};
       if(!groups[key][x.date]) groups[key][x.date] = {};
@@ -8541,6 +8546,7 @@ function renderScheduleCalendar(){
         if(!anySlot) return false;
         let key;
         switch(groupBy){
+          case 'unified': key = '__all__'; break;
           case 'guide':  key = x.tour.Guide || '(미지정)'; break;
           case 'rego':   key = anySlot.rego || '(미지정)'; break;
           case 'driver': key = anySlot.driver || '(미지정)'; break;
@@ -8682,7 +8688,8 @@ function renderScheduleCalendar(){
       console.log(`[Schedule] "${grpKey}" 트랙 ${usedTracks.length}개:`,
         usedTracks.map((t, ti) => `트랙${ti+1}: ${t.items.map(i=>i.date+'/'+i.data.tour.TourID).join(',')}`).join(' | '));
       usedTracks.forEach((track, ti) => {
-        const newKey = grpKey + ' (트랙 ' + (ti+1) + ')';
+        // 통합 모드는 "트랙 N"만 표시 (앞에 그룹명 없음), 다른 모드는 "그룹명 (트랙 N)"
+        const newKey = (grpKey === '__all__') ? '트랙 ' + (ti+1) : (grpKey + ' (트랙 ' + (ti+1) + ')');
         splitGroups[newKey] = {};
         track.items.forEach(({date, slotKey, data}) => {
           if(!splitGroups[newKey][date]) splitGroups[newKey][date] = {};
@@ -8728,6 +8735,22 @@ function renderScheduleCalendar(){
       _schTourColorIdx++;
     }
     return _schTourColorMap[tid];
+  }
+  // ★ 여행사 기준 색상 — 통합 모드에서 여행사별 시각 구분용
+  function colorForAgency(agency){
+    const key = String(agency || '(미지정)').trim();
+    if(_schAgencyColorMap[key] === undefined){
+      _schAgencyColorMap[key] = _schTourColors[_schAgencyColorIdx % _schTourColors.length];
+      _schAgencyColorIdx++;
+    }
+    return _schAgencyColorMap[key];
+  }
+  // ★ 모드별 색상 결정자 — 통합 모드면 여행사색, 다른 모드면 투어색
+  function pickSlotColor(tour){
+    if(groupBy === 'unified'){
+      return colorForAgency(tour.Agency);
+    }
+    return colorForTour(tour.TourID);
   }
 
   // ★ 주 경계 끊김 방지 — 같은 TourID가 이전/다음 주에 이어지는지 검사
@@ -8859,7 +8882,7 @@ function renderScheduleCalendar(){
 
         hdrCells += `<div class="sch-cal-hdr-merge-wrap" style="grid-column:span ${span};display:grid;grid-template-columns:repeat(${totalSlots}, 1fr);gap:0;">
           ${leftPad > 0 ? `<div style="grid-column:span ${leftPad};"></div>` : ''}
-          <div class="sch-cal-hdr-merge tour-block ${tourLeftCls} ${tourRightCls} ${isInvoiced?'invoiced':''}" data-tour-id="${escH(tid)}" style="grid-column:span ${safeHeaderWidth};background:${colorForTour(tid)};"
+          <div class="sch-cal-hdr-merge tour-block ${tourLeftCls} ${tourRightCls} ${isInvoiced?'invoiced':''}" data-tour-id="${escH(tid)}" style="grid-column:span ${safeHeaderWidth};background:${pickSlotColor(firstSlot.tour)};"
                        onclick="event.stopPropagation();openScheduleModal('${escH(tid)}')">
             ${headerLabel}
           </div>
@@ -8907,7 +8930,7 @@ function renderScheduleCalendar(){
         const slotOrder = ['morning','fullday','evening'];
         const startIdx = slotOrder.indexOf(startSlotKey);
         const endIdx = slotOrder.indexOf(endSlotKey);
-        const continueBg = fillBeforeStart || fillAfterEnd ? colorForTour(myTid) : null;
+        const continueBg = (fillBeforeStart || fillAfterEnd) ? (cellSlots[startSlotKey] ? pickSlotColor(cellSlots[startSlotKey].tour) : null) : null;
 
         let inner = '';
         slotOrder.forEach((slotKey, slotIdx) => {
@@ -8934,7 +8957,7 @@ function renderScheduleCalendar(){
             return;
           }
           const r = _schRenderSlotRows(item.tour, item.day, item.slot, slotKey);
-          const bg = colorForTour(item.tour.TourID);
+          const bg = pickSlotColor(item.tour);
           const isInv = String(item.tour.Status||'') === 'invoiced' || String(item.tour.Status||'') === 'paid';
           // 슬롯 단위 좌/우 끝 마커 (셀 전체가 아닌 실제 시작/끝 슬롯에만)
           const isSlotLeft = isLeftEdge && slotKey === startSlotKey;
@@ -8986,7 +9009,7 @@ function renderScheduleCalendar(){
   const minWidth = (140 + dayCount * 140) + 'px';
   wrap.innerHTML = `<div class="sch-cal-table" style="min-width:${minWidth};">
     <div class="sch-cal-row sch-cal-headrow" style="grid-template-columns:${colTemplate};">
-      <div class="sch-cal-grp" style="background:var(--sf2);">${groupBy === 'agency'?'여행사':(groupBy==='guide'?'가이드':(groupBy==='rego'?'차량':'드라이버'))}</div>
+      <div class="sch-cal-grp" style="background:var(--sf2);">${groupBy === 'unified' ? '트랙' : (groupBy === 'agency'?'여행사':(groupBy==='guide'?'가이드':(groupBy==='rego'?'차량':'드라이버')))}</div>
       ${dateHeaders}
     </div>
     ${rowsHtml
