@@ -8332,13 +8332,27 @@ function renderScheduleCalendar(){
   const periodEl = document.getElementById('sch-cal-period');
   if(!wrap || !periodEl) return;
 
+  console.log('[renderScheduleCalendar] mode=', _schCalMode);
+
   // ★ 일간 모드: 별도 렌더링 함수로 위임 (타임라인 형식)
   if(_schCalMode === 'day'){
-    return _renderScheduleDayView(wrap, periodEl);
+    try {
+      return _renderScheduleDayView(wrap, periodEl);
+    } catch(e){
+      console.error('[일간 뷰 오류]', e);
+      wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--rd);">일간 뷰 렌더링 오류: ${escH(e.message)}</div>`;
+      return;
+    }
   }
   // ★ 월간 모드: 진짜 캘린더 그리드 (7열 × 5-6행, 셀 클릭 시 일간 점프)
   if(_schCalMode === 'month'){
-    return _renderScheduleMonthGrid(wrap, periodEl);
+    try {
+      return _renderScheduleMonthGrid(wrap, periodEl);
+    } catch(e){
+      console.error('[월간 뷰 오류]', e);
+      wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--rd);">월간 뷰 렌더링 오류: ${escH(e.message)}<br><small style="color:var(--t3);">F12 콘솔에서 자세한 에러를 확인하세요</small></div>`;
+      return;
+    }
   }
 
   const groupBy = document.getElementById('sch-cal-group')?.value || 'agency';
