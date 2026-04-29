@@ -4999,8 +4999,20 @@ function openScheduleModal(tourId, focusDate, focusSlot){
     delBtn.style.display = 'block';
     const invBtn = document.getElementById('sm-inv-btn');
     if(invBtn) invBtn.style.display = 'block';
-    _schCsels.agency.setValue(r.Agency || '');
-    document.getElementById('sm-tourcode').value = r.TourCode || '';
+    // ★ 안전한 채우기: csel이 빌드 직후라 옵션 매칭이 한 번에 안 될 수 있음 → 직접 input에도 넣기
+    const agencyVal = String(r.Agency || '').trim();
+    const tourCodeVal = String(r.TourCode || '').trim();
+    console.log('[Schedule Edit] 데이터 채우기:', {
+      tourId: r.TourID, agency: agencyVal, tourCode: tourCodeVal,
+      hasAgencyCsel: !!_schCsels.agency
+    });
+    if(_schCsels.agency){
+      try { _schCsels.agency.setValue(agencyVal); } catch(e){ console.warn('agency setValue 실패', e); }
+      // 폴백: csel 내부 input에도 직접 값 설정
+      const agInp = _schCsels.agency.input || document.querySelector('#sm-agency-csel input');
+      if(agInp && !agInp.value){ agInp.value = agencyVal; }
+    }
+    document.getElementById('sm-tourcode').value = tourCodeVal;
     document.getElementById('sm-start').value = _schToISO(r.StartDate);
     document.getElementById('sm-end').value = _schToISO(r.EndDate);
     document.getElementById('sm-pax').value = r.Pax || '';
@@ -5293,6 +5305,8 @@ function onSmFlightInTimeChange(){
       target.startPlaceType = 'airport';
     }
   }
+  // ★ 호텔↔공항 자동 코스 설정
+  _autoSetAirportTransferCourse(target);
   console.log(`[MeetingAuto] 첫날(${d.date}) ${slotName} 슬롯 startTime=${newTime}`);
   _smRebuildDays();
   const hint = document.getElementById('sm-coach-hint');
@@ -5338,6 +5352,8 @@ function onSmFlightOutTimeChange(){
       target.endPlaceType = 'airport';
     }
   }
+  // ★ 호텔↔공항 자동 코스 설정
+  _autoSetAirportTransferCourse(target);
   console.log(`[SandengAuto] 마지막날(${d.date}) ${slotName} 슬롯 startTime=${newTime}`);
   _smRebuildDays();
   const hint = document.getElementById('sm-coach-hint');
@@ -6421,11 +6437,30 @@ function setPlaceType(dayIdx, slotKey, fieldType, newType){
     newVal = '';
   }
   slot[fieldName] = newVal;
+  // ★ 호텔↔공항 패턴이면 코스를 'Airport Transfer'로 자동 설정 (사용자 직접 입력한 코스는 보존)
+  _autoSetAirportTransferCourse(slot);
   // 값이 바뀌었으면 전파
   if(newVal !== oldVal){
     _propagatePlace(dayIdx, slotKey, fieldName, newVal, oldVal);
   } else {
     _smRebuildDays();
+  }
+}
+
+// 호텔↔공항 패턴이면 코스를 자동으로 'Airport Transfer'로 설정
+// - hotel → airport 또는 airport → hotel (양방향 모두 트랜스퍼)
+// - 코스가 이미 'Airport Transfer' 또는 비어있을 때만 덮어씀 (사용자 입력 코스 보호)
+function _autoSetAirportTransferCourse(slot){
+  if(!slot) return;
+  const sType = slot.startPlaceType || '';
+  const eType = slot.endPlaceType || '';
+  const isTransfer = (sType === 'hotel' && eType === 'airport') ||
+                     (sType === 'airport' && eType === 'hotel');
+  if(!isTransfer) return;
+  const curCourse = String(slot.course || '').trim();
+  // 이미 사용자가 다른 코스를 입력했으면 보존 (Airport Transfer 또는 빈값일 때만 덮어씀)
+  if(curCourse === '' || /airport\s*transfer/i.test(curCourse)){
+    slot.course = 'Airport Transfer';
   }
 }
 
