@@ -4999,18 +4999,25 @@ function openScheduleModal(tourId, focusDate, focusSlot){
     delBtn.style.display = 'block';
     const invBtn = document.getElementById('sm-inv-btn');
     if(invBtn) invBtn.style.display = 'block';
-    // ★ 안전한 채우기: csel이 빌드 직후라 옵션 매칭이 한 번에 안 될 수 있음 → 직접 input에도 넣기
+    // ★ 안전한 채우기: csel은 items에서 매칭 실패하면 빈값으로 만들어 버림
+    //   → setValue 호출 후, items에 없는 값이라도 input에 강제로 표시
     const agencyVal = String(r.Agency || '').trim();
     const tourCodeVal = String(r.TourCode || '').trim();
     console.log('[Schedule Edit] 데이터 채우기:', {
       tourId: r.TourID, agency: agencyVal, tourCode: tourCodeVal,
-      hasAgencyCsel: !!_schCsels.agency
+      hasAgencyCsel: !!_schCsels.agency,
+      agencyInDB: (DB.C||[]).some(c => c.Name === agencyVal)
     });
     if(_schCsels.agency){
       try { _schCsels.agency.setValue(agencyVal); } catch(e){ console.warn('agency setValue 실패', e); }
-      // 폴백: csel 내부 input에도 직접 값 설정
-      const agInp = _schCsels.agency.input || document.querySelector('#sm-agency-csel input');
-      if(agInp && !agInp.value){ agInp.value = agencyVal; }
+      // ★ 폴백: csel.input이 비어있으면 강제 입력 (DB.C에 없는 여행사인 경우)
+      const agInp = _schCsels.agency.input;
+      if(agInp && !agInp.value && agencyVal){
+        agInp.value = agencyVal;
+        // csel 내부 value도 동기화 (저장 시 getValue() 폴백으로 input.value 사용됨)
+        _schCsels.agency.value = agencyVal;
+        console.log('[Schedule Edit] Agency 폴백 적용:', agencyVal);
+      }
     }
     document.getElementById('sm-tourcode').value = tourCodeVal;
     document.getElementById('sm-start').value = _schToISO(r.StartDate);
