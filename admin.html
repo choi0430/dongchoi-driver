@@ -26763,8 +26763,16 @@ function renderWeeklyPayroll(){
     const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
     const weekRows = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
     const ownRows = weekRows.filter(r=>!_subMap[(r.Rego||'').trim()]);
+    const subRows = weekRows.filter(r=>!!_subMap[(r.Rego||'').trim()]);
 
     const earned = ownRows.reduce((s,r)=>s+_calcDRFromReport(r),0);
+    // ★ SUB 차량 운행분 (차주별) — 정보용 (자사 지급 대상 아님)
+    const subEarned = subRows.reduce((s,r)=>s+_calcDRFromReport(r),0);
+    const subByPayer = {};
+    subRows.forEach(r => {
+      const payer = _subMap[(r.Rego||'').trim()] || 'Unknown';
+      subByPayer[payer] = (subByPayer[payer]||0) + _calcDRFromReport(r);
+    });
 
     // 지급 내역
     const drvWages = wages[drv]||{};
@@ -26775,9 +26783,9 @@ function renderWeeklyPayroll(){
       if(wkMon === mon) paid += (data.entries||[]).reduce((s,e)=>s+(e.amount||0),0);
     });
 
-    if(earned > 0 || paid > 0){
+    if(earned > 0 || paid > 0 || subEarned > 0){
       const balance = earned - paid;
-      driverPayroll.push({ drv, earned, paid, balance, shifts: ownRows.length });
+      driverPayroll.push({ drv, earned, paid, balance, shifts: ownRows.length, subEarned, subByPayer, subShifts: subRows.length });
       grandEarned += earned;
       grandPaid += paid;
       totalDrivers++;
@@ -26789,19 +26797,21 @@ function renderWeeklyPayroll(){
   const grandBalance = grandEarned - grandPaid;
 
   // 요약 카드
+  const grandSubEarned = driverPayroll.reduce((s,d)=>s+(d.subEarned||0), 0);
   sumEl.innerHTML = `
     <div style="background:linear-gradient(135deg,#eff6ff,#faf5ff);border:1.5px solid #bfdbfe;border-radius:14px;padding:16px;margin-bottom:12px;">
-      <div style="font-size:12px;font-weight:800;color:#1e40af;margin-bottom:4px;">📅 이번 주 지급 현황</div>
-      <div style="font-size:11px;color:#6366f1;margin-bottom:10px;">지급 예정일: ${friLabel}</div>
+      <div style="font-size:12px;font-weight:800;color:#1e40af;margin-bottom:4px;">📅 \uC774\uBC88 \uC8FC \uC9C0\uAE09 \uD604\uD669 (\uC790\uC0AC \uCC28\uB7C9 \uC6B4\uD589 \uAE30\uC900)</div>
+      <div style="font-size:11px;color:#6366f1;margin-bottom:10px;">\uC9C0\uAE09 \uC608\uC815\uC77C: ${friLabel}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-        ${wstat('총 발생', grandEarned, '#059669')}
-        ${wstat('지급 완료', grandPaid, '#2563eb')}
-        ${wstat('미지급 잔액', grandBalance, grandBalance>0?'#dc2626':'#059669')}
+        ${wstat('자사 발생', grandEarned, '#059669')}
+        ${wstat('자사 지급', grandPaid, '#2563eb')}
+        ${wstat('자사 미지급', grandBalance, grandBalance>0?'#dc2626':'#059669')}
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
         ${_cstat('드라이버 수', totalDrivers+'명', '#7c3aed')}
-        ${_cstat('미지급 인원', driverPayroll.filter(d=>d.balance>0).length+'명', driverPayroll.filter(d=>d.balance>0).length>0?'#ea580c':'#059669')}
+        ${_cstat('자사 미지급 인원', driverPayroll.filter(d=>d.balance>0).length+'명', driverPayroll.filter(d=>d.balance>0).length>0?'#ea580c':'#059669')}
       </div>
+      ${grandSubEarned>0 ? `<div style="margin-top:10px;padding:8px 10px;background:#faf5ff;border:1px dashed #c4b5fd;border-radius:8px;font-size:11px;color:#6d28d9;">🚐 SUB \uCC28\uB7C9 \uC6B4\uD589 \uD569\uACC4 (\uCC28\uC8FC \uC9C1\uC811 \uC9C0\uAE09): <span style="font-weight:700;">$${grandSubEarned.toLocaleString()}</span> — \uC790\uC0AC \uC9C0\uAE09 \uB300\uC0C1 \uC544\uB2D8</div>` : ''}
     </div>`;
 
   // 드라이버별 목록
@@ -26812,17 +26822,40 @@ function renderWeeklyPayroll(){
 
   listEl.innerHTML = driverPayroll.map(d=>{
     const isPaid = d.balance <= 0;
-    const bc = isPaid ? '#059669' : '#dc2626';
-    const bg = isPaid ? '#f0fdf4' : '#fef2f2';
+    const isDcOnly = !d.subEarned;
+    const isSubOnly = !d.shifts && d.subEarned > 0; // 자사 운행 없이 SUB만
+    const bc = isSubOnly ? '#7c3aed' : (isPaid ? '#059669' : '#dc2626');
+    const bg = isSubOnly ? '#faf5ff' : (isPaid ? '#f0fdf4' : '#fef2f2');
+
+    // SUB 차량 운행 정보
+    let subInfo = '';
+    if(d.subEarned > 0){
+      const subPayerLines = Object.entries(d.subByPayer||{}).map(([p,a]) =>
+        `<span style="display:inline-block;background:#7c3aed;color:white;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin:1px 2px;">🚐 ${escH(p)} $${a.toLocaleString()}</span>`
+      ).join('');
+      subInfo = `<div style="margin-top:6px;padding:6px 8px;background:#faf5ff;border-left:3px solid #c4b5fd;border-radius:4px;">
+        <div style="font-size:9px;color:#6d28d9;font-weight:700;margin-bottom:3px;">🚐 SUB \uCC28\uB7C9 \uC6B4\uD589 ${d.subShifts}\uAC74 — \uCC28\uC8FC \uC9C1\uC811 \uC9C0\uAE09 (\uC790\uC0AC \uB300\uC0C1 \uC544\uB2D8)</div>
+        ${subPayerLines}
+      </div>`;
+    }
+
+    const mainAmount = isSubOnly ? d.subEarned : Math.abs(d.balance);
+    const statusLabel = isSubOnly
+      ? '🚐 \uCC28\uC8FC \uC9C1\uC811 \uC9C0\uAE09'
+      : (isPaid ? '✅ \uC790\uC0AC \uC815\uC0B0\uC644\uB8CC' : '💰 \uC790\uC0AC \uC9C0\uAE09\uD544\uC694');
+
     return `<div style="background:${bg};border:1px solid ${bc}22;border-left:4px solid ${bc};border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;" onclick="selectWageDriver('${escH(d.drv)}','${mon}')">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
+        <div style="flex:1;">
           <div style="font-size:14px;font-weight:800;color:var(--t1);">${escH(d.drv)}</div>
-          <div style="font-size:11px;color:var(--t3);margin-top:3px;">운행 ${d.shifts}건 · 발생 $${d.earned.toLocaleString()} · 지급 $${d.paid.toLocaleString()}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:3px;">${isSubOnly
+            ? '\uC790\uC0AC \uC6B4\uD589 \uC5C6\uC74C'
+            : '\uC790\uC0AC \uC6B4\uD589 ' + d.shifts + '\uAC74 · \uBC1C\uC0DD $' + d.earned.toLocaleString() + ' · \uC9C0\uAE09 $' + d.paid.toLocaleString()}</div>
+          ${subInfo}
         </div>
-        <div style="text-align:right;">
-          <div style="font-size:18px;font-weight:900;color:${bc};">${isPaid?'':'+'} $${Math.abs(d.balance).toLocaleString()}</div>
-          <div style="font-size:10px;font-weight:700;color:${bc};background:${bg};padding:1px 6px;border-radius:6px;border:1px solid ${bc}33;">${isPaid?'✅ 지급완료':'💰 지급필요'}</div>
+        <div style="text-align:right;flex-shrink:0;margin-left:8px;">
+          <div style="font-size:18px;font-weight:900;color:${bc};">${(isPaid||isSubOnly)?'':'+'} $${mainAmount.toLocaleString()}</div>
+          <div style="font-size:10px;font-weight:700;color:${bc};background:${bg};padding:1px 6px;border-radius:6px;border:1px solid ${bc}33;white-space:nowrap;">${statusLabel}</div>
         </div>
       </div>
     </div>`;
