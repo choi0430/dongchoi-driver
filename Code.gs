@@ -2236,6 +2236,159 @@ function _deleteTrailerRentalTxn(oldData) {
   return deleted;
 }
 
+/**
+ * Daily Report 저장 시 인보이스 드래프트(Manual Items)에 항목 자동 추가
+ *
+ * 식별 키: TourCode + Date + Driver + Rego (같은 운행 1건)
+ * 같은 키의 항목이 이미 있으면 → 업데이트 (DR 데이터 우선)
+ * 없으면 → 신규 추가
+ *
+ * Period: TourCode가 있으면 'TC-{TourCode}', 없으면 'AG-{Agency}-{YYYY-MM}' (월별 그룹)
+ */
+function _autoAddInvoiceDraftItem(data) {
+  if (!data) return;
+  const agency = String(data.Agency || '').trim();
+  const tourCode = String(data.Tour_Code || '').trim();
+  const date = _normalizeDateISO(data.Date) || data.Date;
+  const driver = String(data.Driver || '').trim();
+  const rego = String(data.Rego || '').trim();
+
+  if (!agency || !date || !driver) return; // 필수 정보 없음
+  // 자체운행/Private은 청구 안 함
+  if (String(data.Night_Owner || '').toLowerCase() === 'private') return;
+
+  // Period 결정 — TourCode 있으면 TC 단위, 없으면 월별
+  const period = tourCode ? ('TC-' + tourCode) : ('AG-' + agency + '-' + date.slice(0,7));
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ensureSheet(ss, 'Invoice_Manual_Items');
+  const headers = MASTER_HEADERS['Invoice_Manual_Items'];
+  // 시트 헤더가 비어있으면 생성
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+      .setBackground('#1a56db').setFontColor('white').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+
+  // Source ID — DR 동기화용 (수정/삭제 시 매칭)
+  // 형식: 'DR-draft-{date}-{tourCode}-{driver}-{rego}'
+  const sourceId = 'DR-draft-' + date + '-' + (tourCode || 'NOTC') + '-' + driver + '-' + rego;
+
+  // 기존 항목 검색 (Source ID가 Note에 포함되어 있는지)
+  const lastCol = sheet.getLastColumn();
+  const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : headers;
+  const noteIdx = actualHeaders.indexOf('Note');
+  const periodIdx = actualHeaders.indexOf('Period');
+  const idIdx = actualHeaders.indexOf('ID');
+
+  let existingRow = -1;
+  if (sheet.getLastRow() > 1 && noteIdx >= 0) {
+    const allData = sheet.getDataRange().getValues();
+    for (let i = 1; i < allData.length; i++) {
+      const noteVal = String(allData[i][noteIdx] || '');
+      if (noteVal.indexOf(sourceId) >= 0) {
+        existingRow = i + 1; // 1-indexed
+        break;
+      }
+    }
+  }
+
+  // 항목 데이터 구성
+  const baseAmount = Number(data.SVC_Charge) || 0;
+  const hotel = Number(data.Hotel_Surcharge) || 0;
+  const dist = Number(data.Dist_Surcharge) || 0;
+  const ot = Number(data.OT) || 0;
+  const trailer = Number(data.Trailer) || 0;
+  const totalTA = Number(data.Total_TA) || (baseAmount + hotel + dist + ot + trailer);
+
+  const itemId = existingRow > 0 ? '' : ('IT-' + Date.now() + '-' + Math.random().toString(36).slice(2,8));
+  // Note에 source ID 포함 (수정/삭제 매칭용) + 자동 생성 표시
+  const noteText = '[자동·DR] ' + sourceId + (data.Remarks ? ' · ' + String(data.Remarks).slice(0,80) : '');
+
+  const rowData = {
+    ID: itemId,
+    Agency: agency,
+    Period: period,
+    Date: date,
+    Rego: rego,
+    Tour: data.Attraction || '',
+    Seats: data.Seats || '',
+    TourCode: tourCode,
+    Note: noteText,
+    Amount: baseAmount,
+    OT: ot,
+    Hotel: hotel,
+    Dist: dist,
+    Trailer: trailer,
+    Toll: Number(data.Toll) || 0,
+    Start: data.Time_Start || '',
+    End: data.Time_End || '',
+    Driver: driver,
+    Guide: data.Guide || '',
+    Pickup: data.Pickup || '',
+    Dropoff: data.Dropoff || ''
+  };
+
+  if (existingRow > 0) {
+    // 업데이트 — 기존 ID는 보존
+    if (idIdx >= 0) {
+      const existingId = sheet.getRange(existingRow, idIdx + 1).getValue();
+      if (existingId) rowData.ID = existingId;
+    }
+    const row = actualHeaders.map(h => rowData[h] !== undefined ? rowData[h] : '');
+    sheet.getRange(existingRow, 1, 1, row.length).setValues([row]);
+    Logger.log('[invoice draft] updated: ' + sourceId);
+  } else {
+    // 신규 추가
+    const row = actualHeaders.map(h => rowData[h] !== undefined ? rowData[h] : '');
+    sheet.appendRow(row);
+    Logger.log('[invoice draft] added: ' + sourceId);
+    appendAuditLog('system', 'auto_invoice_draft', 'Invoice_Manual_Items', sheet.getLastRow(),
+      'Period:' + period + ' Date:' + date + ' Amount:' + totalTA);
+  }
+}
+
+/**
+ * Daily Report 수정/삭제 시 자동 생성된 인보이스 드래프트 항목 삭제
+ * Source ID로 매칭: 'DR-draft-{date}-{tourCode}-{driver}-{rego}'
+ */
+function _deleteInvoiceDraftItem(oldData) {
+  if (!oldData) return 0;
+  const date = _normalizeDateISO(oldData.Date) || oldData.Date;
+  const tourCode = String(oldData.Tour_Code || '').trim();
+  const driver = String(oldData.Driver || '').trim();
+  const rego = String(oldData.Rego || '').trim();
+
+  if (!date || !driver) return 0;
+
+  const sourceId = 'DR-draft-' + date + '-' + (tourCode || 'NOTC') + '-' + driver + '-' + rego;
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('Invoice_Manual_Items');
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const noteIdx = headers.indexOf('Note');
+  if (noteIdx < 0) return 0;
+
+  const allData = sheet.getDataRange().getValues();
+  let deleted = 0;
+  // 뒤에서부터 삭제
+  for (let i = allData.length - 1; i >= 1; i--) {
+    if (String(allData[i][noteIdx] || '').indexOf(sourceId) >= 0) {
+      sheet.deleteRow(i + 1);
+      deleted++;
+    }
+  }
+  if (deleted > 0) {
+    Logger.log('[invoice draft] deleted ' + deleted + ' items for: ' + sourceId);
+    appendAuditLog('system', 'auto_invoice_draft_delete', 'Invoice_Manual_Items', '',
+      'Deleted ' + deleted + ' items: ' + sourceId);
+  }
+  return deleted;
+}
+
 function _todayISO_Sydney() {
   const now = new Date();
   // 호주 동부 표준시 보정 (서머타임 무시 — Pre_Departure는 ±1일 허용 범위에서 비교됨)
@@ -2549,6 +2702,13 @@ function saveReport(sheetName, data) {
       } catch(e) {
         Logger.log('[trailer rental] auto-txn error: ' + e);
       }
+      // ★ Daily_Report 저장 시 인보이스 드래프트 항목 자동 누적
+      //   투어코드별 드래프트(Manual Items)에 항목 추가 (이미 같은 항목 있으면 업데이트)
+      try {
+        _autoAddInvoiceDraftItem(data);
+      } catch(e) {
+        Logger.log('[invoice draft] auto-add error: ' + e);
+      }
     }
 
     return {ok: true, sheet: sheetName, row: sheet.getLastRow()};
@@ -2594,6 +2754,11 @@ function updateReport(sheetName, rowIndex, data) {
         if (oldData) _deleteTrailerRentalTxn(oldData);
         _autoCreateTrailerRentalTxn(data);
       } catch(e) { Logger.log('[trailer rental] sync on update: ' + e); }
+      // ★ 인보이스 드래프트 항목 동기화 — 옛 항목 삭제 → 새 항목 추가
+      try {
+        if (oldData) _deleteInvoiceDraftItem(oldData);
+        _autoAddInvoiceDraftItem(data);
+      } catch(e) { Logger.log('[invoice draft] sync on update: ' + e); }
     }
 
     return {ok: true};
@@ -2628,6 +2793,8 @@ function deleteReport(sheetName, rowIndex) {
     // ★ Daily_Report 삭제 후 트레일러 자동 거래도 삭제
     if (sheetName === 'Daily_Report' && oldData) {
       try { _deleteTrailerRentalTxn(oldData); } catch(e) { Logger.log('[trailer rental] sync on delete: ' + e); }
+      // ★ 인보이스 드래프트 항목도 삭제
+      try { _deleteInvoiceDraftItem(oldData); } catch(e) { Logger.log('[invoice draft] sync on delete: ' + e); }
     }
 
     return {ok: true};
