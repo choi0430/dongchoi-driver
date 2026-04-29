@@ -20886,14 +20886,27 @@ async function renderWageAllDrivers() {
   }
   const filterWeek = wSel?.value || '';
 
-  // 드라이버별 합산
+  // 드라이버별 합산 — ★ 자사 차량 운행분만 (SUB 차량 운행은 차주가 지급)
   const drivers = DB.D.map(d => d.Name_KR || d.Name_EN).filter(Boolean);
   let grandEarned = 0, grandPaid = 0;
+  let grandSubEarned = 0;  // SUB 차량 운행 합계 (정보용, 차주가 지급)
   const driverStats = [];
+
+  // 자사 운행 필터: SUB 차량은 제외 (SubOwner 또는 Owner가 자사 외)
+  const _isSelfVehDR = (r) => {
+    if(!r || !r.Rego) return true;
+    const veh = (DB.V||[]).find(v => v.Rego === r.Rego);
+    if(!veh) return true;
+    const subOwner = (veh.SubOwner||'').trim();
+    if(subOwner) return false;
+    const owner = (veh.Owner||'').trim();
+    if(!owner) return true;
+    return (typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(owner));
+  };
 
   for (const drv of drivers) {
     const drvWages = wages[drv] || {};
-    let earned = 0, paid = 0;
+    let earned = 0, paid = 0, subEarned = 0;
 
     if (filterWeek) {
       // 특정 주
@@ -20902,8 +20915,9 @@ async function renderWageAllDrivers() {
       const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
       const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
       const weekRows = rows.filter(r => matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
-      // ★ _calcDRFromReport 사용: 야경 회사납입(Night_Owner) 등 자동 차감 → 급여 single 탭·잔액 탭과 일치
-      earned = weekRows.reduce((s,r) => s+_calcDRFromReport(r), 0);
+      // ★ 자사 차량 운행 분만 — SUB 차량은 차주가 지급
+      earned = weekRows.filter(_isSelfVehDR).reduce((s,r) => s+_calcDRFromReport(r), 0);
+      subEarned = weekRows.filter(r => !_isSelfVehDR(r)).reduce((s,r) => s+_calcDRFromReport(r), 0);
       const week = drvWages[mon] || {entries:[]};
       paid = (week.entries||[]).reduce((s,e) => s+(e.amount||0), 0);
     } else {
@@ -20911,17 +20925,18 @@ async function renderWageAllDrivers() {
       for (const [wk, week] of Object.entries(drvWages)) {
         paid += (week.entries||[]).reduce((s,e) => s+(e.amount||0), 0);
       }
-      earned = rows.filter(r => {
-        const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
-        const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
-        return matchNames.has(String(r.Driver||'').trim());
-      }).reduce((s,r) => s+_calcDRFromReport(r), 0);
+      const drRow = DB.D.find(d=>(d.Name_KR||'')=== drv||(d.Name_EN||'')=== drv);
+      const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
+      const myRows = rows.filter(r => matchNames.has(String(r.Driver||'').trim()));
+      earned = myRows.filter(_isSelfVehDR).reduce((s,r) => s+_calcDRFromReport(r), 0);
+      subEarned = myRows.filter(r => !_isSelfVehDR(r)).reduce((s,r) => s+_calcDRFromReport(r), 0);
     }
 
-    if (earned > 0 || paid > 0) {
-      driverStats.push({ drv, earned, paid, balance: earned - paid });
+    if (earned > 0 || paid > 0 || subEarned > 0) {
+      driverStats.push({ drv, earned, paid, balance: earned - paid, subEarned });
       grandEarned += earned;
       grandPaid += paid;
+      grandSubEarned += subEarned;
     }
   }
 
@@ -20931,13 +20946,14 @@ async function renderWageAllDrivers() {
   sumEl.innerHTML =
     '<div style="background:var(--sf2);border-radius:12px;padding:14px;margin-bottom:10px;">' +
       '<div style="font-size:11px;color:var(--t3);font-weight:700;margin-bottom:8px;">' +
-        (filterWeek ? getWeekLabel(filterWeek) : '전체 기간') + ' — 전체 드라이버 합계' +
+        (filterWeek ? getWeekLabel(filterWeek) : '\uC804\uCCB4 \uAE30\uAC04') + ' — \uC790\uC0AC \uCC28\uB7C9 \uC6B4\uD589 \uD569\uACC4 (\uC790\uC0AC \uC9C0\uAE09 \uB300\uC0C1)' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">' +
-        wstat('총 발생 DR', grandEarned, 'var(--gn)') +
-        wstat('총 지급', grandPaid, 'var(--ac)') +
-        wstat('총 잔액', grandEarned - grandPaid, (grandEarned-grandPaid)>0?'var(--or)':'var(--t3)') +
+        wstat('자사 발생 DR', grandEarned, 'var(--gn)') +
+        wstat('자사 지급', grandPaid, 'var(--ac)') +
+        wstat('자사 잔액', grandEarned - grandPaid, (grandEarned-grandPaid)>0?'var(--or)':'var(--t3)') +
       '</div>' +
+      (grandSubEarned > 0 ? '<div style="margin-top:8px;padding:8px 10px;background:#faf5ff;border:1px dashed #c4b5fd;border-radius:8px;font-size:11px;color:#6d28d9;">🚐 SUB \uCC28\uB7C9 \uC6B4\uD589 \uD569\uACC4 (\uCC38\uACE0): <span style="font-weight:700;">$' + grandSubEarned.toLocaleString() + '</span> — \uCC28\uC8FC\uAC00 \uC9C1\uC811 \uC9C0\uAE09\uD558\uBBC0\uB85C \uC790\uC0AC \uC9C0\uAE09 \uB300\uC0C1 \uC544\uB2D8</div>' : '') +
     '</div>';
 
   if (!driverStats.length) {
@@ -20945,18 +20961,22 @@ async function renderWageAllDrivers() {
     return;
   }
 
-  listEl.innerHTML = driverStats.map(({ drv, earned, paid, balance }) => {
+  listEl.innerHTML = driverStats.map(({ drv, earned, paid, balance, subEarned }) => {
     const de = escH(drv);
     const bc = balance>0?'var(--or)':balance<0?'var(--rd)':'var(--t3)';
+    const subLine = (subEarned > 0)
+      ? '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🚐 SUB \uCC28\uB7C9 \uC6B4\uD589 $' + subEarned.toLocaleString() + ' (\uCC28\uC8FC \uC9C1\uC811 \uC9C0\uAE09)</div>'
+      : '';
     return '<div style="background:var(--sf2);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;"'
       + ' data-drv="' + de + '" onclick="selectWageDriver(this.dataset.drv)">'
       + '<div>'
       + '<div style="font-size:13px;font-weight:700;color:var(--t1);">' + de + '</div>'
-      + '<div style="font-size:11px;color:var(--t3);margin-top:2px;">발생 $' + earned.toLocaleString() + ' · 지급 $' + paid.toLocaleString() + '</div>'
+      + '<div style="font-size:11px;color:var(--t3);margin-top:2px;">\uC790\uC0AC \uBC1C\uC0DD $' + earned.toLocaleString() + ' · \uC9C0\uAE09 $' + paid.toLocaleString() + '</div>'
+      + subLine
       + '</div>'
       + '<div style="text-align:right;">'
       + '<div style="font-size:15px;font-weight:800;color:' + bc + ';">' + (balance>0?'+':'') + '$' + balance.toLocaleString() + '</div>'
-      + '<div style="font-size:10px;color:var(--t3);">' + (balance>0?'미지급':'미수') + '</div>'
+      + '<div style="font-size:10px;color:var(--t3);">' + (balance>0?'\uC790\uC0AC \uBBF8\uC9C0\uAE09':'\uC790\uC0AC \uC815\uC0B0\uC644\uB8CC') + '</div>'
       + '</div>'
       + '</div>';
   }).join('');
