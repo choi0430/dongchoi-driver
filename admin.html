@@ -15475,7 +15475,40 @@ function renderBalDetail(){
 // ── TRANSACTION MODAL (ADD/EDIT) ──
 // 빠른 지급/수금 — 모달 띄우고 회사명 + 잔액 자동 prefill
 function _quickAddPayment(type, name, balance){
-  // 모달 열기
+  // ★ SUB 지급일 경우: 해당 회사의 미지급 인보이스 자동 검색
+  //   인보이스 있으면 → 인보이스 선택 모달 (markSubInvPaid 통일된 흐름)
+  //   없으면 → 기존 일반 지급 모달
+  if(type === 'sub'){
+    const unpaidInvs = (_invHistoryCache||[]).filter(inv => {
+      const subCo = (inv.SubCompany||inv.Agency||'').trim();
+      if(subCo !== name) return false;
+      const status = (inv.Status||'').toLowerCase();
+      if(status === 'paid' || status === 'cancelled' || status === 'void') return false;
+      // 잔액 계산 — Items 합계 또는 GrandTotal
+      let total = 0;
+      try {
+        const items = JSON.parse(inv.Items||'[]');
+        total = items.reduce((s,i)=>s+Number(i.total||0),0);
+      } catch(e){}
+      if(total <= 0) total = Number(inv.GrandTotal||0);
+      // 이미 지급한 거래 제외
+      const prevPaid = (_balSubTxns||[]).filter(t => {
+        const desc = String(t.Description||'');
+        const inv2 = String(t.InvoiceNo||'');
+        return (desc === `PAID:${inv.InvNumber}` || (inv2 === inv.InvNumber && Number(t.CR||0) > 0));
+      }).reduce((s,t)=>s+Number(t.CR||0),0);
+      const remaining = total - prevPaid;
+      return remaining > 0.01;
+    });
+
+    if(unpaidInvs.length > 0){
+      _showSubInvoiceSelectorModal(name, unpaidInvs);
+      return;
+    }
+    // 미지급 인보이스 없으면 → 기존 일반 지급 모달로 fallthrough
+  }
+
+  // 모달 열기 (기존 흐름)
   openBalTxnModal(type, null);
   // 약간 대기 후 prefill (모달 렌더 대기)
   setTimeout(() => {
@@ -15519,6 +15552,116 @@ function _quickAddPayment(type, name, balance){
       }
     } catch(e){ console.warn('quickAddPayment prefill failed:', e); }
   }, 50);
+}
+
+// ─────────────────────────────────────────────────────
+// SUB 회사의 미지급 인보이스 선택 모달
+// 잔액 탭에서 SUB 지급 클릭 → 미지급 인보이스 있으면 이 모달 통해 markSubInvPaid 실행
+// ─────────────────────────────────────────────────────
+function _showSubInvoiceSelectorModal(subName, unpaidInvs){
+  // 인보이스별 잔액 계산
+  const invList = unpaidInvs.map(inv => {
+    let total = 0;
+    try {
+      const items = JSON.parse(inv.Items||'[]');
+      total = items.reduce((s,i)=>s+Number(i.total||0),0);
+    } catch(e){}
+    if(total <= 0) total = Number(inv.GrandTotal||0);
+    const prevPaid = (_balSubTxns||[]).filter(t => {
+      const desc = String(t.Description||'');
+      const inv2 = String(t.InvoiceNo||'');
+      return (desc === `PAID:${inv.InvNumber}` || (inv2 === inv.InvNumber && Number(t.CR||0) > 0));
+    }).reduce((s,t)=>s+Number(t.CR||0),0);
+    return {
+      invNum: inv.InvNumber,
+      total: total,
+      paid: prevPaid,
+      remaining: total - prevPaid,
+      periodFrom: inv.PeriodFrom||'',
+      periodTo: inv.PeriodTo||'',
+      issueDate: inv.IssueDate||''
+    };
+  }).sort((a,b)=> String(a.issueDate).localeCompare(String(b.issueDate)));
+
+  const totalRemaining = invList.reduce((s,i)=>s+i.remaining, 0);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'sis-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML = `
+    <div style="background:var(--sf);border-radius:16px;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.25);">
+      <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:4px;">💰 ${escH(subName)} 지급 처리</div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:12px;">
+        미지급 인보이스 ${invList.length}건 · 합계 잔액 <b style="color:var(--or);">$${totalRemaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
+      </div>
+
+      <div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:10px;margin-bottom:12px;font-size:11px;color:#78350f;">
+        💡 인보이스를 선택하여 지급하면 인보이스의 상태도 자동 업데이트됩니다.<br>
+        <span style="opacity:.8;">인보이스와 무관한 거래라면 "인보이스 없이 직접 입력"을 선택하세요.</span>
+      </div>
+
+      <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:6px;">📄 미지급 인보이스 선택</div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;">
+        ${invList.map(i => `
+          <button data-inv="${escH(i.invNum)}" class="sis-inv-btn" style="text-align:left;background:var(--sf2);border:1.5px solid var(--b1);border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;transition:all .15s;">
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;font-weight:700;color:var(--t1);">${escH(i.invNum)}</div>
+              <div style="font-size:10px;color:var(--t3);margin-top:2px;">${i.periodFrom?escH(i.periodFrom):''}${i.periodTo?' ~ '+escH(i.periodTo):''}${i.paid>0?` · 기지급 $${i.paid.toLocaleString('en-AU',{minimumFractionDigits:2})}`:''}</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0;">
+              <div style="font-size:14px;font-weight:800;color:var(--or);">$${i.remaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</div>
+              <div style="font-size:9px;color:var(--t3);">잔액</div>
+            </div>
+          </button>
+        `).join('')}
+      </div>
+
+      <div style="display:flex;gap:8px;">
+        <button id="sis-direct-btn" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--b2);background:var(--sf2);color:var(--t2);font-size:12px;cursor:pointer;">📝 인보이스 없이 직접 입력</button>
+        <button id="sis-cancel-btn" style="padding:10px 20px;border-radius:8px;border:1px solid var(--b2);background:var(--sf2);color:var(--t3);font-size:12px;cursor:pointer;">취소</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // 인보이스 버튼 hover
+  overlay.querySelectorAll('.sis-inv-btn').forEach(btn => {
+    btn.onmouseover = () => { btn.style.borderColor = 'var(--ac)'; btn.style.background = '#eff6ff'; };
+    btn.onmouseout = () => { btn.style.borderColor = 'var(--b1)'; btn.style.background = 'var(--sf2)'; };
+    btn.onclick = () => {
+      const invNum = btn.dataset.inv;
+      overlay.remove();
+      // markSubInvPaid 통해 통일된 흐름으로 지급 처리
+      if(typeof markSubInvPaid === 'function'){
+        markSubInvPaid(invNum);
+      } else {
+        toast('SUB 인보이스 지급 함수를 찾을 수 없습니다','er');
+      }
+    };
+  });
+
+  // 외부 클릭 닫기
+  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
+  document.getElementById('sis-cancel-btn').onclick = () => overlay.remove();
+
+  // 인보이스 없이 직접 입력 — 기존 일반 지급 모달로
+  document.getElementById('sis-direct-btn').onclick = () => {
+    overlay.remove();
+    // openBalTxnModal로 fallback (인보이스 매칭 없이)
+    openBalTxnModal('sub', null);
+    setTimeout(() => {
+      try {
+        const sel = document.getElementById('btx-subco'); if(sel) sel.value = subName;
+        const dateInp = document.getElementById('btx-date');
+        if(dateInp && !dateInp.value){
+          const today = new Date();
+          dateInp.value = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+        }
+        const title = document.getElementById('bal-txn-title');
+        if(title) title.textContent = `💰 ${subName} 직접 입력 (인보이스 무관)`;
+      } catch(e){}
+    }, 50);
+  };
 }
 
 function openBalTxnModal(type, idx){
