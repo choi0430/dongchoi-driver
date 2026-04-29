@@ -8768,53 +8768,43 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
     // 인접 주의 트랙 정보 미리 조회
     const neighborTracks = _getNeighborWeekTourCodeTrack(grpKey);
 
-    // ★ 시간 단위 비교 헬퍼 — 같은 날 다른 시간대 일정을 한 트랙에 묶기 위함
-    //   slot.startTime이 있으면 그 시간을, 없으면 슬롯별 디폴트(morning=06:00, fullday=08:00, evening=18:00) 사용
-    //   slot.endTime이 있으면 그 시간을, 없으면 슬롯별 디폴트(morning=12:00, fullday=20:00, evening=23:59) 사용
-    const _slotDefaults = {
-      morning: {st: '06:00', et: '12:00'},
-      fullday: {st: '08:00', et: '20:00'},
-      evening: {st: '18:00', et: '23:59'}
-    };
-    const _toDateTime = (date, time) => date + 'T' + (time || '00:00');
-    const _slotStartDT = (date, slotKey, slot) => {
-      const t = (slot && slot.startTime) || _slotDefaults[slotKey]?.st || '00:00';
-      return _toDateTime(date, t);
-    };
-    const _slotEndDT = (date, slotKey, slot) => {
-      const t = (slot && slot.endTime) || _slotDefaults[slotKey]?.et || '23:59';
-      return _toDateTime(date, t);
-    };
+    // ★ 같은 날 슬롯 순서 비교 — morning(0) → fullday(1) → evening(2)
+    //   slot 종료 시점은 다음 슬롯 시작과 동일 (= slot ordinal +1)
+    //   이렇게 하면 같은 날 morning 끝난 후 fullday 시작은 무조건 OK (시간 입력 무관)
+    const _slotOrd = { morning: 0, fullday: 1, evening: 2 };
+    // firstKey  = date + ':' + ordinal (시작 시점 — slot 시작)
+    // lastKey   = date + ':' + (ordinal+1) (종료 시점 — slot 종료 = 다음 ordinal 시작)
+    const _slotStartKey = (date, slotKey) => date + ':' + (_slotOrd[slotKey] ?? 0);
+    const _slotEndKey   = (date, slotKey) => date + ':' + ((_slotOrd[slotKey] ?? 0) + 1);
 
     // 1) 현재 주의 일정에서 TourCode/TourID 단위로 묶음
     //    tcKey = TourCode || TourID — 같은 TourCode 회차들은 한 단위로 트랙 배치
-    //    firstDateTime/lastDateTime — 시간 단위 비교용
-    const tcGroups = {}; // tcKey → {firstDate, lastDate, firstDateTime, lastDateTime, items, preferredTrack}
+    //    firstSlotKey/lastSlotKey — 슬롯 단위 비교용 (시각화 트랙 패킹 전용)
+    const tcGroups = {}; // tcKey → {firstDate, lastDate, firstSlotKey, lastSlotKey, items, preferredTrack}
     Object.entries(groups[grpKey]).forEach(([date, slots]) => {
       Object.entries(slots).forEach(([slotKey, dataArr]) => {
         dataArr.forEach(data => {
           const tid = data.tour.TourID;
           const tc = String(data.tour.TourCode||'').trim();
           const tcKey = tc || tid;
-          const slot = data.slot || {};
-          const stDT = _slotStartDT(date, slotKey, slot);
-          const etDT = _slotEndDT(date, slotKey, slot);
+          const stKey = _slotStartKey(date, slotKey);
+          const etKey = _slotEndKey(date, slotKey);
           if(!tcGroups[tcKey]){
             // 인접 주의 같은 TourCode 트랙 → 선호 트랙
             const nb = neighborTracks[tcKey];
             const preferredTrack = nb ? (nb.prevTrack ?? nb.nextTrack) : -1;
-            tcGroups[tcKey] = {firstDate: date, lastDate: date, firstDateTime: stDT, lastDateTime: etDT, items: [], preferredTrack};
+            tcGroups[tcKey] = {firstDate: date, lastDate: date, firstSlotKey: stKey, lastSlotKey: etKey, items: [], preferredTrack};
           }
           if(date < tcGroups[tcKey].firstDate) tcGroups[tcKey].firstDate = date;
           if(date > tcGroups[tcKey].lastDate) tcGroups[tcKey].lastDate = date;
-          if(stDT < tcGroups[tcKey].firstDateTime) tcGroups[tcKey].firstDateTime = stDT;
-          if(etDT > tcGroups[tcKey].lastDateTime) tcGroups[tcKey].lastDateTime = etDT;
+          if(stKey < tcGroups[tcKey].firstSlotKey) tcGroups[tcKey].firstSlotKey = stKey;
+          if(etKey > tcGroups[tcKey].lastSlotKey) tcGroups[tcKey].lastSlotKey = etKey;
           tcGroups[tcKey].items.push({date, slotKey, data});
         });
       });
     });
 
-    // 2) 정렬 우선순위: preferredTrack 있는 항목 → 작은 트랙 번호 순 → firstDateTime 순
+    // 2) 정렬 우선순위: preferredTrack 있는 항목 → 작은 트랙 번호 순 → firstSlotKey 순
     //    이렇게 하면 인접 주에 트랙 0이었던 TourCode가 먼저 배치되어 트랙 0 차지
     const tcArr = Object.entries(tcGroups).sort((a,b) => {
       const aPref = a[1].preferredTrack;
@@ -8822,19 +8812,20 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
       // 둘 다 preferredTrack 있으면 작은 번호 순
       if(aPref >= 0 && bPref >= 0){
         if(aPref !== bPref) return aPref - bPref;
-        return a[1].firstDateTime.localeCompare(b[1].firstDateTime);
+        return a[1].firstSlotKey.localeCompare(b[1].firstSlotKey);
       }
       // preferredTrack 있는 쪽이 먼저 (안정성 우선)
       if(aPref >= 0 && bPref < 0) return -1;
       if(bPref >= 0 && aPref < 0) return 1;
-      // 둘 다 없으면 firstDateTime 순
-      if(a[1].firstDateTime !== b[1].firstDateTime) return a[1].firstDateTime.localeCompare(b[1].firstDateTime);
+      // 둘 다 없으면 firstSlotKey 순
+      if(a[1].firstSlotKey !== b[1].firstSlotKey) return a[1].firstSlotKey.localeCompare(b[1].firstSlotKey);
       return a[0].localeCompare(b[0]);
     });
 
     // 3) 그리디 트랙 배치 — preferredTrack이 있으면 그 트랙 우선 시도
-    //    ★ 시간 단위 비교: tracks[i].lastDateTime <= span.firstDateTime 이면 같은 트랙 OK
-    const tracks = []; // [{lastDateTime, items: [...]}, ...]
+    //    ★ 슬롯 단위 비교: tracks[i].lastSlotKey <= span.firstSlotKey 이면 같은 트랙 OK
+    //    예: 트랙의 마지막 = "2026-04-28:1" (morning 종료) ≤ "2026-04-28:1" (fullday 시작) → OK
+    const tracks = []; // [{lastSlotKey, items: [...]}, ...]
     tcArr.forEach(([tcKey, span]) => {
       let trackIdx = -1;
       // preferredTrack이 있고 그 트랙이 비어있으면 우선 사용
@@ -8843,24 +8834,24 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
         if(span.preferredTrack >= tracks.length){
           // 빈 트랙 자리까지 채워야 함 (intermediate 트랙 placeholder)
           while(tracks.length < span.preferredTrack){
-            tracks.push({lastDateTime: '', items: []});
+            tracks.push({lastSlotKey: '', items: []});
           }
-          tracks.push({lastDateTime: span.lastDateTime, items: span.items});
+          tracks.push({lastSlotKey: span.lastSlotKey, items: span.items});
           trackIdx = span.preferredTrack;
-        } else if(tracks[span.preferredTrack].lastDateTime <= span.firstDateTime || tracks[span.preferredTrack].items.length === 0){
+        } else if(tracks[span.preferredTrack].lastSlotKey <= span.firstSlotKey || tracks[span.preferredTrack].items.length === 0){
           // 비어있거나 시간 안 겹치면 그 트랙 사용
-          if(span.lastDateTime > tracks[span.preferredTrack].lastDateTime) tracks[span.preferredTrack].lastDateTime = span.lastDateTime;
+          if(span.lastSlotKey > tracks[span.preferredTrack].lastSlotKey) tracks[span.preferredTrack].lastSlotKey = span.lastSlotKey;
           tracks[span.preferredTrack].items = tracks[span.preferredTrack].items.concat(span.items);
           trackIdx = span.preferredTrack;
         }
       }
       if(trackIdx < 0){
-        // preferredTrack 못 사용 → 일반 그리디 (시간 단위 비교)
-        trackIdx = tracks.findIndex(t => t.lastDateTime <= span.firstDateTime);
+        // preferredTrack 못 사용 → 일반 그리디 (슬롯 단위 비교)
+        trackIdx = tracks.findIndex(t => t.lastSlotKey <= span.firstSlotKey);
         if(trackIdx < 0){
-          tracks.push({lastDateTime: span.lastDateTime, items: span.items});
+          tracks.push({lastSlotKey: span.lastSlotKey, items: span.items});
         } else {
-          if(span.lastDateTime > tracks[trackIdx].lastDateTime) tracks[trackIdx].lastDateTime = span.lastDateTime;
+          if(span.lastSlotKey > tracks[trackIdx].lastSlotKey) tracks[trackIdx].lastSlotKey = span.lastSlotKey;
           tracks[trackIdx].items = tracks[trackIdx].items.concat(span.items);
         }
       }
