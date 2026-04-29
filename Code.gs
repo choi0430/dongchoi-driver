@@ -2198,6 +2198,44 @@ function _autoCreateTrailerRentalTxn(data) {
   }
 }
 
+/**
+ * Daily_Report 수정/삭제 시 자동 생성된 트레일러 정산 거래 삭제
+ * Source ID로 매칭: 'DR-trailer-{date}-{trailer}-{driver}'
+ * 같은 source ID를 가진 모든 SUB_Txn 행 삭제
+ * (수정 시: 삭제 후 _autoCreateTrailerRentalTxn 다시 호출)
+ */
+function _deleteTrailerRentalTxn(oldData) {
+  if (!oldData) return 0;
+  const trailerNum = String(oldData.Trailer_Number || '').trim();
+  if (!trailerNum) return 0;
+  // 식별자 — saveReport에서 만든 것과 동일 형식
+  const sourceId = 'DR-trailer-' + (oldData.Date || '') + '-' + trailerNum + '-' + (oldData.Driver || '');
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const txnSheet = ss.getSheetByName('SUB_Txn') || ss.getSheetByName('Sub_Txn');
+  if (!txnSheet || txnSheet.getLastRow() < 2) return 0;
+
+  const tData = txnSheet.getDataRange().getValues();
+  const tH = tData[0];
+  const remarkIdx = tH.indexOf('Remark');
+  if (remarkIdx < 0) return 0;
+
+  // 뒤에서부터 삭제 (인덱스 흐트러짐 방지)
+  let deleted = 0;
+  for (let i = tData.length - 1; i >= 1; i--) {
+    if (String(tData[i][remarkIdx] || '').indexOf(sourceId) >= 0) {
+      txnSheet.deleteRow(i + 1); // 1-indexed
+      deleted++;
+    }
+  }
+  if (deleted > 0) {
+    Logger.log('[trailer rental] deleted ' + deleted + ' txns for: ' + sourceId);
+    appendAuditLog('system', 'auto_trailer_txn_delete', 'SUB_Txn', '',
+      'Deleted ' + deleted + ' txns: ' + sourceId);
+  }
+  return deleted;
+}
+
 function _todayISO_Sydney() {
   const now = new Date();
   // 호주 동부 표준시 보정 (서머타임 무시 — Pre_Departure는 ±1일 허용 범위에서 비교됨)
@@ -2531,11 +2569,32 @@ function updateReport(sheetName, rowIndex, data) {
     const ri = parseInt(rowIndex);
     if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
 
+    // ★ Daily_Report 수정 시: 기존 트레일러 거래를 먼저 가져와서 (수정 후 변경 감지용)
+    let oldData = null;
+    if (sheetName === 'Daily_Report') {
+      try {
+        const lastCol0 = sheet.getLastColumn();
+        const oldHeaders = sheet.getRange(1, 1, 1, lastCol0).getValues()[0];
+        const oldRow = sheet.getRange(ri, 1, 1, lastCol0).getValues()[0];
+        oldData = {};
+        oldHeaders.forEach((h, i) => oldData[h] = oldRow[i]);
+      } catch(e) { Logger.log('[trailer rental] read old: ' + e); }
+    }
+
     // ★ 실제 시트 헤더를 읽어서 매핑 (컬럼 순서 불일치 방지)
     const lastCol = sheet.getLastColumn();
     const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : headers;
     const row = actualHeaders.map(h => data[h] !== undefined ? data[h] : '');
     sheet.getRange(ri, 1, 1, row.length).setValues([row]);
+
+    // ★ Daily_Report 수정 시 트레일러 거래 동기화
+    //   기존 거래 삭제 → 새 데이터로 재생성
+    if (sheetName === 'Daily_Report') {
+      try {
+        if (oldData) _deleteTrailerRentalTxn(oldData);
+        _autoCreateTrailerRentalTxn(data);
+      } catch(e) { Logger.log('[trailer rental] sync on update: ' + e); }
+    }
 
     return {ok: true};
   } catch (err) {
@@ -2552,7 +2611,25 @@ function deleteReport(sheetName, rowIndex) {
     const ri = parseInt(rowIndex);
     if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
 
+    // ★ Daily_Report 삭제 시: 삭제 전 데이터를 먼저 가져와서 트레일러 거래도 같이 삭제
+    let oldData = null;
+    if (sheetName === 'Daily_Report') {
+      try {
+        const lastCol = sheet.getLastColumn();
+        const oldHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+        const oldRow = sheet.getRange(ri, 1, 1, lastCol).getValues()[0];
+        oldData = {};
+        oldHeaders.forEach((h, i) => oldData[h] = oldRow[i]);
+      } catch(e) { Logger.log('[trailer rental] read before delete: ' + e); }
+    }
+
     sheet.deleteRow(ri);
+
+    // ★ Daily_Report 삭제 후 트레일러 자동 거래도 삭제
+    if (sheetName === 'Daily_Report' && oldData) {
+      try { _deleteTrailerRentalTxn(oldData); } catch(e) { Logger.log('[trailer rental] sync on delete: ' + e); }
+    }
+
     return {ok: true};
   } catch (err) {
     return {ok: false, error: err.toString()};
