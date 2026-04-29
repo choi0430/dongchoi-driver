@@ -743,9 +743,10 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
             <label class="form-label">Agency (여행사)<span id="agency-req" class="req">*</span></label>
             <div class="sdd-wrap" id="sdd-agency-wrap">
               <input class="sdd-input" id="dr-agency" placeholder="Search agency (여행사 검색)" autocomplete="off"
-                oninput="sddFilter('agency')" onfocus="sddOpen('agency')" onblur="sddBlur('agency')">
+                oninput="sddFilter('agency');clearAgencyWarning()" onfocus="sddOpen('agency')" onblur="sddBlur('agency');setTimeout(validateAgencyInput,250)">
               <div class="sdd-dropdown" id="sdd-agency-list"></div>
             </div>
+            <div id="dr-agency-warning" style="display:none;margin-top:4px;padding:6px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:11px;color:#dc2626;font-weight:600;"></div>
           </div>
           <div class="form-group">
             <label class="form-label">Date (날짜)</label>
@@ -792,9 +793,10 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
             <label class="form-label">Tour Code (투어 코드)</label>
             <div class="sdd-wrap" id="sdd-tourcode-wrap">
               <input class="sdd-input" id="dr-tourcode" placeholder="BM-001" autocomplete="off"
-                oninput="tcFilter()" onfocus="tcOpen()" onblur="tcBlur()">
+                oninput="tcFilter();clearTourCodeWarning()" onfocus="tcOpen()" onblur="tcBlur();setTimeout(validateTourCodeInput,250)">
               <div class="sdd-dropdown" id="tc-dropdown"></div>
             </div>
+            <div id="dr-tourcode-warning" style="display:none;margin-top:4px;padding:6px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:11px;color:#dc2626;font-weight:600;"></div>
           </div>
         </div>
         <!-- OT / 1박2일 힌트 -->
@@ -2987,6 +2989,11 @@ function sddSelect(key, value) {
   const _closeList = document.getElementById('sdd-'+key+'-list');
   _closeList.classList.remove('open');
   _closeList.style.display = ''; // 혹시 남아있는 인라인 스타일 초기화
+  // ★ 여행사를 정상 선택했으니 경고 제거 + 투어코드 드롭다운 재필터 (여행사별 우선순위)
+  if(key === 'agency'){
+    if(typeof clearAgencyWarning === 'function') clearAgencyWarning();
+    if(typeof tcFilter === 'function') tcFilter();
+  }
   if(key==='guide'){
     const found = GUIDE_LIST.find(g=>g.name===value);
     if(found && window.currentGuidePhone !== undefined) window.currentGuidePhone = found.mobile;
@@ -3161,7 +3168,29 @@ function tcFilter() {
     if(!ctxMap[cu]) ctxMap[cu] = { code:cu, date:'', guide:'', agency:'', attraction:'', count:0 };
   });
 
-  // 3) 검색: 코드 / 가이드 / 여행사 / 코스 어디든 매칭
+  // ★ 3) 드라이버 본인 일정의 투어코드 (최우선 강조 표시)
+  //    오늘/내일/이번 주의 본인 배정 일정 코드들
+  const myScheduleCodes = new Set();
+  const sch = (typeof _driverScheduleCache !== 'undefined' && _driverScheduleCache) ? _driverScheduleCache : [];
+  sch.forEach(s => {
+    const tc = String(s.tourCode||'').toUpperCase().trim();
+    if(!tc) return;
+    myScheduleCodes.add(tc);
+    if(!ctxMap[tc]){
+      ctxMap[tc] = { code:tc, date:s.date||'', guide:s.guide||'', agency:s.agency||'', attraction:s.slot?.course||'', count:0 };
+    } else {
+      // 일정 정보로 보강 (Schedule이 더 정확)
+      if(s.date) ctxMap[tc].date = s.date;
+      if(s.agency) ctxMap[tc].agency = s.agency;
+      if(s.guide) ctxMap[tc].guide = s.guide;
+    }
+    ctxMap[tc]._isMine = true; // 강조 마커
+  });
+
+  // ★ 4) 현재 여행사가 선택되었으면, 같은 여행사 코드만 우선
+  const selectedAgency = (document.getElementById('dr-agency')?.value || '').trim().toLowerCase();
+
+  // 5) 검색: 코드 / 가이드 / 여행사 / 코스 어디든 매칭
   let entries = Object.values(ctxMap);
   if(q){
     entries = entries.filter(e =>
@@ -3172,13 +3201,24 @@ function tcFilter() {
     );
   }
 
-  // 4) 정렬: 최근 날짜 먼저, 다음으로 사용 빈도
+  // 6) 정렬: 본인 일정 먼저 → 같은 여행사 → 최근 날짜 → 사용 빈도
   entries.sort((a,b) => {
+    // 내 일정 우선
+    if(a._isMine && !b._isMine) return -1;
+    if(!a._isMine && b._isMine) return 1;
+    // 같은 여행사 우선 (여행사 선택된 경우)
+    if(selectedAgency){
+      const aMatch = String(a.agency||'').toLowerCase() === selectedAgency;
+      const bMatch = String(b.agency||'').toLowerCase() === selectedAgency;
+      if(aMatch && !bMatch) return -1;
+      if(!aMatch && bMatch) return 1;
+    }
+    // 최근 날짜
     if(b.date !== a.date) return b.date.localeCompare(a.date);
     return b.count - a.count;
   });
 
-  // 5) 최대 30개로 자르기
+  // 7) 최대 30개로 자르기
   entries = entries.slice(0, 30);
 
   if(entries.length===0){
@@ -3195,8 +3235,13 @@ function tcFilter() {
     if(e.agency) subParts.push(`<span style="color:var(--muted);">${e.agency.length>20?e.agency.slice(0,20)+'…':e.agency}</span>`);
     if(e.attraction) subParts.push(`<span style="color:var(--muted);">${e.attraction}</span>`);
     const subLine = subParts.length ? `<div style="font-size:10px;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;">${subParts.join('')}</div>` : '';
-    return `<div class="sdd-item" style="padding:8px 12px;border-bottom:1px solid var(--border-light, #f0f0f0);" onmousedown="event.preventDefault();tcSelect('${codeEsc}')">
-      <div style="font-family:monospace;font-size:13px;font-weight:700;">${e.code}</div>
+    // ★ 본인 일정 강조 스타일
+    const itemStyle = e._isMine
+      ? 'padding:8px 12px;border-bottom:1px solid var(--border-light, #f0f0f0);background:#dcfce7;border-left:3px solid #16a34a;'
+      : 'padding:8px 12px;border-bottom:1px solid var(--border-light, #f0f0f0);';
+    const mineLabel = e._isMine ? ' <span style="font-size:9px;background:#16a34a;color:white;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px;">내 일정</span>' : '';
+    return `<div class="sdd-item" style="${itemStyle}" onmousedown="event.preventDefault();tcSelect('${codeEsc}')">
+      <div style="font-family:monospace;font-size:13px;font-weight:700;">${e.code}${mineLabel}</div>
       ${subLine}
     </div>`;
   }).join('');
@@ -3206,6 +3251,134 @@ function tcSelect(val) {
   document.getElementById('dr-tourcode').value = val;
   const drop = document.getElementById('tc-dropdown');
   if(drop){ drop.classList.remove('open'); drop.style.display=''; }
+  // 선택했으니 경고 제거
+  clearTourCodeWarning();
+}
+
+// ═══════════════════════════════════════
+// ★ 여행사/투어코드 입력 검증 (드라이버 실수 방지)
+// ═══════════════════════════════════════
+
+// 여행사 마스터(M_Clients) 매칭 검사 — 대소문자/공백 무시
+function _isAgencyInMaster(name){
+  if(!name) return true; // 빈값은 검증 통과 (저장 검증에서 별도 처리)
+  const n = String(name).trim().toLowerCase().replace(/\s+/g,' ');
+  if(!n) return true;
+  const masters = (MASTER.agencies || []);
+  return masters.some(a => String(a.Name||'').trim().toLowerCase().replace(/\s+/g,' ') === n);
+}
+
+// 투어코드가 _drReportsCache 또는 Schedule(드라이버 일정 캐시)에 있는지 검사
+function _isTourCodeKnown(code){
+  if(!code) return true; // 빈값은 검증 통과
+  const c = String(code).trim().toUpperCase();
+  if(!c) return true;
+  // 1) 과거 DR 캐시
+  const drCache = (typeof _drReportsCache !== 'undefined' && _drReportsCache) ? _drReportsCache : [];
+  if(drCache.some(r => String(pickTourCode(r) || '').toUpperCase() === c)) return true;
+  // 2) 드라이버 일정 캐시
+  const sch = (typeof _driverScheduleCache !== 'undefined' && _driverScheduleCache) ? _driverScheduleCache : [];
+  if(sch.some(s => String(s.tourCode||'').toUpperCase() === c)) return true;
+  return false;
+}
+
+// 여행사 input 검증 — 마스터에 없으면 경고 표시
+function validateAgencyInput(){
+  const inp = document.getElementById('dr-agency');
+  const warn = document.getElementById('dr-agency-warning');
+  if(!inp || !warn) return;
+  const v = inp.value.trim();
+  if(!v){ warn.style.display = 'none'; return; }
+  if(_isAgencyInMaster(v)){
+    warn.style.display = 'none';
+    inp.style.borderColor = '';
+    return;
+  }
+  // 비슷한 이름 제안 찾기
+  const masters = (MASTER.agencies || []).map(a => String(a.Name||'').trim()).filter(Boolean);
+  const suggestion = _findClosestAgency(v, masters);
+  let msg = `⚠️ "${v}" 은(는) 등록된 여행사가 아닙니다.`;
+  if(suggestion){
+    const sugEsc = suggestion.replace(/'/g,"\\'");
+    msg += ` <button type="button" onclick="document.getElementById('dr-agency').value='${sugEsc}';clearAgencyWarning();" style="margin-left:6px;padding:2px 8px;background:#dc2626;color:white;border:none;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;">→ "${suggestion}"으로 수정</button>`;
+  }
+  warn.innerHTML = msg;
+  warn.style.display = 'block';
+  inp.style.borderColor = '#dc2626';
+}
+
+// 투어코드 input 검증
+function validateTourCodeInput(){
+  const inp = document.getElementById('dr-tourcode');
+  const warn = document.getElementById('dr-tourcode-warning');
+  if(!inp || !warn) return;
+  const v = inp.value.trim();
+  if(!v){ warn.style.display = 'none'; return; }
+  if(_isTourCodeKnown(v)){
+    warn.style.display = 'none';
+    inp.style.borderColor = '';
+    return;
+  }
+  // 형식 검증: 너무 짧으면 의심
+  let msg = `⚠️ "${v}" — 처음 사용하는 투어코드입니다. 정확히 입력했는지 확인하세요.`;
+  // 비슷한 코드 제안 (일정 캐시 우선)
+  const sch = (typeof _driverScheduleCache !== 'undefined' && _driverScheduleCache) ? _driverScheduleCache : [];
+  const codes = [...new Set(sch.map(s => String(s.tourCode||'').toUpperCase()).filter(Boolean))];
+  const suggestion = _findClosestAgency(v.toUpperCase(), codes);
+  if(suggestion){
+    const sugEsc = suggestion.replace(/'/g,"\\'");
+    msg += `<br><button type="button" onclick="document.getElementById('dr-tourcode').value='${sugEsc}';clearTourCodeWarning();" style="margin-top:4px;padding:2px 8px;background:#dc2626;color:white;border:none;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;">→ "${suggestion}"으로 수정 (오늘 일정)</button>`;
+  }
+  warn.innerHTML = msg;
+  warn.style.display = 'block';
+  inp.style.borderColor = '#dc2626';
+}
+
+function clearAgencyWarning(){
+  const warn = document.getElementById('dr-agency-warning');
+  const inp = document.getElementById('dr-agency');
+  if(warn) warn.style.display = 'none';
+  if(inp) inp.style.borderColor = '';
+}
+function clearTourCodeWarning(){
+  const warn = document.getElementById('dr-tourcode-warning');
+  const inp = document.getElementById('dr-tourcode');
+  if(warn) warn.style.display = 'none';
+  if(inp) inp.style.borderColor = '';
+}
+
+// Levenshtein distance — 가장 비슷한 문자열 찾기
+function _editDistance(a, b){
+  if(a === b) return 0;
+  if(!a) return b.length;
+  if(!b) return a.length;
+  const m = [];
+  for(let i = 0; i <= b.length; i++) m[i] = [i];
+  for(let j = 0; j <= a.length; j++) m[0][j] = j;
+  for(let i = 1; i <= b.length; i++){
+    for(let j = 1; j <= a.length; j++){
+      m[i][j] = b[i-1] === a[j-1] ? m[i-1][j-1] :
+        Math.min(m[i-1][j-1] + 1, m[i][j-1] + 1, m[i-1][j] + 1);
+    }
+  }
+  return m[b.length][a.length];
+}
+function _findClosestAgency(input, candidates){
+  if(!input || !candidates || !candidates.length) return null;
+  const inp = String(input).toLowerCase().trim();
+  let best = null;
+  let bestDist = Infinity;
+  candidates.forEach(c => {
+    const cand = String(c).toLowerCase().trim();
+    if(!cand) return;
+    const d = _editDistance(inp, cand);
+    // 거리가 입력 길이의 50% 이하일 때만 의미 있음
+    if(d < bestDist && d <= Math.max(2, Math.floor(inp.length * 0.5))){
+      bestDist = d;
+      best = c;
+    }
+  });
+  return best;
 }
 
 // ═══════════════════════════════════════
@@ -5157,6 +5330,29 @@ function submitDailyReport(){
   /* ── 개선: 인승 미선택 경고 ── */
   const _seatsVal = document.getElementById('dr-seats')?.value;
   if(!_skipValidation && !_seatsVal){ showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
+
+  // ★ 여행사 / 투어코드 검증 — 마스터/일정에 없으면 사용자 확인 받기
+  if(!_skipValidation){
+    const _tourCode = document.getElementById('dr-tourcode')?.value.trim() || '';
+    const _agencyOK = _isAgencyInMaster(agency);
+    const _tcOK = !_tourCode || _isTourCodeKnown(_tourCode);
+    if(!_agencyOK || !_tcOK){
+      const issues = [];
+      if(!_agencyOK){
+        const masters = (MASTER.agencies || []).map(a => String(a.Name||'').trim()).filter(Boolean);
+        const sug = _findClosestAgency(agency, masters);
+        issues.push(`• 여행사: "${agency}" — 등록되지 않음${sug?`\n  (혹시 "${sug}"?)`:''}`);
+      }
+      if(!_tcOK){
+        const sch = (typeof _driverScheduleCache !== 'undefined' && _driverScheduleCache) ? _driverScheduleCache : [];
+        const codes = [...new Set(sch.map(s => String(s.tourCode||'').toUpperCase()).filter(Boolean))];
+        const sug = _findClosestAgency(_tourCode.toUpperCase(), codes);
+        issues.push(`• 투어코드: "${_tourCode}" — 처음 사용${sug?`\n  (혹시 "${sug}"?)`:''}`);
+      }
+      const proceed = confirm(`⚠️ 입력 확인\n\n${issues.join('\n\n')}\n\n그대로 저장하시겠습니까?\n\n[취소] 다시 확인  /  [확인] 그대로 저장`);
+      if(!proceed) return;
+    }
+  }
   const _drBtn = document.querySelector('button[onclick="submitDailyReport()"]');
   if(_drBtn){ _drBtn.disabled=true; _drBtn.textContent='⏳ 저장 중...'; }
   const shift = activeShifts.find(s=>s.id===editingShiftId);
