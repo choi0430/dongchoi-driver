@@ -7840,22 +7840,24 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     // ★ slot.startTime/endTime이 비어있으면 항공편 정보로 폴백
     let _effStartTime = slot.startTime || '';
     let _effEndTime = slot.endTime || '';
-    if(!_effStartTime && tour){
-      if(_endIsHotel && tour.FlightIn){
-        const fi = _schParseFlight(tour.FlightIn);
-        if(fi.time) _effStartTime = _addMinutes(fi.time, fi.type === 'dom' ? 30 : 60) || '';
+    try {
+      if(!_effStartTime && tour){
+        if(_endIsHotel && tour.FlightIn){
+          const fi = _schParseFlight(tour.FlightIn);
+          if(fi.time) _effStartTime = _addMinutes(fi.time, fi.type === 'dom' ? 30 : 60) || '';
+        }
+        if(!_effStartTime && _endIsAirport && tour.FlightOut){
+          const fo = _schParseFlight(tour.FlightOut);
+          if(fo.time) _effStartTime = _addMinutes(fo.time, fo.type === 'dom' ? -120 : -180) || '';
+        }
       }
-      if(!_effStartTime && _endIsAirport && tour.FlightOut){
-        const fo = _schParseFlight(tour.FlightOut);
-        if(fo.time) _effStartTime = _addMinutes(fo.time, fo.type === 'dom' ? -120 : -180) || '';
+      if(!_effEndTime && tour){
+        if(_endIsAirport && tour.FlightOut){
+          const fo = _schParseFlight(tour.FlightOut);
+          if(fo.time) _effEndTime = _addMinutes(fo.time, fo.type === 'dom' ? -60 : -120) || '';
+        }
       }
-    }
-    if(!_effEndTime && tour){
-      if(_endIsAirport && tour.FlightOut){
-        const fo = _schParseFlight(tour.FlightOut);
-        if(fo.time) _effEndTime = _addMinutes(fo.time, fo.type === 'dom' ? -60 : -120) || '';
-      }
-    }
+    } catch(e){ console.warn('[surcharge fallback SUB]', e); }
     // EARLY: 06:00 이전 출발 (시작 장소가 공항이 아닌 경우만)
     const isEarlySurcharge = _effStartTime && _effStartTime < '06:00' && !_startIsAirport;
     // LATE: 23:00 이후 도착 (도착 장소가 공항이 아닌 경우만)
@@ -8039,30 +8041,32 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   //   FlightIn:  도착 시간 + 1시간(국제) / +30분(국내) = 차량 출발 시간 (미팅 시작)
   let _effStartTime = slot.startTime || '';
   let _effEndTime = slot.endTime || '';
-  if(!_effStartTime && tour){
-    // 도착(공항→호텔)인 경우 FlightIn 사용
-    if(_endIsHotel && tour.FlightIn){
-      const fi = _schParseFlight(tour.FlightIn);
-      if(fi.time){
-        _effStartTime = _addMinutes(fi.time, fi.type === 'dom' ? 30 : 60) || '';
+  try {
+    if(!_effStartTime && tour){
+      // 도착(공항→호텔)인 경우 FlightIn 사용
+      if(_endIsHotel && tour.FlightIn){
+        const fi = _schParseFlight(tour.FlightIn);
+        if(fi.time){
+          _effStartTime = _addMinutes(fi.time, fi.type === 'dom' ? 30 : 60) || '';
+        }
+      }
+      // 출국(호텔→공항)인 경우 FlightOut 사용
+      if(!_effStartTime && _endIsAirport && tour.FlightOut){
+        const fo = _schParseFlight(tour.FlightOut);
+        if(fo.time){
+          _effStartTime = _addMinutes(fo.time, fo.type === 'dom' ? -120 : -180) || '';
+        }
       }
     }
-    // 출국(호텔→공항)인 경우 FlightOut 사용
-    if(!_effStartTime && _endIsAirport && tour.FlightOut){
-      const fo = _schParseFlight(tour.FlightOut);
-      if(fo.time){
-        _effStartTime = _addMinutes(fo.time, fo.type === 'dom' ? -120 : -180) || '';
+    if(!_effEndTime && tour){
+      if(_endIsAirport && tour.FlightOut){
+        const fo = _schParseFlight(tour.FlightOut);
+        if(fo.time){
+          _effEndTime = _addMinutes(fo.time, fo.type === 'dom' ? -60 : -120) || '';
+        }
       }
     }
-  }
-  if(!_effEndTime && tour){
-    if(_endIsAirport && tour.FlightOut){
-      const fo = _schParseFlight(tour.FlightOut);
-      if(fo.time){
-        _effEndTime = _addMinutes(fo.time, fo.type === 'dom' ? -60 : -120) || '';
-      }
-    }
-  }
+  } catch(e){ console.warn('[surcharge fallback DC]', e); }
 
   // EARLY: 06:00 이전 출발 (시작이 공항이 아닐 때)
   const isEarlySurcharge = _effStartTime && _effStartTime < '06:00' && !_startIsAirport;
@@ -8582,6 +8586,19 @@ function renderScheduleCalendar(){
       return;
     }
   }
+
+  // ★ 주간 뷰는 try-catch로 감싸 어떤 에러든 사용자 화면에 표시
+  try {
+    return _renderScheduleWeekViewBody(wrap, periodEl);
+  } catch(e){
+    console.error('[주간 뷰 오류]', e);
+    wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--rd);font-family:var(--fd);">주간 뷰 렌더링 오류: ${escH(e.message)}<br><small style="color:var(--t3);margin-top:8px;display:block;">F12 콘솔에서 자세한 에러를 확인하세요</small><br><small style="color:var(--t3);">Stack: ${escH(String(e.stack||'').slice(0,200))}</small></div>`;
+    return;
+  }
+}
+
+// 주간 뷰 본체 — renderScheduleCalendar에서 try-catch와 함께 호출
+function _renderScheduleWeekViewBody(wrap, periodEl){
 
   const groupBy = document.getElementById('sch-cal-group')?.value || 'agency';
 
