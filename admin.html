@@ -16620,9 +16620,12 @@ function renderInvManualList() {
       inlineEl.innerHTML = items.map(item => {
         const sub = (item.amount||0)+(item.ot||0)+(item.hotel||0)+(item.trailer||0)+(item.toll||0)+(item.dist||0);
         const extras = [item.ot?'OT $'+item.ot:'', item.hotel?'Hotel_Surcharge $'+item.hotel:'', item.trailer?'Trailer $'+item.trailer:'', item.toll?'Toll $'+item.toll:'', item.dist?'Dist_Surcharge $'+item.dist:''].filter(Boolean).join(' · ');
-        return `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--bd);">
+        // ★ 자동 생성 항목 표시 (Note에 [자동·DR] 포함)
+        const isAuto = String(item.note||'').indexOf('[자동·DR]') >= 0;
+        const autoBadge = isAuto ? '<span style="font-size:9px;background:#dcfce7;color:#16a34a;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px;">자동·DR</span>' : '';
+        return `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--bd);${isAuto?'background:#f0fdf4;':''}">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:11px;font-weight:600;color:var(--t1);">${fmtDate(item.date)} · ${escH(item.tour)}${item.seats?' ('+item.seats+')':''}</div>
+            <div style="font-size:11px;font-weight:600;color:var(--t1);">${fmtDate(item.date)} · ${escH(item.tour)}${item.seats?' ('+item.seats+')':''}${autoBadge}</div>
             ${extras?'<div style="font-size:9px;color:var(--t3);">'+extras+'</div>':''}
           </div>
           <div style="font-size:11px;font-weight:700;color:var(--gn);flex-shrink:0;">$${sub.toLocaleString()}</div>
