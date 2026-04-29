@@ -7748,14 +7748,25 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
 
     // 서차지 플래그 (서브 모드도 동일하게 검사)
     const hotels = DB.H || [];
-    const isStartHotelSurcharge = slot.startPlaceType === 'hotel' && slot.startPlace &&
+    // ★ 공항/호텔 패턴 감지 헬퍼 — type 필드가 비어있어도 텍스트로 추론
+    const _looksLikeAirport = (type, place) => {
+      if(type === 'airport') return true;
+      if(!place) return false;
+      return /\b[A-Z]{2,3}\d{2,4}\b/.test(String(place)) || /\b(INTL|DOM|airport|공항)\b/i.test(String(place));
+    };
+    const _looksLikeHotel = (type, place) => {
+      if(type === 'hotel') return true;
+      if(!place) return false;
+      return !!hotels.find(h => h.Hotel_Name === place) || /hotel|호텔/i.test(String(place));
+    };
+    const _startIsHotel = _looksLikeHotel(slot.startPlaceType, slot.startPlace);
+    const _endIsHotel = _looksLikeHotel(slot.endPlaceType, slot.endPlace);
+    const isStartHotelSurcharge = _startIsHotel && slot.startPlace &&
       !!hotels.find(h => h.Hotel_Name === slot.startPlace && h.Surcharge_Area);
-    const isEndHotelSurcharge = slot.endPlaceType === 'hotel' && slot.endPlace &&
+    const isEndHotelSurcharge = _endIsHotel && slot.endPlace &&
       !!hotels.find(h => h.Hotel_Name === slot.endPlace && h.Surcharge_Area);
-    const isEarlySurcharge = slot.startPlaceType === 'hotel' && slot.endPlaceType === 'airport' &&
-      slot.startTime && slot.startTime < '06:00';
-    const isLateSurcharge = slot.startPlaceType === 'airport' && slot.endPlaceType === 'hotel' &&
-      slot.startTime && slot.startTime >= '23:00';
+    const isEarlySurcharge = _startIsHotel && slot.startTime && slot.startTime < '06:00';
+    const isLateSurcharge = _endIsHotel && slot.endTime && slot.endTime >= '23:00';
     const isTrailer = !!day.trailer;
 
     // ★ 항공편 자동 채우기 (SUB 모드도 동일)
@@ -7906,14 +7917,33 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
 
   // 서차지 플래그
   const hotels = DB.H || [];
-  const isStartHotelSurcharge = slot.startPlaceType === 'hotel' && slot.startPlace &&
+  // ★ 공항 패턴 감지 헬퍼 — type 필드가 비어있어도 텍스트로 추론
+  //   - type === 'airport' (명시적)
+  //   - 또는 텍스트에 항공 코드 패턴 (대문자 2~3자 + 숫자 2~4자)이 있으면 공항으로 간주
+  const _looksLikeAirport = (type, place) => {
+    if(type === 'airport') return true;
+    if(!place) return false;
+    return /\b[A-Z]{2,3}\d{2,4}\b/.test(String(place)) || /\b(INTL|DOM|airport|공항)\b/i.test(String(place));
+  };
+  const _looksLikeHotel = (type, place) => {
+    if(type === 'hotel') return true;
+    if(!place) return false;
+    // 명시적 hotel 타입이 아니면, DB.H에 있는 호텔명과 매칭되거나 'HOTEL' 키워드 포함 시 호텔로 간주
+    return !!hotels.find(h => h.Hotel_Name === place) || /hotel|호텔/i.test(String(place));
+  };
+  const _startIsHotel = _looksLikeHotel(slot.startPlaceType, slot.startPlace);
+  const _endIsHotel = _looksLikeHotel(slot.endPlaceType, slot.endPlace);
+  const _startIsAirport = _looksLikeAirport(slot.startPlaceType, slot.startPlace);
+  const _endIsAirport = _looksLikeAirport(slot.endPlaceType, slot.endPlace);
+
+  const isStartHotelSurcharge = _startIsHotel && slot.startPlace &&
     !!hotels.find(h => h.Hotel_Name === slot.startPlace && h.Surcharge_Area);
-  const isEndHotelSurcharge = slot.endPlaceType === 'hotel' && slot.endPlace &&
+  const isEndHotelSurcharge = _endIsHotel && slot.endPlace &&
     !!hotels.find(h => h.Hotel_Name === slot.endPlace && h.Surcharge_Area);
-  const isEarlySurcharge = slot.startPlaceType === 'hotel' && slot.endPlaceType === 'airport' &&
-    slot.startTime && slot.startTime < '06:00';
-  const isLateSurcharge = slot.startPlaceType === 'airport' && slot.endPlaceType === 'hotel' &&
-    slot.startTime && slot.startTime >= '23:00';
+  // EARLY: 호텔에서 새벽(<06:00) 출발 (공항 샌딩 또는 일반 투어 모두 해당)
+  const isEarlySurcharge = _startIsHotel && slot.startTime && slot.startTime < '06:00';
+  // LATE: 늦은 도착 (>=23:00) 호텔로 복귀 (공항 픽업 또는 일반 투어 모두 해당)
+  const isLateSurcharge = _endIsHotel && slot.endTime && slot.endTime >= '23:00';
   const isTrailer = !!day.trailer;
 
   // ★ 항공편 자동 채우기: 슬롯 끝점이 공항이면 FlightIn/Out에서 코드/시간 가져오기
