@@ -5339,6 +5339,40 @@ function _addMinutes(hhmm, mins){
   return `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
 }
 
+// 코스 기반 종료 시간 자동 계산 (자사: M_PriceClient.max_hours / SUB: M_PriceSub.max_hours)
+// startT: 'HH:MM', course: 코스명, agency: 여행사명, subCompany: SUB 회사명 (SUB일 때만)
+// 반환: 'HH:MM' 또는 ''
+function _schCalcEndTime(startT, course, agency, subCompany){
+  if(!startT || !course) return '';
+  const isEvening = /dinner|night/i.test(course);
+  let maxHrs = null;
+  try {
+    if(subCompany){
+      // SUB 차량: M_PriceSub[subCo][course]
+      const ps = (typeof DB !== 'undefined' && DB.PS && DB.PS[subCompany]) ? DB.PS[subCompany] : null;
+      if(ps && ps[course]){
+        const mh = parseFloat(ps[course].max_hours);
+        if(!isNaN(mh) && mh > 0) maxHrs = mh;
+      }
+    }
+    if(!maxHrs && agency){
+      // 자사: M_PriceClient[agency][course]
+      const ag = (typeof DB !== 'undefined' && DB.PC && DB.PC[agency]) ? DB.PC[agency] : null;
+      if(ag && ag[course]){
+        const mh = parseFloat(ag[course].max_hours);
+        if(!isNaN(mh) && mh > 0) maxHrs = mh;
+      }
+    }
+  } catch(e){}
+  if(!maxHrs) return '';
+  let endT = _addMinutes(startT, maxHrs * 60) || '';
+  // 8pm 캡 (저녁 트랜스퍼 제외)
+  if(!isEvening && endT && endT > '20:00'){
+    endT = '20:00';
+  }
+  return endT;
+}
+
 // timezone-safe 날짜 산술: 'YYYY-MM-DD' + n일 → 'YYYY-MM-DD'
 function _schAddDays(ymd, days){
   const [y, m, d] = ymd.split('-').map(Number);
@@ -7397,10 +7431,20 @@ function _schGetSlotInfo(tourId, dateISO, slotKey){
   // 슬롯 정보
   if(slot){
     const slotLabel = slotKey==='morning'?'AM':slotKey==='fullday'?'풀데이':'PM';
+    // ★ endTime이 비어있고 startTime + course가 있으면 자동 계산 (max_hours 기반)
+    let displayEndTime = slot.endTime || '';
+    let endTimeIsCalculated = false;
+    if(!displayEndTime && slot.startTime && slot.course){
+      const calc = _schCalcEndTime(slot.startTime, slot.course, tour && tour.Agency, isSubMode ? slot.subCompany : null);
+      if(calc){
+        displayEndTime = calc;
+        endTimeIsCalculated = true;
+      }
+    }
     lines.push(`<div style="border-top:1px solid #374151;padding-top:6px;margin-top:4px;">`);
     lines.push(`<div style="font-size:10px;color:#9ca3af;margin-bottom:4px;">📅 ${escH(dateISO)} · ${slotLabel}${isSubMode?' · 🏢 SUB':' · 🏠 자사'}</div>`);
     if(slot.startTime || slot.startPlace) lines.push(`<div>🕐 시작: ${escH(slot.startTime||'-')} ${escH(slot.startPlace||'')}</div>`);
-    if(slot.endTime || slot.endPlace)     lines.push(`<div>🕓 도착: ${escH(slot.endTime||'-')} ${escH(slot.endPlace||'')}</div>`);
+    if(displayEndTime || slot.endPlace)   lines.push(`<div>🕓 도착: ${escH(displayEndTime||'-')}${endTimeIsCalculated?'<span style="font-size:9px;color:#9ca3af;margin-left:4px;">(계산)</span>':''} ${escH(slot.endPlace||'')}</div>`);
     if(slot.course)                       lines.push(`<div>🗺 코스: ${escH(slot.course)}</div>`);
     if(isSubMode){
       if(slot.subCompany) lines.push(`<div>🏢 업체: ${escH(slot.subCompany)}</div>`);
