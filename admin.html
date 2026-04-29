@@ -5454,6 +5454,60 @@ function _schDayOfWeek(ymd){
   return dt.getUTCDay(); // 0=일
 }
 
+// ★ 중간 날(첫날/마지막날 제외) 슬롯 시작/도착 시간 자동 입력
+//   - 첫날: 공항 픽업 시간이 항공편으로 자동 계산되므로 제외
+//   - 마지막날: 공항 샌딩 시간이 항공편으로 자동 계산되므로 제외
+//   - 중간 날들만:
+//     · MAX 10시간 코스 → 09:00 ~ 19:00
+//     · MAX 12시간 코스 → 07:00 ~ 19:00
+//   - 사용자가 이미 시간을 입력한 슬롯은 건드리지 않음 (둘 다 빈 경우만 자동)
+function _smAutoFillMiddleDayTimes(){
+  if(!_schDays || _schDays.length < 3) return; // 3일 이상일 때만 의미 있음 (중간 날 존재)
+  const agencyVal = (_schCsels.agency?.getValue() || _schCsels.agency?.input?.value || '').trim();
+  for(let i = 1; i < _schDays.length - 1; i++){ // 첫날(0) / 마지막날(length-1) 제외
+    const d = _schDays[i];
+    if(!d || !d.slots) continue;
+    ['morning', 'fullday', 'evening'].forEach(slotKey => {
+      const slot = d.slots[slotKey];
+      if(!slot) return;
+      // 이미 시간 입력됐으면 스킵
+      if(slot.startTime || slot.endTime) return;
+      // 코스 없으면 스킵
+      const course = String(slot.course || '').trim();
+      if(!course) return;
+      // 코스의 max_hours 조회 (자사 우선, SUB는 SUB 회사로)
+      let maxHrs = null;
+      try {
+        const isSub = slot.mode === 'sub';
+        if(isSub && slot.subCompany){
+          const ps = (DB.PS && DB.PS[slot.subCompany]) ? DB.PS[slot.subCompany] : null;
+          if(ps && ps[course]){
+            const mh = parseFloat(ps[course].max_hours);
+            if(!isNaN(mh) && mh > 0) maxHrs = mh;
+          }
+        }
+        if(!maxHrs && agencyVal){
+          const ag = (DB.PC && DB.PC[agencyVal]) ? DB.PC[agencyVal] : null;
+          if(ag && ag[course]){
+            const mh = parseFloat(ag[course].max_hours);
+            if(!isNaN(mh) && mh > 0) maxHrs = mh;
+          }
+        }
+      } catch(e){}
+      if(!maxHrs) return;
+      // MAX 시간별 기본값 적용
+      if(maxHrs <= 10){
+        slot.startTime = '09:00';
+        slot.endTime = '19:00';
+      } else if(maxHrs <= 12){
+        slot.startTime = '07:00';
+        slot.endTime = '19:00';
+      }
+      // 12시간 초과는 명확한 룰 없으므로 그냥 둠
+    });
+  }
+}
+
 function _smRebuildDays(){
   const wrap = document.getElementById('sm-days-list');
   if(!wrap) return;
@@ -5471,6 +5525,13 @@ function _smRebuildDays(){
       if(d.slots[k] === undefined) d.slots[k] = null;
     });
   });
+
+  // ★ 중간 날(첫날/마지막날 제외) 슬롯 시간 자동 입력
+  //   - 시작/도착 시간이 둘 다 비어있을 때만 자동 채움
+  //   - MAX 10시간 코스: 09:00 ~ 19:00
+  //   - MAX 12시간 코스: 07:00 ~ 19:00
+  //   - 코스가 없거나 max_hours 모르면 패스
+  _smAutoFillMiddleDayTimes();
 
   const SLOT_KEYS = ['morning','fullday','evening'];
   const SLOT_LABELS = { morning:'AM (샌딩)', fullday:'풀데이', evening:'PM (트랜스퍼)' };
@@ -6090,7 +6151,16 @@ function _smRebuildDays(){
         items: courseItems,
         value: d.slots[k].course || '',
         placeholder: '코스 (BM, OPERA...)',
-        onSelect: (it) => { _schDays[i].slots[k].course = it.value; },
+        onSelect: (it) => {
+          _schDays[i].slots[k].course = it.value;
+          // ★ 코스 선택 시 startTime/endTime이 둘 다 비어있으면 자동 채움
+          //   - 12시간 코스 (Port Stephens, Hunter Valley 등): 07:00 ~ 19:00
+          //   - 10시간 코스: 09:00 ~ 19:00
+          //   - 그 외: 09:00 ~ MAX HOUR + 8pm 캡
+          //   공항 슬롯은 별도 처리되므로 제외
+          _schAutoFillTimesFromCourse(i, k);
+          _smRebuildDays();
+        },
         onClear: () => { _schDays[i].slots[k].course = ''; }
       });
       if(d.slots[k].course) _schDayCsels['course-'+cellPrefix].setValue(d.slots[k].course);
