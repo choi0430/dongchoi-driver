@@ -15936,21 +15936,22 @@ function _calcSlotSubCost(tour, day, slot, slotKey){
   }
   if(!subCo) return null; // 자사 케이스
 
-  // ★ 트레일러 사용료 정산 — 차량 소유주 ≠ 트레일러 소유주이면 ±$30
+  // ★ 트레일러 사용료 정산 — 차량 소유주 ≠ 트레일러 소유주이면 ±Rental_Fee
   //   day.trailer가 true이고 day.trailerNumber가 있으면 트레일러 사용 중
   //   - 트레일러가 SUB 소유: SUB가 본인 트레일러 사용 → 차감 없음
-  //   - 트레일러가 자사(DC) 소유, SUB 차량 사용: SUB가 자사 트레일러 빌림 → SUB 지급액에서 -$30
-  //   - 트레일러가 다른 SUB 소유 (드물지만): -$30 (이 경우 별도 트레일러 소유주 정산은 수동)
+  //   - 트레일러가 자사(DC) 소유, SUB 차량 사용: SUB가 자사 트레일러 빌림 → SUB 지급액에서 -Rental_Fee
+  //   - 트레일러가 다른 SUB 소유: SUB 지급액에서 -Rental_Fee (이 경우 별도 트레일러 소유주 정산은 수동)
   let trailerAdjust = 0;
   let trailerInfo = null;
   if(day && day.trailer && day.trailerNumber){
     const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
     if(tr){
       const trOwner = String(tr.Owner||'').trim();
+      const trFee = Number(tr.Rental_Fee) || 30;
       // SUB 차량 소유주가 SUB 자체이고 트레일러 소유주가 SUB와 다르면 차감
       if(trOwner && trOwner !== subCo){
-        trailerAdjust = -30;
-        trailerInfo = { trailerNumber: tr.Trailer_Number, trailerOwner: trOwner, type: 'borrowed_from_other' };
+        trailerAdjust = -trFee;
+        trailerInfo = { trailerNumber: tr.Trailer_Number, trailerOwner: trOwner, fee: trFee, type: 'borrowed_from_other' };
       }
     }
   }
@@ -16131,6 +16132,17 @@ async function openInvScheduleImport(){
     const tourCode = c.tour.TourCode || c.tour.TourID || '';
     const dupKey = `${c.date}|${(calc?.tour||'').toLowerCase()}|${tourCode.toLowerCase()}`;
     const isDup = existingMap.has(dupKey);
+    // 트레일러 정산 여부 — 자동 활성, 사용자가 토글 가능
+    const hasTrailerAdj = (subCalc && subCalc.trailerAdjust !== 0) || (() => {
+      // DC 차량 + SUB 트레일러 케이스
+      if(subCalc) return false;
+      const day = c.day;
+      if(!day || !day.trailer || !day.trailerNumber) return false;
+      const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
+      if(!tr) return false;
+      const trOwner = String(tr.Owner||'').trim();
+      return trOwner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(trOwner);
+    })();
     return {
       ...c,
       calc,
@@ -16138,7 +16150,9 @@ async function openInvScheduleImport(){
       isSubMode,
       tourCode,
       isDup,
-      selected: !isDup // 중복은 기본 선택 해제
+      selected: !isDup, // 중복은 기본 선택 해제
+      trailerEnabled: hasTrailerAdj, // 트레일러 정산 활성 (기본 ON)
+      hasTrailerAdj // 정산 가능 여부 (UI 표시용)
     };
   });
 
@@ -16147,6 +16161,13 @@ async function openInvScheduleImport(){
 }
 
 let _invSchImportData = [];
+
+// 트레일러 정산 활성/비활성 토글
+function _toggleTrailerAdj(idx){
+  if(!_invSchImportData[idx]) return;
+  _invSchImportData[idx].trailerEnabled = !_invSchImportData[idx].trailerEnabled;
+  _renderInvScheduleImportModal();
+}
 
 function _renderInvScheduleImportModal(){
   const el = document.getElementById('inv-sch-modal');
@@ -16181,20 +16202,31 @@ function _renderInvScheduleImportModal(){
         const trAdj = sc.trailerAdjust || 0;
         const trInfo = sc.trailerInfo;
         if(trAdj !== 0 && trInfo){
-          subCostHtml = `<span style="color:#7c3aed;font-weight:700;" title="${escH(sc.subCo)}: 운임 $${(sc.baseAmount||0).toLocaleString()} ${trAdj > 0 ? '+' : ''}$${trAdj} 트레일러(${trInfo.trailerNumber} ${trInfo.trailerOwner} 빌림)">$${(sc.amount||0).toLocaleString()}<br><span style="font-size:9px;color:#dc2626;font-weight:600;">🚐 -$30</span></span>`;
+          // 사용자가 트레일러 정산 토글 가능
+          const enabled = it.trailerEnabled !== false;
+          const effectiveAmount = enabled ? (sc.amount||0) : (sc.baseAmount||0);
+          const adjBadge = enabled
+            ? `<span style="font-size:9px;color:#dc2626;font-weight:600;cursor:pointer;" onclick="_toggleTrailerAdj(${idx})" title="클릭: 트레일러 정산 끄기">🚐 -$${trInfo.fee||30} ✓</span>`
+            : `<span style="font-size:9px;color:#9ca3af;font-weight:600;cursor:pointer;text-decoration:line-through;" onclick="_toggleTrailerAdj(${idx})" title="클릭: 트레일러 정산 켜기">🚐 -$${trInfo.fee||30}</span>`;
+          subCostHtml = `<span style="color:#7c3aed;font-weight:700;" title="${escH(sc.subCo)}: 운임 $${(sc.baseAmount||0).toLocaleString()}, 트레일러(${trInfo.trailerNumber} ${trInfo.trailerOwner} 빌림)">$${effectiveAmount.toLocaleString()}<br>${adjBadge}</span>`;
         } else {
           subCostHtml = `<span style="color:#7c3aed;font-weight:700;" title="${escH(sc.subCo)}">$${(sc.amount||0).toLocaleString()}</span>`;
         }
       }
     } else {
-      // 자사 운행이지만 트레일러는 SUB 소유 → 별도 +$30 지급 거래
+      // 자사 운행이지만 트레일러는 SUB 소유 → 별도 +Rental_Fee 지급 거래
       const day = it.day, slot = it.slot;
       if(day && day.trailer && day.trailerNumber){
         const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
         if(tr){
           const trOwner = String(tr.Owner||'').trim();
+          const trFee = Number(tr.Rental_Fee) || 30;
           if(trOwner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(trOwner)){
-            subCostHtml = `<span style="color:#16a34a;font-weight:700;" title="${escH(trOwner)}에게 트레일러 ${tr.Trailer_Number} 사용료 지급">🚐 +$30<br><span style="font-size:9px;color:var(--t3);">${escH(trOwner)}</span></span>`;
+            const enabled = it.trailerEnabled !== false;
+            const adjBadge = enabled
+              ? `<span style="cursor:pointer;" onclick="_toggleTrailerAdj(${idx})" title="클릭: 정산 끄기">🚐 +$${trFee} ✓</span>`
+              : `<span style="cursor:pointer;color:#9ca3af;text-decoration:line-through;" onclick="_toggleTrailerAdj(${idx})" title="클릭: 정산 켜기">🚐 +$${trFee}</span>`;
+            subCostHtml = `<span style="color:#16a34a;font-weight:700;" title="${escH(trOwner)}에게 트레일러 ${tr.Trailer_Number} 사용료 지급">${adjBadge}<br><span style="font-size:9px;color:var(--t3);">${escH(trOwner)}</span></span>`;
           }
         }
       }
@@ -16344,8 +16376,11 @@ function applyInvScheduleImport(){
     // ★ SUB 비용 자동 정산 — Sub_Txn에 DR(지급할 비용) 거래 추가
     if(it.subCalc && !it.subCalc._noRate && (it.subCalc.amount||0) > 0){
       // 트레일러 사용료 차감 표시 (있으면 description에 명시)
-      const trAdj = it.subCalc.trailerAdjust || 0;
+      // 사용자가 toggleTrailerAdj()로 끈 경우 차감 안 함
+      const trEnabled = it.trailerEnabled !== false;
+      const trAdj = trEnabled ? (it.subCalc.trailerAdjust || 0) : 0;
       const trInfo = it.subCalc.trailerInfo;
+      const finalAmount = trEnabled ? it.subCalc.amount : (it.subCalc.baseAmount || it.subCalc.amount);
       let descSuffix = it.isSubMode ? ' [SUB통째]' : ' [DC운행]';
       if(trAdj !== 0 && trInfo){
         descSuffix += ` (트레일러 ${trInfo.trailerNumber} ${trInfo.trailerOwner} 빌림: ${trAdj > 0 ? '+' : ''}$${trAdj})`;
@@ -16356,31 +16391,36 @@ function applyInvScheduleImport(){
         Date: it.date,
         InvoiceNo: '',  // SUB가 인보이스 발행 시 채워짐, 또는 수동 입력
         Description: `${item.tour} (${tourCode}) - ${it.subCalc.seats}S` + descSuffix,
-        DR: it.subCalc.amount,
+        DR: finalAmount,
         CR: 0,
         Remark: `Schedule 자동 (${it.tour.TourID||''})${trAdj !== 0 ? ' · 트레일러 정산 포함' : ''}`
       });
       subAdded++;
     } else if(!it.subCalc) {
-      // ★ 자사 운행이지만 트레일러는 SUB 소유인 경우 → SUB에게 +$30 지급 거래 생성
-      const day = it.day, slot = it.slot;
-      if(day && day.trailer && day.trailerNumber){
-        const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
-        if(tr){
-          const trOwner = String(tr.Owner||'').trim();
-          // 트레일러 소유주가 자사가 아니면 SUB에게 지급
-          if(trOwner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(trOwner)){
-            subTxnsToCreate.push({
-              SubCompany: trOwner,
-              Category: 'service',
-              Date: it.date,
-              InvoiceNo: '',
-              Description: `트레일러 ${tr.Trailer_Number} 사용료 (${item.tour} ${tourCode})`,
-              DR: 30,
-              CR: 0,
-              Remark: `Schedule 자동 (${it.tour.TourID||''}) · 트레일러 빌림 정산`
-            });
-            subAdded++;
+      // ★ 자사 운행이지만 트레일러는 SUB 소유인 경우 → SUB에게 +Rental_Fee 지급 거래 생성
+      // 사용자가 toggleTrailerAdj()로 끈 경우 거래 생성 안 함
+      const trEnabled = it.trailerEnabled !== false;
+      if(trEnabled){
+        const day = it.day, slot = it.slot;
+        if(day && day.trailer && day.trailerNumber){
+          const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
+          if(tr){
+            const trOwner = String(tr.Owner||'').trim();
+            const trFee = Number(tr.Rental_Fee) || 30;
+            // 트레일러 소유주가 자사가 아니면 SUB에게 지급
+            if(trOwner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(trOwner)){
+              subTxnsToCreate.push({
+                SubCompany: trOwner,
+                Category: 'service',
+                Date: it.date,
+                InvoiceNo: '',
+                Description: `트레일러 ${tr.Trailer_Number} 사용료 (${item.tour} ${tourCode})`,
+                DR: trFee,
+                CR: 0,
+                Remark: `Schedule 자동 (${it.tour.TourID||''}) · 트레일러 빌림 정산`
+              });
+              subAdded++;
+            }
           }
         }
       }
@@ -22721,6 +22761,7 @@ function openM(type,idx){
         ${ownerOpts}
       </select></div></div>
       <div class="fr"><label class="fl">용량/규격</label><input class="fi" id="f2" value="${escH(d.Capacity||'')}" placeholder="예: 4인용, 짐 트레일러"></div>
+      <div class="fr"><label class="fl">💰 사용료 ($/회) — 다른 회사가 빌렸을 때 받는 금액</label><input type="number" class="fi" id="f7" value="${d.Rental_Fee !== undefined && d.Rental_Fee !== '' ? d.Rental_Fee : 30}" placeholder="기본 30" min="0" step="5"></div>
       <div class="fr"><label class="fl">🚗 Rego 만료일 (등록 만료)</label><input type="date" class="fi" id="f3" value="${fmtDateInput(d.Rego_Date)}"></div>
       <div class="fr"><label class="fl">🛡️ E-Safety Check 만료일 (연 1회)</label><input type="date" class="fi" id="f4" value="${fmtDateInput(d.ESafety_Date)}"></div>
       <div class="fr"><label class="fl">메모</label><textarea class="fta" id="f5" style="min-height:55px" placeholder="등록번호, 상태 등">${escH(d.Notes||'')}</textarea></div>
@@ -22807,7 +22848,8 @@ function saveM(){
          Rego_Date:gv('f3'),
          ESafety_Date:gv('f4'),
          Notes:gv('f5').trim(),
-         Active:gv('f6')||'Y'};
+         Active:gv('f6')||'Y',
+         Rental_Fee:Number(gv('f7'))||30};
     ie?DB.T[idx]=obj:DB.T.push(obj);
   } else if(t==='AG'){
     let agName=gv('fagname');
@@ -23412,7 +23454,8 @@ async function _applyAdminBundle(bundle){
     Rego_Date:r.Rego_Date||'',
     ESafety_Date:r.ESafety_Date||r.HVIS_Date||'',  // 이전 HVIS_Date 호환
     Notes:String(r.Notes||'').trim(),
-    Active:String(r.Active||'Y').trim()
+    Active:String(r.Active||'Y').trim(),
+    Rental_Fee:Number(r.Rental_Fee)||30  // ★ 사용료 ($/회), 미설정 시 기본 30
   })).filter(r=>r.Trailer_Number);
   // ── M_PriceClient → DB.PC ──
   if(d.M_PriceClient?.length){
