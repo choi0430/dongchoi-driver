@@ -2067,6 +2067,137 @@ function _normalizeDateISO(val) {
   return s;
 }
 
+/**
+ * Daily_Report 저장 시 트레일러 사용료 자동 정산
+ * - 차량 소유주와 트레일러 소유주가 다르면 SUB_Txn에 거래 자동 생성
+ * - SUB 차량 + DC 트레일러: SUB 회사 차변(DR)에 -Rental_Fee 차감 (SUB 지급액 줄어듦)
+ *   → 실제로는 운임 지급할 때 차감되어야 하므로, 별도 거래로 +Rental_Fee CR 처리
+ * - DC 차량 + SUB 트레일러: 트레일러 소유주(SUB)에게 +Rental_Fee 지급 (DR)
+ * - 자동 중복 방지: 같은 (Date + Driver + Trailer + Source) 거래가 이미 있으면 생성 안 함
+ */
+function _autoCreateTrailerRentalTxn(data) {
+  if (!data) return;
+  const trailerNum = String(data.Trailer_Number || data.Trailer || '').trim();
+  if (!trailerNum) return;
+  // Trailer 값이 0이거나 'No' 같은 것은 사용 안 함을 의미
+  const trailerUsed = (data.Trailer_Number) || (data.Trailer && Number(data.Trailer) > 0);
+  if (!trailerUsed) return;
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const trSheet = ss.getSheetByName('M_Trailers');
+  const vSheet = ss.getSheetByName('M_Vehicles');
+  if (!trSheet || !vSheet) return;
+
+  // M_Trailers에서 트레일러 소유주 + Rental_Fee 조회
+  const trData = trSheet.getDataRange().getValues();
+  if (trData.length < 2) return;
+  const trH = trData[0];
+  const trNumIdx = trH.indexOf('Trailer_Number');
+  const trOwnerIdx = trH.indexOf('Owner');
+  const trFeeIdx = trH.indexOf('Rental_Fee');
+  if (trNumIdx < 0 || trOwnerIdx < 0) return;
+
+  let trOwner = '';
+  let trFee = 30;
+  for (let i = 1; i < trData.length; i++) {
+    if (String(trData[i][trNumIdx] || '').trim() === trailerNum) {
+      trOwner = String(trData[i][trOwnerIdx] || '').trim();
+      if (trFeeIdx >= 0 && trData[i][trFeeIdx]) {
+        trFee = Number(trData[i][trFeeIdx]) || 30;
+      }
+      break;
+    }
+  }
+  if (!trOwner) return;
+
+  // M_Vehicles에서 차량 소유주 조회
+  const rego = String(data.Rego || '').trim();
+  if (!rego) return;
+  const vData = vSheet.getDataRange().getValues();
+  if (vData.length < 2) return;
+  const vH = vData[0];
+  const vRegoIdx = vH.indexOf('Rego');
+  const vOwnerIdx = vH.indexOf('Owner');
+  if (vRegoIdx < 0 || vOwnerIdx < 0) return;
+
+  let vehOwner = '';
+  for (let i = 1; i < vData.length; i++) {
+    if (String(vData[i][vRegoIdx] || '').trim() === rego) {
+      vehOwner = String(vData[i][vOwnerIdx] || '').trim();
+      break;
+    }
+  }
+  if (!vehOwner) return;
+
+  // 같은 소유주이면 정산 불필요
+  if (trOwner === vehOwner) return;
+
+  // DC 회사 정의 (영문/공백 변형 고려)
+  const DC_NAMES = ['DONG CHOI PTY LTD', 'DONG CHOI', '동초이'];
+  const isVehDC = DC_NAMES.indexOf(vehOwner) >= 0;
+  const isTrDC = DC_NAMES.indexOf(trOwner) >= 0;
+
+  // 중복 방지: 같은 날짜 + 같은 트레일러 + 같은 driver의 거래가 이미 있으면 스킵
+  const txnSheet = ss.getSheetByName('SUB_Txn') || ss.getSheetByName('Sub_Txn');
+  if (!txnSheet) return;
+  const sourceId = 'DR-trailer-' + (data.Date || '') + '-' + trailerNum + '-' + (data.Driver || '');
+  if (txnSheet.getLastRow() > 1) {
+    const tData = txnSheet.getDataRange().getValues();
+    const tH = tData[0];
+    const remarkIdx = tH.indexOf('Remark');
+    if (remarkIdx >= 0) {
+      for (let i = 1; i < tData.length; i++) {
+        if (String(tData[i][remarkIdx] || '').indexOf(sourceId) >= 0) {
+          Logger.log('[trailer rental] already exists: ' + sourceId);
+          return;
+        }
+      }
+    }
+  }
+
+  // 거래 생성
+  let subCo, dr, descPrefix;
+  if (isVehDC && !isTrDC) {
+    // DC 차량 + SUB 트레일러: SUB에게 사용료 지급 (DR)
+    subCo = trOwner;
+    dr = trFee;
+    descPrefix = '트레일러 ' + trailerNum + ' 사용료';
+  } else if (!isVehDC && isTrDC) {
+    // SUB 차량 + DC 트레일러: SUB 운임에서 차감 (CR — 우리가 받을 돈)
+    // SUB가 우리에게 트레일러 빌렸으니 우리가 SUB에게 받을 금액 = +CR
+    subCo = vehOwner;
+    dr = 0;
+    descPrefix = '트레일러 ' + trailerNum + ' 사용료 (자사 트레일러 빌림)';
+  } else {
+    // 양쪽 모두 SUB (이론적으로 가능, 다른 SUB끼리)
+    // 트레일러 소유주가 받음
+    subCo = trOwner;
+    dr = trFee;
+    descPrefix = '트레일러 ' + trailerNum + ' 사용료';
+  }
+
+  const dateISO = _normalizeDateISO(data.Date) || data.Date;
+  const txnData = {
+    SubCompany: subCo,
+    Category: 'trailer',
+    Date: dateISO,
+    InvoiceNo: '',
+    Description: descPrefix + ' · DR(' + (data.Driver || '') + ' / ' + rego + ')',
+    DR: dr,
+    CR: dr === 0 ? trFee : 0,  // SUB 차량 + DC 트레일러일 때 CR=trFee (받을 돈)
+    Remark: 'DR 자동 · ' + sourceId
+  };
+
+  const r = addMasterRow('SUB_Txn', txnData);
+  if (r.ok) {
+    appendAuditLog('system', 'auto_trailer_txn', 'SUB_Txn', r.row || '',
+      'Sub:' + subCo + ' DR:' + dr + ' CR:' + (txnData.CR));
+    Logger.log('[trailer rental] auto-created: ' + JSON.stringify(txnData));
+  } else {
+    Logger.log('[trailer rental] failed: ' + JSON.stringify(r));
+  }
+}
+
 function _todayISO_Sydney() {
   const now = new Date();
   // 호주 동부 표준시 보정 (서머타임 무시 — Pre_Departure는 ±1일 허용 범위에서 비교됨)
@@ -2371,6 +2502,16 @@ function saveReport(sheetName, data) {
     const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : headers;
     const row = actualHeaders.map(h => data[h] !== undefined ? data[h] : '');
     sheet.appendRow(row);
+
+    // ★ Daily_Report 저장 시 트레일러 사용료 자동 정산 (Sub_Txn 생성)
+    //   조건: Trailer_Number 있고, 차량/트레일러 소유주 다름
+    if (sheetName === 'Daily_Report') {
+      try {
+        _autoCreateTrailerRentalTxn(data);
+      } catch(e) {
+        Logger.log('[trailer rental] auto-txn error: ' + e);
+      }
+    }
 
     return {ok: true, sheet: sheetName, row: sheet.getLastRow()};
   } catch (err) {
