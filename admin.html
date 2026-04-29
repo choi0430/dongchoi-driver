@@ -21614,6 +21614,18 @@ async function renderWage(){
 
 // ── DR 비용 계산 (공용) ──────────────────────────────
 function _calcDRFromReport(r){
+  // ★ SUB 운행 제외 — SUB 차량으로 운행한 DR은 자사 직원 급여 계산 대상이 아님
+  //   해당 드라이버는 SUB 회사 직원이므로 SUB 회사가 직접 지급
+  //   판정: M_Vehicles에서 차량 Owner가 자사(DC_OWNERS)가 아니면 SUB 차량
+  if(r && r.Rego){
+    const veh = (typeof DB !== 'undefined' && DB.V) ? DB.V.find(v => v.Rego === r.Rego) : null;
+    if(veh){
+      const owner = (veh.Owner||'').trim();
+      if(owner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(owner)){
+        return 0; // SUB 차량 운행 → 급여 0 (SUB 회사가 직접 지급)
+      }
+    }
+  }
   const stored=parseFloat(r.DR_Cost);
   const own=parseFloat(r.Night_Owner)||0;
   const svc=parseFloat(r.SVC_Charge)||0;
