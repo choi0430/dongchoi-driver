@@ -399,13 +399,13 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   z-index:9999;padding:32px 24px;
 ">
-  <div style="text-align:center;margin-left:auto;margin-right:auto;margin-bottom:36px;align-self:center;">
+  <div style="text-align:center;margin-bottom:36px;">
     <div style="font-size:52px;margin-bottom:12px;">🚌</div>
     <div style="font-family:'Barlow Condensed',sans-serif;font-size:32px;font-weight:800;color:white;letter-spacing:2px;">DC FLEET</div>
     <div style="font-size:13px;color:rgba(255,255,255,0.45);margin-top:4px;letter-spacing:1px;">DONG CHOI PTY LTD</div>
   </div>
 
-  <div style="width:100%;max-width:340px;margin-left:auto;margin-right:auto;align-self:center;box-sizing:border-box;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:24px;">
+  <div style="width:340px;max-width:calc(100% - 16px);background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:24px;">
     <div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:10px;font-weight:600;">Select Driver (드라이버 선택)</div>
     <select id="login-driver-select" style="
       width:100%;padding:13px 14px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);
@@ -3480,7 +3480,7 @@ function _onAuthFailure(reason){
   try {
     const loginScreen = document.getElementById('login-screen');
     const appScreen = document.getElementById('app');
-    if (loginScreen) loginScreen.style.display = 'flex';
+    if (loginScreen) loginScreen.style.display = '';
     if (appScreen) appScreen.style.display = 'none';
     const lastDrv = localStorage.getItem('dc_last_driver') || '';
     const name = (lastDrv.split('|')[0] || '').trim();
@@ -9539,6 +9539,31 @@ function calcDRCostFromRow(r) {
   return expectedNet;
 }
 
+// ═══════════════════════════════════════
+// 드라이버 급여 지급 주체(Payer) 판정
+// ═══════════════════════════════════════
+// 자사(DONG CHOI) 차량 → 자사가 지급
+// SUB 차량 → 차주가 지급
+//
+// 판정 우선순위: SubOwner (있으면 SUB 차량) → Owner (자사 외이면 SUB)
+// ═══════════════════════════════════════
+const DC_OWNER_NAMES = ['DONG CHOI PTY LTD', 'DONG CHOI', '동초이', '', null];
+function getPayerForRego(rego){
+  if(!rego) return 'DONG CHOI PTY LTD';
+  const veh = (typeof MASTER !== 'undefined' && MASTER.vehicles) ? MASTER.vehicles.find(v => v.Rego === rego) : null;
+  if(!veh) return 'DONG CHOI PTY LTD';
+  // SubOwner 우선
+  const subOwner = (veh.SubOwner||'').trim();
+  if(subOwner) return subOwner;
+  const owner = (veh.Owner||'').trim();
+  if(!owner) return 'DONG CHOI PTY LTD';
+  if(DC_OWNER_NAMES.includes(owner)) return 'DONG CHOI PTY LTD';
+  return owner;
+}
+function isOwnVehicle(rego){
+  return getPayerForRego(rego) === 'DONG CHOI PTY LTD';
+}
+
 async function getGASDRForWeek(driverName, monISO){
   const rows = await fetchDRCache();
   const sun = (()=>{const d=new Date(monISO+'T00:00:00');d.setDate(d.getDate()+6);return toLocalISO(d);})();
@@ -9749,7 +9774,7 @@ async function renderPay(){
     const card = document.createElement('div');
     card.className = 'pay-week-card';
     const subGroupArr = Object.values(subGroups).sort((a,b)=>b.total-a.total);
-    const subBadgesHtml = subGroupArr.map(sg=>`<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">SUB·${sg.name} $${sg.total.toLocaleString()} (${sg.count}건)</span>`).join(' ');
+    const subBadgesHtml = subGroupArr.map(sg=>`<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">🚐 ${sg.name} $${sg.total.toLocaleString()} (${sg.count}건)</span>`).join(' ');
 
     card.innerHTML = `
       <div class="pay-week-top">
@@ -9760,20 +9785,24 @@ async function renderPay(){
         <div style="text-align:right;">
           <div class="pay-week-total">$${netPay.toLocaleString()}</div>
           <div style="font-size:11px;font-weight:700;margin-top:2px;color:${isPaid?'#16a34a':'#ea580c'};">
-            ${isPaid?'✅ Paid (지급완료)':'⏳ Unpaid (미지급) $'+Math.round(balance)}
+            ${isPaid?'✅ 자사 지급 완료':'⏳ 자사 미지급 $'+Math.round(balance)}
           </div>
         </div>
       </div>
       ${subDRTotal > 0 ? `<div style="background:var(--surface2);border-radius:10px;padding:10px 12px;margin-bottom:8px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <span style="font-size:11px;font-weight:700;color:var(--text);">🏢 회사 지급 (Company Pay)</span>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">💡 회사별 받을 돈 (Pay Source by Company)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;padding:6px 8px;background:rgba(96,165,250,.08);border-radius:6px;">
+          <span style="font-size:11px;font-weight:700;color:var(--accent);">🏢 자사(DONG CHOI)에서 받을 돈</span>
           <span style="font-size:14px;font-weight:800;color:var(--accent);">$${ownDRTotal.toLocaleString()}</span>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:11px;font-weight:700;color:#7c3aed;">🤝 SUB 지급 (SUB Pay)</span>
-          <span style="font-size:14px;font-weight:800;color:#7c3aed;">$${subDRTotal.toLocaleString()}</span>
+        <div style="padding:6px 8px;background:rgba(124,58,237,.08);border-radius:6px;">
+          <div style="font-size:11px;font-weight:700;color:#7c3aed;margin-bottom:4px;">🚐 차주(SUB)에서 받을 돈 — 차주가 직접 지급</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;">${subBadgesHtml}</div>
+          <div style="border-top:1px solid #c4b5fd;margin-top:6px;padding-top:4px;display:flex;justify-content:space-between;">
+            <span style="font-size:10px;color:#7c3aed;">SUB 합계</span>
+            <span style="font-size:13px;font-weight:800;color:#7c3aed;">$${subDRTotal.toLocaleString()}</span>
+          </div>
         </div>
-        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${subBadgesHtml}</div>
         <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;">
           <span style="font-size:10px;color:var(--muted);">총 수당 합계 (Total)</span>
           <span style="font-size:13px;font-weight:800;color:var(--text);">$${drTotal.toLocaleString()}</span>
@@ -9781,15 +9810,15 @@ async function renderPay(){
       </div>` : ''}
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:${items.length?'10px':'0'};">
         <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center;">
-          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">${subDRTotal>0?'회사분 수당':'Earned (발생 수당)'}</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">${subDRTotal>0?'자사 발생':'Earned (발생 수당)'}</div>
           <div style="font-size:14px;font-weight:800;color:#16a34a;">$${ownDRTotal.toLocaleString()}</div>
         </div>
         <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center;">
-          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">Paid (지급됨)</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">${subDRTotal>0?'자사 지급':'Paid (지급됨)'}</div>
           <div style="font-size:14px;font-weight:800;color:var(--accent);">$${paidAmt.toLocaleString()}</div>
         </div>
         <div style="background:${isPaid?'var(--surface2)':'#fff7ed'};border-radius:8px;padding:8px;text-align:center;${!isPaid?'border:1.5px solid #fed7aa;':''}">
-          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">Balance (잔액)</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">${subDRTotal>0?'자사 잔액':'Balance (잔액)'}</div>
           <div style="font-size:14px;font-weight:800;color:${isPaid?'var(--muted)':'#ea580c'};">$${Math.max(0,Math.round(balance)).toLocaleString()}</div>
         </div>
       </div>
