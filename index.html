@@ -6121,6 +6121,44 @@ const SHEET_URL = APPS_SCRIPT_URL; // alias
 function submitEndShift(){
   const km = document.getElementById('end-km').value;
   if(!km){showToast('종료 KM을 입력하세요. End KM required.','error');return;}
+
+  // ★ 미저장 Daily Report 감지 — 폼에 의미있는 데이터 있는데 제출 안 한 경우 경고
+  //   사용자가 EOS만 누르고 DR 잊어버린 경우 데이터 손실 방지
+  const _drFormHasContent = (() => {
+    const drPage = document.getElementById('dr-form-page') || document.getElementById('dr-page');
+    if(!drPage) return false;
+    // DR 화면이 렌더링된 상태인지 확인
+    const ag = document.getElementById('dr-agency')?.value?.trim();
+    const att = document.getElementById('dr-attraction')?.value?.trim();
+    const tc = document.getElementById('dr-tourcode')?.value?.trim();
+    const pickup = document.getElementById('dr-pickup')?.value?.trim();
+    const dropoff = document.getElementById('dr-dropoff')?.value?.trim();
+    const tStart = document.getElementById('dr-time-start')?.value?.trim();
+    const tEnd = document.getElementById('dr-time-end')?.value?.trim();
+    const kmStart = document.getElementById('dr-km-start')?.value?.trim();
+    const kmEnd = document.getElementById('dr-km-end')?.value?.trim();
+    // 의미있는 데이터 (5개 이상 필드 입력)이면 작성 중으로 판정
+    const filled = [ag, att, tc, pickup, dropoff, tStart, tEnd, kmStart, kmEnd].filter(Boolean).length;
+    return filled >= 3;
+  })();
+
+  if(_drFormHasContent){
+    const proceed = confirm(
+      `🚨 작성 중인 Daily Report가 있습니다\n\n` +
+      `Daily Report를 저장하지 않고 End of Shift를 제출하면\n` +
+      `입력하신 내용이 사라집니다.\n\n` +
+      `먼저 Daily Report 화면으로 돌아가서 [✓ Save Daily Report]를\n` +
+      `누른 후 End of Shift를 제출하세요.\n\n` +
+      `[취소] DR 화면으로 돌아가기 (권장)\n` +
+      `[확인] DR 저장 없이 EOS만 제출 (데이터 손실)`
+    );
+    if(!proceed){
+      // DR 화면으로 자동 이동
+      if(typeof goStep === 'function') goStep(2);
+      return;
+    }
+  }
+
   const _eosBtn = document.querySelector('button[onclick="submitEndShift()"]');
   if(_eosBtn){ _eosBtn.disabled=true; _eosBtn.textContent='⏳ 완료 중...'; }
   // Passenger & lost property check
@@ -8849,9 +8887,21 @@ function renderDriverSchedule(){
     const slot = s.slot || {};
     const reported = _isSlotReported(s);
     const titleParts = [s.tourCode || s.tourId, s.agency].filter(Boolean);
+
+    // ★ 시간 + 픽업/드롭오프 장소 — 다를 때 모두 표시
     const subParts = [];
-    if(slot.startTime) subParts.push(`⏰ ${slot.startTime}`);
-    if(slot.startPlace) subParts.push(`📍 ${slot.startPlace}`);
+    if(slot.startTime) subParts.push(`⏰ ${slot.startTime}${slot.endTime?'~'+slot.endTime:''}`);
+
+    const sp = String(slot.startPlace||'').trim();
+    const ep = String(slot.endPlace||'').trim();
+    if(sp && ep && sp !== ep){
+      subParts.push(`📍 ${sp} → ${ep}`);
+    } else if(sp){
+      subParts.push(`📍 ${sp}`);
+    } else if(ep){
+      subParts.push(`📍 → ${ep}`);
+    }
+
     const detailParts = [];
     if(slot.course) detailParts.push(slot.course);
     // 차량 SUB 인지 확인
@@ -8877,8 +8927,15 @@ function renderDriverSchedule(){
       ? `<div class="ds-slot-cta" style="background:#dcfce7;color:#16a34a;">✅ DR 완료 (Reported)</div>`
       : (isToday ? `<div class="ds-slot-cta">📋 이 일정으로 DR 시작 →</div>` : '');
 
+    // ★ 미래 일정은 카드에 날짜 표시 (오늘/내일 외 future)
+    const showFutureDate = !isToday && s.date && s.date > _addDaysISO(_todayLocalISO(), 1);
+    const dateBadge = showFutureDate
+      ? `<span style="font-size:10px;font-weight:700;color:#7c3aed;background:#f3e8ff;border-radius:6px;padding:2px 7px;margin-right:4px;">📅 ${_fmtAU(s.date)}</span>`
+      : '';
+
     return `<div class="${cardClass}" ${onclickAttr} style="${reported?'opacity:.65;cursor:default;':''}">
       <div class="ds-slot-head">
+        ${dateBadge}
         <span class="ds-slot-badge">${_SLOT_LABELS[s.slotKey]||s.slotKey}</span>
         <span class="ds-slot-title">${titleParts.join(' · ')}</span>
         ${reported?'<span style="margin-left:auto;font-size:11px;color:#16a34a;font-weight:700;">✅ 완료</span>':''}
