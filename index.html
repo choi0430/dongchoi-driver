@@ -8889,11 +8889,23 @@ function renderDriverSchedule(){
     const titleParts = [s.tourCode || s.tourId, s.agency].filter(Boolean);
 
     // ★ 시간 + 픽업/드롭오프 장소 — 다를 때 모두 표시
+    //   장소가 비어있을 때 항공편 정보로 보강:
+    //   - morning 슬롯에 startPlace 비어있고 flightIn 있음 → 항공편 도착 픽업
+    //   - evening 슬롯에 endPlace 비어있고 flightOut 있음 → 항공편 출발 드롭
     const subParts = [];
     if(slot.startTime) subParts.push(`⏰ ${slot.startTime}${slot.endTime?'~'+slot.endTime:''}`);
 
-    const sp = String(slot.startPlace||'').trim();
-    const ep = String(slot.endPlace||'').trim();
+    let sp = String(slot.startPlace||'').trim();
+    let ep = String(slot.endPlace||'').trim();
+    // 픽업 보강 (morning 슬롯에 도착편)
+    if(!sp && s.flightIn && s.slotKey === 'morning'){
+      sp = `✈ ${s.flightIn}`;
+    }
+    // 드롭 보강 (evening 슬롯에 출발편)
+    if(!ep && s.flightOut && s.slotKey === 'evening'){
+      ep = `✈ ${s.flightOut}`;
+    }
+
     if(sp && ep && sp !== ep){
       subParts.push(`📍 ${sp} → ${ep}`);
     } else if(sp){
@@ -9044,8 +9056,8 @@ function applySchedulePrefill(){
   }
 
   // 픽업 / 드롭
-  // ★ 공항인 경우 (startPlaceType='airport') 항공편/시간 대신 AIRPORT로 표시
-  //   원본 일정에는 "JQ403 09:40" 등이 있지만 드라이버 리포트엔 단순화
+  // ★ 공항인 경우 (startPlaceType='airport' 또는 항공편명만 있음) → AIRPORT로 단순화
+  //   일정 카드에는 "✈ JQ403 09:40" 같이 상세 표시되지만 DR 리포트는 단순 'AIRPORT'
   const _isAirportPlace = (placeType, place) => {
     if(placeType === 'airport') return true;
     // type이 없는 경우 휴리스틱: 공항코드+시간 패턴
@@ -9056,18 +9068,34 @@ function applySchedulePrefill(){
   };
 
   const pickup = document.getElementById('dr-pickup');
-  if(pickup && slot.startPlace){
-    const pickupVal = _isAirportPlace(slot.startPlaceType, slot.startPlace) ? 'AIRPORT' : slot.startPlace;
-    pickup.value = pickupVal;
-    if(typeof sddPick === 'function') try{ sddPick('pickup', pickupVal); }catch(e){}
-    filled.push('픽업');
+  if(pickup){
+    let pickupVal = '';
+    if(slot.startPlace){
+      pickupVal = _isAirportPlace(slot.startPlaceType, slot.startPlace) ? 'AIRPORT' : slot.startPlace;
+    } else if(data.flightIn && data.slotKey === 'morning'){
+      // startPlace 비어있고 도착편(flightIn) 있는 morning 슬롯 → AIRPORT
+      pickupVal = 'AIRPORT';
+    }
+    if(pickupVal){
+      pickup.value = pickupVal;
+      if(typeof sddPick === 'function') try{ sddPick('pickup', pickupVal); }catch(e){}
+      filled.push('픽업');
+    }
   }
   const dropoff = document.getElementById('dr-dropoff');
-  if(dropoff && slot.endPlace){
-    const dropoffVal = _isAirportPlace(slot.endPlaceType, slot.endPlace) ? 'AIRPORT' : slot.endPlace;
-    dropoff.value = dropoffVal;
-    if(typeof sddPick === 'function') try{ sddPick('dropoff', dropoffVal); }catch(e){}
-    filled.push('드롭');
+  if(dropoff){
+    let dropoffVal = '';
+    if(slot.endPlace){
+      dropoffVal = _isAirportPlace(slot.endPlaceType, slot.endPlace) ? 'AIRPORT' : slot.endPlace;
+    } else if(data.flightOut && data.slotKey === 'evening'){
+      // endPlace 비어있고 출발편(flightOut) 있는 evening 슬롯 → AIRPORT
+      dropoffVal = 'AIRPORT';
+    }
+    if(dropoffVal){
+      dropoff.value = dropoffVal;
+      if(typeof sddPick === 'function') try{ sddPick('dropoff', dropoffVal); }catch(e){}
+      filled.push('드롭');
+    }
   }
 
   // 시작 / 종료 시간 — 자동 입력 제외 (드라이버가 실제 운행 시간 직접 입력)
