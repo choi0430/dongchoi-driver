@@ -4092,33 +4092,21 @@ async function doLogin() {
     localStorage.setItem('dc_token_role', loginRes.role||'driver');
   } catch(e){}
 
-  // ★ 로그인 성공 직후 강제 새로고침 — 최신 코드 보장 (캐시 우회)
-  //   무한 루프 방지: sessionStorage 플래그로 1회만 실행
-  //   세션 자동 복원: 새로고침 후 dc_session_{name} 마커가 있으면 자동 로그인됨
+  // 세션 마커 + 마지막 드라이버 저장 (자동 복원용)
   try {
-    const reloadDone = sessionStorage.getItem('dc_login_reload_done');
-    if(!reloadDone){
-      // 새로고침 후 자동 로그인되도록 미리 세션 마커 저장
-      try {
-        localStorage.setItem('dc_last_driver', sel);
-        localStorage.setItem('dc_session_' + name, '1');
-      } catch(e){}
-      sessionStorage.setItem('dc_login_reload_done', '1');
-      // Service Worker 강제 갱신
-      if('serviceWorker' in navigator){
-        try {
-          navigator.serviceWorker.getRegistrations().then(regs => {
-            regs.forEach(r => r.update());
-          });
-        } catch(e){}
-      }
-      // 잠깐 후 새로고침 (메시지 전달 시간 확보)
-      setTimeout(() => {
-        location.reload(true);
-      }, 100);
-      return;
-    }
-  } catch(e){ console.warn('reload guard:', e); }
+    localStorage.setItem('dc_last_driver', sel);
+    localStorage.setItem('dc_session_' + name, '1');
+  } catch(e){}
+
+  // ★ Service Worker 백그라운드 갱신 (PIN 입력 흐름 방해 안 함)
+  //   다음 페이지 로드 시 새 코드 적용. 강제 reload 없음 — 사용자가 PIN 두 번 입력하지 않도록
+  if('serviceWorker' in navigator){
+    try {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(r => r.update());
+      });
+    } catch(e){}
+  }
 
   if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = prevLabel || '🔐 로그인'; }
 
