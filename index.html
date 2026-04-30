@@ -8664,6 +8664,25 @@ function renderDriverSchedule(){
   if(!wrap) return;
   const today = _todayLocalISO();
   const tomorrow = _addDaysISO(today, 1);
+
+  // ★ DR 제출된 일정은 별도 표시 (오늘/내일 카드에서 제외하지 않고 ✅ 완료 표시)
+  //   매칭: tour_code + date — _drReportsCache의 리포트가 같은 tour_code+date로 있으면 완료된 것으로 간주
+  const reports = (typeof _drReportsCache !== 'undefined' && _drReportsCache) ? _drReportsCache : [];
+  const _isSlotReported = (s) => {
+    if(!s) return false;
+    const sTC = String(s.tourCode||'').trim();
+    const sDate = String(s.date||'').slice(0,10);
+    if(!sDate) return false;
+    return reports.some(r => {
+      const rTC = String(r.Tour_Code||r.TourCode||'').trim();
+      const rDate = String(r._isoDate || r.Date || '').slice(0,10);
+      // 같은 날짜 + 투어코드 일치 (투어코드 없으면 날짜만 매칭은 위험하므로 제외)
+      if(!rDate || rDate !== sDate) return false;
+      if(sTC && rTC) return sTC === rTC;
+      return false;
+    });
+  };
+
   const todaySlots = _driverScheduleCache.filter(s => s.date === today);
   const tomorrowSlots = _driverScheduleCache.filter(s => s.date === tomorrow);
   const futureSlots = _driverScheduleCache.filter(s => s.date > tomorrow).slice(0, 3);
@@ -8675,6 +8694,7 @@ function renderDriverSchedule(){
 
   const renderSlot = (s, isToday) => {
     const slot = s.slot || {};
+    const reported = _isSlotReported(s);
     const titleParts = [s.tourCode || s.tourId, s.agency].filter(Boolean);
     const subParts = [];
     if(slot.startTime) subParts.push(`⏰ ${slot.startTime}`);
@@ -8697,14 +8717,22 @@ function renderDriverSchedule(){
     if(s.guide) detailParts.push(`👤 ${s.guide}`);
     if(s.pax) detailParts.push(`${s.pax}명`);
 
-    return `<div class="ds-slot-card ${isToday?'today':''}" onclick="startDRFromSchedule('${s.tourId}','${s.date}','${s.slotKey}')">
+    // ★ 리포트 제출된 슬롯은 회색 처리 + ✅ 완료 표시 + 클릭 비활성
+    const cardClass = `ds-slot-card ${isToday?'today':''}${reported?' reported':''}`;
+    const onclickAttr = reported ? '' : `onclick="startDRFromSchedule('${s.tourId}','${s.date}','${s.slotKey}')"`;
+    const ctaHtml = reported
+      ? `<div class="ds-slot-cta" style="background:#dcfce7;color:#16a34a;">✅ DR 완료 (Reported)</div>`
+      : (isToday ? `<div class="ds-slot-cta">📋 이 일정으로 DR 시작 →</div>` : '');
+
+    return `<div class="${cardClass}" ${onclickAttr} style="${reported?'opacity:.65;cursor:default;':''}">
       <div class="ds-slot-head">
         <span class="ds-slot-badge">${_SLOT_LABELS[s.slotKey]||s.slotKey}</span>
         <span class="ds-slot-title">${titleParts.join(' · ')}</span>
+        ${reported?'<span style="margin-left:auto;font-size:11px;color:#16a34a;font-weight:700;">✅ 완료</span>':''}
       </div>
       ${subParts.length ? `<div class="ds-slot-sub">${subParts.join(' &nbsp;·&nbsp; ')}</div>` : ''}
       ${detailParts.length ? `<div class="ds-slot-detail">${detailParts.join(' · ')}</div>` : ''}
-      ${isToday ? `<div class="ds-slot-cta">📋 이 일정으로 DR 시작 →</div>` : ''}
+      ${ctaHtml}
     </div>`;
   };
 
