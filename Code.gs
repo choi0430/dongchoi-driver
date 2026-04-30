@@ -5243,6 +5243,17 @@ function getSchedule(filters) {
     if (data.length < 2) return { ok: true, rows: [] };
     const headers = data[0];
     const DATE_FIELDS = ['StartDate','EndDate','CreatedAt','UpdatedAt'];
+    // ★ DD/MM/YYYY → YYYY-MM-DD 변환 (필터 비교용)
+    const _toISO = (s) => {
+      const str = String(s||'').trim();
+      if (!str) return '';
+      // 이미 YYYY-MM-DD 형식
+      if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0,10);
+      // DD/MM/YYYY 형식
+      const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (m) return m[3] + '-' + String(m[2]).padStart(2,'0') + '-' + String(m[1]).padStart(2,'0');
+      return str;
+    };
     let rows = [];
     for (let i = 1; i < data.length; i++) {
       const obj = {};
@@ -5258,9 +5269,10 @@ function getSchedule(filters) {
     }
     if (filters.status) rows = rows.filter(r => String(r.Status||'').trim() === filters.status);
     if (filters.agency) rows = rows.filter(r => String(r.Agency||'').trim().toLowerCase() === filters.agency.toLowerCase());
-    if (filters.from)   rows = rows.filter(r => String(r.EndDate||'')   >= filters.from);
-    if (filters.to)     rows = rows.filter(r => String(r.StartDate||'') <= filters.to);
-    rows.sort((a, b) => String(b.StartDate||'').localeCompare(String(a.StartDate||'')));
+    // ★ 날짜 필터 — ISO 형식으로 정규화 후 비교
+    if (filters.from)   rows = rows.filter(r => _toISO(r.EndDate)   >= filters.from);
+    if (filters.to)     rows = rows.filter(r => _toISO(r.StartDate) <= filters.to);
+    rows.sort((a, b) => _toISO(b.StartDate).localeCompare(_toISO(a.StartDate)));
     return { ok: true, rows: rows };
   } catch (err) {
     return { ok: false, error: err.toString() };
@@ -5285,14 +5297,26 @@ function getDriverSchedule(driver, from, to) {
     const idx = {};
     headers.forEach((h, ci) => idx[h] = ci);
 
+    // ★ DD/MM/YYYY → YYYY-MM-DD 변환 (필터 비교용)
+    const _toISO = (s) => {
+      const str = String(s||'').trim();
+      if (!str) return '';
+      if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0,10);
+      const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (m) return m[3] + '-' + String(m[2]).padStart(2,'0') + '-' + String(m[1]).padStart(2,'0');
+      return str;
+    };
+
     const result = [];
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       const status = String(row[idx.Status]||'').trim();
       if (status === 'cancelled') continue;
-      // 날짜 범위 체크
-      const sd = row[idx.StartDate] instanceof Date ? Utilities.formatDate(row[idx.StartDate], 'Australia/Sydney', 'yyyy-MM-dd') : String(row[idx.StartDate]||'').slice(0,10);
-      const ed = row[idx.EndDate] instanceof Date ? Utilities.formatDate(row[idx.EndDate], 'Australia/Sydney', 'yyyy-MM-dd') : String(row[idx.EndDate]||'').slice(0,10);
+      // 날짜 범위 체크 — ISO 형식으로 변환 후 비교
+      const sdRaw = row[idx.StartDate];
+      const edRaw = row[idx.EndDate];
+      const sd = sdRaw instanceof Date ? Utilities.formatDate(sdRaw, 'Australia/Sydney', 'yyyy-MM-dd') : _toISO(sdRaw);
+      const ed = edRaw instanceof Date ? Utilities.formatDate(edRaw, 'Australia/Sydney', 'yyyy-MM-dd') : _toISO(edRaw);
       if (from && ed && ed < from) continue;
       if (to && sd && sd > to) continue;
 
