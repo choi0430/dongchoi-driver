@@ -3381,6 +3381,141 @@ function _findClosestAgency(input, candidates){
   return best;
 }
 
+// ═════════════════════════════════════════════════════════════════
+// 일정 ↔ DR 매칭 검증
+// 현재 작성 중인 DR 폼 값과 같은 날짜+드라이버의 일정을 비교
+// 다른 항목은 사용자에게 알림 (강한 confirm 다이얼로그)
+// 검증 항목: Rego, Agency, TourCode, Seats, Driver, Guide, Attraction, Pickup, Dropoff
+// ═════════════════════════════════════════════════════════════════
+function _detectScheduleMismatch(){
+  const sch = (typeof _driverScheduleCache !== 'undefined' && _driverScheduleCache) ? _driverScheduleCache : [];
+  if(!sch.length) return null;
+
+  // 현재 DR 날짜
+  const drDate = document.getElementById('dr-date')?.value?.trim() || '';
+  // dr-date는 dd/mm/yyyy 형식 → ISO로 변환
+  let drDateISO = '';
+  const m = drDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m) drDateISO = m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');
+  if(!drDateISO) return null;
+
+  // 현재 활성 시프트의 차량(rego)
+  const shift = activeShifts.find(s => s.id === editingShiftId);
+  const drRego = shift ? String(shift.rego||'').trim().toUpperCase() : '';
+
+  // 같은 날짜 일정 후보 (드라이버 기준)
+  const candidates = sch.filter(s => s.date === drDateISO);
+  if(!candidates.length) return null; // 일정 없음 → 검증 불가
+
+  // 가장 가까운 일정 매칭 — Rego 일치 우선, 없으면 첫 번째
+  let matchedSchedule = candidates.find(s => String(s.slot?.rego||'').trim().toUpperCase() === drRego);
+  if(!matchedSchedule) matchedSchedule = candidates[0];
+  if(!matchedSchedule) return null;
+
+  const slot = matchedSchedule.slot || {};
+  const issues = [];
+
+  // 정규화 헬퍼
+  const _norm = (v) => String(v||'').trim().toUpperCase();
+  const _isAirportPlace = (placeType, place) => {
+    if(placeType === 'airport') return true;
+    const s = String(place||'').trim().toUpperCase();
+    if(/^[A-Z]{2}\d{2,4}\s+\d{1,2}:\d{2}/.test(s)) return true;
+    if(/AIRPORT|Sydney INTL|Sydney DOM/i.test(place||'')) return true;
+    return false;
+  };
+
+  // 1. 차량 (Rego)
+  const expectedRego = _norm(slot.rego);
+  if(expectedRego && drRego && expectedRego !== drRego){
+    issues.push({label:'🚐 차량 (Rego)', expected:slot.rego, actual:drRego});
+  }
+
+  // 2. 여행사 (Agency)
+  const drAgency = document.getElementById('dr-agency')?.value || '';
+  const expectedAgency = String(matchedSchedule.agency||'').trim();
+  if(expectedAgency && _norm(drAgency) !== _norm(expectedAgency)){
+    issues.push({label:'🏢 여행사 (Agency)', expected:expectedAgency, actual:drAgency});
+  }
+
+  // 3. 투어코드 (TourCode)
+  const drTC = document.getElementById('dr-tourcode')?.value || '';
+  const expectedTC = String(matchedSchedule.tourCode||'').trim();
+  if(expectedTC && drTC && _norm(drTC) !== _norm(expectedTC)){
+    issues.push({label:'🎫 투어코드 (Tour Code)', expected:expectedTC, actual:drTC});
+  }
+
+  // 4. 인승 (Seats)
+  const drSeats = document.getElementById('dr-seats')?.value || '';
+  const expectedSeats = String(matchedSchedule.seats||'').trim();
+  if(expectedSeats && drSeats){
+    // "25S" === "25" 또는 "25S" 호환 — 숫자만 추출
+    const expNum = (expectedSeats.match(/\d+/)||[])[0];
+    const actNum = (drSeats.match(/\d+/)||[])[0];
+    if(expNum && actNum && expNum !== actNum){
+      issues.push({label:'💺 인승 (Seats)', expected:expectedSeats, actual:drSeats});
+    }
+  }
+
+  // 5. 드라이버 (Driver) — 보통 본인이지만 혹시 dropdown 잘못 변경했을 경우
+  const _stripPrefix = (s) => String(s||'')
+    .replace(/^[\u2B50\u26A0\uFE0F\u26AA\s]*/, '')
+    .replace(/^[\u{1F3E0}\u{1F3E2}\u{1F3E8}]\s*/u, '')
+    .replace(/^[\u{1F535}\u{1F6AB}]\s*/u, '')
+    .replace(/^[\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}]\s*/u, '')
+    .trim();
+  const expectedDriver = _stripPrefix(slot.driver);
+  const drDriverName = (typeof currentDriver !== 'undefined' && currentDriver?.name) || '';
+  if(expectedDriver && drDriverName && _norm(expectedDriver) !== _norm(drDriverName)){
+    issues.push({label:'👤 드라이버 (Driver)', expected:expectedDriver, actual:drDriverName});
+  }
+
+  // 6. 가이드 (Guide)
+  const drGuide = document.getElementById('dr-guide')?.value || '';
+  const expectedGuide = String(matchedSchedule.guide||'').trim();
+  if(expectedGuide && drGuide && _norm(expectedGuide) !== _norm(drGuide)){
+    issues.push({label:'🗣️ 가이드 (Guide)', expected:expectedGuide, actual:drGuide});
+  }
+
+  // 7. 코스 (Attraction)
+  const drAttraction = document.getElementById('dr-attraction')?.value || '';
+  const expectedAttraction = String(slot.course||'').trim();
+  if(expectedAttraction && drAttraction && _norm(expectedAttraction) !== _norm(drAttraction)){
+    issues.push({label:'🗺️ 코스 (Attraction)', expected:expectedAttraction, actual:drAttraction});
+  }
+
+  // 8. 픽업 (Pickup) — 공항인 경우 'AIRPORT'와 매칭 호환
+  const drPickup = document.getElementById('dr-pickup')?.value || '';
+  const expPickupRaw = String(slot.startPlace||'').trim();
+  const expPickup = _isAirportPlace(slot.startPlaceType, slot.startPlace) ? 'AIRPORT' : expPickupRaw;
+  if(expPickup && drPickup){
+    const expN = _norm(expPickup);
+    const drN = _norm(drPickup);
+    // 공항이면 'AIRPORT' 또는 원본 둘 다 OK
+    const airportOK = _isAirportPlace(slot.startPlaceType, slot.startPlace) &&
+                      (drN === 'AIRPORT' || drN === _norm(expPickupRaw));
+    if(expN !== drN && !airportOK){
+      issues.push({label:'📍 픽업 (Pickup)', expected:expPickup, actual:drPickup});
+    }
+  }
+
+  // 9. 드롭오프 (Dropoff)
+  const drDropoff = document.getElementById('dr-dropoff')?.value || '';
+  const expDropoffRaw = String(slot.endPlace||'').trim();
+  const expDropoff = _isAirportPlace(slot.endPlaceType, slot.endPlace) ? 'AIRPORT' : expDropoffRaw;
+  if(expDropoff && drDropoff){
+    const expN = _norm(expDropoff);
+    const drN = _norm(drDropoff);
+    const airportOK = _isAirportPlace(slot.endPlaceType, slot.endPlace) &&
+                      (drN === 'AIRPORT' || drN === _norm(expDropoffRaw));
+    if(expN !== drN && !airportOK){
+      issues.push({label:'📍 드롭오프 (Dropoff)', expected:expDropoff, actual:drDropoff});
+    }
+  }
+
+  return issues;
+}
+
 // ═══════════════════════════════════════
 // DATA
 // ═══════════════════════════════════════
@@ -5368,6 +5503,24 @@ function submitDailyReport(){
         issues.push(`• 투어코드: "${_tourCode}" — 처음 사용${sug?`\n  (혹시 "${sug}"?)`:''}`);
       }
       const proceed = confirm(`⚠️ 입력 확인\n\n${issues.join('\n\n')}\n\n그대로 저장하시겠습니까?\n\n[취소] 다시 확인  /  [확인] 그대로 저장`);
+      if(!proceed) return;
+    }
+  }
+
+  // ★ 일정 vs 리포트 매칭 검증 — 일정에 등록된 정보와 다르면 경고
+  if(!_skipValidation){
+    const mismatch = _detectScheduleMismatch();
+    if(mismatch && mismatch.length > 0){
+      const issuesText = mismatch.map(m =>
+        `• ${m.label}\n  일정: "${m.expected}"\n  입력: "${m.actual}"`
+      ).join('\n\n');
+      const proceed = confirm(
+        `🚨 일정과 다릅니다 (Mismatch with Schedule)\n\n` +
+        `다음 항목들이 등록된 일정과 다릅니다:\n\n` +
+        `${issuesText}\n\n` +
+        `이대로 저장하면 정산/청구에 영향을 줄 수 있습니다.\n\n` +
+        `[취소] 다시 확인 (권장)  /  [확인] 그대로 저장`
+      );
       if(!proceed) return;
     }
   }
