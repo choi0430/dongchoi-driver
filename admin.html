@@ -1735,6 +1735,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </div>
   <!-- 요약 배지 -->
   <div id="dr-summary" style="padding:6px 14px 0;font-size:11px;color:var(--t3);"></div>
+  <!-- ★ 운행 검증 알림 (미제출/누락/불일치) -->
+  <div id="dr-verify-alert" style="padding:0 14px;"></div>
   <!-- 리포트 목록 -->
   <div id="dr-list" style="padding:8px 14px 80px;"></div>
 </div>
@@ -21540,10 +21542,201 @@ function renderDR(){
   const el = document.getElementById('dr-list');
   if(!el) return;
 
+  // ★ 일정 매칭 헬퍼 — 검증 알림 + DR 카드 배지에 공통 사용
+  const _scheduleSlotsForDate = (isoDate) => {
+    if(!_schCache || !isoDate) return [];
+    const slots = [];
+    _schCache.forEach(t => {
+      let plan = [];
+      try { plan = typeof t.TourPlan === 'string' ? JSON.parse(t.TourPlan||'[]') : (t.TourPlan||[]); } catch(e){}
+      if(!Array.isArray(plan)) return;
+      plan.forEach(d => {
+        if(!d || !d.date) return;
+        const dDate = String(d.date).slice(0,10);
+        if(dDate !== isoDate) return;
+        ['morning','fullday','evening'].forEach(slotKey => {
+          const slot = d.slots && d.slots[slotKey];
+          if(!slot) return;
+          slots.push({
+            tourId: t.TourID, tourCode: t.TourCode, agency: t.Agency,
+            seats: t.Seats, guide: t.Guide, status: t.Status,
+            date: dDate, slotKey, slot
+          });
+        });
+      });
+    });
+    return slots;
+  };
+  const _stripPfx = (s) => String(s||'')
+    .replace(/^[\u2B50\u26A0\uFE0F\u26AA\s]*/, '')
+    .replace(/^[\u{1F3E0}\u{1F3E2}\u{1F3E8}]\s*/u, '')
+    .replace(/^[\u{1F535}\u{1F6AB}]\s*/u, '')
+    .replace(/^[\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}]\s*/u, '')
+    .trim();
+  const _isAirportP = (placeType, place) => {
+    if(placeType === 'airport') return true;
+    const s = String(place||'').trim().toUpperCase();
+    if(/^[A-Z]{2}\d{2,4}\s+\d{1,2}:\d{2}/.test(s)) return true;
+    if(/AIRPORT|Sydney INTL|Sydney DOM/i.test(place||'')) return true;
+    return false;
+  };
+  const _checkDRMismatch = (r) => {
+    const isoDate = parseToISO(r.Date||'');
+    if(!isoDate) return null;
+    const drRego = String(r.Rego||'').trim().toUpperCase();
+    const drDriver = _stripPfx(r.Driver);
+    const candidates = _scheduleSlotsForDate(isoDate);
+    if(!candidates.length) return { noSchedule: true };
+    let matched = candidates.find(c =>
+      String(c.slot.rego||'').trim().toUpperCase() === drRego &&
+      _stripPfx(c.slot.driver) === drDriver
+    );
+    if(!matched) matched = candidates.find(c => String(c.slot.rego||'').trim().toUpperCase() === drRego);
+    if(!matched) matched = candidates.find(c => _stripPfx(c.slot.driver) === drDriver);
+    if(!matched) return { noMatch: true, candidates: candidates.length };
+
+    const issues = [];
+    const _norm = (v) => String(v||'').trim().toUpperCase();
+
+    if(matched.agency && _norm(matched.agency) !== _norm(r.Agency)){
+      issues.push({field:'여행사', expected:matched.agency, actual:r.Agency});
+    }
+    if(matched.tourCode && r.Tour_Code && _norm(matched.tourCode) !== _norm(r.Tour_Code)){
+      issues.push({field:'투어코드', expected:matched.tourCode, actual:r.Tour_Code});
+    }
+    if(matched.seats && r.Seats){
+      const expN = (String(matched.seats).match(/\d+/)||[])[0];
+      const actN = (String(r.Seats).match(/\d+/)||[])[0];
+      if(expN && actN && expN !== actN){
+        issues.push({field:'인승', expected:matched.seats, actual:r.Seats});
+      }
+    }
+    if(matched.guide && r.Guide && _norm(matched.guide) !== _norm(r.Guide)){
+      issues.push({field:'가이드', expected:matched.guide, actual:r.Guide});
+    }
+    if(matched.slot.course && r.Attraction && _norm(matched.slot.course) !== _norm(r.Attraction)){
+      issues.push({field:'코스', expected:matched.slot.course, actual:r.Attraction});
+    }
+    if(matched.slot.startPlace && r.Pickup){
+      const exp = _isAirportP(matched.slot.startPlaceType, matched.slot.startPlace) ? 'AIRPORT' : matched.slot.startPlace;
+      const expN = _norm(exp);
+      const drN = _norm(r.Pickup);
+      const airportOK = _isAirportP(matched.slot.startPlaceType, matched.slot.startPlace) &&
+                        (drN === 'AIRPORT' || drN === _norm(matched.slot.startPlace));
+      if(expN !== drN && !airportOK){
+        issues.push({field:'픽업', expected:exp, actual:r.Pickup});
+      }
+    }
+    if(matched.slot.endPlace && r.Dropoff){
+      const exp = _isAirportP(matched.slot.endPlaceType, matched.slot.endPlace) ? 'AIRPORT' : matched.slot.endPlace;
+      const expN = _norm(exp);
+      const drN = _norm(r.Dropoff);
+      const airportOK = _isAirportP(matched.slot.endPlaceType, matched.slot.endPlace) &&
+                        (drN === 'AIRPORT' || drN === _norm(matched.slot.endPlace));
+      if(expN !== drN && !airportOK){
+        issues.push({field:'드롭', expected:exp, actual:r.Dropoff});
+      }
+    }
+    return { matched, issues };
+  };
+
   if(filtered.length===0){
     el.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">리포트가 없습니다</div>';
     return;
   }
+
+  // ★ 운행 검증 알림 — 일정 있는데 DR 없는 케이스
+  //   _schCache에서 active 상태 일정 슬롯들을 추출, 각 슬롯이 DR로 매칭되는지 확인
+  //   미매칭이면 "DR 누락" 알림으로 표시
+  const _renderVerifyAlert = () => {
+    const alertEl = document.getElementById('dr-verify-alert');
+    if(!alertEl) return;
+    if(!_schCache || !_schCache.length){ alertEl.innerHTML = ''; return; }
+
+    // 오늘부터 30일 전까지 (너무 오래된 것은 표시 안 함)
+    const today = new Date();
+    const thirtyAgo = new Date(today); thirtyAgo.setDate(today.getDate() - 30);
+    const thirtyAgoISO = thirtyAgo.toISOString().slice(0,10);
+    const todayISO = today.toISOString().slice(0,10);
+
+    // 일정의 모든 슬롯 평탄화
+    const allScheduleSlots = [];
+    _schCache.forEach(t => {
+      const status = String(t.Status||'').trim();
+      if(status === 'cancelled') return;
+      let plan = [];
+      try { plan = typeof t.TourPlan === 'string' ? JSON.parse(t.TourPlan||'[]') : (t.TourPlan||[]); } catch(e){ return; }
+      if(!Array.isArray(plan)) return;
+      plan.forEach(d => {
+        if(!d || !d.date) return;
+        const dDate = String(d.date).slice(0,10);
+        if(dDate < thirtyAgoISO || dDate > todayISO) return; // 범위 외
+        ['morning','fullday','evening'].forEach(slotKey => {
+          const slot = d.slots && d.slots[slotKey];
+          if(!slot) return;
+          // 자체운행은 검증 제외 (mode === 'private')
+          if(slot.mode === 'private') return;
+          const slotDriver = _stripPfx(slot.driver);
+          const slotRego = String(slot.rego||'').trim().toUpperCase();
+          if(!slotDriver && !slotRego) return; // 미배정 슬롯 제외
+          allScheduleSlots.push({
+            tourId: t.TourID, tourCode: t.TourCode, agency: t.Agency,
+            date: dDate, slotKey, driver: slotDriver, rego: slotRego, slot
+          });
+        });
+      });
+    });
+
+    if(!allScheduleSlots.length){ alertEl.innerHTML = ''; return; }
+
+    // 각 슬롯이 DR에 매칭되는지 확인
+    const drList = _drCache || [];
+    const missing = [];
+    allScheduleSlots.forEach(s => {
+      const matched = drList.find(r => {
+        const rDate = parseToISO(r.Date||'');
+        if(rDate !== s.date) return false;
+        const rRego = String(r.Rego||'').trim().toUpperCase();
+        const rDriver = _stripPfx(r.Driver);
+        // 차량 또는 드라이버 일치
+        return (s.rego && rRego === s.rego) || (s.driver && rDriver === s.driver);
+      });
+      if(!matched) missing.push(s);
+    });
+
+    if(!missing.length){ alertEl.innerHTML = ''; return; }
+
+    // 날짜 내림차순 정렬
+    missing.sort((a,b) => b.date.localeCompare(a.date));
+    // 중복 제거 (같은 일정+날짜+드라이버)
+    const seen = new Set();
+    const uniqMissing = missing.filter(m => {
+      const key = m.tourId + '|' + m.date + '|' + m.slotKey + '|' + m.driver;
+      if(seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const showLimit = 5;
+    const items = uniqMissing.slice(0, showLimit).map(m =>
+      `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:white;border-radius:6px;margin-bottom:4px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:11px;font-weight:700;color:var(--t1);">${escH(fmtDate(m.date))} · ${escH(m.tourCode||m.tourId)} · ${escH(m.agency||'')}</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:1px;">🚐 ${escH(m.rego||'-')} · 👤 ${escH(m.driver||'-')} · ${m.slotKey}</div>
+        </div>
+        <div style="font-size:10px;color:#dc2626;font-weight:700;flex-shrink:0;">DR 미제출</div>
+      </div>`
+    ).join('');
+    const more = uniqMissing.length > showLimit ? `<div style="text-align:center;font-size:10px;color:#dc2626;margin-top:4px;">... 외 ${uniqMissing.length - showLimit}건 더</div>` : '';
+
+    alertEl.innerHTML = `
+      <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:10px 12px;margin:6px 0;">
+        <div style="font-size:12px;font-weight:800;color:#dc2626;margin-bottom:6px;">🚨 DR 미제출 ${uniqMissing.length}건 (최근 30일)</div>
+        ${items}
+        ${more}
+      </div>`;
+  };
+  _renderVerifyAlert();
 
   el.innerHTML = filtered.map(r=>{
     const dr   = parseFloat(r.DR_Cost||0);
@@ -21604,6 +21797,26 @@ function renderDR(){
     return `<div style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
+
+          <!-- ★ 일정 매칭 검증 배지 -->
+          ${(() => {
+            const m = _checkDRMismatch(r);
+            if(!m) return '';
+            if(m.noSchedule) return ''; // 일정 자체가 없는 날 — 배지 안 띄움 (자체운행 등)
+            if(m.noMatch){
+              return `<div style="background:#fef3c7;border:1.5px solid #f59e0b;border-radius:8px;padding:6px 10px;margin-bottom:6px;font-size:11px;color:#92400e;font-weight:700;">⚠️ 일정 매칭 없음 (해당 날짜 일정 ${m.candidates}건 있음 — 차량/드라이버 다름)</div>`;
+            }
+            if(m.issues && m.issues.length > 0){
+              const issuesText = m.issues.map(i =>
+                `<div style="font-size:10px;color:#991b1b;font-weight:600;line-height:1.4;">• <b>${i.field}</b>: 일정 "${escH(i.expected)}" ≠ 입력 "${escH(i.actual||'')}"</div>`
+              ).join('');
+              return `<div style="background:#fee2e2;border:1.5px solid #ef4444;border-radius:8px;padding:6px 10px;margin-bottom:6px;">
+                <div style="font-size:11px;color:#dc2626;font-weight:800;margin-bottom:3px;">🚨 일정과 ${m.issues.length}건 불일치</div>
+                ${issuesText}
+              </div>`;
+            }
+            return ''; // 매칭됨, 불일치 없음 → 배지 없음 (정상)
+          })()}
 
           <!-- 날짜 · 드라이버 · 차량 + SUB 배지 + NEW 배지 -->
           <div style="font-size:12px;font-weight:800;color:var(--t1);">${escH(fmtDate(r.Date))}${newBadgeHtml('ndr',String(rowIdx))}
