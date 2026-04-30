@@ -8834,16 +8834,29 @@ function applySchedulePrefill(){
   }
 
   // 픽업 / 드롭
+  // ★ 공항인 경우 (startPlaceType='airport') 항공편/시간 대신 AIRPORT로 표시
+  //   원본 일정에는 "JQ403 09:40" 등이 있지만 드라이버 리포트엔 단순화
+  const _isAirportPlace = (placeType, place) => {
+    if(placeType === 'airport') return true;
+    // type이 없는 경우 휴리스틱: 공항코드+시간 패턴
+    const s = String(place||'').trim().toUpperCase();
+    if(/^[A-Z]{2}\d{2,4}\s+\d{1,2}:\d{2}/.test(s)) return true; // QF123 09:30
+    if(/AIRPORT|Sydney INTL|Sydney DOM/i.test(place||'')) return true;
+    return false;
+  };
+
   const pickup = document.getElementById('dr-pickup');
   if(pickup && slot.startPlace){
-    pickup.value = slot.startPlace;
-    if(typeof sddPick === 'function') try{ sddPick('pickup', slot.startPlace); }catch(e){}
+    const pickupVal = _isAirportPlace(slot.startPlaceType, slot.startPlace) ? 'AIRPORT' : slot.startPlace;
+    pickup.value = pickupVal;
+    if(typeof sddPick === 'function') try{ sddPick('pickup', pickupVal); }catch(e){}
     filled.push('픽업');
   }
   const dropoff = document.getElementById('dr-dropoff');
   if(dropoff && slot.endPlace){
-    dropoff.value = slot.endPlace;
-    if(typeof sddPick === 'function') try{ sddPick('dropoff', slot.endPlace); }catch(e){}
+    const dropoffVal = _isAirportPlace(slot.endPlaceType, slot.endPlace) ? 'AIRPORT' : slot.endPlace;
+    dropoff.value = dropoffVal;
+    if(typeof sddPick === 'function') try{ sddPick('dropoff', dropoffVal); }catch(e){}
     filled.push('드롭');
   }
 
