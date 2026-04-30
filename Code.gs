@@ -5346,8 +5346,17 @@ function getDriverSchedule(driver, from, to) {
         ['morning','fullday','evening'].forEach(slotKey => {
           const slot = d.slots && d.slots[slotKey];
           if (!slot) return;
-          // 드라이버 매칭
-          if (String(slot.driver||'').trim() !== String(driver).trim()) return;
+          // ★ 드라이버 매칭 — prefix(🏠/🏢/⚠️/🚫 등) 제거 후 비교
+          //   어드민 dropdown 라벨이 잘못 저장된 경우 대비
+          const _stripPrefix = (s) => String(s||'')
+            .replace(/^[\u2B50\u26A0\uFE0F\u26AA\s]*/, '')      // ⭐⚠️⚪
+            .replace(/^[\u{1F3E0}\u{1F3E2}\u{1F3E8}]\s*/u, '')  // 🏠🏢🏨
+            .replace(/^[\u{1F535}\u{1F6AB}]\s*/u, '')           // 🔵🚫
+            .replace(/^[\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}]\s*/u, '') // 🚐🚌🚙🚛🚜
+            .trim();
+          const slotDriver = _stripPrefix(slot.driver);
+          const targetDriver = _stripPrefix(driver);
+          if (slotDriver !== targetDriver) return;
           result.push({
             tourId: tourId,
             tourCode: tourCode,
