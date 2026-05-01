@@ -285,6 +285,9 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 /* PAY PAGE */
 .pay-week-card{background:white;border-radius:12px;margin:0 12px 10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);border:1.5px solid var(--border);cursor:pointer;transition:box-shadow .15s;}
 .pay-week-card:active{box-shadow:0 0 0 2px var(--accent);}
+/* SUB만 있는 주 — 보라색 톤 (자사 미지급 추적과 시각적으로 구분) */
+.pay-week-card.sub-only{background:linear-gradient(135deg,#faf5ff 0%,#f5f3ff 100%);border-color:#c4b5fd;}
+.pay-week-card.sub-only .pay-week-total{color:#7c3aed;}
 .pay-week-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
 .pay-week-label{font-size:12px;font-weight:700;color:var(--muted);}
 .pay-week-total{font-size:20px;font-weight:800;color:var(--accent);}
@@ -9601,22 +9604,38 @@ const PeriodNav = (function(){
   return { attach, setMode, setQuick, nav };
 })();
 // ── SUB 차량 판별 헬퍼 ──
+// 반환값: SUB 차량이면 차주명, 자사 차량이면 빈 문자열
+// 판정 우선순위: SubOwner (있으면 SUB) → Owner (자사 외이면 SUB) — getPayerForRego와 일치
+// ★ Rego 정규화 (trim + upper + 공백제거) — 마스터/DR 표기 차이에 강건
 function getSubOwnerForRego(rego){
   if(!rego) return '';
-  const v = (MASTER.vehicles||[]).find(x=>x.Rego===rego.trim());
+  const _norm = (s) => String(s||'').trim().toUpperCase().replace(/\s+/g, '');
+  const target = _norm(rego);
+  if(!target) return '';
+  const v = (MASTER.vehicles||[]).find(x=>_norm(x.Rego)===target);
   if(!v) return '';
+  // 자사 회사명 매칭 헬퍼 (DC_OWNER_NAMES 변형 + dong choi 패턴)
+  const _isDC = (name) => {
+    const s = String(name||'').trim();
+    if(!s) return true; // 빈 값 = 자사
+    if(typeof DC_OWNER_NAMES !== 'undefined' && DC_OWNER_NAMES.includes(s)) return true;
+    const normalized = s.toUpperCase().replace(/\s+/g, ' ').trim();
+    const dcVariants = (DC_OWNER_NAMES||[]).map(n => String(n||'').toUpperCase().replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if(dcVariants.includes(normalized)) return true;
+    if(/^dong\s*choi(\s|$)/i.test(s)) return true;
+    return false;
+  };
+  // SubOwner 우선 — 있으면 SUB 차량
   const subOwner = (v.SubOwner||'').trim();
-  if(!subOwner) return '';
-  // ★ SubOwner가 자사 회사명이면 SUB가 아님 (자사 차량으로 처리)
-  //   DONG CHOI / DONG CHOI PTY LTD 등 다양하게 입력 가능
-  if(typeof DC_OWNER_NAMES !== 'undefined' && DC_OWNER_NAMES.includes(subOwner)) return '';
-  // 대소문자/공백 무시 매칭
-  const normalized = subOwner.toUpperCase().replace(/\s+/g, ' ').trim();
-  const dcVariants = (DC_OWNER_NAMES||[]).map(n => String(n||'').toUpperCase().replace(/\s+/g, ' ').trim()).filter(Boolean);
-  if(dcVariants.includes(normalized)) return '';
-  // /dong\s*choi/ 패턴도 자사로 인식
-  if(/^dong\s*choi(\s|$)/i.test(subOwner)) return '';
-  return subOwner;
+  if(subOwner){
+    if(_isDC(subOwner)) return ''; // 자사 회사명이면 자사로 처리
+    return subOwner;
+  }
+  // SubOwner 없으면 Owner fallback 검사 (자사 외이면 SUB 차량)
+  const owner = (v.Owner||'').trim();
+  if(!owner) return ''; // Owner 비어있어도 자사로 처리
+  if(_isDC(owner)) return '';
+  return owner;
 }
 
 function getWeekKey(dateStr){
@@ -9838,7 +9857,10 @@ function calcDRCostFromRow(r) {
 const DC_OWNER_NAMES = ['DONG CHOI PTY LTD', 'DONG CHOI', '동초이', '', null];
 function getPayerForRego(rego){
   if(!rego) return 'DONG CHOI PTY LTD';
-  const veh = (typeof MASTER !== 'undefined' && MASTER.vehicles) ? MASTER.vehicles.find(v => v.Rego === rego) : null;
+  const _norm = (s) => String(s||'').trim().toUpperCase().replace(/\s+/g, '');
+  const target = _norm(rego);
+  if(!target) return 'DONG CHOI PTY LTD';
+  const veh = (typeof MASTER !== 'undefined' && MASTER.vehicles) ? MASTER.vehicles.find(v => _norm(v.Rego) === target) : null;
   if(!veh) return 'DONG CHOI PTY LTD';
   // SubOwner 우선
   const subOwner = (veh.SubOwner||'').trim();
@@ -10060,9 +10082,30 @@ async function renderPay(){
         </div>` : '';
 
     const card = document.createElement('div');
-    card.className = 'pay-week-card';
+    // ★ SUB만 있고 자사 운행 0인 주 → 보라색 카드 톤 (자사 미지급 추적과 시각적 구분)
+    const isSubOnly = ownDRTotal === 0 && subDRTotal > 0;
+    card.className = 'pay-week-card' + (isSubOnly ? ' sub-only' : '');
     const subGroupArr = Object.values(subGroups).sort((a,b)=>b.total-a.total);
     const subBadgesHtml = subGroupArr.map(sg=>`<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">🚐 ${sg.name} $${sg.total.toLocaleString()} (${sg.count}건)</span>`).join(' ');
+
+    // ★ 상단 큰 숫자 = 총 받을 돈 (자사 + SUB) — 일한 총 가치를 한눈에
+    //   바로 아래 작은 글씨로 분해 표시 (자사 + SUB 또는 SUB만)
+    //   미지급 배지는 자사 추적용 (SUB는 차주가 직접 지급)
+    let breakdownHtml = '';
+    if(ownDRTotal > 0 && subDRTotal > 0){
+      breakdownHtml = `<div style="font-size:10px;color:var(--muted);margin-top:1px;">자사 $${ownDRTotal.toLocaleString()} + SUB $${subDRTotal.toLocaleString()}</div>`;
+    } else if(isSubOnly){
+      breakdownHtml = `<div style="font-size:10px;color:#7c3aed;font-weight:700;margin-top:1px;">🚐 SUB만 — 차주가 지급</div>`;
+    }
+    let badgeHtml = '';
+    if(isSubOnly){
+      // SUB only — 자사 미지급 개념 없음, 차주 지급 안내만
+      badgeHtml = `<span style="font-size:11px;font-weight:700;color:#7c3aed;">차주에게 지급 받기</span>`;
+    } else if(isPaid){
+      badgeHtml = `<span style="font-size:11px;font-weight:700;color:#16a34a;">✅ 자사 지급 완료</span>`;
+    } else {
+      badgeHtml = `<span style="font-size:11px;font-weight:700;color:#ea580c;">⏳ 자사 미지급 $${Math.round(balance)}</span>`;
+    }
 
     card.innerHTML = `
       <div class="pay-week-top">
@@ -10071,18 +10114,17 @@ async function renderPay(){
           <div style="font-size:11px;color:var(--muted);margin-top:2px;">${days} days worked (${days}일 근무) · ${trips} trips (${trips}건 운행)</div>
         </div>
         <div style="text-align:right;">
-          <div class="pay-week-total">$${netPay.toLocaleString()}</div>
-          <div style="font-size:11px;font-weight:700;margin-top:2px;color:${isPaid?'#16a34a':'#ea580c'};">
-            ${isPaid?'✅ 자사 지급 완료':'⏳ 자사 미지급 $'+Math.round(balance)}
-          </div>
+          <div class="pay-week-total">$${drTotal.toLocaleString()}</div>
+          ${breakdownHtml}
+          <div style="margin-top:2px;">${badgeHtml}</div>
         </div>
       </div>
       ${subDRTotal > 0 ? `<div style="background:var(--surface2);border-radius:10px;padding:10px 12px;margin-bottom:8px;">
         <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">💡 회사별 받을 돈 (Pay Source by Company)</div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;padding:6px 8px;background:rgba(96,165,250,.08);border-radius:6px;">
+        ${ownDRTotal > 0 ? `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;padding:6px 8px;background:rgba(96,165,250,.08);border-radius:6px;">
           <span style="font-size:11px;font-weight:700;color:var(--accent);">🏢 자사(DONG CHOI)에서 받을 돈</span>
           <span style="font-size:14px;font-weight:800;color:var(--accent);">$${ownDRTotal.toLocaleString()}</span>
-        </div>
+        </div>` : ''}
         <div style="padding:6px 8px;background:rgba(124,58,237,.08);border-radius:6px;">
           <div style="font-size:11px;font-weight:700;color:#7c3aed;margin-bottom:4px;">🚐 차주(SUB)에서 받을 돈 — 차주가 직접 지급</div>
           <div style="display:flex;flex-wrap:wrap;gap:4px;">${subBadgesHtml}</div>
@@ -10091,12 +10133,12 @@ async function renderPay(){
             <span style="font-size:13px;font-weight:800;color:#7c3aed;">$${subDRTotal.toLocaleString()}</span>
           </div>
         </div>
-        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;">
+        ${ownDRTotal > 0 ? `<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;">
           <span style="font-size:10px;color:var(--muted);">총 수당 합계 (Total)</span>
           <span style="font-size:13px;font-weight:800;color:var(--text);">$${drTotal.toLocaleString()}</span>
-        </div>
+        </div>` : ''}
       </div>` : ''}
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:${items.length?'10px':'0'};">
+      ${isSubOnly ? '' : `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:${items.length?'10px':'0'};">
         <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center;">
           <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">${subDRTotal>0?'자사 발생':'Earned (발생 수당)'}</div>
           <div style="font-size:14px;font-weight:800;color:#16a34a;">$${ownDRTotal.toLocaleString()}</div>
@@ -10109,7 +10151,7 @@ async function renderPay(){
           <div style="font-size:10px;color:var(--muted);margin-bottom:2px;">${subDRTotal>0?'자사 잔액':'Balance (잔액)'}</div>
           <div style="font-size:14px;font-weight:800;color:${isPaid?'var(--muted)':'#ea580c'};">$${Math.max(0,Math.round(balance)).toLocaleString()}</div>
         </div>
-      </div>
+      </div>`}
       ${items.length?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">${itemBadges}</div>`:''}
       ${wageRows}
       <div style="text-align:center;margin-top:8px;">
