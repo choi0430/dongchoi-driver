@@ -22197,7 +22197,21 @@ async function renderWage(){
   // ── SUB / 자사 차량 분리 ──
   const _vehs = DB.V||[];
   // ★ Rego는 양쪽 모두 trim — v.Rego에 trailing space 있으면 매칭 실패
-  const _subMapW = {}; _vehs.forEach(v=>{ const so=(v.SubOwner||'').trim(); if(so) _subMapW[(v.Rego||'').trim()]=so; });
+  //   ★ SubOwner가 자사 회사명이면 SUB가 아님 (자사 차량으로 처리)
+  const _isDCOwner = (name) => {
+    const s = String(name||'').trim();
+    if(!s) return true;
+    if(typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(s)) return true;
+    const norm = s.toUpperCase().replace(/\s+/g, ' ').trim();
+    const variants = (DC_OWNERS||[]).map(n => String(n||'').toUpperCase().replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if(variants.includes(norm)) return true;
+    if(/^dong\s*choi(\s|$)/i.test(s)) return true;
+    return false;
+  };
+  const _subMapW = {}; _vehs.forEach(v=>{
+    const so=(v.SubOwner||'').trim();
+    if(so && !_isDCOwner(so)) _subMapW[(v.Rego||'').trim()]=so;
+  });
   const ownReports = weekReports.filter(r=>!_subMapW[(r.Rego||'').trim()]);
   const subReports = weekReports.filter(r=>!!_subMapW[(r.Rego||'').trim()]);
   const subGroups = {};
@@ -22320,13 +22334,27 @@ function getDriverPayerForReport(r){
   if(!r || !r.Rego) return dcDefault;
   const veh = (typeof DB !== 'undefined' && DB.V) ? DB.V.find(v => v.Rego === r.Rego) : null;
   if(!veh) return dcDefault;
+  // ★ 자사 회사명 매칭 헬퍼 — 다양한 표기 정규화 (대소문자/공백 무시)
+  const _isDC = (name) => {
+    const s = String(name||'').trim();
+    if(!s) return true; // 빈 값 = 자사
+    if(typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(s)) return true;
+    const norm = s.toUpperCase().replace(/\s+/g, ' ').trim();
+    const variants = (DC_OWNERS||[]).map(n => String(n||'').toUpperCase().replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if(variants.includes(norm)) return true;
+    if(/^dong\s*choi(\s|$)/i.test(s)) return true;
+    return false;
+  };
   // SubOwner 우선 — SUB 차량은 SubOwner에 차주 명시
   const subOwner = (veh.SubOwner||'').trim();
-  if(subOwner) return subOwner;
+  if(subOwner){
+    if(_isDC(subOwner)) return dcDefault; // 자사 차량 (SubOwner에 자사명 입력된 경우)
+    return subOwner;
+  }
   // SubOwner 없으면 Owner 검사 (자사 외이면 SUB 차량)
   const owner = (veh.Owner||'').trim();
   if(!owner) return dcDefault;
-  if(typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(owner)) return dcDefault;
+  if(_isDC(owner)) return dcDefault;
   return owner;
 }
 
