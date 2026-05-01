@@ -6811,6 +6811,25 @@ async function saveScheduleData(){
   const showErr = (msg) => { if(errEl){ errEl.textContent = msg; errEl.style.display = 'block'; } };
   errEl && (errEl.style.display = 'none');
 
+  // ★ 저장 전 cleanup — slot.rego/driver에 emoji prefix 남아있으면 제거
+  //   (dropdown 선택 후 input에 prefix 라벨이 잔존하는 경우 방어)
+  const _stripPfxSave = (s) => String(s||'')
+    .replace(/^[\u2B50\u26A0\uFE0F\u26AA\s]*/, '')
+    .replace(/^[\u{1F3E0}\u{1F3E2}\u{1F3E8}]\s*/u, '')
+    .replace(/^[\u{1F535}\u{1F6AB}]\s*/u, '')
+    .replace(/^[\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}]\s*/u, '')
+    .trim();
+  _schDays.forEach(d => {
+    ['morning','fullday','evening'].forEach(k => {
+      const s = d.slots && d.slots[k];
+      if(!s) return;
+      if(s.rego) s.rego = _stripPfxSave(s.rego);
+      if(s.driver) s.driver = _stripPfxSave(s.driver);
+      if(s.subDriver) s.subDriver = _stripPfxSave(s.subDriver);
+      if(s.subVehicleNote) s.subVehicleNote = _stripPfxSave(s.subVehicleNote);
+    });
+  });
+
   const agency = (_schCsels.agency?.getValue() || _schCsels.agency?.input?.value || '').trim();
   const guide = (_schCsels.guide?.getValue() || '').trim();
   // 자유 입력으로 들어간 값 (선택 안 한 경우)도 보존
@@ -7994,8 +8013,17 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   }
 
   // 자사 모드 — Rego만 (capacity 제거 — 너무 김)
-  const veh = (DB.V||[]).find(v => v.Rego === slot.rego);
-  const vehLabel = slot.rego || '';
+  // ★ 시트에 잘못 저장된 emoji prefix(🏠/🏢/⚠️/🚫 등) 제거 — 표시 시 정리
+  const _stripDispPrefix = (s) => String(s||'')
+    .replace(/^[\u2B50\u26A0\uFE0F\u26AA\s]*/, '')
+    .replace(/^[\u{1F3E0}\u{1F3E2}\u{1F3E8}]\s*/u, '')
+    .replace(/^[\u{1F535}\u{1F6AB}]\s*/u, '')
+    .replace(/^[\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}]\s*/u, '')
+    .trim();
+  const cleanRego = _stripDispPrefix(slot.rego);
+  const cleanDriver = _stripDispPrefix(slot.driver);
+  const veh = (DB.V||[]).find(v => v.Rego === cleanRego);
+  const vehLabel = cleanRego || '';
   const carExtras = [];
   if(day.trailer) carExtras.push('🚐');
   // DR에서 실제 OT 가져오기
@@ -8188,7 +8216,7 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     startPlace: dcStartPlace,
     startPlaceFull: dcStartPlaceFull,
     car: carLine,
-    driver: slot.driver || '',
+    driver: cleanDriver,
     course: slot.course || '',
     endTime: dcEndTime,
     endPlace: dcEndPlace,
