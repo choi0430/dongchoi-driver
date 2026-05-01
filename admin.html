@@ -8852,11 +8852,17 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
       }
     });
 
-    // 빈 placeholder 트랙 제거 (items.length === 0)
-    const usedTracks = tracks.filter(t => t.items.length > 0);
+    // ★ 트랙 인덱스 보존 — placeholder 제거 시 번호가 압축되어 인접 주와 안 맞아짐
+    //   예: tracks[0]=A, tracks[1]=빈, tracks[2]=B → filter 시 [A,B]로 인덱스 0,1로 됨
+    //   해결: 끝부터만 빈 placeholder 잘라내고, 중간 빈 placeholder는 유지하여 트랙 번호 일관성 보장
+    const usedTracks = tracks.slice();
+    while(usedTracks.length > 0 && usedTracks[usedTracks.length-1].items.length === 0){
+      usedTracks.pop();
+    }
+    const hasAnyContent = usedTracks.some(t => t.items.length > 0);
 
     // 4) splitGroups에 트랙별 데이터 등록
-    if(usedTracks.length === 0){
+    if(!hasAnyContent){
       splitGroups[grpKey] = {};
     } else if(usedTracks.length === 1){
       // 트랙 1개 — 접미사 없음
@@ -8866,9 +8872,9 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
         splitGroups[grpKey][date][slotKey] = data;
       });
     } else {
-      // 트랙 N개 — 트랙 번호 접미사
+      // 트랙 N개 — 트랙 번호 접미사 (빈 placeholder도 출력해 인접 주 트랙 번호 일치)
       console.log(`[Schedule] "${grpKey}" 트랙 ${usedTracks.length}개:`,
-        usedTracks.map((t, ti) => `트랙${ti+1}: ${t.items.map(i=>i.date+'/'+i.data.tour.TourID).join(',')}`).join(' | '));
+        usedTracks.map((t, ti) => `트랙${ti+1}: ${t.items.map(i=>i.date+'/'+i.data.tour.TourID).join(',')||'(빈)'}`).join(' | '));
       usedTracks.forEach((track, ti) => {
         // 통합 모드는 "트랙 N"만 표시 (앞에 그룹명 없음), 다른 모드는 "그룹명 (트랙 N)"
         const newKey = (grpKey === '__all__') ? '트랙 ' + (ti+1) : (grpKey + ' (트랙 ' + (ti+1) + ')');
