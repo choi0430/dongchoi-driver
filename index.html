@@ -9604,7 +9604,19 @@ const PeriodNav = (function(){
 function getSubOwnerForRego(rego){
   if(!rego) return '';
   const v = (MASTER.vehicles||[]).find(x=>x.Rego===rego.trim());
-  return v ? (v.SubOwner||'').trim() : '';
+  if(!v) return '';
+  const subOwner = (v.SubOwner||'').trim();
+  if(!subOwner) return '';
+  // ★ SubOwner가 자사 회사명이면 SUB가 아님 (자사 차량으로 처리)
+  //   DONG CHOI / DONG CHOI PTY LTD 등 다양하게 입력 가능
+  if(typeof DC_OWNER_NAMES !== 'undefined' && DC_OWNER_NAMES.includes(subOwner)) return '';
+  // 대소문자/공백 무시 매칭
+  const normalized = subOwner.toUpperCase().replace(/\s+/g, ' ').trim();
+  const dcVariants = (DC_OWNER_NAMES||[]).map(n => String(n||'').toUpperCase().replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if(dcVariants.includes(normalized)) return '';
+  // /dong\s*choi/ 패턴도 자사로 인식
+  if(/^dong\s*choi(\s|$)/i.test(subOwner)) return '';
+  return subOwner;
 }
 
 function getWeekKey(dateStr){
