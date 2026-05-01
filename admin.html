@@ -1947,9 +1947,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 전체 보기 뷰 -->
   <div id="wage-view-all" style="display:none;padding:10px 14px 0;">
     <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;">
-      <select id="wage-all-week-sel" class="profit-sel" style="flex:1;" onchange="renderWageAll()">
+      <button onclick="_wageAllWeekStep(-1)" title="이전 주" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;color:var(--t2);flex-shrink:0;">◀</button>
+      <select id="wage-all-week-sel" class="profit-sel" style="flex:1;" onchange="renderWageAllDrivers()">
         <option value="">전체 기간</option>
       </select>
+      <button onclick="_wageAllWeekStep(1)" title="다음 주" style="background:var(--sf2);border:1px solid var(--b1);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;color:var(--t2);flex-shrink:0;">▶</button>
     </div>
     <div id="wage-all-summary"></div>
     <div id="wage-all-list"></div>
@@ -4645,6 +4647,9 @@ async function loadSchedule(){
     const json = await res.json();
     if(!json.ok) throw new Error(json.error || '조회 실패');
     _schCache = json.rows || [];
+    // ★ 일정 데이터 갱신 시 글로벌 트랙 맵 무효화 — 새 TourCode 추가/이동 반영
+    _schGroupTrackMap = {};
+    _schGroupTrackOccupancy = {};
     // DR 인덱스도 갱신
     await _schEnsureDRCache();
     _schBuildDRMatchIndex();
@@ -7385,6 +7390,14 @@ let _schTourColorIdx = 0;
 const _schAgencyColorMap = {};
 let _schAgencyColorIdx = 0;
 const _schTourColors = ['#dbeafe','#fef3c7','#dcfce7','#fee2e2','#e0e7ff','#fce7f3','#cffafe','#fed7aa','#d9f99d','#f3e8ff'];
+// ★ 글로벌 트랙 맵 — TourCode가 어느 주에서 보든 항상 같은 트랙 번호 유지
+//   key: `${groupBy}|${grpKey}|${tcKey}` → trackIdx
+//   한 번 부여된 트랙은 페이지 새로고침/_schCache 갱신 전까지 유지 (색상 맵과 동일 패턴)
+let _schGroupTrackMap = {};
+// ★ 트랙 점유 상태 — 같은 그룹 내에서 어느 트랙이 어디까지 차지했는지
+//   key: `${groupBy}|${grpKey}|${trackIdx}` → 해당 트랙이 차지한 (date, slot) 범위 배열
+//   값: [{firstSlotKey, lastSlotKey, tcKey}, ...] — 트랙별 배정 이력
+let _schGroupTrackOccupancy = {};
 // ★ 캘린더 표시 필터 — 어떤 일정을 보여줄지
 let _schFilters = (() => {
   try {
@@ -8707,189 +8720,171 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
     });
   });
 
-  // ★ 같은 그룹 안에서 다른 TourID들을 자동 트랙 분할
-  // 정책: 공간 활용 우선 — 매주 빈 자리에 일정을 채워 트랙 수 최소화
-  //       같은 TourCode는 한 트랙 유지 (회차가 여러 개여도 같은 줄에 표시)
-  //       서로 다른 TourCode는 시간이 안 겹치면 같은 트랙 재사용 (그리디 압축)
-  //       ★ 인접 주에서 같은 TourCode가 사용한 트랙 번호 우선 매칭 (연결 끊김 방지)
-  // 결과: 일정이 많을수록 트랙 수 최소화. 같은 TourCode 연속성 가능한 한 유지.
+  // ★ 같은 그룹 안에서 다른 TourID들을 자동 트랙 분할 (글로벌 안정 트랙)
+  // 정책: 같은 TourCode는 어느 주를 보든 항상 같은 트랙 번호 유지 (cross-week 안정성)
+  //       전체 일정 데이터를 한 번 스캔해 글로벌 트랙 맵을 구축하고 캐시
+  //       서로 다른 TourCode는 시간이 안 겹치면 같은 트랙에 그리디 패킹
+  //       페이지 새로고침 또는 _schCache 갱신 전까지 트랙 번호 유지 (색상 맵과 동일 패턴)
+  // 결과: 주 단위 이동 시에도 같은 TourCode는 같은 트랙 → 시각적 연속성 보장
 
-  // ★ 인접 주의 TourCode-트랙 매핑 미리 계산 (현재 주 + 이전 주 + 다음 주 검사)
-  //    같은 TourCode가 인접 주에 있다면 그 트랙 번호 선호
-  function _getNeighborWeekTourCodeTrack(grpKey){
-    if(_schCalMode !== 'week') return {}; // 월간 모드는 인접 주 개념 없음
-    // 이전 주, 다음 주 날짜 범위 계산
-    const prevStart = new Date(startDt); prevStart.setDate(prevStart.getDate() - 7);
-    const prevEnd = new Date(startDt); prevEnd.setDate(prevEnd.getDate() - 1);
-    const nextStart = new Date(endDt); nextStart.setDate(nextStart.getDate() + 1);
-    const nextEnd = new Date(endDt); nextEnd.setDate(nextEnd.getDate() + 7);
-    const ranges = [
-      [fmtYMD(prevStart), fmtYMD(prevEnd)],
-      [fmtYMD(nextStart), fmtYMD(nextEnd)]
-    ];
+  // ★ 같은 날 슬롯 순서 비교 — morning(0) → fullday(1) → evening(2)
+  const _slotOrd = { morning: 0, fullday: 1, evening: 2 };
+  const _slotStartKey = (date, slotKey) => date + ':' + (_slotOrd[slotKey] ?? 0);
+  const _slotEndKey   = (date, slotKey) => date + ':' + ((_slotOrd[slotKey] ?? 0) + 1);
 
-    // 각 인접 주에서도 같은 그리디 알고리즘으로 트랙 계산
-    const result = {}; // tcKey → {prevTrack: number, nextTrack: number}
-
-    ranges.forEach(([rStart, rEnd], rangeIdx) => {
-      const rangeDays = (allDays||[]).filter(x => x.date >= rStart && x.date <= rEnd);
-      // 같은 그룹에 속한 일정만 추출
-      const grpDays = rangeDays.filter(x => {
-        const slots = x.day.slots || {};
-        const anySlot = ['morning','fullday','evening'].map(k => slots[k]).find(s => s);
-        if(!anySlot) return false;
-        let key;
-        switch(groupBy){
-          case 'unified': key = '__all__'; break;
-          case 'guide':  key = x.tour.Guide || '(미지정)'; break;
-          case 'rego':   key = anySlot.rego || '(미지정)'; break;
-          case 'driver': key = anySlot.driver || '(미지정)'; break;
-          default:       key = x.tour.Agency || '(미지정)';
-        }
-        return key === grpKey;
-      });
-      // tcKey별 firstDate, lastDate
-      const tcSpans = {};
-      grpDays.forEach(x => {
-        const tid = x.tour.TourID;
-        const tc = String(x.tour.TourCode||'').trim();
-        const tcKey = tc || tid;
-        if(!tcSpans[tcKey]) tcSpans[tcKey] = {firstDate: x.date, lastDate: x.date};
-        if(x.date < tcSpans[tcKey].firstDate) tcSpans[tcKey].firstDate = x.date;
-        if(x.date > tcSpans[tcKey].lastDate) tcSpans[tcKey].lastDate = x.date;
-      });
-      // 그리디 트랙 배치 (현재 주와 동일 알고리즘)
-      const tcArr = Object.entries(tcSpans).sort((a,b) => {
-        if(a[1].firstDate !== b[1].firstDate) return a[1].firstDate.localeCompare(b[1].firstDate);
-        return a[0].localeCompare(b[0]);
-      });
-      const tracks = []; // [{lastDate}]
-      const tcToTrack = {}; // tcKey → trackIdx
-      tcArr.forEach(([tcKey, span]) => {
-        let trackIdx = tracks.findIndex(t => t.lastDate < span.firstDate);
-        if(trackIdx < 0){
-          tracks.push({lastDate: span.lastDate});
-          trackIdx = tracks.length - 1;
-        } else {
-          if(span.lastDate > tracks[trackIdx].lastDate) tracks[trackIdx].lastDate = span.lastDate;
-        }
-        tcToTrack[tcKey] = trackIdx;
-      });
-      // 결과 누적
-      Object.entries(tcToTrack).forEach(([tcKey, trackIdx]) => {
-        if(!result[tcKey]) result[tcKey] = {};
-        if(rangeIdx === 0) result[tcKey].prevTrack = trackIdx;
-        else result[tcKey].nextTrack = trackIdx;
-      });
-    });
-
-    return result;
+  // 그룹 키 결정 함수 — allDays 한 항목에서 groupBy에 따라 그룹 키 추출
+  function _resolveGroupKey(x){
+    const slots = x.day.slots || {};
+    const anySlot = ['morning','fullday','evening'].map(k => slots[k]).find(s => s);
+    if(!anySlot) return null;
+    switch(groupBy){
+      case 'unified': return '__all__';
+      case 'guide':   return x.tour.Guide || '(미지정)';
+      case 'rego':    return anySlot.rego || '(미지정)';
+      case 'driver':  return anySlot.driver || '(미지정)';
+      default:        return x.tour.Agency || '(미지정)';
+    }
   }
 
+  // ★ 글로벌 트랙 결정 — (groupBy, grpKey, tcKey) 단위로 한 번만 결정 후 캐시
+  //   캐시에 있으면 그대로 사용, 없으면 새로 계산하여 등록
+  function _ensureGlobalTrack(grpKey, tcKey, span){
+    const cacheKey = groupBy + '|' + grpKey + '|' + tcKey;
+    if(_schGroupTrackMap[cacheKey] !== undefined){
+      // 캐시 적중 — 트랙 번호만 반환 (점유 정보는 이미 호출자가 등록)
+      return _schGroupTrackMap[cacheKey];
+    }
+    // 새 트랙 결정 — 같은 그룹의 기존 트랙들 중 시간이 안 겹치는 가장 작은 번호 선택
+    const occByTrack = {}; // trackIdx → 점유 배열
+    Object.keys(_schGroupTrackOccupancy).forEach(k => {
+      const parts = k.split('|');
+      // groupBy + '|' + grpKey + '|' + trackIdx 구조 — grpKey에 '|'가 있을 수 있어 마지막만 분리
+      const lastSep = k.lastIndexOf('|');
+      const prefix = k.slice(0, lastSep);
+      const expectedPrefix = groupBy + '|' + grpKey;
+      if(prefix !== expectedPrefix) return;
+      const trackIdx = parseInt(k.slice(lastSep + 1), 10);
+      if(!isNaN(trackIdx)) occByTrack[trackIdx] = _schGroupTrackOccupancy[k];
+    });
+    // 시간 충돌 검사 — span과 점유 배열의 모든 항목이 안 겹쳐야 OK
+    function _trackHasConflict(trackIdx){
+      const arr = occByTrack[trackIdx] || [];
+      return arr.some(o => !(o.lastSlotKey <= span.firstSlotKey || span.lastSlotKey <= o.firstSlotKey));
+    }
+    // 0번부터 빈 트랙 또는 충돌 없는 트랙 찾기
+    let trackIdx = 0;
+    while(_trackHasConflict(trackIdx)) trackIdx++;
+    // 캐시 등록
+    _schGroupTrackMap[cacheKey] = trackIdx;
+    const occKey = groupBy + '|' + grpKey + '|' + trackIdx;
+    if(!_schGroupTrackOccupancy[occKey]) _schGroupTrackOccupancy[occKey] = [];
+    _schGroupTrackOccupancy[occKey].push({firstSlotKey: span.firstSlotKey, lastSlotKey: span.lastSlotKey, tcKey});
+    return trackIdx;
+  }
+
+  // ★ 트랙 결정을 위해서는 전체 일정에서 TourCode별 first/last slot이 필요함
+  //   현재 주만 보면 안 됨 — 글로벌 데이터로 결정해야 cross-week 안정성 보장
+  //   같은 그룹에 속한 모든 일정을 tcKey 단위로 묶어 firstSlotKey/lastSlotKey 계산
+  function _buildGlobalTcSpansForGroup(grpKey){
+    const tcSpans = {}; // tcKey → {firstSlotKey, lastSlotKey}
+    (allDays||[]).forEach(x => {
+      if(_resolveGroupKey(x) !== grpKey) return;
+      const tid = x.tour.TourID;
+      const tc = String(x.tour.TourCode||'').trim();
+      const tcKey = tc || tid;
+      const slots = x.day.slots || {};
+      ['morning','fullday','evening'].forEach(slotKey => {
+        if(!slots[slotKey]) return;
+        const stKey = _slotStartKey(x.date, slotKey);
+        const etKey = _slotEndKey(x.date, slotKey);
+        if(!tcSpans[tcKey]){
+          tcSpans[tcKey] = {firstSlotKey: stKey, lastSlotKey: etKey};
+        } else {
+          if(stKey < tcSpans[tcKey].firstSlotKey) tcSpans[tcKey].firstSlotKey = stKey;
+          if(etKey > tcSpans[tcKey].lastSlotKey) tcSpans[tcKey].lastSlotKey = etKey;
+        }
+      });
+    });
+    return tcSpans;
+  }
+
+  // 그룹별로 글로벌 트랙 맵 보충 — 이번에 등장한 TourCode 중 캐시 없는 것은 새로 결정
+  //   결정 순서: firstSlotKey 빠른 순 (시간순 배치) → 안정적 결과
+  Object.keys(groups).forEach(grpKey => {
+    const tcSpans = _buildGlobalTcSpansForGroup(grpKey);
+    // 캐시에 없는 tcKey만 추출 → firstSlotKey 순으로 정렬 → 순차 배정
+    const newTcs = Object.entries(tcSpans).filter(([tcKey, _]) => {
+      const cacheKey = groupBy + '|' + grpKey + '|' + tcKey;
+      return _schGroupTrackMap[cacheKey] === undefined;
+    }).sort((a,b) => {
+      if(a[1].firstSlotKey !== b[1].firstSlotKey) return a[1].firstSlotKey.localeCompare(b[1].firstSlotKey);
+      return a[0].localeCompare(b[0]);
+    });
+    // 기존 캐시된 tcKey들의 점유 정보를 미리 등록 (충돌 검사 위해)
+    Object.entries(tcSpans).forEach(([tcKey, span]) => {
+      const cacheKey = groupBy + '|' + grpKey + '|' + tcKey;
+      if(_schGroupTrackMap[cacheKey] !== undefined){
+        const trackIdx = _schGroupTrackMap[cacheKey];
+        const occKey = groupBy + '|' + grpKey + '|' + trackIdx;
+        if(!_schGroupTrackOccupancy[occKey]) _schGroupTrackOccupancy[occKey] = [];
+        // 중복 등록 방지 — 같은 tcKey가 이미 있으면 skip
+        if(!_schGroupTrackOccupancy[occKey].some(o => o.tcKey === tcKey)){
+          _schGroupTrackOccupancy[occKey].push({firstSlotKey: span.firstSlotKey, lastSlotKey: span.lastSlotKey, tcKey});
+        }
+      }
+    });
+    // 새 tcKey들 트랙 배정
+    newTcs.forEach(([tcKey, span]) => {
+      _ensureGlobalTrack(grpKey, tcKey, span);
+    });
+  });
+
+  // 이제 현재 주 데이터를 트랙별로 분배
   const splitGroups = {};
   Object.keys(groups).forEach(grpKey => {
-    // 인접 주의 트랙 정보 미리 조회
-    const neighborTracks = _getNeighborWeekTourCodeTrack(grpKey);
-
-    // ★ 같은 날 슬롯 순서 비교 — morning(0) → fullday(1) → evening(2)
-    //   slot 종료 시점은 다음 슬롯 시작과 동일 (= slot ordinal +1)
-    //   이렇게 하면 같은 날 morning 끝난 후 fullday 시작은 무조건 OK (시간 입력 무관)
-    const _slotOrd = { morning: 0, fullday: 1, evening: 2 };
-    // firstKey  = date + ':' + ordinal (시작 시점 — slot 시작)
-    // lastKey   = date + ':' + (ordinal+1) (종료 시점 — slot 종료 = 다음 ordinal 시작)
-    const _slotStartKey = (date, slotKey) => date + ':' + (_slotOrd[slotKey] ?? 0);
-    const _slotEndKey   = (date, slotKey) => date + ':' + ((_slotOrd[slotKey] ?? 0) + 1);
-
-    // 1) 현재 주의 일정에서 TourCode/TourID 단위로 묶음
-    //    tcKey = TourCode || TourID — 같은 TourCode 회차들은 한 단위로 트랙 배치
-    //    firstSlotKey/lastSlotKey — 슬롯 단위 비교용 (시각화 트랙 패킹 전용)
-    const tcGroups = {}; // tcKey → {firstDate, lastDate, firstSlotKey, lastSlotKey, items, preferredTrack}
+    // 현재 주의 일정에서 TourCode/TourID 단위로 묶음 → 각 tcKey의 글로벌 트랙 번호 조회
+    const tcGroups = {}; // tcKey → {items: [{date, slotKey, data}], trackIdx}
     Object.entries(groups[grpKey]).forEach(([date, slots]) => {
       Object.entries(slots).forEach(([slotKey, dataArr]) => {
         dataArr.forEach(data => {
           const tid = data.tour.TourID;
           const tc = String(data.tour.TourCode||'').trim();
           const tcKey = tc || tid;
-          const stKey = _slotStartKey(date, slotKey);
-          const etKey = _slotEndKey(date, slotKey);
           if(!tcGroups[tcKey]){
-            // 인접 주의 같은 TourCode 트랙 → 선호 트랙
-            const nb = neighborTracks[tcKey];
-            const preferredTrack = nb ? (nb.prevTrack ?? nb.nextTrack) : -1;
-            tcGroups[tcKey] = {firstDate: date, lastDate: date, firstSlotKey: stKey, lastSlotKey: etKey, items: [], preferredTrack};
+            const cacheKey = groupBy + '|' + grpKey + '|' + tcKey;
+            tcGroups[tcKey] = {items: [], trackIdx: _schGroupTrackMap[cacheKey] ?? 0};
           }
-          if(date < tcGroups[tcKey].firstDate) tcGroups[tcKey].firstDate = date;
-          if(date > tcGroups[tcKey].lastDate) tcGroups[tcKey].lastDate = date;
-          if(stKey < tcGroups[tcKey].firstSlotKey) tcGroups[tcKey].firstSlotKey = stKey;
-          if(etKey > tcGroups[tcKey].lastSlotKey) tcGroups[tcKey].lastSlotKey = etKey;
           tcGroups[tcKey].items.push({date, slotKey, data});
         });
       });
     });
 
-    // 2) 정렬 우선순위: preferredTrack 있는 항목 → 작은 트랙 번호 순 → firstSlotKey 순
-    //    이렇게 하면 인접 주에 트랙 0이었던 TourCode가 먼저 배치되어 트랙 0 차지
-    const tcArr = Object.entries(tcGroups).sort((a,b) => {
-      const aPref = a[1].preferredTrack;
-      const bPref = b[1].preferredTrack;
-      // 둘 다 preferredTrack 있으면 작은 번호 순
-      if(aPref >= 0 && bPref >= 0){
-        if(aPref !== bPref) return aPref - bPref;
-        return a[1].firstSlotKey.localeCompare(b[1].firstSlotKey);
-      }
-      // preferredTrack 있는 쪽이 먼저 (안정성 우선)
-      if(aPref >= 0 && bPref < 0) return -1;
-      if(bPref >= 0 && aPref < 0) return 1;
-      // 둘 다 없으면 firstSlotKey 순
-      if(a[1].firstSlotKey !== b[1].firstSlotKey) return a[1].firstSlotKey.localeCompare(b[1].firstSlotKey);
-      return a[0].localeCompare(b[0]);
+    // 트랙 번호 → 아이템 배열로 정리
+    const tracksByIdx = {}; // trackIdx → items[]
+    let maxTrackIdx = -1;
+    Object.values(tcGroups).forEach(g => {
+      if(!tracksByIdx[g.trackIdx]) tracksByIdx[g.trackIdx] = [];
+      tracksByIdx[g.trackIdx] = tracksByIdx[g.trackIdx].concat(g.items);
+      if(g.trackIdx > maxTrackIdx) maxTrackIdx = g.trackIdx;
     });
 
-    // 3) 그리디 트랙 배치 — preferredTrack이 있으면 그 트랙 우선 시도
-    //    ★ 슬롯 단위 비교: tracks[i].lastSlotKey <= span.firstSlotKey 이면 같은 트랙 OK
-    //    예: 트랙의 마지막 = "2026-04-28:1" (morning 종료) ≤ "2026-04-28:1" (fullday 시작) → OK
-    const tracks = []; // [{lastSlotKey, items: [...]}, ...]
-    tcArr.forEach(([tcKey, span]) => {
-      let trackIdx = -1;
-      // preferredTrack이 있고 그 트랙이 비어있으면 우선 사용
-      if(span.preferredTrack >= 0){
-        // 그 트랙이 아직 없거나, 있어도 시간이 안 겹치면 사용
-        if(span.preferredTrack >= tracks.length){
-          // 빈 트랙 자리까지 채워야 함 (intermediate 트랙 placeholder)
-          while(tracks.length < span.preferredTrack){
-            tracks.push({lastSlotKey: '', items: []});
-          }
-          tracks.push({lastSlotKey: span.lastSlotKey, items: span.items});
-          trackIdx = span.preferredTrack;
-        } else if(tracks[span.preferredTrack].lastSlotKey <= span.firstSlotKey || tracks[span.preferredTrack].items.length === 0){
-          // 비어있거나 시간 안 겹치면 그 트랙 사용
-          if(span.lastSlotKey > tracks[span.preferredTrack].lastSlotKey) tracks[span.preferredTrack].lastSlotKey = span.lastSlotKey;
-          tracks[span.preferredTrack].items = tracks[span.preferredTrack].items.concat(span.items);
-          trackIdx = span.preferredTrack;
-        }
-      }
-      if(trackIdx < 0){
-        // preferredTrack 못 사용 → 일반 그리디 (슬롯 단위 비교)
-        trackIdx = tracks.findIndex(t => t.lastSlotKey <= span.firstSlotKey);
-        if(trackIdx < 0){
-          tracks.push({lastSlotKey: span.lastSlotKey, items: span.items});
-        } else {
-          if(span.lastSlotKey > tracks[trackIdx].lastSlotKey) tracks[trackIdx].lastSlotKey = span.lastSlotKey;
-          tracks[trackIdx].items = tracks[trackIdx].items.concat(span.items);
-        }
-      }
-    });
+    if(maxTrackIdx < 0){
+      // 일정 없음
+      splitGroups[grpKey] = {};
+      return;
+    }
 
-    // ★ 트랙 인덱스 보존 — placeholder 제거 시 번호가 압축되어 인접 주와 안 맞아짐
-    //   예: tracks[0]=A, tracks[1]=빈, tracks[2]=B → filter 시 [A,B]로 인덱스 0,1로 됨
-    //   해결: 끝부터만 빈 placeholder 잘라내고, 중간 빈 placeholder는 유지하여 트랙 번호 일관성 보장
-    const usedTracks = tracks.slice();
+    // 트랙 0 ~ maxTrackIdx 까지 배열로 (빈 트랙도 placeholder로 — 트랙 번호 유지)
+    const usedTracks = [];
+    for(let i = 0; i <= maxTrackIdx; i++){
+      usedTracks.push({items: tracksByIdx[i] || []});
+    }
+    // 끝쪽 빈 트랙은 잘라내기 (중간 빈 트랙은 유지)
     while(usedTracks.length > 0 && usedTracks[usedTracks.length-1].items.length === 0){
       usedTracks.pop();
     }
     const hasAnyContent = usedTracks.some(t => t.items.length > 0);
 
-    // 4) splitGroups에 트랙별 데이터 등록
     if(!hasAnyContent){
       splitGroups[grpKey] = {};
     } else if(usedTracks.length === 1){
@@ -8900,11 +8895,11 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
         splitGroups[grpKey][date][slotKey] = data;
       });
     } else {
-      // 트랙 N개 — 트랙 번호 접미사 (빈 placeholder도 출력해 인접 주 트랙 번호 일치)
+      // 트랙 N개 — 트랙 번호 접미사
       console.log(`[Schedule] "${grpKey}" 트랙 ${usedTracks.length}개:`,
         usedTracks.map((t, ti) => `트랙${ti+1}: ${t.items.map(i=>i.date+'/'+i.data.tour.TourID).join(',')||'(빈)'}`).join(' | '));
       usedTracks.forEach((track, ti) => {
-        // 통합 모드는 "트랙 N"만 표시 (앞에 그룹명 없음), 다른 모드는 "그룹명 (트랙 N)"
+        // 통합 모드는 "트랙 N"만 표시, 다른 모드는 "그룹명 (트랙 N)"
         const newKey = (grpKey === '__all__') ? '트랙 ' + (ti+1) : (grpKey + ' (트랙 ' + (ti+1) + ')');
         splitGroups[newKey] = {};
         track.items.forEach(({date, slotKey, data}) => {
@@ -18603,7 +18598,11 @@ async function _updateSchedulesAfterInvoice(invNum, agency, rows, manualItems, p
     try {
       const res = await fetch(APPS_SCRIPT_URL + '?action=get_schedule');
       const j = await res.json();
-      if(j.ok && j.rows) _schCache = j.rows;
+      if(j.ok && j.rows){
+        _schCache = j.rows;
+        _schGroupTrackMap = {};
+        _schGroupTrackOccupancy = {};
+      }
     } catch(e){ return; }
   }
   if(!_schCache || !_schCache.length) return;
@@ -18700,7 +18699,11 @@ async function _updateSchedulesAfterPayment(invoiceId, agency){
     try {
       const res = await fetch(APPS_SCRIPT_URL + '?action=get_schedule');
       const j = await res.json();
-      if(j.ok && j.rows) _schCache = j.rows;
+      if(j.ok && j.rows){
+        _schCache = j.rows;
+        _schGroupTrackMap = {};
+        _schGroupTrackOccupancy = {};
+      }
     } catch(e){ return; }
   }
 
@@ -18810,7 +18813,11 @@ async function generateDraftInvoices(force=false){
     if(!_schCache || !_schCache.length){
       const res = await fetch(APPS_SCRIPT_URL + '?action=get_schedule');
       const j = await res.json();
-      if(j.ok && j.rows) _schCache = j.rows;
+      if(j.ok && j.rows){
+        _schCache = j.rows;
+        _schGroupTrackMap = {};
+        _schGroupTrackOccupancy = {};
+      }
     }
     if(!_schCache || !_schCache.length){
       draftList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);font-size:12px;">일정이 없습니다.</div>';
@@ -21220,6 +21227,27 @@ function setWageTab(tab) {
   if (tab==='weekly') renderWeeklyPayroll();
 }
 
+// ★ 전체 보기 탭의 주 이동 (◀▶ 화살표) — direction: -1=이전 주(과거), +1=다음 주(미래)
+//   sortedWeeks는 최신순(desc)으로 정렬되어 있어 인덱스 +1 = 더 과거
+//   "전체 기간"(빈 값) → ◀ 누르면 가장 최근 주로, ▶ 누르면 가장 오래된 주로 진입
+function _wageAllWeekStep(direction){
+  const wSel = document.getElementById('wage-all-week-sel');
+  if(!wSel) return;
+  const opts = [...wSel.options].map(o => o.value); // ['', 최신주, ..., 가장오래된주]
+  const cur = wSel.value || '';
+  let idx = opts.indexOf(cur);
+  if(idx < 0) idx = 0;
+  // direction -1 = 이전 주(더 과거) = 인덱스 증가 (sortedWeeks가 desc 순이라)
+  // direction +1 = 다음 주(더 최근) = 인덱스 감소
+  let newIdx = idx + (direction === -1 ? 1 : -1);
+  // "전체 기간"(idx 0)에서 ▶(다음 주)는 의미 없음 — 그대로 유지
+  if(newIdx < 0) newIdx = 0;
+  if(newIdx >= opts.length) newIdx = opts.length - 1;
+  if(newIdx === idx) return; // 변화 없음
+  wSel.value = opts[newIdx];
+  renderWageAllDrivers();
+}
+
 async function renderWageAllDrivers() {
   const sumEl = document.getElementById('wage-all-summary');
   const listEl = document.getElementById('wage-all-list');
@@ -21236,12 +21264,16 @@ async function renderWageAllDrivers() {
   rows.forEach(r => { if(r._isoDate) allWeeks.add(getMondayOfDate(r._isoDate)); });
   const sortedWeeks = [...allWeeks].filter(w => w && /^\d{4}-\d{2}-\d{2}$/.test(w)).sort((a,b) => b.localeCompare(a));
 
-  // 주차 셀렉트 채우기
+  // 주차 셀렉트 채우기 — 현재 선택값을 보존
   const wSel = document.getElementById('wage-all-week-sel');
   const curWeek = wSel?.value || '';
   if (wSel) {
     wSel.innerHTML = '<option value="">전체 기간</option>' +
       sortedWeeks.map(w => '<option value="'+w+'"'+(w===curWeek?' selected':'')+'>'+getWeekLabel(w)+'</option>').join('');
+    // ★ innerHTML 재설정 후 value를 명시적으로 복원 (브라우저가 첫 옵션으로 reset 하는 것 방지)
+    if(curWeek && sortedWeeks.includes(curWeek)){
+      wSel.value = curWeek;
+    }
   }
   const filterWeek = wSel?.value || '';
 
@@ -21251,17 +21283,23 @@ async function renderWageAllDrivers() {
   let grandSubEarned = 0;  // SUB 차량 운행 합계 (정보용, 차주가 지급)
   const driverStats = [];
 
-  // 자사 운행 필터: SUB 차량은 제외 (SubOwner 또는 Owner가 자사 외)
-  const _isSelfVehDR = (r) => {
-    if(!r || !r.Rego) return true;
-    const veh = (DB.V||[]).find(v => v.Rego === r.Rego);
-    if(!veh) return true;
-    const subOwner = (veh.SubOwner||'').trim();
-    if(subOwner) return false;
-    const owner = (veh.Owner||'').trim();
-    if(!owner) return true;
-    return (typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(owner));
-  };
+  // ★ 자사 운행 분류 — 잔액 탭과 동일한 canonical 함수 사용
+  //    isDirectPayDR(r) === true → 자사 차량 (자사가 드라이버에게 직접 지급)
+  //    SubOwner 또는 Owner가 자사 외이면 SUB로 판정 (한 줄 분류기 통합)
+  const _isSelfVehDR = (r) => (typeof isDirectPayDR === 'function') ? isDirectPayDR(r) : true;
+  // 마스터에 없는 Rego 추적
+  {
+    const _normRego = (s) => String(s||'').trim().toUpperCase().replace(/\s+/g, '');
+    const _masterRegoSet = new Set((DB.V||[]).map(v => _normRego(v.Rego)).filter(Boolean));
+    const _missingRegos = new Set();
+    rows.forEach(r => {
+      const rg = _normRego(r && r.Rego);
+      if(rg && !_masterRegoSet.has(rg)) _missingRegos.add(r.Rego);
+    });
+    if(_missingRegos.size > 0){
+      console.warn('[Wage] DR에 있지만 M_Vehicles에 없는 Rego (자사로 가정됨, 분류 확인 필요):', [..._missingRegos]);
+    }
+  }
 
   for (const drv of drivers) {
     const drvWages = wages[drv] || {};
@@ -22228,28 +22266,20 @@ async function renderWage(){
   const matchNames = new Set([ST.wageDriver, drRow?.Name_KR||'', drRow?.Name_EN||'']);
   const weekReports = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
 
-  // ── SUB / 자사 차량 분리 ──
-  const _vehs = DB.V||[];
-  // ★ Rego는 양쪽 모두 trim — v.Rego에 trailing space 있으면 매칭 실패
-  //   ★ SubOwner가 자사 회사명이면 SUB가 아님 (자사 차량으로 처리)
-  const _isDCOwner = (name) => {
-    const s = String(name||'').trim();
-    if(!s) return true;
-    if(typeof DC_OWNERS !== 'undefined' && DC_OWNERS.includes(s)) return true;
-    const norm = s.toUpperCase().replace(/\s+/g, ' ').trim();
-    const variants = (DC_OWNERS||[]).map(n => String(n||'').toUpperCase().replace(/\s+/g, ' ').trim()).filter(Boolean);
-    if(variants.includes(norm)) return true;
-    if(/^dong\s*choi(\s|$)/i.test(s)) return true;
-    return false;
-  };
-  const _subMapW = {}; _vehs.forEach(v=>{
-    const so=(v.SubOwner||'').trim();
-    if(so && !_isDCOwner(so)) _subMapW[(v.Rego||'').trim()]=so;
-  });
-  const ownReports = weekReports.filter(r=>!_subMapW[(r.Rego||'').trim()]);
-  const subReports = weekReports.filter(r=>!!_subMapW[(r.Rego||'').trim()]);
+  // ── SUB / 자사 차량 분리 — 잔액 탭과 동일한 canonical 함수 사용 ──
+  //   isDirectPayDR(r) = true → 자사 차량
+  //   getDriverPayerForReport(r) = 'YOUNGKEAN KIM' / 'TRIPLE A' 등 → SUB 차주명
+  const _drIsSelf2 = (r) => (typeof isDirectPayDR === 'function') ? isDirectPayDR(r) : true;
+  const _drPayer2 = (r) => (typeof getDriverPayerForReport === 'function') ? getDriverPayerForReport(r) : 'Unknown';
+  const ownReports = weekReports.filter(r=>_drIsSelf2(r));
+  const subReports = weekReports.filter(r=>!_drIsSelf2(r));
   const subGroups = {};
-  subReports.forEach(r=>{ const sn=_subMapW[(r.Rego||'').trim()]; if(!subGroups[sn]) subGroups[sn]={name:sn,total:0,count:0}; subGroups[sn].total+=_calcDRFromReport(r); subGroups[sn].count++; });
+  subReports.forEach(r=>{
+    const sn = _drPayer2(r) || 'Unknown';
+    if(!subGroups[sn]) subGroups[sn]={name:sn,total:0,count:0};
+    subGroups[sn].total += _calcDRFromReport(r);
+    subGroups[sn].count++;
+  });
 
   // ★ 회사 지급 대상 = 자사 차량 운행분만
   const drTotal = ownReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
@@ -22366,7 +22396,11 @@ function getDriverPayerForReport(r){
   // 기본값 = 자사
   const dcDefault = (typeof DC_OWNERS !== 'undefined' && DC_OWNERS[0]) ? DC_OWNERS[0] : 'DONG CHOI PTY LTD';
   if(!r || !r.Rego) return dcDefault;
-  const veh = (typeof DB !== 'undefined' && DB.V) ? DB.V.find(v => v.Rego === r.Rego) : null;
+  // ★ Rego 정규화 — DR과 마스터 표기 차이(공백/대소문자)에 강건하게 매칭
+  const _normR = (s) => String(s||'').trim().toUpperCase().replace(/\s+/g, '');
+  const targetRego = _normR(r.Rego);
+  if(!targetRego) return dcDefault;
+  const veh = (typeof DB !== 'undefined' && DB.V) ? DB.V.find(v => _normR(v.Rego) === targetRego) : null;
   if(!veh) return dcDefault;
   // ★ 자사 회사명 매칭 헬퍼 — 다양한 표기 정규화 (대소문자/공백 무시)
   const _isDC = (name) => {
@@ -22728,8 +22762,10 @@ async function renderWageAll(){
   });
 
   // ── SUB 차량 매핑 ──
+  // ★ Rego 정규화 — DR과 마스터 표기 차이 흡수
+  const _normRegoAll = (s) => String(s||'').trim().toUpperCase().replace(/\s+/g, '');
   const _vehsAll = DB.V||[];
-  const _subMapAll = {}; _vehsAll.forEach(v=>{ const so=(v.SubOwner||'').trim(); if(so) _subMapAll[v.Rego]=so; });
+  const _subMapAll = {}; _vehsAll.forEach(v=>{ const so=(v.SubOwner||'').trim(); if(so) _subMapAll[_normRegoAll(v.Rego)]=so; });
 
   // ★ DR_Cost는 이미 Night_Owner 차감 후 저장됨 → 이중 차감 방지
   let grandDR=0, grandPaid=0, grandReports=0, grandSubDR=0;
@@ -22739,8 +22775,8 @@ async function renderWageAll(){
     const sunD=new Date(wk+'T00:00:00'); sunD.setDate(sunD.getDate()+6);
     const sun=toLocalISO(sunD);
     const wReports=rows.filter(r=>matchNames.has(String(r.Driver||'').trim())&&r._isoDate>=mon&&r._isoDate<=sun);
-    const wOwnReports = wReports.filter(r=>!_subMapAll[(r.Rego||'').trim()]);
-    const wSubReports = wReports.filter(r=>!!_subMapAll[(r.Rego||'').trim()]);
+    const wOwnReports = wReports.filter(r=>(typeof isDirectPayDR === 'function') ? isDirectPayDR(r) : true);
+    const wSubReports = wReports.filter(r=>(typeof isDirectPayDR === 'function') ? !isDirectPayDR(r) : false);
     const drTotal=wOwnReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
     const subDR=wSubReports.reduce((s,r)=>s+_calcDRFromReport(r),0);
     const sur=_calcWeekSurcharges(wOwnReports);
@@ -27444,8 +27480,24 @@ function renderWeeklyPayroll(){
 
   const wages = getWages();
   const rows = _reportsCache || [];
+  // ★ 자사/SUB 분류는 잔액 탭과 동일한 canonical 함수 사용
+  //    isDirectPayDR(r) === true → 자사 차량 (자사가 드라이버에게 직접 지급)
+  //    isDirectPayDR(r) === false → SUB 차량 (차주가 직접 지급, 자사 지급 대상 아님)
+  //    이전 버전은 별도 _subMap을 사용했는데, SubOwner 비어있고 Owner만 차주명인 경우 잘못 분류됨 (잔액 탭과 불일치)
+  const _drIsSelf = (r) => (typeof isDirectPayDR === 'function') ? isDirectPayDR(r) : true;
+  const _drPayer = (r) => (typeof getDriverPayerForReport === 'function') ? getDriverPayerForReport(r) : 'Unknown';
+  // 마스터에 없는 Rego 추적 (자사로 가정되어 분류 오류 가능성 있음)
   const _vehsAll = DB.V||[];
-  const _subMap = {}; _vehsAll.forEach(v=>{ const so=(v.SubOwner||"").trim(); if(so) _subMap[(v.Rego||"").trim()]=so; });
+  const _normRegoW = (s) => String(s||'').trim().toUpperCase().replace(/\s+/g, '');
+  const _missingRegos = new Set();
+  const _masterRegoSet = new Set(_vehsAll.map(v => _normRegoW(v.Rego)).filter(Boolean));
+  rows.forEach(r => {
+    const rg = _normRegoW(r && r.Rego);
+    if(rg && !_masterRegoSet.has(rg)) _missingRegos.add(r.Rego);
+  });
+  if(_missingRegos.size > 0){
+    console.warn('[Wage] DR에 있지만 M_Vehicles에 없는 Rego (자사로 가정됨, 분류 확인 필요):', [..._missingRegos]);
+  }
 
   // 모든 주의 월요일 수집
   const allWeeks = new Set();
@@ -27472,7 +27524,7 @@ function renderWeeklyPayroll(){
       const drRow = DB.D.find(d=>(d.Name_KR||'')===drv||(d.Name_EN||'')===drv);
       const mNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
       const wRows = rows.filter(r=>mNames.has(String(r.Driver||'').trim()) && r._isoDate>=w && r._isoDate<=wSunISO);
-      const oRows = wRows.filter(r=>!_subMap[(r.Rego||'').trim()]);
+      const oRows = wRows.filter(r=>_drIsSelf(r));
       wEarned += oRows.reduce((s,r)=>s+_calcDRFromReport(r),0);
       const dw = wages[drv]||{};
       Object.entries(dw).forEach(([wk,data])=>{
@@ -27504,15 +27556,15 @@ function renderWeeklyPayroll(){
     const drRow = DB.D.find(d=>(d.Name_KR||'')===drv||(d.Name_EN||'')===drv);
     const matchNames = new Set([drv, drRow?.Name_KR||'', drRow?.Name_EN||'']);
     const weekRows = rows.filter(r=>matchNames.has(String(r.Driver||'').trim()) && r._isoDate>=mon && r._isoDate<=sun);
-    const ownRows = weekRows.filter(r=>!_subMap[(r.Rego||'').trim()]);
-    const subRows = weekRows.filter(r=>!!_subMap[(r.Rego||'').trim()]);
+    const ownRows = weekRows.filter(r=>_drIsSelf(r));
+    const subRows = weekRows.filter(r=>!_drIsSelf(r));
 
     const earned = ownRows.reduce((s,r)=>s+_calcDRFromReport(r),0);
     // ★ SUB 차량 운행분 (차주별) — 정보용 (자사 지급 대상 아님)
     const subEarned = subRows.reduce((s,r)=>s+_calcDRFromReport(r),0);
     const subByPayer = {};
     subRows.forEach(r => {
-      const payer = _subMap[(r.Rego||'').trim()] || 'Unknown';
+      const payer = _drPayer(r) || 'Unknown';
       subByPayer[payer] = (subByPayer[payer]||0) + _calcDRFromReport(r);
     });
 
