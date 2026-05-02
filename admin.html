@@ -14799,6 +14799,17 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     // 잔액 0인 항목도 리스트에 포함 (녹색 "완료" 표시 — 사용자가 받은 사실 인지)
     // 단 합계 계산엔 잔액만 들어감
 
+    // Guide/TourCode — Agency_Txn에 있으면 사용, 없으면 인보이스 캐시에서 fallback
+    let guide = String(tx.Guide || '').trim();
+    let tourCode = String(tx.TourCode || '').trim();
+    if ((!guide || !tourCode) && invNum && Array.isArray(_invHistoryCache)) {
+      const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNum);
+      if (inv) {
+        if (!guide) guide = String(inv.Guide || '').trim();
+        if (!tourCode) tourCode = String(inv.TourCode || '').trim();
+      }
+    }
+
     receivables.push({
       agency: tx.Agency || 'Unknown',
       invoiceId: tx.InvoiceID || '',
@@ -14807,7 +14818,8 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
       balance: balance,
       isPaid: balance <= 0.01,
       dueDate: dueISO,
-      tourCode: tx.TourCode || ''
+      tourCode: tourCode,
+      guide: guide
     });
   });
 
@@ -14861,6 +14873,18 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     const subPaid = subCR[subKey] || 0;
     const subBalance = roundMoney(dr - subPaid);
 
+    // Guide/TourCode — SUB_Txn 자체에는 없으므로 SUB 인보이스 캐시에서 fallback
+    let subGuide = String(tx.Guide || '').trim();
+    let subTourCode = String(tx.TourCode || '').trim();
+    const subInvNum = String(tx.InvoiceNo || '').trim();
+    if ((!subGuide || !subTourCode) && subInvNum && Array.isArray(_invHistoryCache)) {
+      const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === subInvNum);
+      if (inv) {
+        if (!subGuide) subGuide = String(inv.Guide || '').trim();
+        if (!subTourCode) subTourCode = String(inv.TourCode || '').trim();
+      }
+    }
+
     subPayables.push({
       company: tx.SubCompany || 'Unknown',
       invoiceNo: tx.InvoiceNo || '',
@@ -14869,7 +14893,9 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
       paid: subPaid,
       balance: subBalance,
       isPaid: subBalance <= 0.01,
-      dueDate: dueISO
+      dueDate: dueISO,
+      tourCode: subTourCode,
+      guide: subGuide
     });
   });
 
@@ -15217,19 +15243,27 @@ function renderBalWeeklySummary() {
           html += '<span style="color:var(--ac);font-family:var(--fn);">' + $f(agTotal) + '</span></div>';
         }
         items.forEach(r => {
+          // 가이드/투어코드 메타 표시 (있는 경우만)
+          const metaParts = [];
+          if (r.tourCode) metaParts.push('🏷 ' + r.tourCode);
+          if (r.guide) metaParts.push('👤 ' + r.guide);
+          const metaHtml = metaParts.length
+            ? `<span style="color:var(--t3);font-size:9px;margin-left:4px;">${metaParts.map(escH).join(' · ')}</span>`
+            : '';
+
           // 잔액 0이면 "받음 $X" 녹색 표시 (드라이버 급여와 동일한 UX)
           if (r.isPaid) {
-            html += '<div style="display:flex;justify-content:space-between;padding:1px 0 1px 10px;font-size:10px;color:var(--gn);">';
-            html += '<span>' + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')</span>';
-            html += '<span style="font-family:var(--fn);font-weight:700;">✓ 받음 ' + $f(r.paid||r.amount) + '</span></div>';
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:4px;padding:1px 0 1px 10px;font-size:10px;color:var(--gn);">';
+            html += '<span style="flex:1;min-width:0;">' + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')' + metaHtml + '</span>';
+            html += '<span style="font-family:var(--fn);font-weight:700;white-space:nowrap;">✓ 받음 ' + $f(r.paid||r.amount) + '</span></div>';
             return;
           }
           // 토글 ON 시 이번 주 이전 미수금이면 ⚠ 마커
           const isOverdue = _cfIncludeOverdue && r.dueDate < targetMonISO;
           const safeAg = (r.agency||'').replace(/'/g,"\\'");
           html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:1px 0 1px 10px;font-size:10px;color:' + (isOverdue?'#dc2626':'var(--t3)') + ';' + (isOverdue?'font-weight:700;':'') + '">';
-          html += '<span style="flex:1;">' + (isOverdue?'⚠ ':'') + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')</span>';
-          html += '<span style="font-family:var(--fn);">' + $f(r.balance) + '</span>';
+          html += '<span style="flex:1;min-width:0;">' + (isOverdue?'⚠ ':'') + escH(r.invoiceId || r.tourCode) + ' (Due: ' + r.dueDate.slice(5) + ')' + metaHtml + '</span>';
+          html += '<span style="font-family:var(--fn);white-space:nowrap;">' + $f(r.balance) + '</span>';
           html += `<button onclick="event.stopPropagation();_quickAddPayment('agency','${safeAg}',${r.balance})" title="이 인보이스 수금 처리" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;">💰</button>`;
           html += '</div>';
         });
@@ -15243,17 +15277,25 @@ function renderBalWeeklySummary() {
       html += '<div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-bottom:10px;padding:12px 14px;">';
       html += '<div style="font-size:12px;font-weight:700;color:var(--or);margin-bottom:8px;">\uD83D\uDE8C \uC11C\uBE0C \uC9C0\uAE09 \uC608\uC815</div>';
       cf.subPayables.sort((a,b) => (b.balance||b.amount) - (a.balance||a.amount)).forEach(s => {
+        // 가이드/투어코드 메타 표시
+        const sMetaParts = [];
+        if (s.tourCode) sMetaParts.push('🏷 ' + s.tourCode);
+        if (s.guide) sMetaParts.push('👤 ' + s.guide);
+        const sMetaHtml = sMetaParts.length
+          ? `<span style="color:var(--t3);font-size:9px;margin-left:4px;">${sMetaParts.map(escH).join(' · ')}</span>`
+          : '';
+
         if (s.isPaid) {
-          html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">';
-          html += '<span style="color:var(--t3);">' + escH(s.company) + (s.invoiceNo ? ' <span style="font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + '</span>';
-          html += '<span style="font-weight:700;font-family:var(--fn);color:var(--gn);">✓ 지급 ' + $f(s.paid||s.amount) + '</span></div>';
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:4px;padding:3px 0;font-size:11px;">';
+          html += '<span style="color:var(--t3);flex:1;min-width:0;">' + escH(s.company) + (s.invoiceNo ? ' <span style="font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
+          html += '<span style="font-weight:700;font-family:var(--fn);color:var(--gn);white-space:nowrap;">✓ 지급 ' + $f(s.paid||s.amount) + '</span></div>';
           return;
         }
         const safeCo = (s.company||'').replace(/'/g,"\\'");
         const subBal = s.balance!==undefined?s.balance:s.amount;
         html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:3px 0;font-size:11px;">';
-        html += '<span style="color:var(--t2);flex:1;">' + escH(s.company) + (s.invoiceNo ? ' <span style="color:var(--t3);font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="color:var(--t3);font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + '</span>';
-        html += '<span style="font-weight:600;font-family:var(--fn);color:var(--or);">' + $f(subBal) + '</span>';
+        html += '<span style="color:var(--t2);flex:1;min-width:0;">' + escH(s.company) + (s.invoiceNo ? ' <span style="color:var(--t3);font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="color:var(--t3);font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
+        html += '<span style="font-weight:600;font-family:var(--fn);color:var(--or);white-space:nowrap;">' + $f(subBal) + '</span>';
         html += `<button onclick="event.stopPropagation();_quickAddPayment('sub','${safeCo}',${subBal})" title="이 항목 지급 처리" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;">💰</button>`;
         html += '</div>';
       });
