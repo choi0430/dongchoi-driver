@@ -9890,6 +9890,61 @@ async function getGASDRForWeek(driverName, monISO){
   });
   return total;
 }
+// ═══════════════════════════════════════
+// SUB 차량 운행 — 드라이버 본인 확인 ('받았음' 체크)
+// ═══════════════════════════════════════
+async function driverConfirmSubReceived(payerName, confirmed, rowIndexesJson){
+  let rowIndexes = [];
+  try {
+    rowIndexes = typeof rowIndexesJson === 'string' ? JSON.parse(rowIndexesJson) : (rowIndexesJson||[]);
+  } catch(e){ rowIndexes = []; }
+  rowIndexes = (rowIndexes||[]).filter(n => Number.isInteger(n) && n >= 2);
+  if(!rowIndexes.length){
+    alert('처리할 운행 건이 없습니다.\n\n관리자가 GAS migrateAddSubPaymentColumns를 먼저 실행해야 합니다.');
+    return;
+  }
+
+  const action = confirmed ? '받았음 확인' : '확인 취소';
+  if(!confirm(`${payerName} 차주의 SUB 운행 ${rowIndexes.length}건을 "${action}" 처리하시겠습니까?`)) return;
+
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action: 'confirm_sub_payment_bulk',
+        rowIndexes: rowIndexes,
+        type: 'driver',  // GAS는 driver 토큰이면 자동으로 driver로 강제하지만 명시
+        confirmed: !!confirmed,
+        _user: currentDriver?.name || ''
+      })
+    });
+    const j = await res.json();
+    if(!j.ok){
+      alert('처리 실패: ' + (j.error || j.msg || 'unknown'));
+      return;
+    }
+
+    // 캐시 즉시 갱신 (UI 새로고침 전)
+    try {
+      const now = new Date().toISOString();
+      (_drReportsCache||[]).forEach(r => {
+        if(rowIndexes.includes(r._rowIndex)){
+          r.SubPaid_Driver = confirmed ? 'Y' : '';
+          r.SubPaid_DriverAt = confirmed ? now : '';
+        }
+      });
+    } catch(e){ console.warn('[driverConfirmSubReceived] cache update:', e); }
+
+    // 모든 의존 뷰 다시 렌더
+    try { if (typeof renderPay === 'function') renderPay(); } catch(e){}
+    try { if (typeof renderSalary === 'function') renderSalary(); } catch(e){}
+  } catch(err){
+    console.error('[driverConfirmSubReceived]', err);
+    alert('네트워크 오류: ' + err.message);
+  }
+}
+
 async function renderPay(){
   const driverName = currentDriver?.name || localStorage.getItem('dc_last_driver')?.split('|')[0] || '';
 
@@ -9951,7 +10006,14 @@ async function renderPay(){
     dropoff:     (()=>{ const v=r.Dropoff||''; return (v&&!String(v).includes('1899'))?v:''; })(),
     kmStart:     (()=>{ const v=r.KM_Start||r.Start_KM||''; return (v&&!String(v).includes('1899'))?v:''; })(),
     kmEnd:       (()=>{ const v=r.KM_End||r.End_KM||''; return (v&&!String(v).includes('1899'))?v:''; })(),
-    id:          r.ID||r.id||''
+    id:          r.ID||r.id||'',
+    // ★ SUB 차량 운행 — 차주 지급 확인 추적
+    _rowIndex:        r._rowIndex || null,
+    subPaidOwner:     String(r.SubPaid_Owner||'').toUpperCase() === 'Y',
+    subPaidOwnerAt:   r.SubPaid_OwnerAt || '',
+    subPaidOwnerBy:   r.SubPaid_OwnerBy || '',
+    subPaidDriver:    String(r.SubPaid_Driver||'').toUpperCase() === 'Y',
+    subPaidDriverAt:  r.SubPaid_DriverAt || ''
   }));
 
   // GAS 데이터만 사용 (로컬 병합 없음 → 중복 원천 차단)
@@ -10012,7 +10074,20 @@ async function renderPay(){
     const ownReports = wk.reports.filter(r=>!getSubOwnerForRego(r.rego));
     const subReports = wk.reports.filter(r=>!!getSubOwnerForRego(r.rego));
     const subGroups = {};
-    subReports.forEach(r=>{ const sn=getSubOwnerForRego(r.rego); if(!subGroups[sn]) subGroups[sn]={name:sn,total:0,count:0}; subGroups[sn].total+=(r.dr||0); subGroups[sn].count++; });
+    subReports.forEach(r=>{
+      const sn = getSubOwnerForRego(r.rego);
+      if(!subGroups[sn]) subGroups[sn] = {
+        name: sn, total: 0, count: 0,
+        rows: [],                  // ★ 이 차주의 모든 운행 row (확인 토글용)
+        ownerConfirmedCount: 0,    // ★ 차주가 지급했음 확인된 건수
+        driverConfirmedCount: 0    // ★ 드라이버가 받았음 확인된 건수
+      };
+      subGroups[sn].total += (r.dr || 0);
+      subGroups[sn].count++;
+      subGroups[sn].rows.push(r);
+      if(r.subPaidOwner) subGroups[sn].ownerConfirmedCount++;
+      if(r.subPaidDriver) subGroups[sn].driverConfirmedCount++;
+    });
 
     const trips  = wk.reports.length;
     const days   = [...new Set(wk.reports.map(r=>r.date))].length;
@@ -10086,7 +10161,43 @@ async function renderPay(){
     const isSubOnly = ownDRTotal === 0 && subDRTotal > 0;
     card.className = 'pay-week-card' + (isSubOnly ? ' sub-only' : '');
     const subGroupArr = Object.values(subGroups).sort((a,b)=>b.total-a.total);
-    const subBadgesHtml = subGroupArr.map(sg=>`<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">🚐 ${sg.name} $${sg.total.toLocaleString()} (${sg.count}건)</span>`).join(' ');
+    const subBadgesHtml = subGroupArr.map(sg=>{
+      const all = sg.count;
+      const ownerAll = sg.ownerConfirmedCount === all && all > 0;
+      const driverAll = sg.driverConfirmedCount === all && all > 0;
+
+      // 상태 라벨
+      let statusBadge = '';
+      if(ownerAll && driverAll){
+        statusBadge = '<span style="background:#059669;color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">\u2705 \uC815\uC0B0\uC644\uB8CC</span>';
+      } else if(ownerAll){
+        statusBadge = '<span style="background:#f59e0b;color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">\uD83D\uDFE1 \uCC28\uC8FC\u2713</span>';
+      } else if(driverAll){
+        statusBadge = '<span style="background:#3b82f6;color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">\uD83D\uDD35 \uB098 \u2713</span>';
+      } else {
+        statusBadge = '<span style="background:#6b7280;color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">\u26AA \uBBF8\uD655\uC778</span>';
+      }
+
+      // 드라이버 본인 확인 버튼 — 미확인이면 "받았음" 체크, 확인됐으면 "취소" 체크
+      const validRows = (sg.rows||[]).map(r => r._rowIndex).filter(n => n);
+      const rowsAttr = JSON.stringify(validRows).replace(/"/g, '&quot;');
+      let receiveBtn = '';
+      if(validRows.length > 0){
+        if(driverAll){
+          receiveBtn = `<button onclick='event.stopPropagation();driverConfirmSubReceived(${JSON.stringify(sg.name)},false,"${rowsAttr}")' style="background:#dc2626;color:white;border:none;border-radius:4px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer;">\u232B \uCDE8\uC18C</button>`;
+        } else {
+          receiveBtn = `<button onclick='event.stopPropagation();driverConfirmSubReceived(${JSON.stringify(sg.name)},true,"${rowsAttr}")' style="background:#3b82f6;color:white;border:none;border-radius:4px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer;">\u2705 \uBC1B\uC558\uC74C</button>`;
+        }
+      }
+
+      return `<div style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;background:linear-gradient(135deg,#6d28d9,#4f46e5);color:white;font-size:10px;font-weight:700;padding:4px 6px;border-radius:8px;margin:2px;">
+        <span>\uD83D\uDE90 ${sg.name}</span>
+        <span>$${sg.total.toLocaleString()}</span>
+        <span style="opacity:.85;">(${sg.count}\uAC74)</span>
+        ${statusBadge}
+        ${receiveBtn}
+      </div>`;
+    }).join('');
 
     // ★ 상단 큰 숫자 = 총 받을 돈 (자사 + SUB) — 일한 총 가치를 한눈에
     //   바로 아래 작은 글씨로 분해 표시 (자사 + SUB 또는 SUB만)
@@ -10432,7 +10543,13 @@ async function renderSalary(){
   }).map(r=>({
     date: fmtDate(r.Date||''),
     dr:   calcDRCostFromRow(r),
-    nightOwner: parseFloat(r.Night_Owner||0)
+    nightOwner: parseFloat(r.Night_Owner||0),
+    rego: r.Rego||'',
+    // ★ SUB 차량 운행 — 차주 지급 확인
+    _rowIndex:       r._rowIndex || null,
+    subOwner:        getSubOwnerForRego(r.Rego||''),
+    subPaidOwner:    String(r.SubPaid_Owner||'').toUpperCase() === 'Y',
+    subPaidDriver:   String(r.SubPaid_Driver||'').toUpperCase() === 'Y'
   }));
   // GAS 데이터만 사용
   const all = gasAll;
@@ -10444,10 +10561,27 @@ async function renderSalary(){
   all.forEach(r=>{
     const wk = getWeekKey(r.date);
     if(!wk) return;
-    if(!weekMap[wk.key]) weekMap[wk.key]={label:wk.label,key:wk.key,total:0,paid:0,wageEntries:[]};
+    if(!weekMap[wk.key]) weekMap[wk.key]={label:wk.label,key:wk.key,total:0,paid:0,wageEntries:[],
+      ownTotal:0, subTotal:0, subGroups:{}};
     weekMap[wk.key].total += (r.dr||0);  // DR_Cost는 이미 야경납입 차감 후 net이어야 함
+    // ★ 자사/SUB 분리 (홈 화면 SUB 차주 확인 표시용)
+    const sn = r.subOwner;
+    if(sn){
+      weekMap[wk.key].subTotal += (r.dr||0);
+      if(!weekMap[wk.key].subGroups[sn]) weekMap[wk.key].subGroups[sn] = {
+        name: sn, total: 0, count: 0, rows: [],
+        ownerConfirmedCount: 0, driverConfirmedCount: 0
+      };
+      weekMap[wk.key].subGroups[sn].total += (r.dr||0);
+      weekMap[wk.key].subGroups[sn].count++;
+      weekMap[wk.key].subGroups[sn].rows.push(r);
+      if(r.subPaidOwner)  weekMap[wk.key].subGroups[sn].ownerConfirmedCount++;
+      if(r.subPaidDriver) weekMap[wk.key].subGroups[sn].driverConfirmedCount++;
+    } else {
+      weekMap[wk.key].ownTotal += (r.dr||0);
+    }
     // ★ 자사 차량분 nightOwner만 추적 (SUB는 차주에 직접 납입, 회사 정산 대상 아님)
-    if(!getSubOwnerForRego(r.rego)){
+    if(!sn){
       weekNightOwner[wk.key] = (weekNightOwner[wk.key]||0) + (r.nightOwner||0);
     }
   });
@@ -10484,8 +10618,11 @@ async function renderSalary(){
   const weeks = Object.values(weekMap).sort((a,b)=> _weekKeyToDate(b.key) - _weekKeyToDate(a.key));
 
   function salaryCard(s){
-    const balance = Math.max(0, Math.round(s.total - s.paid));
-    const isPaid = balance<=0;
+    // ★ 자사/SUB 분리 — 자사 미지급은 자사 발생만 기준
+    const ownTotal = s.ownTotal || 0;
+    const subTotal = s.subTotal || 0;
+    const balance = Math.max(0, Math.round(ownTotal - s.paid));
+    const isPaid = balance <= 0;
     const entries = s.wageEntries || [];
 
     let wageRowsHTML = '';
@@ -10509,12 +10646,52 @@ async function renderSalary(){
         + '<span style="font-size:11px;color:var(--muted);">Total Paid (지급 합계)</span>'
         + '<span style="font-size:12px;font-weight:700;color:var(--accent);">$'+Math.round(s.paid).toLocaleString()+'</span>'
         + '</div></div>';
-    } else if(s.total > 0){
-      wageRowsHTML = '<div style="margin-top:8px;padding:7px 10px;background:#fff7ed;border-radius:8px;border:1px solid #fed7aa;font-size:11px;color:#92400e;text-align:center;">📌 No Payment Records (아직 지급 내역 없음)</div>';
+    } else if(ownTotal > 0){
+      wageRowsHTML = '<div style="margin-top:8px;padding:7px 10px;background:#fff7ed;border-radius:8px;border:1px solid #fed7aa;font-size:11px;color:#92400e;text-align:center;">📌 No Payment Records (아직 자사 지급 내역 없음)</div>';
+    }
+
+    // ── SUB 차주 확인 섹션 ──
+    let subSectionHTML = '';
+    const subGroupArr = Object.values(s.subGroups || {}).sort((a,b)=>b.total-a.total);
+    if(subGroupArr.length > 0){
+      const subBadges = subGroupArr.map(sg=>{
+        const all = sg.count;
+        const ownerAll = sg.ownerConfirmedCount === all && all > 0;
+        const driverAll = sg.driverConfirmedCount === all && all > 0;
+        let badge;
+        if(ownerAll && driverAll){
+          badge = '<span style="background:#059669;color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">\u2705 \uC815\uC0B0\uC644\uB8CC</span>';
+        } else if(ownerAll){
+          badge = '<span style="background:#f59e0b;color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">\uD83D\uDFE1 \uCC28\uC8FC\u2713</span>';
+        } else if(driverAll){
+          badge = '<span style="background:#3b82f6;color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">\uD83D\uDD35 \uB098 \u2713</span>';
+        } else {
+          badge = '<span style="background:#6b7280;color:white;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">\u26AA \uBBF8\uD655\uC778</span>';
+        }
+        const validRows = (sg.rows||[]).map(r => r._rowIndex).filter(n => n);
+        const rowsAttr = JSON.stringify(validRows).replace(/"/g, '&quot;');
+        let btn = '';
+        if(validRows.length > 0){
+          btn = driverAll
+            ? `<button onclick='event.stopPropagation();driverConfirmSubReceived(${JSON.stringify(sg.name)},false,"${rowsAttr}")' style="background:#dc2626;color:white;border:none;border-radius:4px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer;">\u232B \uCDE8\uC18C</button>`
+            : `<button onclick='event.stopPropagation();driverConfirmSubReceived(${JSON.stringify(sg.name)},true,"${rowsAttr}")' style="background:#3b82f6;color:white;border:none;border-radius:4px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer;">\u2705 \uBC1B\uC558\uC74C</button>`;
+        }
+        return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:5px 8px;background:#f5f3ff;border-radius:6px;margin:3px 0;font-size:11px;">
+          <span style="font-weight:700;color:#6d28d9;">\uD83D\uDE90 ${sg.name}</span>
+          <span style="font-weight:700;color:#7c3aed;font-family:var(--mono),monospace;">$${sg.total.toLocaleString()}</span>
+          <span style="color:var(--muted);font-size:10px;">(${sg.count}\uAC74)</span>
+          ${badge}
+          ${btn}
+        </div>`;
+      }).join('');
+      subSectionHTML = `<div style="margin-top:8px;padding:8px 10px;background:#faf5ff;border-left:3px solid #c4b5fd;border-radius:6px;">
+        <div style="font-size:10px;color:#6d28d9;font-weight:700;margin-bottom:5px;">\uD83D\uDE90 SUB \uCC28\uB7C9 \uC6B4\uD589 \u2014 \uCC28\uC8FC\uC5D0\uAC8C \uC9C1\uC811 \uBC1B\uC73C\uC138\uC694</div>
+        ${subBadges}
+      </div>`;
     }
 
     const statusColor  = !isPaid ? '#ea580c' : '#16a34a';
-    const statusText   = !isPaid ? ('⏳ $'+balance+' 미지급') : '✅ 완료';
+    const statusText   = !isPaid ? ('⏳ $'+balance+' 자사 미지급') : (subTotal > 0 ? '✅ 자사 완료' : '✅ 완료');
     const balColor     = !isPaid ? '#ea580c' : 'var(--muted)';
 
     return '<div class="salary-week" style="cursor:pointer;" onclick="document.getElementById(\'nav-pay\').click()">'
@@ -10523,11 +10700,12 @@ async function renderSalary(){
       + '<span style="font-size:11px;font-weight:700;color:'+statusColor+';">'+statusText+'</span>'
       + '</div>'
       + '<div class="salary-amounts">'
-      + '<div class="salary-amt"><div class="salary-amt-label">Earned (발생 수당)</div><div class="salary-amt-val" style="color:#16a34a;">$'+Math.round(s.total).toLocaleString()+'</div></div>'
-      + '<div class="salary-amt"><div class="salary-amt-label">Paid (지급됨)</div><div class="salary-amt-val accent">$'+Math.round(s.paid).toLocaleString()+'</div></div>'
-      + '<div class="salary-amt"><div class="salary-amt-label">Balance (잔액)</div><div class="salary-amt-val" style="color:'+balColor+';">$'+balance.toLocaleString()+'</div></div>'
+      + '<div class="salary-amt"><div class="salary-amt-label">'+(subTotal>0?'자사 발생':'Earned (발생 수당)')+'</div><div class="salary-amt-val" style="color:#16a34a;">$'+Math.round(ownTotal).toLocaleString()+'</div></div>'
+      + '<div class="salary-amt"><div class="salary-amt-label">'+(subTotal>0?'자사 지급':'Paid (지급됨)')+'</div><div class="salary-amt-val accent">$'+Math.round(s.paid).toLocaleString()+'</div></div>'
+      + '<div class="salary-amt"><div class="salary-amt-label">'+(subTotal>0?'자사 잔액':'Balance (잔액)')+'</div><div class="salary-amt-val" style="color:'+balColor+';">$'+balance.toLocaleString()+'</div></div>'
       + '</div>'
       + wageRowsHTML
+      + subSectionHTML
       + '</div>';
   }
   // 주간 페이지네이션 데이터 저장
@@ -10536,12 +10714,12 @@ async function renderSalary(){
   window._salaryCardFn = salaryCard;
   _renderSalaryWeek();
 
-  // 배지 업데이트
-  const totalUnpaid = weeks.reduce((s,w)=>s+Math.max(0,Math.round(w.total-w.paid)),0);
+  // 배지 업데이트 — 자사 미지급만 (SUB는 차주가 직접 지급)
+  const totalUnpaid = weeks.reduce((s,w)=>s+Math.max(0,Math.round((w.ownTotal||0)-w.paid)),0);
   const badge = document.getElementById('salary-balance');
-  if(badge) badge.textContent = totalUnpaid>0?'Unpaid (미지급) $'+totalUnpaid:'지급완료';
+  if(badge) badge.textContent = totalUnpaid>0?'Unpaid (자사 미지급) $'+totalUnpaid:'자사 지급완료';
   const badge2 = document.getElementById('salary-balance2');
-  if(badge2) badge2.textContent = totalUnpaid>0?'Unpaid (미지급) $'+totalUnpaid:'지급완료';
+  if(badge2) badge2.textContent = totalUnpaid>0?'Unpaid (자사 미지급) $'+totalUnpaid:'자사 지급완료';
 
   if(meEl) meEl.innerHTML = weeks.map(s=>`<div style="margin:0 12px 8px;">${salaryCard(s)}</div>`).join('');
 }
