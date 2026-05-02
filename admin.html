@@ -13729,6 +13729,10 @@ async function syncBalanceData(force){
     // ★ Agency_Txn은 인보이스 발행(saveInvoiceToSheet) 시에만 생성됨
     // sync에서는 기존 데이터 로드만 수행 (자동 생성 없음)
 
+    // ★ Wages도 GAS에서 fresh 로드 — 급여 탭에서 추가/수정한 지급이
+    //   잔액 탭에 즉시 반영되도록 (잔액 탭 ↔ 급여 탭 양방향 동기화)
+    try { await loadWagesFromSheet(true); } catch(e){ console.warn('wages sync:', e); }
+
     // ★ Ledger → SUB_Txn 자동 동기화 (외주 + Dong Choi 차량)
     await _syncLedgerToSubTxn();
 
@@ -23115,6 +23119,16 @@ function wfield(label,type,id,val){
 function _refreshWageView(){
   if(ST.wageWeek==='ALL') renderWageAll();
   else renderWage();
+  // ★ 잔액 탭 ↔ 급여 탭 동기화 — 잔액 탭의 wage 데이터도 다시 빌드/렌더
+  try {
+    if (typeof _buildWageTxns === 'function') _buildWageTxns();
+    if (typeof renderBalance === 'function') renderBalance();
+    // 잔액 디테일 모달이 열려있으면 같이 갱신
+    const balDetailModal = document.getElementById('bal-detail-modal');
+    if (balDetailModal && balDetailModal.style.display !== 'none' && typeof renderBalDetail === 'function') {
+      renderBalDetail();
+    }
+  } catch(e){ console.warn('[_refreshWageView] balance sync:', e); }
 }
 
 async function saveWageEntry(){
