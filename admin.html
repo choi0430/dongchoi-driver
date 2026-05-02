@@ -4394,6 +4394,21 @@ function _schBuildDRMatchIndex(){
   }
 }
 
+// ★ OT 비용을 시간(HR)으로 환산 — DR 시트의 OT 필드는 금액(달러)이지 시간이 아님
+// 21~25석: $30/hr · 40석: $40/hr · 50석+도 $40/hr 규약
+// 호주로 OT는 절반 요율 ($15/hr for 21석)
+function _otAmountToHours(otAmount, seats, agency){
+  const amt = parseFloat(otAmount)||0;
+  if(amt <= 0) return 0;
+  const cap = parseInt(seats)||21;
+  const baseRate = cap>=40 ? 40 : 30;
+  const _isHojuroOT = /호주로|hojuro/i.test(String(agency||''));
+  const rate = _isHojuroOT ? baseRate/2 : baseRate;
+  if(rate <= 0) return 0;
+  // 0.5시간 단위로 반올림 (드라이버 입력은 보통 30분 단위)
+  return Math.round((amt / rate) * 2) / 2;
+}
+
 // 슬롯과 매칭되는 DR 찾기 (있으면 OT, Time_Start, Time_End 등 사후 데이터 반환)
 function _schFindDRForSlot(date, slot, tour){
   if(!_schDRMatchIndex) return null;
@@ -4493,7 +4508,8 @@ async function showDRDiagnostics(tourId){
         if(slotCourse && slotCourse.toUpperCase() !== drCourse.toUpperCase())
           diffs.push(`코스: 일정="${slotCourse}" → DR="${drCourse||'-'}"`);
         const ot = parseFloat(dr.OT||0);
-        const otStr = ot > 0 ? ` · OT ${ot}HR` : '';
+        const otHours = _otAmountToHours(ot, dr.Seats, dr.Agency);
+        const otStr = ot > 0 ? ` · OT ${otHours}HR ($${ot})` : '';
         const subTag = isSubMatched ? ' (외주, 자사 DR 제출)' : '';
         slotDiagnostics.push({
           date: d.date, slot: slotLabel, status: 'matched', icon: isSubMatched ? '🏢✅' : '✅',
@@ -4732,7 +4748,8 @@ function renderScheduleList(){
     let hasTrailer = false;
     let totalSlots = 0;
     let matchedSlots = 0;
-    let totalActualOT = 0;
+    let totalActualOT = 0;        // OT 시간 합 (HR)
+    let totalActualOTAmount = 0;  // OT 금액 합 ($)
     const today = _schToday();
     let pastUnmatchedCount = 0;
     days.forEach(d => {
@@ -4760,7 +4777,10 @@ function renderScheduleList(){
         if(dr){
           matchedSlots++;
           const ot = parseFloat(dr.OT||0);
-          if(ot > 0) totalActualOT += ot;
+          if(ot > 0){
+            totalActualOT += _otAmountToHours(ot, dr.Seats, dr.Agency);
+            totalActualOTAmount += ot;
+          }
         } else if(s.mode === 'sub'){
           // SUB이면서 DR도 없으면 카운트에서 제외 (DR 작성 의무 없는 외주)
           totalSlots--;
@@ -4792,9 +4812,9 @@ function renderScheduleList(){
     if(totalSlots > 0){
       const onclickDiag = `onclick="event.stopPropagation();showDRDiagnostics('${escH(r.TourID)}')"`;
       if(matchedSlots === totalSlots){
-        drBadge = `<span ${onclickDiag} style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: DR 매칭 상세">▣ DR완료${totalActualOT>0?` · 실제 OT ${totalActualOT}HR`:''}</span>`;
+        drBadge = `<span ${onclickDiag} style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: DR 매칭 상세">▣ DR완료${totalActualOT>0?` · 실제 OT ${totalActualOT}HR ($${totalActualOTAmount})`:''}</span>`;
       } else if(matchedSlots > 0){
-        drBadge = `<span ${onclickDiag} style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미매칭 슬롯 보기">▣ ${matchedSlots}/${totalSlots}${totalActualOT>0?` · ${totalActualOT}HR`:''}</span>`;
+        drBadge = `<span ${onclickDiag} style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미매칭 슬롯 보기">▣ ${matchedSlots}/${totalSlots}${totalActualOT>0?` · ${totalActualOT}HR ($${totalActualOTAmount})`:''}</span>`;
       } else if(pastUnmatchedCount > 0){
         drBadge = `<span ${onclickDiag} style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미작성/불일치 진단">⚠ DR 미작성</span>`;
       }
@@ -5647,7 +5667,8 @@ function _smRebuildDays(){
       let drStatus = '';
       if(matchedDR){
         const ot = parseFloat(matchedDR.OT||0);
-        drStatus = `<span class="sm-dr-badge ok">▣ DR 매칭됨${ot>0?` · 실제 OT ${ot}HR`:' · OT 없음'}</span>`;
+        const otHours = _otAmountToHours(ot, matchedDR.Seats, matchedDR.Agency);
+        drStatus = `<span class="sm-dr-badge ok">▣ DR 매칭됨${ot>0?` · 실제 OT ${otHours}HR ($${ot})`:' · OT 없음'}</span>`;
       } else if(d.date < today && (d.slots[k].driver || d.slots[k].rego)){
         drStatus = `<span class="sm-dr-badge warn">⚠ DR 미작성/미매칭 — 차량+코스 일치 확인</span>`;
       }
@@ -8043,7 +8064,10 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   const dr = _schFindDRForSlot(day.date, slot, tour);
   if(dr){
     const ot = parseFloat(dr.OT || 0);
-    if(ot > 0) carExtras.push(`+${ot}HR`);
+    if(ot > 0) {
+      const otHours = _otAmountToHours(ot, dr.Seats, dr.Agency);
+      carExtras.push(`+${otHours}HR`);
+    }
     carExtras.push('▣');
   } else if(slot.driver || slot.rego) {
     const dateToday = _schToday();
