@@ -5732,10 +5732,26 @@ function runScheduleStatusUpdate() {
     const now = new Date();
     const today = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd');
     const sydNow = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
+
+    // ★ 시트 셀이 Date 객체일 수도, 문자열일 수도 → 통일된 yyyy-MM-dd 추출
+    function _toISODate(v) {
+      if (!v && v !== 0) return '';
+      if (v instanceof Date && !isNaN(v.getTime())) {
+        return Utilities.formatDate(v, 'Australia/Sydney', 'yyyy-MM-dd');
+      }
+      const s = String(v).trim();
+      // 이미 yyyy-MM-dd로 시작하면 그대로
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      // dd/MM/yyyy 형식 변환
+      const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+      return '';
+    }
+
     let updated = 0;
     for (let i = 1; i < data.length; i++) {
-      const sd = String(data[i][sdCol]||'').slice(0, 10);
-      const ed = String(data[i][edCol]||'').slice(0, 10);
+      const sd = _toISODate(data[i][sdCol]);
+      const ed = _toISODate(data[i][edCol]);
       const st = String(data[i][stCol]||'').trim();
       let newSt = '';
       if ((st === 'scheduled' || st === 'in_progress') && today > ed && ed) {
@@ -5835,6 +5851,18 @@ function diagnoseScheduleSystem() {
   const stCol = headers.indexOf('Status');
   const agCol = headers.indexOf('Agency');
 
+  function _toISODate(v) {
+    if (!v && v !== 0) return '';
+    if (v instanceof Date && !isNaN(v.getTime())) {
+      return Utilities.formatDate(v, 'Australia/Sydney', 'yyyy-MM-dd');
+    }
+    const s = String(v).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    return '';
+  }
+
   // 진행중이거나 예정인 일정만 표시
   log.push('상태가 scheduled / in_progress 인 일정:');
   let count = 0;
@@ -5842,8 +5870,10 @@ function diagnoseScheduleSystem() {
     const st = String(data[i][stCol]||'').trim();
     if (st !== 'scheduled' && st !== 'in_progress') continue;
 
-    const sd = String(data[i][sdCol]||'').slice(0, 10);
-    const ed = String(data[i][edCol]||'').slice(0, 10);
+    const rawSd = data[i][sdCol];
+    const rawEd = data[i][edCol];
+    const sd = _toISODate(rawSd);
+    const ed = _toISODate(rawEd);
     const id = data[i][idCol] || '';
     const tc = data[i][tcCol] || '';
     const ag = data[i][agCol] || '';
@@ -5853,7 +5883,9 @@ function diagnoseScheduleSystem() {
     else if (sd && ed && today >= sd && today <= ed) suggestion = ' → in_progress (오늘 일정 중)';
     else if (sd && today < sd) suggestion = ' (시작일 미도래, scheduled 유지)';
 
-    log.push(`[${st}] ${id} (${tc}) | ${ag} | ${sd} ~ ${ed}${suggestion}`);
+    // 원본 셀 타입 함께 출력 (디버깅용)
+    const sdType = rawSd instanceof Date ? 'Date' : typeof rawSd;
+    log.push(`[${st}] ${id} (${tc}) | ${ag} | ${sd} ~ ${ed} (raw start: ${sdType} "${rawSd}")${suggestion}`);
     count++;
     if (count > 20) { log.push('... (이하 생략)'); break; }
   }
@@ -5863,8 +5895,8 @@ function diagnoseScheduleSystem() {
   log.push('\n--- 4) 만약 지금 runScheduleStatusUpdate를 실행하면 ---');
   let wouldUpdate = 0;
   for (let i = 1; i < data.length; i++) {
-    const sd = String(data[i][sdCol]||'').slice(0, 10);
-    const ed = String(data[i][edCol]||'').slice(0, 10);
+    const sd = _toISODate(data[i][sdCol]);
+    const ed = _toISODate(data[i][edCol]);
     const st = String(data[i][stCol]||'').trim();
     if ((st === 'scheduled' || st === 'in_progress') && today > ed && ed) wouldUpdate++;
     else if (st === 'scheduled' && sd && ed && today >= sd && today <= ed) wouldUpdate++;
@@ -5911,6 +5943,19 @@ function runScheduleStatusUpdateV2() {
     const today = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd');
     const sydNow = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
 
+    // 시트 셀이 Date 객체/문자열 모두 처리
+    function _toISODate(v) {
+      if (!v && v !== 0) return '';
+      if (v instanceof Date && !isNaN(v.getTime())) {
+        return Utilities.formatDate(v, 'Australia/Sydney', 'yyyy-MM-dd');
+      }
+      const s = String(v).trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+      return '';
+    }
+
     // Daily_Report 한 번만 로드해서 메모리에서 처리
     const drSheet = ss.getSheetByName('Daily_Report');
     let drRows = [];
@@ -5921,9 +5966,7 @@ function runScheduleStatusUpdateV2() {
       const drAgCol = drHeaders.indexOf('Agency');
       const drTcCol = drHeaders.indexOf('Tour_Code');
       drRows = drData.slice(1).map(r => ({
-        date: r[drDateCol] instanceof Date
-          ? Utilities.formatDate(r[drDateCol], 'Australia/Sydney', 'yyyy-MM-dd')
-          : String(r[drDateCol]||'').slice(0,10),
+        date: _toISODate(r[drDateCol]),
         agency: String(r[drAgCol]||'').trim(),
         tourCode: String(r[drTcCol]||'').trim()
       })).filter(r => r.date);
@@ -5944,8 +5987,8 @@ function runScheduleStatusUpdateV2() {
     let updated = 0;
     const updateLog = [];
     for (let i = 1; i < data.length; i++) {
-      const sd = String(data[i][sdCol]||'').slice(0, 10);
-      const ed = String(data[i][edCol]||'').slice(0, 10);
+      const sd = _toISODate(data[i][sdCol]);
+      const ed = _toISODate(data[i][edCol]);
       const st = String(data[i][stCol]||'').trim();
       const ag = data[i][agCol] || '';
       const tc = tcCol >= 0 ? (data[i][tcCol] || '') : '';
