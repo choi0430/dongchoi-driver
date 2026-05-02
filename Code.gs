@@ -26,7 +26,9 @@ const REPORT_HEADERS = {
                      'SVC_Label','SVC_Charge','Hotel_Surcharge','Dist_Surcharge',
                      'OT','Trailer','Trailer_Number','Total_TA','DR_Cost','Toll','Toll_Personal',
                      'Fuel','Fuel_Personal','Early','Night_Type','Night_DR','Night_Owner',
-                     'Wash','Meal','Tip','Etc','Etc_Desc','Remarks'],
+                     'Wash','Meal','Tip','Etc','Etc_Desc','Remarks',
+                     'SubPaid_Owner','SubPaid_OwnerAt','SubPaid_OwnerBy',
+                     'SubPaid_Driver','SubPaid_DriverAt'],
   'Pre_Departure':  ['Submitted','Driver','Date','Rego','Seats','Start_KM','Fuel','Start_Time',
                      'Check_Results','Remarks','Signature','Trailer_Number'],
   'End_of_Shift':   ['Submitted','Driver','Date','Rego','Start_KM','End_KM','End_Time','Fuel_End','Damage','Check_Results','Daily_Reports','Remarks','Signature'],
@@ -658,6 +660,136 @@ function migrateAddTrailerSystem() {
   } catch (err) {
     Logger.log('migrateAddTrailerSystem error: ' + err.toString());
     return 'error: ' + err.toString();
+  }
+}
+
+/**
+ * SUB 차량 운행 — 차주 지급 확인 시스템 마이그레이션
+ *
+ * Daily_Report 시트에 SUB 차량 운행에 대한 차주 지급 확인 컬럼 5개 추가:
+ *   - SubPaid_Owner    : 'Y' / '' (차주가 지급했다고 관리자가 확인)
+ *   - SubPaid_OwnerAt  : ISO 타임스탬프
+ *   - SubPaid_OwnerBy  : 확인한 관리자/차주명
+ *   - SubPaid_Driver   : 'Y' / '' (드라이버가 받았다고 확인)
+ *   - SubPaid_DriverAt : ISO 타임스탬프
+ *
+ * 자사 차량 운행 행에서는 이 컬럼들이 빈 값으로 유지됨 (의미 없음)
+ *
+ * 사용법: Apps Script 에디터에서 한 번 실행
+ */
+function migrateAddSubPaymentColumns() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const log = [];
+
+    function ensureColumn(sheetName, colName, afterCol) {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) { log.push(sheetName + ': sheet not found, skip'); return; }
+      const lastCol = sheet.getLastColumn();
+      const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+      if (headers.indexOf(colName) >= 0) {
+        log.push(sheetName + '.' + colName + ': already exists');
+        return;
+      }
+      const afterIdx = headers.indexOf(afterCol);
+      if (afterIdx < 0) {
+        sheet.getRange(1, lastCol + 1).setValue(colName);
+        log.push(sheetName + '.' + colName + ': appended at end');
+        return;
+      }
+      sheet.insertColumnAfter(afterIdx + 1);
+      sheet.getRange(1, afterIdx + 2).setValue(colName);
+      log.push(sheetName + '.' + colName + ': inserted after ' + afterCol);
+    }
+
+    // Remarks 다음에 5개 컬럼 순서대로 추가
+    ensureColumn('Daily_Report', 'SubPaid_Owner',    'Remarks');
+    ensureColumn('Daily_Report', 'SubPaid_OwnerAt',  'SubPaid_Owner');
+    ensureColumn('Daily_Report', 'SubPaid_OwnerBy',  'SubPaid_OwnerAt');
+    ensureColumn('Daily_Report', 'SubPaid_Driver',   'SubPaid_OwnerBy');
+    ensureColumn('Daily_Report', 'SubPaid_DriverAt', 'SubPaid_Driver');
+
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+  } catch (err) {
+    Logger.log('migrateAddSubPaymentColumns error: ' + err.toString());
+    return 'error: ' + err.toString();
+  }
+}
+
+/**
+ * SUB 차량 운행 — 차주 지급 확인
+ *
+ * @param {number} rowIndex - Daily_Report 시트의 1-indexed row (헤더가 1행)
+ * @param {string} type - 'owner' (관리자/차주 확인) 또는 'driver' (드라이버 확인)
+ * @param {string} user - 확인한 사람 이름
+ * @param {boolean} confirmed - true=확인, false=취소
+ */
+function confirmSubPayment(rowIndex, type, user, confirmed) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Daily_Report');
+    if (!sheet) return {ok: false, msg: 'Daily_Report sheet not found'};
+
+    const ri = parseInt(rowIndex);
+    if (!ri || ri < 2) return {ok: false, msg: 'Invalid rowIndex'};
+
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+    const setCell = (colName, value) => {
+      const idx = headers.indexOf(colName);
+      if (idx < 0) throw new Error('Column not found: ' + colName + ' (run migrateAddSubPaymentColumns first)');
+      sheet.getRange(ri, idx + 1).setValue(value);
+    };
+
+    const now = new Date().toISOString();
+    const isConfirmed = confirmed !== false; // default true
+
+    if (type === 'owner') {
+      setCell('SubPaid_Owner',   isConfirmed ? 'Y' : '');
+      setCell('SubPaid_OwnerAt', isConfirmed ? now : '');
+      setCell('SubPaid_OwnerBy', isConfirmed ? (user || 'unknown') : '');
+    } else if (type === 'driver') {
+      setCell('SubPaid_Driver',   isConfirmed ? 'Y' : '');
+      setCell('SubPaid_DriverAt', isConfirmed ? now : '');
+    } else {
+      return {ok: false, msg: 'Invalid type: must be owner or driver'};
+    }
+
+    // 현재 row 데이터 반환 (UI 갱신용)
+    const updatedRow = sheet.getRange(ri, 1, 1, lastCol).getValues()[0];
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = updatedRow[i]);
+
+    return {ok: true, row: obj};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+/**
+ * SUB 차량 운행 — 차주 지급 일괄 확인
+ * 한 차주의 여러 row를 한 번에 확인 처리
+ *
+ * @param {Array<number>} rowIndexes - 1-indexed rows
+ * @param {string} type - 'owner' or 'driver'
+ * @param {string} user
+ * @param {boolean} confirmed
+ */
+function confirmSubPaymentBulk(rowIndexes, type, user, confirmed) {
+  try {
+    if (!Array.isArray(rowIndexes) || rowIndexes.length === 0) {
+      return {ok: false, msg: 'No rows specified'};
+    }
+    const results = [];
+    for (const ri of rowIndexes) {
+      results.push(confirmSubPayment(ri, type, user, confirmed));
+    }
+    const okCount = results.filter(r => r.ok).length;
+    return {ok: okCount > 0, total: rowIndexes.length, success: okCount, results};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
   }
 }
 
@@ -1436,6 +1568,42 @@ function doPost(e) {
       case 'save_correction_request':
         return cors(saveCorrectionRequest(payload));
 
+      // ── SUB 차량 운행 — 차주 지급 확인 ──
+      case 'confirm_sub_payment': {
+        // type: 'owner' (관리자) | 'driver' (드라이버)
+        // 드라이버 토큰이면 type을 driver로 강제 (다른 사람 대신 확인 방지)
+        let confirmType = payload.type || 'owner';
+        if (tokenValid.valid && tokenValid.role === 'driver') {
+          confirmType = 'driver';
+        }
+        const r = confirmSubPayment(
+          payload.rowIndex,
+          confirmType,
+          _user,
+          payload.confirmed !== false
+        );
+        if (r.ok) appendAuditLog(_user, 'confirm_sub_payment', 'Daily_Report', payload.rowIndex,
+          'type:' + confirmType + ' confirmed:' + (payload.confirmed !== false));
+        return cors(r);
+      }
+
+      case 'confirm_sub_payment_bulk': {
+        let confirmType = payload.type || 'owner';
+        if (tokenValid.valid && tokenValid.role === 'driver') {
+          confirmType = 'driver';
+        }
+        const r = confirmSubPaymentBulk(
+          payload.rowIndexes || [],
+          confirmType,
+          _user,
+          payload.confirmed !== false
+        );
+        if (r.ok) appendAuditLog(_user, 'confirm_sub_payment_bulk', 'Daily_Report',
+          (payload.rowIndexes||[]).join(','),
+          'type:' + confirmType + ' count:' + r.success + '/' + r.total);
+        return cors(r);
+      }
+
       // ── Master CRUD ──
       case 'add_master': {
         const r = addMasterRow(payload.sheet, payload.data);
@@ -1736,10 +1904,10 @@ function getReports(sheetName, driver) {
       return v;
     }
 
-    let rows = data.slice(1).map(row => {
-      const obj = {};
-      headers.forEach((h, i) => {
-        obj[h] = formatCell(h, row[i]);
+    let rows = data.slice(1).map((row, i) => {
+      const obj = {_rowIndex: i + 2}; // 1-indexed sheet row (헤더가 1행이므로 i+2)
+      headers.forEach((h, idx) => {
+        obj[h] = formatCell(h, row[idx]);
       });
       return obj;
     });
