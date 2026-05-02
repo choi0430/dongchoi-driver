@@ -5784,3 +5784,198 @@ function removeScheduleTrigger() {
   Logger.log('Removed ' + removed + ' schedule trigger(s).');
   return removed;
 }
+
+/**
+ * 진단: Schedule 시트 + 트리거 상태를 한 번에 점검
+ * Apps Script 에디터에서 직접 실행 → Logger 확인
+ */
+function diagnoseScheduleSystem() {
+  const log = [];
+  log.push('═══ 운행 일정 시스템 진단 ═══');
+
+  // 1. 트리거 상태
+  log.push('\n--- 1) 자동 트리거 등록 상태 ---');
+  const triggers = ScriptApp.getProjectTriggers();
+  const scheduleTriggers = triggers.filter(t => t.getHandlerFunction() === 'runScheduleStatusUpdate');
+  if (scheduleTriggers.length === 0) {
+    log.push('❌ 등록된 트리거 없음. setupScheduleTrigger() 함수를 실행해야 합니다.');
+  } else {
+    scheduleTriggers.forEach(t => {
+      log.push('✅ 트리거 등록됨: ' + t.getEventType() + ' (' + t.getTriggerSource() + ')');
+    });
+  }
+
+  // 2. 오늘 날짜 (Sydney 기준)
+  const now = new Date();
+  const today = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd');
+  log.push('\n--- 2) 오늘 날짜 (Sydney) ---');
+  log.push('today = ' + today);
+
+  // 3. Schedule 시트 데이터
+  log.push('\n--- 3) Schedule 시트 데이터 ---');
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('Schedule');
+  if (!sheet) {
+    log.push('❌ Schedule 시트 없음');
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+  }
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    log.push('(데이터 없음)');
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+  }
+
+  const headers = data[0];
+  const idCol = headers.indexOf('TourID');
+  const tcCol = headers.indexOf('TourCode');
+  const sdCol = headers.indexOf('StartDate');
+  const edCol = headers.indexOf('EndDate');
+  const stCol = headers.indexOf('Status');
+  const agCol = headers.indexOf('Agency');
+
+  // 진행중이거나 예정인 일정만 표시
+  log.push('상태가 scheduled / in_progress 인 일정:');
+  let count = 0;
+  for (let i = 1; i < data.length; i++) {
+    const st = String(data[i][stCol]||'').trim();
+    if (st !== 'scheduled' && st !== 'in_progress') continue;
+
+    const sd = String(data[i][sdCol]||'').slice(0, 10);
+    const ed = String(data[i][edCol]||'').slice(0, 10);
+    const id = data[i][idCol] || '';
+    const tc = data[i][tcCol] || '';
+    const ag = data[i][agCol] || '';
+
+    let suggestion = '';
+    if (today > ed && ed) suggestion = ' → completed (종료일 지남)';
+    else if (sd && ed && today >= sd && today <= ed) suggestion = ' → in_progress (오늘 일정 중)';
+    else if (sd && today < sd) suggestion = ' (시작일 미도래, scheduled 유지)';
+
+    log.push(`[${st}] ${id} (${tc}) | ${ag} | ${sd} ~ ${ed}${suggestion}`);
+    count++;
+    if (count > 20) { log.push('... (이하 생략)'); break; }
+  }
+  if (count === 0) log.push('(scheduled/in_progress 일정 없음)');
+
+  // 4. 시뮬레이션 — 지금 trigger 돌리면 몇 건 바뀔지
+  log.push('\n--- 4) 만약 지금 runScheduleStatusUpdate를 실행하면 ---');
+  let wouldUpdate = 0;
+  for (let i = 1; i < data.length; i++) {
+    const sd = String(data[i][sdCol]||'').slice(0, 10);
+    const ed = String(data[i][edCol]||'').slice(0, 10);
+    const st = String(data[i][stCol]||'').trim();
+    if ((st === 'scheduled' || st === 'in_progress') && today > ed && ed) wouldUpdate++;
+    else if (st === 'scheduled' && sd && ed && today >= sd && today <= ed) wouldUpdate++;
+  }
+  log.push(wouldUpdate + ' 건이 상태 변경 대상');
+
+  Logger.log(log.join('\n'));
+  return log.join('\n');
+}
+
+/**
+ * 강화된 자동 상태 전환 — DR 매칭 기반 보너스 룰 추가
+ *
+ * 기존 룰:
+ *   - StartDate <= today <= EndDate → in_progress
+ *   - today > EndDate → completed
+ *
+ * 새 룰 (DR-driven):
+ *   - 일정 기간 내 Daily_Report에 매칭 row가 1건이라도 있으면 → in_progress
+ *     (시작일 도래 안 했어도 드라이버가 일찍 출근한 케이스 처리)
+ *
+ * 매칭 키: Date in [StartDate, EndDate] AND (Agency match OR TourCode match)
+ */
+function runScheduleStatusUpdateV2() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Schedule');
+    if (!sheet) {
+      Logger.log('Schedule sheet not found, skipping');
+      return { ok: true, updated: 0 };
+    }
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { ok: true, updated: 0 };
+
+    const headers = data[0];
+    const sdCol = headers.indexOf('StartDate');
+    const edCol = headers.indexOf('EndDate');
+    const stCol = headers.indexOf('Status');
+    const upCol = headers.indexOf('UpdatedAt');
+    const agCol = headers.indexOf('Agency');
+    const tcCol = headers.indexOf('TourCode');
+
+    const now = new Date();
+    const today = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd');
+    const sydNow = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
+
+    // Daily_Report 한 번만 로드해서 메모리에서 처리
+    const drSheet = ss.getSheetByName('Daily_Report');
+    let drRows = [];
+    if (drSheet && drSheet.getLastRow() > 1) {
+      const drData = drSheet.getDataRange().getValues();
+      const drHeaders = drData[0];
+      const drDateCol = drHeaders.indexOf('Date');
+      const drAgCol = drHeaders.indexOf('Agency');
+      const drTcCol = drHeaders.indexOf('Tour_Code');
+      drRows = drData.slice(1).map(r => ({
+        date: r[drDateCol] instanceof Date
+          ? Utilities.formatDate(r[drDateCol], 'Australia/Sydney', 'yyyy-MM-dd')
+          : String(r[drDateCol]||'').slice(0,10),
+        agency: String(r[drAgCol]||'').trim(),
+        tourCode: String(r[drTcCol]||'').trim()
+      })).filter(r => r.date);
+    }
+
+    function hasMatchingDR(sd, ed, agency, tourCode) {
+      if (!sd || !ed) return false;
+      const ag = String(agency||'').trim();
+      const tc = String(tourCode||'').trim();
+      return drRows.some(dr => {
+        if (dr.date < sd || dr.date > ed) return false;
+        if (tc && dr.tourCode === tc) return true;
+        if (ag && dr.agency === ag) return true;
+        return false;
+      });
+    }
+
+    let updated = 0;
+    const updateLog = [];
+    for (let i = 1; i < data.length; i++) {
+      const sd = String(data[i][sdCol]||'').slice(0, 10);
+      const ed = String(data[i][edCol]||'').slice(0, 10);
+      const st = String(data[i][stCol]||'').trim();
+      const ag = data[i][agCol] || '';
+      const tc = tcCol >= 0 ? (data[i][tcCol] || '') : '';
+      let newSt = '';
+
+      // 룰 1: 종료일 지남 → completed
+      if ((st === 'scheduled' || st === 'in_progress') && today > ed && ed) {
+        newSt = 'completed';
+      }
+      // 룰 2: 오늘이 일정 기간 내 → in_progress
+      else if (st === 'scheduled' && sd && ed && today >= sd && today <= ed) {
+        newSt = 'in_progress';
+      }
+      // 룰 3 (NEW): DR이 매칭되면 시작일 전이라도 → in_progress
+      else if (st === 'scheduled' && hasMatchingDR(sd, ed, ag, tc)) {
+        newSt = 'in_progress';
+      }
+
+      if (newSt && newSt !== st) {
+        sheet.getRange(i + 1, stCol + 1).setValue(newSt);
+        if (upCol >= 0) sheet.getRange(i + 1, upCol + 1).setValue(sydNow);
+        updated++;
+        updateLog.push(`Row ${i+1}: ${st} → ${newSt} (${ag} ${sd}~${ed})`);
+      }
+    }
+    Logger.log(`runScheduleStatusUpdateV2: ${updated} 건 상태 변경`);
+    if (updateLog.length) Logger.log(updateLog.join('\n'));
+    return { ok: true, updated: updated, details: updateLog };
+  } catch (err) {
+    Logger.log('runScheduleStatusUpdateV2 error: ' + err.toString());
+    return { ok: false, error: err.toString() };
+  }
+}
