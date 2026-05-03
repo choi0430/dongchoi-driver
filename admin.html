@@ -18699,20 +18699,20 @@ async function saveInvoiceToSheet() {
         _balLoaded = false;
       } else {
         // ★ 수정 모드: 기존 Agency_Txn DR 금액이 변경되었으면 업데이트
-        //   DueDate도 같이 업데이트 (IssuedDate+14 = 저장 시점의 오늘+14)
+        //   ※ DueDate는 최초 발행 시점 기준으로 보존 (수정 시 재계산하지 않음)
         const oldDR = roundMoney(Number(existingTxn.DR)||0);
         if (Math.abs(oldDR - drAmount) > 0.01) {
           console.log('[Invoice→Balance] DR 금액 변경 감지:', invNum, oldDR, '→', drAmount);
           const rowIdx = existingTxn._rowIndex || existingTxn.rowIndex;
           if (rowIdx) {
             fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
-              body: JSON.stringify({action:'update_agency_txn', rowIndex: rowIdx, data: {DR: drAmount, StartDate: actualFrom, FinishDate: actualTo, DueDate: dueDateStr, Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})`}, _user:getAdminUser()})
+              body: JSON.stringify({action:'update_agency_txn', rowIndex: rowIdx, data: {DR: drAmount, StartDate: actualFrom, FinishDate: actualTo, Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})`}, _user:getAdminUser()})
             }).then(r=>r.json()).then(j=>{
-              if(j.ok) { console.log('[Invoice→Balance] DR 금액 업데이트:', invNum, drAmount); existingTxn.DR = drAmount; existingTxn.DueDate = dueDateStr; }
+              if(j.ok) { console.log('[Invoice→Balance] DR 금액 업데이트:', invNum, drAmount); existingTxn.DR = drAmount; }
             }).catch(e=>console.warn('[Invoice→Balance] DR update error:', e));
           } else {
-            // rowIndex 없으면 삭제 후 재등록
-            const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: actualFrom, FinishDate: actualTo, DueDate: dueDateStr };
+            // rowIndex 없으면 삭제 후 재등록 — 기존 DueDate 보존
+            const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: actualFrom, FinishDate: actualTo, DueDate: existingTxn.DueDate||'' };
             const drTxn = { ...baseTxn, Type: 'invoice', DR: drAmount, CR: 0,
               Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})` };
             fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
