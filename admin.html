@@ -13114,17 +13114,52 @@ function buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTota
   const fmtFrom = _fmtSubInvDate(autoFrom);
   const fmtTo = _fmtSubInvDate(autoTo);
 
-  const rowsHtml = items.map(i=>`<tr>
+  // ★ 투어코드별 그룹화 + 마지막 날짜 + 14일 = 지급 예정일
+  const groups = {};
+  items.forEach(i => {
+    const tc = String(i.tourCode||'').trim() || '__NO_TC__';
+    if(!groups[tc]) groups[tc] = { tourCode: tc==='__NO_TC__' ? '' : tc, rows: [], total: 0, lastISO: '' };
+    const g = groups[tc];
+    g.rows.push(i);
+    g.total += Number(i.total||0);
+    const iso = String(i.date||'').slice(0,10);
+    if(/^\d{4}-\d{2}-\d{2}$/.test(iso) && iso > g.lastISO) g.lastISO = iso;
+  });
+  const sortedGroups = Object.values(groups).sort((a,b)=> (a.lastISO||'').localeCompare(b.lastISO||''));
+
+  // 행 렌더 헬퍼
+  const _rowHtml = (i) => `<tr>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${_fmtSubInvDate(i.date)||''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.rego||''}</td>
-    <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.tourCode||''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;">${i.tour||''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:center;">${i.seats||''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">$${Number(i.amount||0).toLocaleString()}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">${(i.ot||0)>0?'$'+Number(i.ot).toLocaleString():''}${i.otTime?' <span style="font-size:9px;color:#888;">('+i.otTime+')</span>':''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;">${(i.etc||0)>0?'$'+Number(i.etc).toLocaleString():''}${i.etcLabel?' ('+i.etcLabel+')':''}</td>
     <td style="padding:6px 8px;border:1px solid #ddd;font-size:11px;text-align:right;font-weight:700;">$${Number(i.total||0).toLocaleString()}</td>
-  </tr>`).join('');
+  </tr>`;
+
+  // 그룹별 헤더 + 행 + 소계 + 지급예정일
+  const rowsHtml = sortedGroups.map(g => {
+    let dueStr = '';
+    if(g.lastISO){
+      const d = new Date(g.lastISO+'T00:00:00');
+      if(!isNaN(d.getTime())){
+        d.setDate(d.getDate()+14);
+        const yy = d.getFullYear(), mm = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+        dueStr = `${dd}/${mm}/${yy}`;
+      }
+    }
+    const tcLabel = g.tourCode ? g.tourCode : '(Tour code not specified)';
+    return `<tr><td colspan="8" style="background:#ede9fe;color:#4c1d95;font-size:11px;font-weight:700;padding:6px 8px;border:1px solid #c4b5fd;">
+      🏷 Tour Code: ${escH(tcLabel)} <span style="font-weight:400;color:#6b7280;">(${g.rows.length} item${g.rows.length>1?'s':''})</span>
+      ${dueStr ? `<span style="float:right;color:#dc2626;background:#fef2f2;padding:1px 8px;border-radius:4px;font-size:10px;">📅 Due: ${dueStr}</span>` : ''}
+    </td></tr>` +
+    g.rows.map(_rowHtml).join('') +
+    `<tr><td colspan="7" style="padding:5px 8px;border:1px solid #ddd;font-size:11px;text-align:right;color:#6b7280;font-weight:600;">Subtotal (${escH(g.tourCode||'no code')})</td>
+      <td style="padding:5px 8px;border:1px solid #ddd;font-size:11px;text-align:right;font-weight:700;color:#4c1d95;">$${g.total.toLocaleString('en-AU',{minimumFractionDigits:2})}</td>
+    </tr>`;
+  }).join('');
   return `<div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
       <div><div style="font-size:20px;font-weight:700;">${subName}</div>
@@ -13145,7 +13180,6 @@ function buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTota
       <thead><tr style="background:#4f46e5;color:white;">
         <th style="padding:6px 8px;font-size:10px;text-align:left;">Date</th>
         <th style="padding:6px 8px;font-size:10px;text-align:left;">Rego</th>
-        <th style="padding:6px 8px;font-size:10px;text-align:left;">Tour Code</th>
         <th style="padding:6px 8px;font-size:10px;text-align:left;">Course</th>
         <th style="padding:6px 8px;font-size:10px;text-align:center;">Seats</th>
         <th style="padding:6px 8px;font-size:10px;text-align:right;">Amount</th>
@@ -14408,6 +14442,36 @@ function _isSubLedgerSuppressed(t){
   return ranges.some(r => dateISO >= r.from && dateISO <= r.to);
 }
 
+// ★ SUB 트랜잭션에서 투어코드 추출 (전역 헬퍼)
+//   1) TourCode 필드 우선
+//   2) Description 패턴: DRSUB:날짜_차량_투어코드 또는 LEDGER:날짜_차량_투어코드
+//   3) Remark에서 ' / '로 분리된 마지막 비-D/G 토큰
+function _extractSubTourCode(r){
+  const tc = String(r.TourCode||'').trim();
+  if(tc) return tc;
+  const desc = String(r.Description||'');
+  const dm = desc.match(/^(?:DRSUB|LEDGER):\d{4}-\d{2}-\d{2}_[^_]+_(.+)$/);
+  if(dm) return dm[1].trim();
+  const rem = String(r.Remark||'');
+  if(rem){
+    const parts = rem.split('/').map(s=>s.trim()).filter(Boolean);
+    const candidates = parts.filter(p => !/^[A-Z]:/.test(p) && !/^TV\d+$/.test(p));
+    if(candidates.length >= 2){
+      return candidates[candidates.length - 1];
+    }
+  }
+  return '';
+}
+
+// ★ 마지막 운행일 + 14일 = 지급 예정일
+function _calcSubDueFromLastDate(lastISO){
+  if(!lastISO) return '';
+  const d = new Date(lastISO + 'T00:00:00');
+  if(isNaN(d.getTime())) return '';
+  d.setDate(d.getDate() + 14);
+  return toLocalISO(d);
+}
+
 function _subBalances(){
   // ★ SUBINV 우선 정책: LEDGER/DRSUB가 같은 SubCompany+기간의 SUBINV에 의해 가려진 경우 제외
   // ★ DRSUB 우선 정책: 같은 날짜+차량 운행이 LEDGER에도 있으면 DRSUB가 더 정확하므로 LEDGER 가림
@@ -14432,13 +14496,27 @@ function _subBalances(){
     }
     const name = t.SubCompany||'Unknown';
     const cat = t.Category||'Outsourcing';
-    if(!map[name]) map[name]={name, dr:0, cr:0, wageDr:0, wageCr:0, driverWages:{}};
+    if(!map[name]) map[name]={name, dr:0, cr:0, wageDr:0, wageCr:0, driverWages:{}, tourCodeGroups:{}};
     if(cat==='Wage'){
       map[name].wageDr += Number(t.DR)||0;
       map[name].wageCr += Number(t.CR)||0;
     } else {
       map[name].dr += Number(t.DR)||0;
       map[name].cr += Number(t.CR)||0;
+    }
+
+    // ★ 투어코드별 그룹 집계 (외주만 — 급여 항목은 따로 관리)
+    if(cat !== 'Wage'){
+      const tc = _extractSubTourCode(t) || '__NO_TOUR_CODE__';
+      if(!map[name].tourCodeGroups[tc]){
+        map[name].tourCodeGroups[tc] = { tourCode: tc===  '__NO_TOUR_CODE__' ? '' : tc, count: 0, dr: 0, cr: 0, lastISO: '' };
+      }
+      const g = map[name].tourCodeGroups[tc];
+      g.count++;
+      g.dr += Number(t.DR)||0;
+      g.cr += Number(t.CR)||0;
+      const iso = parseToISO(t.Date||'');
+      if(iso && iso > g.lastISO) g.lastISO = iso;
     }
   });
 
@@ -14451,7 +14529,7 @@ function _subBalances(){
       const payer = tx.payer || dcOwner;
       if(payer === dcOwner) return; // 자사 차량은 제외
       const driver = tx.driver || 'Unknown';
-      if(!map[payer]) map[payer]={name:payer, dr:0, cr:0, wageDr:0, wageCr:0, driverWages:{}};
+      if(!map[payer]) map[payer]={name:payer, dr:0, cr:0, wageDr:0, wageCr:0, driverWages:{}, tourCodeGroups:{}};
       if(!map[payer].driverWages) map[payer].driverWages = {};
       map[payer].driverWages[driver] = (map[payer].driverWages[driver] || 0) + (Number(tx.amount) || 0);
     });
@@ -14462,7 +14540,11 @@ function _subBalances(){
     const wageBal = a.wageDr - a.wageCr;
     // 차주가 분배해야 할 드라이버 급여 합계
     const driverWageTotal = Object.values(a.driverWages||{}).reduce((s,v)=>s+v, 0);
-    return {...a, outsourcingBal, wageBal, balance: outsourcingBal + wageBal, driverWageTotal};
+    // 투어코드 그룹 → 배열 (마지막 날짜순)
+    const tourGroups = Object.values(a.tourCodeGroups||{})
+      .map(g => ({...g, balance: g.dr - g.cr, dueDate: _calcSubDueFromLastDate(g.lastISO)}))
+      .sort((a,b)=> (a.lastISO||'').localeCompare(b.lastISO||''));
+    return {...a, outsourcingBal, wageBal, balance: outsourcingBal + wageBal, driverWageTotal, tourGroups};
   }).sort((a,b)=>b.balance-a.balance);
 }
 
@@ -14507,6 +14589,23 @@ function renderBalSubList(){
         ${driverList.map(([drv, amt]) => `<div style="display:flex;justify-content:space-between;font-size:10px;padding:2px 0;color:var(--t2);"><span>${escH(drv)}</span><span style="font-family:var(--fn);font-weight:600;color:#7c3aed;">$${amt.toLocaleString('en',{minimumFractionDigits:2})}</span></div>`).join('')}
         <div style="display:flex;justify-content:space-between;font-size:10px;padding:4px 0 0 0;margin-top:4px;border-top:1px solid #c4b5fd;font-weight:700;color:#7c3aed;"><span>\uD569\uACC4 (\uCC38\uACE0)</span><span style="font-family:var(--fn);">$${(a.driverWageTotal||0).toLocaleString('en',{minimumFractionDigits:2})}</span></div>
       </div>` : '';
+
+    // ★ 투어코드별 그룹 미니 리스트 (외주 항목만, 잔액>0인 것 우선)
+    const tg = (a.tourGroups||[]).filter(g => g.balance > 0.01 || g.dr > 0);
+    const tgHtml = tg.length > 0 ? `
+      <div style="margin-top:8px;padding:8px;background:#faf5ff;border-left:3px solid #c4b5fd;border-radius:6px;">
+        <div style="font-size:10px;font-weight:700;color:#6d28d9;margin-bottom:5px;">\uD83C\uDFF7 \uD22C\uC5B4\ucf54\ub4dc\ubcc4 \ubaa8\uc544\ubcf4\uae30 (${tg.length}\uAC1C)</div>
+        ${tg.map(g => {
+          const balColor = g.balance > 0.01 ? '#dc2626' : (g.balance < -0.01 ? 'var(--ac)' : 'var(--gn)');
+          const dueLabel = g.dueDate ? `<span style="color:#dc2626;background:#fef2f2;padding:1px 5px;border-radius:3px;font-weight:700;">\uD83D\uDCC5 ${fmtDate(g.dueDate)}</span>` : '';
+          const tcLabel = g.tourCode ? escH(g.tourCode) : '<span style="color:var(--t3);">(\uBBF8\uC2DD\uBCC4)</span>';
+          return `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;font-size:10px;color:var(--t2);padding:3px 0;border-top:1px dashed #ddd6fe;">
+            <span style="flex:1;min-width:0;"><b style="color:#6d28d9;">${tcLabel}</b> <span style="color:var(--t3);">(${g.count}\uAC74)</span> ${dueLabel}</span>
+            <span style="font-family:var(--fn);font-weight:700;color:${balColor};white-space:nowrap;">$${Math.abs(g.balance).toLocaleString('en',{minimumFractionDigits:2})}</span>
+          </div>`;
+        }).join('')}
+      </div>` : '';
+
     return `
     <div style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;">
       <div onclick="openBalDetail('sub','${safeName}')" style="cursor:pointer;">
@@ -14519,6 +14618,7 @@ function renderBalSubList(){
           <div>급여: DR $${a.wageDr.toLocaleString()} / CR $${a.wageCr.toLocaleString()} = <span style="color:${a.wageBal>0?'var(--or)':'var(--gn)'}">$${a.wageBal.toLocaleString()}</span></div>
         </div>
       </div>
+      ${tgHtml}
       ${driverWageHtml}
       ${a.balance > 0.01 ? `<div style="margin-top:8px;text-align:right;"><button onclick="event.stopPropagation();_quickAddPayment('sub','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;" title="지급 처리">💰 지급</button></div>` : ''}
     </div>`;
@@ -15339,28 +15439,89 @@ function renderBalWeeklySummary() {
     if (cf.subPayables.length) {
       html += '<div style="background:var(--s2);border:1px solid var(--b1);border-radius:12px;margin-bottom:10px;padding:12px 14px;">';
       html += '<div style="font-size:12px;font-weight:700;color:var(--or);margin-bottom:8px;">\uD83D\uDE8C \uC11C\uBE0C \uC9C0\uAE09 \uC608\uC815</div>';
-      cf.subPayables.sort((a,b) => (b.balance||b.amount) - (a.balance||a.amount)).forEach(s => {
-        // 가이드/투어코드 메타 표시
-        const sMetaParts = [];
-        if (s.tourCode) sMetaParts.push('🏷 ' + s.tourCode);
-        if (s.guide) sMetaParts.push('👤 ' + s.guide);
-        const sMetaHtml = sMetaParts.length
-          ? `<span style="color:var(--t3);font-size:9px;margin-left:4px;">${sMetaParts.map(escH).join(' · ')}</span>`
-          : '';
 
-        if (s.isPaid) {
-          html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:4px;padding:3px 0;font-size:11px;">';
-          html += '<span style="color:var(--t3);flex:1;min-width:0;">' + escH(s.company) + (s.invoiceNo ? ' <span style="font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
-          html += '<span style="font-weight:700;font-family:var(--fn);color:var(--gn);white-space:nowrap;">✓ 지급 ' + $f(s.paid||s.amount) + '</span></div>';
-          return;
+      // ★ 회사 → 투어코드 2단 그룹화
+      const byCompany = {};
+      cf.subPayables.forEach(s => {
+        const co = s.company || 'Unknown';
+        if(!byCompany[co]) byCompany[co] = [];
+        byCompany[co].push(s);
+      });
+
+      Object.entries(byCompany).sort((a,b)=>{
+        const aBal = a[1].reduce((s,r)=>s+(r.balance!==undefined?r.balance:r.amount), 0);
+        const bBal = b[1].reduce((s,r)=>s+(r.balance!==undefined?r.balance:r.amount), 0);
+        return bBal - aBal;
+      }).forEach(([company, items]) => {
+        const coTotal = items.reduce((s,r)=>s+(r.balance!==undefined?r.balance:r.amount), 0);
+        const coUnpaid = items.reduce((s,r)=> s + (r.isPaid ? 0 : (r.balance!==undefined?r.balance:r.amount)), 0);
+        const coPaid = items.reduce((s,r)=> s + (r.isPaid ? (r.paid||r.amount) : 0), 0);
+        const safeCo = (company||'').replace(/'/g,"\\'");
+
+        // 회사 헤더
+        html += '<div style="margin-bottom:8px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:4px 0;font-size:11px;font-weight:700;border-bottom:1px solid var(--b1);">';
+        html += '<span style="color:var(--t1);flex:1;min-width:0;">\uD83D\uDE90 ' + escH(company) + ' <span style="color:var(--t3);font-size:9px;font-weight:400;">(' + items.length + '\uAC74)</span></span>';
+        if (coUnpaid > 0.01) {
+          html += '<span style="color:var(--or);font-family:var(--fn);">' + $f(coUnpaid) + '</span>';
+          html += `<button onclick="event.stopPropagation();_quickAddPayment('sub','${safeCo}',${coUnpaid})" title="\uC774 \uD68C\uC0AC \ud55c\ubc88\uc5d0 \uc9c0\uae09" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;">\uD83D\uDCB0</button>`;
+        } else if (coPaid > 0.01) {
+          html += '<span style="color:var(--gn);font-family:var(--fn);">\u2713 \uC9C0\uAE09 ' + $f(coPaid) + '</span>';
         }
-        const safeCo = (s.company||'').replace(/'/g,"\\'");
-        const subBal = s.balance!==undefined?s.balance:s.amount;
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:3px 0;font-size:11px;">';
-        html += '<span style="color:var(--t2);flex:1;min-width:0;">' + escH(s.company) + (s.invoiceNo ? ' <span style="color:var(--t3);font-size:10px;">' + escH(s.invoiceNo) + '</span>' : '') + (s.dueDate ? ' <span style="color:var(--t3);font-size:9px;">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
-        html += '<span style="font-weight:600;font-family:var(--fn);color:var(--or);white-space:nowrap;">' + $f(subBal) + '</span>';
-        html += `<button onclick="event.stopPropagation();_quickAddPayment('sub','${safeCo}',${subBal})" title="이 항목 지급 처리" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;">💰</button>`;
         html += '</div>';
+
+        // ★ 투어코드별 그룹화 (cashflow 항목 단위)
+        const byTour = {};
+        items.forEach(s => {
+          const tc = s.tourCode || '__NO_TC__';
+          if(!byTour[tc]) byTour[tc] = [];
+          byTour[tc].push(s);
+        });
+
+        Object.entries(byTour).sort((a,b)=>{
+          const aBal = a[1].reduce((s,r)=>s+(r.balance!==undefined?r.balance:r.amount), 0);
+          const bBal = b[1].reduce((s,r)=>s+(r.balance!==undefined?r.balance:r.amount), 0);
+          return bBal - aBal;
+        }).forEach(([tc, tcItems]) => {
+          const tcLabel = tc === '__NO_TC__' ? '<span style="color:var(--t3);">(\uBBF8\uC2DD\uBCC4)</span>' : '<b style="color:#6d28d9;">\uD83C\uDFF7 ' + escH(tc) + '</b>';
+          const tcUnpaid = tcItems.reduce((s,r)=> s + (r.isPaid ? 0 : (r.balance!==undefined?r.balance:r.amount)), 0);
+          const tcPaid = tcItems.reduce((s,r)=> s + (r.isPaid ? (r.paid||r.amount) : 0), 0);
+
+          // 투어코드 헤더 (작은 글씨)
+          if (tcItems.length > 1 || tc !== '__NO_TC__') {
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:3px 0 3px 10px;font-size:10px;background:#faf5ff;border-radius:4px;margin:3px 0;">';
+            html += '<span style="flex:1;min-width:0;">' + tcLabel + ' <span style="color:var(--t3);">(' + tcItems.length + '\uAC74)</span></span>';
+            if (tcUnpaid > 0.01) {
+              html += '<span style="color:var(--or);font-family:var(--fn);font-weight:700;">' + $f(tcUnpaid) + '</span>';
+            } else if (tcPaid > 0.01) {
+              html += '<span style="color:var(--gn);font-family:var(--fn);">\u2713 ' + $f(tcPaid) + '</span>';
+            }
+            html += '</div>';
+          }
+
+          // 개별 인보이스 항목
+          tcItems.forEach(s => {
+            const sMetaParts = [];
+            if (s.guide) sMetaParts.push('👤 ' + s.guide);
+            const sMetaHtml = sMetaParts.length
+              ? `<span style="color:var(--t3);font-size:9px;margin-left:4px;">${sMetaParts.map(escH).join(' · ')}</span>`
+              : '';
+
+            if (s.isPaid) {
+              html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:4px;padding:2px 0 2px 18px;font-size:10px;color:var(--gn);">';
+              html += '<span style="flex:1;min-width:0;">' + (s.invoiceNo ? escH(s.invoiceNo) : '\u2014') + (s.dueDate ? ' <span style="font-size:9px;color:var(--t3);">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
+              html += '<span style="font-weight:700;font-family:var(--fn);white-space:nowrap;">\u2713 ' + $f(s.paid||s.amount) + '</span></div>';
+              return;
+            }
+            const subBal = s.balance!==undefined?s.balance:s.amount;
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:2px 0 2px 18px;font-size:10px;color:var(--t2);">';
+            html += '<span style="flex:1;min-width:0;">' + (s.invoiceNo ? escH(s.invoiceNo) : '\u2014') + (s.dueDate ? ' <span style="font-size:9px;color:var(--t3);">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
+            html += '<span style="font-family:var(--fn);color:var(--or);white-space:nowrap;">' + $f(subBal) + '</span>';
+            html += `<button onclick="event.stopPropagation();_quickAddPayment('sub','${safeCo}',${subBal})" title="\uC774 \ud56d\ubaa9 \uc9c0\uae09" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:1px 5px;font-size:9px;font-weight:700;cursor:pointer;">\uD83D\uDCB0</button>`;
+            html += '</div>';
+          });
+        });
+        html += '</div>'; // 회사 그룹 닫기
       });
       html += '</div>';
     }
