@@ -20372,7 +20372,21 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
       surLines.push({label: hotelLabel, amount: c.hotel});
     }
     if (c.dist > 0) surLines.push({label: 'Distance surcharge', amount: c.dist});
-    if (c.earlyTA > 0) surLines.push({label: 'Early/Late surcharge', amount: c.earlyTA});
+    if (c.earlyTA > 0) {
+      // ★ Early/Late 구분 + 해당 시간 표시 (OT 표시와 동일한 패턴)
+      const ts = r._timeStart || '';
+      const te = r._timeEnd || '';
+      let elLabel = 'Early/Late surcharge';
+      if (ts && ts < '06:00') {
+        elLabel = 'Early surcharge (start: ' + ts + ')';
+      } else if (te && te >= '21:00') {
+        elLabel = 'Late surcharge (end: ' + te + ')';
+      } else if (ts || te) {
+        // 시간 정보가 있긴 한데 기본 임계값 밖 — 그래도 표시
+        elLabel = 'Early/Late surcharge (' + (ts||'') + (te ? ' - ' + te : '') + ')';
+      }
+      surLines.push({label: elLabel, amount: c.earlyTA});
+    }
     if ((c.parkingFee||0) > 0) surLines.push({label: 'Airport parking', amount: c.parkingFee});
     if ((c.trailerVal||0) > 0) surLines.push({label: 'Trailer', amount: c.trailerVal});
     if ((c.nightTA||0) > 0) surLines.push({label: 'Night tour', amount: c.nightTA});
