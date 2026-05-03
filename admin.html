@@ -14771,29 +14771,33 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     const dr = Number(tx.DR) || 0;
     if (dr <= 0) return;
 
-    // ★ Due date 계산 — EmailSentDate(인보이스 발송일) + 14일
-    //   1순위: 인보이스 캐시에서 EmailSentDate 조회 → +14
-    //   2순위: tx.DueDate (저장된 값, 옛 데이터 호환)
-    //   미발송 인보이스(EmailSentDate 없음 + 저장 DueDate 없음)는 cashflow에서 제외
-    //     (수금 예정일이 정해지지 않았으므로)
-    let dueISO = '';
+    // ★ Due date 계산 — IssuedDate(인보이스 생성일) + 14일
+    //   1순위: tx.DueDate (저장 시점 값 — saveInvoiceToSheet가 today+14로 저장)
+    //   2순위: 인보이스 캐시의 IssuedDate + 14 (옛 인보이스 fallback)
+    //   3순위: tx.Date (Agency_Txn 자체 날짜) + 14 (최후 fallback)
+    let dueISO = _tryParseDate(tx.DueDate) || '';
     const invNum = String(tx.InvoiceID || '').trim();
-    if (invNum && Array.isArray(_invHistoryCache)) {
+    if (!dueISO && invNum && Array.isArray(_invHistoryCache)) {
       const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNum);
       if (inv) {
-        const emailedISO = _tryParseDate(inv.EmailSentDate);
-        if (emailedISO) {
-          const ed = new Date(emailedISO + 'T00:00:00');
+        const issuedISO = _tryParseDate(inv.IssuedDate);
+        if (issuedISO) {
+          const ed = new Date(issuedISO + 'T00:00:00');
           ed.setDate(ed.getDate() + 14);
           dueISO = _localISO(ed);
         }
       }
     }
     if (!dueISO) {
-      // Fallback: 저장된 DueDate (옛 인보이스나 캐시 미스 대비)
-      dueISO = _tryParseDate(tx.DueDate) || '';
+      // 최후 fallback: Agency_Txn.Date + 14
+      const txDate = _tryParseDate(tx.Date);
+      if (txDate) {
+        const ed = new Date(txDate + 'T00:00:00');
+        ed.setDate(ed.getDate() + 14);
+        dueISO = _localISO(ed);
+      }
     }
-    if (!dueISO) return; // 미발송 인보이스 — 예정일 미정, cashflow 제외
+    if (!dueISO) return;
     if (dueISO < filterStartS || dueISO > sunS) return;
 
     // Check unpaid balance
@@ -16066,13 +16070,12 @@ function openBalTxnModal(type, idx){
           existing.Guide = itGuides.join(', ');
         }
         if(!existing.DueDate){
-          // ★ EmailSentDate + 14일 우선 (인보이스 발송 후 14일 = 수금 예정일)
-          //   미발송이면 빈 값 유지 (수금 예정일 미정)
+          // ★ IssuedDate + 14일 우선 (인보이스 생성일 + 14 = 수금 예정일)
           try {
-            if (linkedInv && linkedInv.EmailSentDate) {
-              const emailedISO = parseToISO(String(linkedInv.EmailSentDate));
-              if (emailedISO) {
-                const ed = new Date(emailedISO+'T00:00:00');
+            if (linkedInv && linkedInv.IssuedDate) {
+              const issuedISO = parseToISO(String(linkedInv.IssuedDate));
+              if (issuedISO) {
+                const ed = new Date(issuedISO+'T00:00:00');
                 if(!isNaN(ed.getTime())){
                   ed.setDate(ed.getDate()+14);
                   existing.DueDate = toLocalISO(ed);
@@ -18645,9 +18648,12 @@ async function saveInvoiceToSheet() {
       if (!lastDate) { lastDate = new Date(to + 'T00:00:00'); if(isNaN(lastDate.getTime())) lastDate = new Date(); }
       const actualFrom = toLocalISO(firstDate);
       const actualTo = toLocalISO(lastDate);
-      // ★ Due date — 인보이스 발송 후 EmailSentDate+14로 별도 업데이트됨
-      //   여기서는 빈 값으로 저장 (markAsSent 시 자동 채워짐)
-      const dueDateStr = '';
+      // ★ Due date = IssuedDate + 14일 (인보이스 발행일 = 저장 시점 = 오늘)
+      //   GAS는 IssuedDate를 저장 시 자동으로 오늘로 설정하므로 클라이언트에서도 동일한 값 사용
+      const _issuedD = new Date();
+      const dueBaseDate = new Date(_issuedD);
+      dueBaseDate.setDate(dueBaseDate.getDate() + 14);
+      const dueDateStr = toLocalISO(dueBaseDate);
       const todayStr = toLocalISO(new Date());
       const _allTxnItems = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)]);
       const _txnCodes = [...new Set([
@@ -18693,20 +18699,20 @@ async function saveInvoiceToSheet() {
         _balLoaded = false;
       } else {
         // ★ 수정 모드: 기존 Agency_Txn DR 금액이 변경되었으면 업데이트
-        //   ※ DueDate는 발송일 + 14로 별도 관리되므로 여기서는 건드리지 않음
+        //   DueDate도 같이 업데이트 (IssuedDate+14 = 저장 시점의 오늘+14)
         const oldDR = roundMoney(Number(existingTxn.DR)||0);
         if (Math.abs(oldDR - drAmount) > 0.01) {
           console.log('[Invoice→Balance] DR 금액 변경 감지:', invNum, oldDR, '→', drAmount);
           const rowIdx = existingTxn._rowIndex || existingTxn.rowIndex;
           if (rowIdx) {
             fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
-              body: JSON.stringify({action:'update_agency_txn', rowIndex: rowIdx, data: {DR: drAmount, StartDate: actualFrom, FinishDate: actualTo, Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})`}, _user:getAdminUser()})
+              body: JSON.stringify({action:'update_agency_txn', rowIndex: rowIdx, data: {DR: drAmount, StartDate: actualFrom, FinishDate: actualTo, DueDate: dueDateStr, Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})`}, _user:getAdminUser()})
             }).then(r=>r.json()).then(j=>{
-              if(j.ok) { console.log('[Invoice→Balance] DR 금액 업데이트:', invNum, drAmount); existingTxn.DR = drAmount; }
+              if(j.ok) { console.log('[Invoice→Balance] DR 금액 업데이트:', invNum, drAmount); existingTxn.DR = drAmount; existingTxn.DueDate = dueDateStr; }
             }).catch(e=>console.warn('[Invoice→Balance] DR update error:', e));
           } else {
-            // rowIndex 없으면 삭제 후 재등록 — 이때는 기존 DueDate 보존
-            const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: actualFrom, FinishDate: actualTo, DueDate: existingTxn.DueDate||'' };
+            // rowIndex 없으면 삭제 후 재등록
+            const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: actualFrom, FinishDate: actualTo, DueDate: dueDateStr };
             const drTxn = { ...baseTxn, Type: 'invoice', DR: drAmount, CR: 0,
               Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})` };
             fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
@@ -19932,8 +19938,6 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
     try {
       await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
         body: JSON.stringify({action:'update_invoice_status', invNumber, status:'emailed', field:'EmailSentDate', _user:getAdminUser()}) });
-      // ★ 수금 예정일 = 발송일 + 14일 자동 설정
-      await _updateAgencyTxnDueAfterSend(invNumber);
       _invHistoryCache = null;
       await loadInvHistory(true);
     } catch(e2) {}
@@ -19949,30 +19953,6 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
 }
 
 // ★ 미발송 → 발송완료 수동 표시
-// ★ 인보이스 발송 후 Agency_Txn DueDate를 +14일로 업데이트
-// 자동/수동 발송 양쪽에서 호출
-async function _updateAgencyTxnDueAfterSend(invNumber){
-  try {
-    const todayD = new Date();
-    const dueD = new Date(todayD);
-    dueD.setDate(dueD.getDate() + 14);
-    const dueISO = toLocalISO(dueD);
-    const matchTxns = (_balAgencyTxns||[]).filter(t =>
-      String(t.InvoiceID||'').trim() === invNumber &&
-      String(t.Type||'').trim() === 'invoice'
-    );
-    for (const tx of matchTxns) {
-      if (!tx._rowIndex) continue;
-      await fetch(APPS_SCRIPT_URL, {
-        method:'POST', headers:{'Content-Type':'text/plain'},
-        body: JSON.stringify({action:'update_agency_txn', rowIndex: tx._rowIndex, data: {DueDate: dueISO}, _user:getAdminUser()})
-      });
-      tx.DueDate = dueISO;
-    }
-    return dueISO;
-  } catch(e){ console.warn('[_updateAgencyTxnDueAfterSend]', e); return ''; }
-}
-
 async function markAsSent(invNumber) {
   if (!confirm(`${invNumber}을(를) 발송완료로 표시하시겠습니까?`)) return;
   try {
@@ -19982,11 +19962,7 @@ async function markAsSent(invNumber) {
     });
     const json = await res.json();
     if (!json.ok) throw new Error(json.error||'상태 변경 실패');
-
-    // ★ 수금 예정일 = 발송일 + 14일 (Agency_Txn DueDate 업데이트)
-    await _updateAgencyTxnDueAfterSend(invNumber);
-
-    toast('✉️ ' + invNumber + ' 발송완료 표시 (수금 예정일 +14일 자동 설정)','ok');
+    toast('✉️ ' + invNumber + ' 발송완료 표시','ok');
     _invHistoryCache = null;
     await loadInvHistory(true);
   } catch(e) { toast('⚠️ 상태 변경 실패: ' + e.message, 'er'); }
@@ -20324,17 +20300,16 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
   const invNum = invNumOverride || getInvNum(agency, from);
   const _todayD = new Date();
   const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
-  // ★ Due date = 인보이스 발송일 + 14일
-  //   - 이미 발송된 인보이스: EmailSentDate + 14
-  //   - 미발송/미리보기: 오늘 + 14 (발송 시점 기준 가정)
+  // ★ Due date = IssuedDate (인보이스 생성일) + 14일
+  //   - 이미 저장된 인보이스: 캐시의 IssuedDate + 14
+  //   - 미저장/미리보기: 오늘 + 14 (저장 시점 기준 가정)
   const _dueD = (function(){
-    // 이미 저장된 인보이스가 있는지 캐시 조회
     if (invNum && Array.isArray(_invHistoryCache)) {
       const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNum);
-      if (inv && inv.EmailSentDate) {
-        const emailedISO = parseToISO(inv.EmailSentDate);
-        if (emailedISO) {
-          const ed = new Date(emailedISO + 'T00:00:00');
+      if (inv && inv.IssuedDate) {
+        const issuedISO = parseToISO(inv.IssuedDate);
+        if (issuedISO) {
+          const ed = new Date(issuedISO + 'T00:00:00');
           if (!isNaN(ed.getTime())) {
             ed.setDate(ed.getDate() + 14);
             return ed;
@@ -20342,7 +20317,7 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
         }
       }
     }
-    // 미발송 — 오늘 + 14일 가정
+    // 미저장 — 오늘 + 14일 가정
     const d = new Date();
     d.setDate(d.getDate() + 14);
     return d;
