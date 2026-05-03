@@ -13118,12 +13118,15 @@ function buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTota
   const groups = {};
   items.forEach(i => {
     const tc = String(i.tourCode||'').trim() || '__NO_TC__';
-    if(!groups[tc]) groups[tc] = { tourCode: tc==='__NO_TC__' ? '' : tc, rows: [], total: 0, lastISO: '' };
+    if(!groups[tc]) groups[tc] = { tourCode: tc==='__NO_TC__' ? '' : tc, rows: [], total: 0, lastISO: '', guideSet: new Set() };
     const g = groups[tc];
     g.rows.push(i);
     g.total += Number(i.total||0);
     const iso = String(i.date||'').slice(0,10);
     if(/^\d{4}-\d{2}-\d{2}$/.test(iso) && iso > g.lastISO) g.lastISO = iso;
+    // 가이드 수집 (item에 guide 또는 tourGuide 필드)
+    const gd = String(i.guide||i.tourGuide||'').trim();
+    if(gd) g.guideSet.add(gd);
   });
   const sortedGroups = Object.values(groups).sort((a,b)=> (a.lastISO||'').localeCompare(b.lastISO||''));
 
@@ -13151,8 +13154,10 @@ function buildSubInvoiceHtml(invNum, agency, from, to, items, subName, grandTota
       }
     }
     const tcLabel = g.tourCode ? g.tourCode : '(Tour code not specified)';
+    const guidesArr = Array.from(g.guideSet || []);
+    const guideHtml = guidesArr.length ? ` <span style="color:#0891b2;font-weight:600;">👤 ${guidesArr.map(s=>String(s).replace(/[<>&"]/g,'')).join(', ')}</span>` : '';
     return `<tr><td colspan="8" style="background:#ede9fe;color:#4c1d95;font-size:11px;font-weight:700;padding:6px 8px;border:1px solid #c4b5fd;">
-      🏷 Tour Code: ${escH(tcLabel)} <span style="font-weight:400;color:#6b7280;">(${g.rows.length} item${g.rows.length>1?'s':''})</span>
+      🏷 Tour Code: ${escH(tcLabel)}${guideHtml} <span style="font-weight:400;color:#6b7280;">(${g.rows.length} item${g.rows.length>1?'s':''})</span>
       ${dueStr ? `<span style="float:right;color:#dc2626;background:#fef2f2;padding:1px 8px;border-radius:4px;font-size:10px;">📅 Due: ${dueStr}</span>` : ''}
     </td></tr>` +
     g.rows.map(_rowHtml).join('') +
@@ -14463,6 +14468,26 @@ function _extractSubTourCode(r){
   return '';
 }
 
+// ★ SUB 트랜잭션에서 가이드 이름 추출 (전역 헬퍼)
+//   1) Guide 필드 우선
+//   2) Remark의 'G:이름' 패턴
+//   3) 인보이스 캐시에서 InvoiceNo로 fallback
+function _extractSubGuide(r){
+  const g = String(r.Guide||'').trim();
+  if(g) return g;
+  // Remark에서 "G:이름" 패턴
+  const rem = String(r.Remark||'');
+  const m = rem.match(/(?:^|\/|\s)G:\s*([^\/]+?)(?=\s*(?:\/|$))/);
+  if(m) return m[1].trim();
+  // 인보이스 캐시 fallback
+  const invNum = String(r.InvoiceNo || r.InvoiceID || '').trim();
+  if(invNum && Array.isArray(_invHistoryCache)){
+    const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNum);
+    if(inv && inv.Guide) return String(inv.Guide).trim();
+  }
+  return '';
+}
+
 // ★ 마지막 운행일 + 14일 = 지급 예정일
 function _calcSubDueFromLastDate(lastISO){
   if(!lastISO) return '';
@@ -14509,7 +14534,7 @@ function _subBalances(){
     if(cat !== 'Wage'){
       const tc = _extractSubTourCode(t) || '__NO_TOUR_CODE__';
       if(!map[name].tourCodeGroups[tc]){
-        map[name].tourCodeGroups[tc] = { tourCode: tc===  '__NO_TOUR_CODE__' ? '' : tc, count: 0, dr: 0, cr: 0, lastISO: '' };
+        map[name].tourCodeGroups[tc] = { tourCode: tc===  '__NO_TOUR_CODE__' ? '' : tc, count: 0, dr: 0, cr: 0, lastISO: '', guideSet: new Set() };
       }
       const g = map[name].tourCodeGroups[tc];
       g.count++;
@@ -14517,6 +14542,9 @@ function _subBalances(){
       g.cr += Number(t.CR)||0;
       const iso = parseToISO(t.Date||'');
       if(iso && iso > g.lastISO) g.lastISO = iso;
+      // ★ 가이드 추출 — 같은 투어코드 내 여러 가이드 가능 (드물지만)
+      const gd = _extractSubGuide(t);
+      if(gd) g.guideSet.add(gd);
     }
   });
 
@@ -14542,7 +14570,16 @@ function _subBalances(){
     const driverWageTotal = Object.values(a.driverWages||{}).reduce((s,v)=>s+v, 0);
     // 투어코드 그룹 → 배열 (마지막 날짜순)
     const tourGroups = Object.values(a.tourCodeGroups||{})
-      .map(g => ({...g, balance: g.dr - g.cr, dueDate: _calcSubDueFromLastDate(g.lastISO)}))
+      .map(g => ({
+        tourCode: g.tourCode,
+        count: g.count,
+        dr: g.dr,
+        cr: g.cr,
+        lastISO: g.lastISO,
+        balance: g.dr - g.cr,
+        dueDate: _calcSubDueFromLastDate(g.lastISO),
+        guides: Array.from(g.guideSet || [])
+      }))
       .sort((a,b)=> (a.lastISO||'').localeCompare(b.lastISO||''));
     return {...a, outsourcingBal, wageBal, balance: outsourcingBal + wageBal, driverWageTotal, tourGroups};
   }).sort((a,b)=>b.balance-a.balance);
@@ -14599,8 +14636,9 @@ function renderBalSubList(){
           const balColor = g.balance > 0.01 ? '#dc2626' : (g.balance < -0.01 ? 'var(--ac)' : 'var(--gn)');
           const dueLabel = g.dueDate ? `<span style="color:#dc2626;background:#fef2f2;padding:1px 5px;border-radius:3px;font-weight:700;">\uD83D\uDCC5 ${fmtDate(g.dueDate)}</span>` : '';
           const tcLabel = g.tourCode ? escH(g.tourCode) : '<span style="color:var(--t3);">(\uBBF8\uC2DD\uBCC4)</span>';
+          const guideLabel = (g.guides && g.guides.length) ? `<span style="color:#0891b2;background:#ecfeff;padding:1px 5px;border-radius:3px;font-weight:600;margin-left:3px;">\uD83D\uDC64 ${g.guides.map(escH).join(', ')}</span>` : '';
           return `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;font-size:10px;color:var(--t2);padding:3px 0;border-top:1px dashed #ddd6fe;">
-            <span style="flex:1;min-width:0;"><b style="color:#6d28d9;">${tcLabel}</b> <span style="color:var(--t3);">(${g.count}\uAC74)</span> ${dueLabel}</span>
+            <span style="flex:1;min-width:0;"><b style="color:#6d28d9;">${tcLabel}</b> ${guideLabel} <span style="color:var(--t3);">(${g.count}\uAC74)</span> ${dueLabel}</span>
             <span style="font-family:var(--fn);font-weight:700;color:${balColor};white-space:nowrap;">$${Math.abs(g.balance).toLocaleString('en',{minimumFractionDigits:2})}</span>
           </div>`;
         }).join('')}
@@ -15487,10 +15525,14 @@ function renderBalWeeklySummary() {
           const tcUnpaid = tcItems.reduce((s,r)=> s + (r.isPaid ? 0 : (r.balance!==undefined?r.balance:r.amount)), 0);
           const tcPaid = tcItems.reduce((s,r)=> s + (r.isPaid ? (r.paid||r.amount) : 0), 0);
 
+          // ★ 그룹 내 가이드 모음 (중복 제거)
+          const tcGuides = [...new Set(tcItems.map(it => (it.guide||'').trim()).filter(Boolean))];
+          const tcGuideLabel = tcGuides.length ? '<span style="color:#0891b2;background:#ecfeff;padding:1px 5px;border-radius:3px;font-weight:600;margin-left:4px;">\uD83D\uDC64 ' + tcGuides.map(escH).join(', ') + '</span>' : '';
+
           // 투어코드 헤더 (작은 글씨)
           if (tcItems.length > 1 || tc !== '__NO_TC__') {
             html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:3px 0 3px 10px;font-size:10px;background:#faf5ff;border-radius:4px;margin:3px 0;">';
-            html += '<span style="flex:1;min-width:0;">' + tcLabel + ' <span style="color:var(--t3);">(' + tcItems.length + '\uAC74)</span></span>';
+            html += '<span style="flex:1;min-width:0;">' + tcLabel + tcGuideLabel + ' <span style="color:var(--t3);">(' + tcItems.length + '\uAC74)</span></span>';
             if (tcUnpaid > 0.01) {
               html += '<span style="color:var(--or);font-family:var(--fn);font-weight:700;">' + $f(tcUnpaid) + '</span>';
             } else if (tcPaid > 0.01) {
@@ -15808,17 +15850,20 @@ function renderBalDetail(){
     }
 
     // ★ 행을 투어코드별로 그룹화
-    const groups = {};       // tourCode → { rows:[], dr, cr, lastDate }
+    const groups = {};       // tourCode → { rows:[], dr, cr, lastDate, guideSet }
     const ungrouped = [];    // 투어코드 추출 실패한 행들
     rows.forEach(r => {
       const tc = _extractTourCode(r);
       if(!tc){ ungrouped.push(r); return; }
-      if(!groups[tc]) groups[tc] = { tourCode: tc, rows: [], dr: 0, cr: 0, lastISO: '' };
+      if(!groups[tc]) groups[tc] = { tourCode: tc, rows: [], dr: 0, cr: 0, lastISO: '', guideSet: new Set() };
       groups[tc].rows.push(r);
       groups[tc].dr += Number(r.DR)||0;
       groups[tc].cr += Number(r.CR)||0;
       const iso = parseToISO(r.Date||'');
       if(iso && iso > groups[tc].lastISO) groups[tc].lastISO = iso;
+      // ★ 가이드 추출 (전역 헬퍼 사용)
+      const gd = _extractSubGuide(r);
+      if(gd) groups[tc].guideSet.add(gd);
     });
     // 그룹 정렬: 마지막 날짜 기준 (오래된 것부터)
     const sortedGroups = Object.values(groups).sort((a,b) => (a.lastISO||'').localeCompare(b.lastISO||''));
@@ -15858,11 +15903,13 @@ function renderBalDetail(){
       const balColor = groupBalance > 0.01 ? 'var(--rd)' : (groupBalance < -0.01 ? 'var(--ac)' : 'var(--gn)');
 
       // 그룹 헤더
+      const groupGuides = Array.from(g.guideSet || []);
+      const groupGuideHtml = groupGuides.length ? `<span style="font-size:10px;font-weight:600;color:#0891b2;background:#ecfeff;padding:1px 6px;border-radius:3px;margin-left:6px;">\uD83D\uDC64 ${groupGuides.map(escH).join(', ')}</span>` : '';
       html += `<tr style="background:#faf5ff;border-bottom:1px solid #c4b5fd;">
         <td colspan="7" style="padding:6px 8px;">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
             <div style="font-size:11px;font-weight:700;color:#6d28d9;">
-              \uD83C\uDFF7 ${escH(g.tourCode)}
+              \uD83C\uDFF7 ${escH(g.tourCode)}${groupGuideHtml}
               <span style="font-size:10px;font-weight:600;color:var(--t3);margin-left:6px;">(${g.rows.length}\uAC74)</span>
               ${g.lastISO ? `<span style="font-size:10px;font-weight:600;color:var(--t3);margin-left:6px;">\uB9C8\uC9C0\uB9C9 ${fmtDate(g.lastISO)}</span>` : ''}
               ${dueStr ? `<span style="font-size:10px;font-weight:700;color:#dc2626;margin-left:6px;background:#fef2f2;padding:1px 6px;border-radius:4px;">\uD83D\uDCC5 \uC9C0\uAE09 \uC608\uC815: ${fmtDate(dueStr)}</span>` : ''}
