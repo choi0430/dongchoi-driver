@@ -15074,7 +15074,7 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     const subPaid = subCR[subKey] || 0;
     const subBalance = roundMoney(dr - subPaid);
 
-    // Guide/TourCode — SUB_Txn 자체에는 없으므로 SUB 인보이스 캐시에서 fallback
+    // Guide/TourCode — Field 우선 → 인보이스 캐시 fallback → Description/Remark 패턴 fallback
     let subGuide = String(tx.Guide || '').trim();
     let subTourCode = String(tx.TourCode || '').trim();
     const subInvNum = String(tx.InvoiceNo || '').trim();
@@ -15085,6 +15085,9 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
         if (!subTourCode) subTourCode = String(inv.TourCode || '').trim();
       }
     }
+    // ★ 인보이스 미발행 거래(LEDGER/DRSUB)는 Description/Remark에서 추출
+    if (!subTourCode && typeof _extractSubTourCode === 'function') subTourCode = _extractSubTourCode(tx);
+    if (!subGuide && typeof _extractSubGuide === 'function') subGuide = _extractSubGuide(tx);
 
     subPayables.push({
       company: tx.SubCompany || 'Unknown',
@@ -15543,21 +15546,34 @@ function renderBalWeeklySummary() {
 
           // 개별 인보이스 항목
           tcItems.forEach(s => {
+            // ★ 라벨 결정: 인보이스 번호 우선 → 없으면 투어코드 + 가이드 조합
+            let lineLabel;
+            if (s.invoiceNo) {
+              lineLabel = escH(s.invoiceNo);
+            } else {
+              const parts = [];
+              if (s.tourCode) parts.push('🏷 ' + s.tourCode);
+              if (s.guide) parts.push('👤 ' + s.guide);
+              lineLabel = parts.length
+                ? parts.map(p => '<span>' + escH(p) + '</span>').join(' <span style="color:var(--t3);">·</span> ')
+                : '\u2014';
+            }
+            // 가이드는 lineLabel에 이미 포함되었으면 메타 영역에서 제외
             const sMetaParts = [];
-            if (s.guide) sMetaParts.push('👤 ' + s.guide);
+            if (s.guide && s.invoiceNo) sMetaParts.push('👤 ' + s.guide);
             const sMetaHtml = sMetaParts.length
               ? `<span style="color:var(--t3);font-size:9px;margin-left:4px;">${sMetaParts.map(escH).join(' · ')}</span>`
               : '';
 
             if (s.isPaid) {
               html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:4px;padding:2px 0 2px 18px;font-size:10px;color:var(--gn);">';
-              html += '<span style="flex:1;min-width:0;">' + (s.invoiceNo ? escH(s.invoiceNo) : '\u2014') + (s.dueDate ? ' <span style="font-size:9px;color:var(--t3);">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
+              html += '<span style="flex:1;min-width:0;">' + lineLabel + (s.dueDate ? ' <span style="font-size:9px;color:var(--t3);">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
               html += '<span style="font-weight:700;font-family:var(--fn);white-space:nowrap;">\u2713 ' + $f(s.paid||s.amount) + '</span></div>';
               return;
             }
             const subBal = s.balance!==undefined?s.balance:s.amount;
             html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:2px 0 2px 18px;font-size:10px;color:var(--t2);">';
-            html += '<span style="flex:1;min-width:0;">' + (s.invoiceNo ? escH(s.invoiceNo) : '\u2014') + (s.dueDate ? ' <span style="font-size:9px;color:var(--t3);">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
+            html += '<span style="flex:1;min-width:0;">' + lineLabel + (s.dueDate ? ' <span style="font-size:9px;color:var(--t3);">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
             html += '<span style="font-family:var(--fn);color:var(--or);white-space:nowrap;">' + $f(subBal) + '</span>';
             html += `<button onclick="event.stopPropagation();_quickAddPayment('sub','${safeCo}',${subBal})" title="\uC774 \ud56d\ubaa9 \uc9c0\uae09" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:1px 5px;font-size:9px;font-weight:700;cursor:pointer;">\uD83D\uDCB0</button>`;
             html += '</div>';
