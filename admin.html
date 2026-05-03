@@ -15622,13 +15622,55 @@ function renderBalDetail(){
     }).sort((a,b)=>parseToISO(a.Date||'').localeCompare(parseToISO(b.Date||'')));
     const dr = rows.reduce((s,r)=>s+(Number(r.DR)||0),0);
     const cr = rows.reduce((s,r)=>s+(Number(r.CR)||0),0);
+
+    // ★ 투어코드 추출 헬퍼 — TourCode 필드 우선, 없으면 Description/Remark에서 파싱
+    function _extractTourCode(r){
+      // 1) 전용 필드
+      const tc = String(r.TourCode||'').trim();
+      if(tc) return tc;
+      // 2) Description: DRSUB:YYYY-MM-DD_차량_투어코드 또는 LEDGER:YYYY-MM-DD_차량_투어코드
+      const desc = String(r.Description||'');
+      const dm = desc.match(/^(?:DRSUB|LEDGER):\d{4}-\d{2}-\d{2}_[^_]+_(.+)$/);
+      if(dm) return dm[1].trim();
+      // 3) Remark: "코스 / 차량 / 투어코드" 또는 "코스 / 차량 / 투어코드 / D:이름 / G:이름" 패턴 → 마지막 비-D/G 토큰
+      const rem = String(r.Remark||'');
+      if(rem){
+        const parts = rem.split('/').map(s=>s.trim()).filter(Boolean);
+        // D: G: 등의 prefix가 있는 토큰 제외
+        const candidates = parts.filter(p => !/^[A-Z]:/.test(p) && !/^TV\d+$/.test(p));
+        if(candidates.length >= 2){
+          // 첫번째는 보통 코스명이라 두 번째 이후가 투어코드
+          return candidates[candidates.length - 1];
+        }
+      }
+      return '';
+    }
+
+    // ★ 행을 투어코드별로 그룹화
+    const groups = {};       // tourCode → { rows:[], dr, cr, lastDate }
+    const ungrouped = [];    // 투어코드 추출 실패한 행들
+    rows.forEach(r => {
+      const tc = _extractTourCode(r);
+      if(!tc){ ungrouped.push(r); return; }
+      if(!groups[tc]) groups[tc] = { tourCode: tc, rows: [], dr: 0, cr: 0, lastISO: '' };
+      groups[tc].rows.push(r);
+      groups[tc].dr += Number(r.DR)||0;
+      groups[tc].cr += Number(r.CR)||0;
+      const iso = parseToISO(r.Date||'');
+      if(iso && iso > groups[tc].lastISO) groups[tc].lastISO = iso;
+    });
+    // 그룹 정렬: 마지막 날짜 기준 (오래된 것부터)
+    const sortedGroups = Object.values(groups).sort((a,b) => (a.lastISO||'').localeCompare(b.lastISO||''));
+
     document.getElementById('bal-detail-summary').innerHTML = `
-      <div style="display:flex;gap:10px;font-size:12px;font-family:var(--fn);">
+      <div style="display:flex;gap:10px;font-size:12px;font-family:var(--fn);flex-wrap:wrap;">
         <span style="color:var(--ac);">DR $${dr.toLocaleString('en',{minimumFractionDigits:2})}</span>
         <span style="color:var(--gn);">CR $${cr.toLocaleString('en',{minimumFractionDigits:2})}</span>
         <span style="color:${(dr-cr)>0?'var(--rd)':'var(--gn)'};">잔액 $${(dr-cr).toLocaleString('en',{minimumFractionDigits:2})}</span>
+        <span style="color:var(--t3);font-size:11px;">📦 ${sortedGroups.length}\uAC1C \uD22C\uC5B4\ucf54\ub4dc</span>
       </div>
       ${suppressedCount > 0 ? `<div style="font-size:10px;color:#7c3aed;margin-top:4px;">ℹ️ SUBINV/DRSUB 우선 정책으로 ${suppressedCount}건 가려짐 (중복 방지)</div>` : ''}`;
+
     html = `<table style="width:100%;font-size:11px;border-collapse:collapse;">
       <thead><tr style="border-bottom:1px solid var(--b2);color:var(--t3);font-size:10px;">
         <th style="text-align:left;padding:6px 4px;">Date (날짜)</th>
@@ -15639,23 +15681,103 @@ function renderBalDetail(){
         <th style="text-align:right;padding:6px 4px;">CR</th>
         <th style="text-align:center;padding:6px 2px;">⚙</th>
       </tr></thead><tbody>`;
-    rows.forEach((r,i)=>{
-      const realIdx = _balSubTxns.indexOf(r);
-      const cat = r.Category==='Wage'?'급여':'외주';
-      const remark = r.Remark || '—';
-      html += `<tr style="border-bottom:1px solid var(--b1);">
-        <td style="padding:6px 4px;white-space:nowrap;">${fmtDate(r.Date)||'—'}</td>
-        <td style="padding:6px 4px;"><span style="background:${r.Category==='Wage'?'var(--pud)':'var(--acd)'};padding:1px 6px;border-radius:4px;font-size:9px;">${cat}</span></td>
-        <td style="padding:6px 4px;">${r.Description||r.InvoiceNo||'—'}</td>
-        <td style="padding:6px 4px;font-size:10px;color:var(--t3);">${escH(remark)}</td>
-        <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
-        <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
-        <td style="padding:6px 2px;text-align:center;">
-          <span onclick="event.stopPropagation();openBalTxnModal('sub',${realIdx})" style="cursor:pointer;">✏️</span>
-          <span onclick="event.stopPropagation();deleteBalTxn('sub',${realIdx})" style="cursor:pointer;margin-left:2px;">🗑</span>
+
+    // ★ 투어코드별 그룹 렌더 — 헤더(투어코드+합계+지급예정일) → 상세 행들
+    sortedGroups.forEach(g => {
+      // 마지막 날짜 + 14일 = 지급 예정일
+      let dueStr = '';
+      if(g.lastISO){
+        const d = new Date(g.lastISO + 'T00:00:00');
+        if(!isNaN(d.getTime())){
+          d.setDate(d.getDate() + 14);
+          dueStr = toLocalISO(d);
+        }
+      }
+      const groupBalance = g.dr - g.cr;
+      const balColor = groupBalance > 0.01 ? 'var(--rd)' : (groupBalance < -0.01 ? 'var(--ac)' : 'var(--gn)');
+
+      // 그룹 헤더
+      html += `<tr style="background:#faf5ff;border-bottom:1px solid #c4b5fd;">
+        <td colspan="7" style="padding:6px 8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+            <div style="font-size:11px;font-weight:700;color:#6d28d9;">
+              \uD83C\uDFF7 ${escH(g.tourCode)}
+              <span style="font-size:10px;font-weight:600;color:var(--t3);margin-left:6px;">(${g.rows.length}\uAC74)</span>
+              ${g.lastISO ? `<span style="font-size:10px;font-weight:600;color:var(--t3);margin-left:6px;">\uB9C8\uC9C0\uB9C9 ${fmtDate(g.lastISO)}</span>` : ''}
+              ${dueStr ? `<span style="font-size:10px;font-weight:700;color:#dc2626;margin-left:6px;background:#fef2f2;padding:1px 6px;border-radius:4px;">\uD83D\uDCC5 \uC9C0\uAE09 \uC608\uC815: ${fmtDate(dueStr)}</span>` : ''}
+            </div>
+            <div style="font-size:11px;font-family:var(--fn);">
+              <span style="color:var(--ac);">DR $${g.dr.toLocaleString('en',{minimumFractionDigits:2})}</span>
+              <span style="margin:0 4px;color:var(--t3);">·</span>
+              <span style="color:var(--gn);">CR $${g.cr.toLocaleString('en',{minimumFractionDigits:2})}</span>
+              <span style="margin:0 4px;color:var(--t3);">·</span>
+              <span style="color:${balColor};font-weight:700;">\uC794\uC561 $${groupBalance.toLocaleString('en',{minimumFractionDigits:2})}</span>
+            </div>
+          </div>
         </td>
       </tr>`;
+
+      // 그룹 내 행들 (날짜순)
+      g.rows.slice().sort((a,b)=>parseToISO(a.Date||'').localeCompare(parseToISO(b.Date||''))).forEach(r => {
+        const realIdx = _balSubTxns.indexOf(r);
+        const cat = r.Category==='Wage'?'급여':'외주';
+        const remark = r.Remark || '—';
+        html += `<tr style="border-bottom:1px solid var(--b1);">
+          <td style="padding:6px 4px;white-space:nowrap;padding-left:18px;">${fmtDate(r.Date)||'—'}</td>
+          <td style="padding:6px 4px;"><span style="background:${r.Category==='Wage'?'var(--pud)':'var(--acd)'};padding:1px 6px;border-radius:4px;font-size:9px;">${cat}</span></td>
+          <td style="padding:6px 4px;">${r.Description||r.InvoiceNo||'—'}</td>
+          <td style="padding:6px 4px;font-size:10px;color:var(--t3);">${escH(remark)}</td>
+          <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+          <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+          <td style="padding:6px 2px;text-align:center;">
+            <span onclick="event.stopPropagation();openBalTxnModal('sub',${realIdx})" style="cursor:pointer;">✏️</span>
+            <span onclick="event.stopPropagation();deleteBalTxn('sub',${realIdx})" style="cursor:pointer;margin-left:2px;">🗑</span>
+          </td>
+        </tr>`;
+      });
     });
+
+    // ★ 투어코드 미식별 항목들 — 별도 그룹으로 표시
+    if(ungrouped.length){
+      const ugDr = ungrouped.reduce((s,r)=>s+(Number(r.DR)||0),0);
+      const ugCr = ungrouped.reduce((s,r)=>s+(Number(r.CR)||0),0);
+      const ugBal = ugDr - ugCr;
+      html += `<tr style="background:#f9fafb;border-bottom:1px solid #d1d5db;">
+        <td colspan="7" style="padding:6px 8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+            <div style="font-size:11px;font-weight:700;color:var(--t2);">
+              \u2754 \uD22C\uC5B4\ucf54\ub4dc \uBBF8\uC2DD\uBCC4
+              <span style="font-size:10px;font-weight:600;color:var(--t3);margin-left:6px;">(${ungrouped.length}\uAC74)</span>
+            </div>
+            <div style="font-size:11px;font-family:var(--fn);">
+              <span style="color:var(--ac);">DR $${ugDr.toLocaleString('en',{minimumFractionDigits:2})}</span>
+              <span style="margin:0 4px;color:var(--t3);">·</span>
+              <span style="color:var(--gn);">CR $${ugCr.toLocaleString('en',{minimumFractionDigits:2})}</span>
+              <span style="margin:0 4px;color:var(--t3);">·</span>
+              <span style="color:${ugBal>0?'var(--rd)':'var(--gn)'};font-weight:700;">\uC794\uC561 $${ugBal.toLocaleString('en',{minimumFractionDigits:2})}</span>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+      ungrouped.forEach(r => {
+        const realIdx = _balSubTxns.indexOf(r);
+        const cat = r.Category==='Wage'?'급여':'외주';
+        const remark = r.Remark || '—';
+        html += `<tr style="border-bottom:1px solid var(--b1);">
+          <td style="padding:6px 4px;white-space:nowrap;padding-left:18px;">${fmtDate(r.Date)||'—'}</td>
+          <td style="padding:6px 4px;"><span style="background:${r.Category==='Wage'?'var(--pud)':'var(--acd)'};padding:1px 6px;border-radius:4px;font-size:9px;">${cat}</span></td>
+          <td style="padding:6px 4px;">${r.Description||r.InvoiceNo||'—'}</td>
+          <td style="padding:6px 4px;font-size:10px;color:var(--t3);">${escH(remark)}</td>
+          <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+          <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+          <td style="padding:6px 2px;text-align:center;">
+            <span onclick="event.stopPropagation();openBalTxnModal('sub',${realIdx})" style="cursor:pointer;">✏️</span>
+            <span onclick="event.stopPropagation();deleteBalTxn('sub',${realIdx})" style="cursor:pointer;margin-left:2px;">🗑</span>
+          </td>
+        </tr>`;
+      });
+    }
+
     html += '</tbody></table>';
 
   } else { // wage
