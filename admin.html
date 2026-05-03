@@ -7950,18 +7950,15 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
           if(!isNaN(mh) && mh > 0) maxHrs = mh;
         }
       }catch(e){}
-      // MAX HOUR 기반 종료 시간
-      let endT = '';
+      // ★ maxHrs 있으면 startT + maxHrs 신뢰 (8pm cap 적용 안 함)
+      //   maxHrs 없을 때만 8pm cap fallback (저녁 제외)
       if(maxHrs){
-        endT = _subAddMinutes(startT, maxHrs * 60) || '';
+        return _subAddMinutes(startT, maxHrs * 60) || '';
       }
-      // 8pm 캡 (저녁 트랜스퍼 제외)
       if(!isEvening){
-        if(!endT || endT > '20:00'){
-          endT = '20:00';
-        }
+        return '20:00';
       }
-      return endT;
+      return '';
     };
 
     if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
@@ -8169,18 +8166,18 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
         if(!isNaN(mh) && mh > 0) maxHrs = mh;
       }
     }catch(e){}
-    // MAX HOUR 기반 종료 시간
-    let endT = '';
+    // ★ MAX HOUR 기반 종료 시간 계산
+    //   - maxHrs 있으면 startT + maxHrs를 그대로 신뢰 (8pm cap 적용 안 함)
+    //     예: Blue Mountains 09:25 + 10h = 19:25 (이게 정확한 종료 예정)
+    //   - maxHrs 없으면 8pm cap fallback (저녁 제외)
     if(maxHrs){
-      endT = _addMinutes(startT, maxHrs * 60) || '';
+      return _addMinutes(startT, maxHrs * 60) || '';
     }
-    // 8pm 캡 (저녁 트랜스퍼 제외)
+    // maxHrs 없는 경우만 8pm cap 적용
     if(!isEvening){
-      if(!endT || endT > '20:00'){
-        endT = '20:00';
-      }
+      return '20:00';
     }
-    return endT;
+    return '';
   };
 
   if(slot.startPlaceType === 'airport' && tour && tour.FlightIn){
@@ -8264,6 +8261,64 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
     surchargeCar: isTrailer
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 진단: 일정 슬롯의 시간 자동 계산 문제 디버깅
+// 콘솔에서 _diagSlotTimes('City Tour') 또는 _diagSlotTimes() 실행
+// ═══════════════════════════════════════════════════════════════════════════
+window._diagSlotTimes = function(courseFilter){
+  console.log('═══ 슬롯 시간 자동 계산 진단 ═══');
+  console.log('필터:', courseFilter || '(전체)');
+
+  // PriceClient에서 max_hours 확인
+  console.log('\n[1] PriceClient max_hours 등록 현황:');
+  if(typeof DB === 'undefined' || !DB.PC){ console.log('  ❌ DB.PC 없음'); return; }
+  Object.entries(DB.PC).forEach(([agency, courses]) => {
+    Object.entries(courses).forEach(([course, data]) => {
+      if(courseFilter && !course.toLowerCase().includes(courseFilter.toLowerCase())) return;
+      const mh = data.max_hours;
+      const mark = (mh && parseFloat(mh) > 0) ? '✅' : '⚠️';
+      console.log(`  ${mark} [${agency}] ${course}: max_hours = ${mh || '(없음)'}`);
+    });
+  });
+
+  // PriceSub
+  console.log('\n[2] PriceSub max_hours 등록 현황:');
+  if(DB.PS){
+    Object.entries(DB.PS).forEach(([sub, courses]) => {
+      Object.entries(courses).forEach(([course, data]) => {
+        if(courseFilter && !course.toLowerCase().includes(courseFilter.toLowerCase())) return;
+        const mh = data.max_hours;
+        const mark = (mh && parseFloat(mh) > 0) ? '✅' : '⚠️';
+        console.log(`  ${mark} [${sub}] ${course}: max_hours = ${mh || '(없음)'}`);
+      });
+    });
+  }
+
+  // 현재 일정에서 해당 코스를 가진 슬롯 찾기
+  console.log('\n[3] Schedule 시트의 해당 코스 슬롯:');
+  if(typeof _schGetAllDays === 'function'){
+    const allDays = _schGetAllDays();
+    let found = 0;
+    allDays.forEach(d => {
+      ['am','full','pm','evening'].forEach(slotKey => {
+        const s = d.slots && d.slots[slotKey];
+        if(!s) return;
+        if(courseFilter && !String(s.course||'').toLowerCase().includes(courseFilter.toLowerCase())) return;
+        found++;
+        if(found > 10) return;
+        console.log(`  ${d.date} ${slotKey}: course="${s.course}", startTime="${s.startTime||''}", endTime="${s.endTime||''}", startPlaceType="${s.startPlaceType||''}", endPlaceType="${s.endPlaceType||''}"`);
+      });
+    });
+    if(found === 0) console.log('  (해당 슬롯 없음)');
+    else if(found > 10) console.log(`  ... (총 ${found}건 중 10건만 표시)`);
+  } else {
+    console.log('  (_schGetAllDays 함수 없음)');
+  }
+
+  console.log('\n=== 진단 완료 ===');
+  console.log('💡 max_hours가 ⚠️로 표시되면 마스터 데이터 → 요금표(자사/SUB)에서 해당 코스의 max_hours를 설정하세요.');
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 일간 뷰 렌더링 — 시간대별 타임라인으로 그날 모든 슬롯 표시
