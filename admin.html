@@ -20382,38 +20382,72 @@ async function updateInvStatus(invNumber, status, field) {
 
     // ★ 결제 시 Agency_Txn에 CR(수금) 자동 등록 → 잔액 탭 연동
     // PaidCR(백엔드 계산) 활용, 잔액만 payment 타입으로 등록
+    // ★ 2026-05 fix: await + 캐시 fallback + 실패 토스트 + 1회 재시도 (윤규리 케이스)
     if (status === 'paid') {
-      try {
-        const inv = (_invHistoryCache||[]).find(i => String(i.InvNumber) === invNumber);
-        if (inv) {
-          const grandTotal = parseFloat(inv.GrandTotal) || 0;
-          const alreadyPaidCR = parseFloat(inv.PaidCR) || 0;
-          const remainingCR = roundMoney(grandTotal - alreadyPaidCR);
-          if (remainingCR > 0) {
-            const txnData = {
-              Agency:    inv.Agency || '',
-              Date:      toLocalISO(new Date()),
-              InvoiceID: invNumber,
-              TourCode:  '',
-              Type:      'payment',
-              DR:        0,
-              CR:        remainingCR,
-              Remark:    `전액결제 완료 (${invNumber})${alreadyPaidCR > 0 ? ' — 잔액분' : ''}`,
-              StartDate: inv.PeriodFrom || '',
-              FinishDate:inv.PeriodTo || '',
-              DueDate:   ''
-            };
-            fetch(APPS_SCRIPT_URL, {
-              method:'POST', headers:{'Content-Type':'text/plain'},
-              body: JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
-            }).then(r=>r.json()).then(j=>{
-              if(j.ok) { console.log('[Payment→Balance] CR(payment) 등록:', invNumber, remainingCR); _balLoaded=false; }
-            }).catch(e=>console.warn('[Payment→Balance] error:', e));
-          } else {
-            console.log('[Payment→Balance] 이미 전액 수금 완료됨:', invNumber);
+      let inv = (_invHistoryCache||[]).find(i => String(i.InvNumber) === invNumber);
+      // 캐시 미스(연속 결제 처리 중 race condition 등)면 백엔드에서 직접 fetch
+      if (!inv) {
+        try {
+          const r2 = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+          const j2 = await r2.json();
+          if (j2.ok) {
+            inv = (j2.rows||[]).find(i => String(i.InvNumber) === invNumber);
+            // 캐시도 새로 채워둠
+            _invHistoryCache = (j2.rows||[]).slice().reverse();
           }
+        } catch(e) { console.warn('[Payment→Balance] cache fallback fetch error:', e); }
+      }
+      if (inv) {
+        const grandTotal = parseFloat(inv.GrandTotal) || 0;
+        const alreadyPaidCR = parseFloat(inv.PaidCR) || 0;
+        const remainingCR = roundMoney(grandTotal - alreadyPaidCR);
+        if (remainingCR > 0) {
+          const txnData = {
+            Agency:    inv.Agency || '',
+            Date:      toLocalISO(new Date()),
+            InvoiceID: invNumber,
+            TourCode:  '',
+            Type:      'payment',
+            DR:        0,
+            CR:        remainingCR,
+            Remark:    `전액결제 완료 (${invNumber})${alreadyPaidCR > 0 ? ' — 잔액분' : ''}`,
+            StartDate: inv.PeriodFrom || '',
+            FinishDate:inv.PeriodTo || '',
+            DueDate:   ''
+          };
+          // ★ await로 변경 + 실패 시 1회 재시도 + 사용자 토스트
+          let crOk = false, lastErr = '';
+          for (let attempt=1; attempt<=2 && !crOk; attempt++) {
+            try {
+              const r = await fetch(APPS_SCRIPT_URL, {
+                method:'POST', headers:{'Content-Type':'text/plain'},
+                body: JSON.stringify({action:'add_agency_txn', data:txnData, _user:getAdminUser()})
+              });
+              const j = await r.json();
+              if (j.ok) {
+                crOk = true;
+                _balLoaded = false;
+                console.log('[Payment→Balance] CR(payment) 등록 (attempt '+attempt+'):', invNumber, remainingCR);
+              } else {
+                lastErr = j.error || 'unknown';
+              }
+            } catch(e) {
+              lastErr = e.message || String(e);
+            }
+            if (!crOk && attempt===1) await new Promise(r=>setTimeout(r,800));
+          }
+          if (!crOk) {
+            toast('⚠️ 결제 처리는 됐지만 잔액 동기화 실패: '+invNumber+' ('+lastErr+') — 잔액 탭 Sync 버튼을 눌러주세요','er');
+            console.error('[Payment→Balance] CR 등록 최종 실패:', invNumber, lastErr);
+          }
+        } else {
+          console.log('[Payment→Balance] 이미 전액 수금 완료됨:', invNumber);
         }
-      } catch(e) { console.warn('[Payment→Balance] 결제 CR 등록 오류:', e); }
+      } else {
+        // 인보이스를 끝내 못 찾으면 사용자에게 명확하게 알림
+        toast('⚠️ 결제 처리는 됐지만 인보이스 정보를 찾지 못해 잔액 동기화 실패: '+invNumber+' — 새로고침 후 다시 시도해주세요','er');
+        console.error('[Payment→Balance] inv not found in cache or backend:', invNumber);
+      }
     }
 
     await loadInvHistory(true);
