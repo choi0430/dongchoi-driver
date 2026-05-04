@@ -6022,3 +6022,104 @@ function runScheduleStatusUpdateV2() {
     return { ok: false, error: err.toString() };
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ONE-TIME MIGRATION: 인보이스 번호 변경 (옵션 C — 시스템을 PDF에 맞춤)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 사용법:
+//   1) Apps Script 에디터에서 이 파일을 열고
+//   2) 함수 선택 드롭다운에서 'fixInvoiceNumber_001to002' 선택
+//   3) ▶ Run 클릭 → 실행 권한 승인
+//   4) Logger 로그(보기 → 실행)에서 결과 확인
+//   5) 실행 후 이 함수는 다시 실행하지 말 것 (멱등성 가드 있음)
+//
+// 작동:
+//   - Invoices 시트의 InvNumber 'INV-202605-001' → 'INV-202605-002'
+//   - Agency_Txn 시트의 InvoiceID 'INV-202605-001' → 'INV-202605-002'
+//   - Agency_Txn의 Remark에 포함된 'INV-202605-001' 문자열도 모두 치환
+//   - 002가 이미 존재하면 충돌 방지를 위해 중단 (안전 가드)
+//
+function fixInvoiceNumber_001to002() {
+  const OLD_NUM = 'INV-202605-001';
+  const NEW_NUM = 'INV-202605-002';
+  return _renameInvoiceNumber(OLD_NUM, NEW_NUM);
+}
+
+function _renameInvoiceNumber(OLD_NUM, NEW_NUM) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const log = [];
+  log.push(`▶ 마이그레이션 시작: ${OLD_NUM} → ${NEW_NUM}`);
+
+  // ─── 1. Invoices 시트 ───
+  const invSheet = ss.getSheetByName('Invoices');
+  if (!invSheet) {
+    return { ok: false, error: 'Invoices 시트 없음', log: log.join('\n') };
+  }
+  const invData = invSheet.getDataRange().getValues();
+  const invHeaders = invData[0];
+  const invNumCol = invHeaders.indexOf('InvNumber');
+  if (invNumCol < 0) {
+    return { ok: false, error: 'InvNumber 열 없음', log: log.join('\n') };
+  }
+
+  // 안전 가드: NEW_NUM이 이미 존재하면 충돌
+  let oldRow = -1;
+  let newExists = false;
+  for (let i = 1; i < invData.length; i++) {
+    const v = String(invData[i][invNumCol]).trim();
+    if (v === OLD_NUM) oldRow = i + 1; // 1-based row
+    if (v === NEW_NUM) newExists = true;
+  }
+  if (oldRow < 0) {
+    log.push(`⚠️ Invoices 시트에 ${OLD_NUM}이 없음 — 이미 변경됐거나 삭제됨. 중단.`);
+    Logger.log(log.join('\n'));
+    return { ok: false, error: 'OLD_NUM not found', log: log.join('\n') };
+  }
+  if (newExists) {
+    log.push(`❌ 충돌: Invoices 시트에 ${NEW_NUM}이 이미 존재함. 중단.`);
+    Logger.log(log.join('\n'));
+    return { ok: false, error: 'NEW_NUM already exists', log: log.join('\n') };
+  }
+
+  // 실제 변경
+  invSheet.getRange(oldRow, invNumCol + 1).setValue(NEW_NUM);
+  log.push(`✅ Invoices: row ${oldRow} InvNumber ${OLD_NUM} → ${NEW_NUM}`);
+
+  // ─── 2. Agency_Txn 시트 ───
+  const txnSheet = ss.getSheetByName('Agency_Txn');
+  if (!txnSheet) {
+    log.push(`⚠️ Agency_Txn 시트 없음 — 스킵.`);
+    Logger.log(log.join('\n'));
+    return { ok: true, log: log.join('\n') };
+  }
+  const txnData = txnSheet.getDataRange().getValues();
+  const txnHeaders = txnData[0];
+  const invIdCol = txnHeaders.indexOf('InvoiceID');
+  const remarkCol = txnHeaders.indexOf('Remark');
+
+  let txnUpdated = 0;
+  for (let i = 1; i < txnData.length; i++) {
+    let rowChanged = false;
+    // InvoiceID 정확 매칭
+    if (invIdCol >= 0 && String(txnData[i][invIdCol]).trim() === OLD_NUM) {
+      txnSheet.getRange(i + 1, invIdCol + 1).setValue(NEW_NUM);
+      rowChanged = true;
+    }
+    // Remark에 포함된 OLD_NUM 문자열 치환 (예: "전액결제 완료 (INV-202605-001)")
+    if (remarkCol >= 0) {
+      const remark = String(txnData[i][remarkCol] || '');
+      if (remark.indexOf(OLD_NUM) >= 0) {
+        const newRemark = remark.split(OLD_NUM).join(NEW_NUM);
+        txnSheet.getRange(i + 1, remarkCol + 1).setValue(newRemark);
+        rowChanged = true;
+      }
+    }
+    if (rowChanged) txnUpdated++;
+  }
+  log.push(`✅ Agency_Txn: ${txnUpdated}개 행 갱신 (InvoiceID + Remark)`);
+
+  log.push(`▶ 마이그레이션 완료.`);
+  Logger.log(log.join('\n'));
+  return { ok: true, log: log.join('\n') };
+}
