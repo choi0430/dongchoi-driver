@@ -18866,6 +18866,10 @@ function getExistingOrNewInvNum(agency, from) {
       String(inv.PeriodFrom||'').trim() === String(from||'').trim()
     );
     if (match && match.InvNumber) return match.InvNumber;
+  } else {
+    // ★ 2026-05: 캐시가 null이면 매칭 불가 → 새 번호가 발급될 위험
+    // 호출자에서 await loadInvHistory()를 미리 해야 안전. 경고만 남기고 진행.
+    console.warn('[getExistingOrNewInvNum] _invHistoryCache is null — caller should reload before calling. agency:', agency, 'from:', from);
   }
   // ② 방금 생성한 번호가 같은 여행사+기간이면 재사용
   if (_lastGeneratedInvNum && _lastGenInvAgency === agency && _lastGenInvFrom === from) {
@@ -18932,6 +18936,10 @@ async function saveInvoiceToSheet() {
   const grandTotal = _calcInvGrandTotal(rows);
   const gst   = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
+  // ★ 2026-05 fix: 캐시가 null이면 reload (이중 발행 방지 및 정확한 번호 조회)
+  if (!_invHistoryCache) {
+    try { await loadInvHistory(false); } catch(e) { console.warn('[saveInvoice] cache reload failed:', e); }
+  }
   // 현재 여행사/기간에 맞는 번호 조회 (이력 → 현재 생성분 → 신규 순)
   const invNum = getExistingOrNewInvNum(agency, from);
 
@@ -19130,6 +19138,10 @@ async function saveInvoiceToSheet() {
     _invHistoryCache = null; // 캐시 무효화
     _balLoaded = false; // ★ 잔액 캐시도 무효화
     _lastGeneratedInvNum = null; _lastGenInvAgency = null; _lastGenInvFrom = null; _editItemFilter = null; _trueEditData = null; // 다음 인보이스를 위해 번호 초기화
+
+    // ★ 2026-05 fix: 캐시 즉시 reload (저장 직후 발송/미리보기 클릭 시 새 번호 발급되는 버그 방지)
+    // INV-202605-001 저장 후 즉시 ✉️발송 클릭 → 캐시 null + _lastGen null → 새 번호 INV-202605-002 발급되는 케이스 방지
+    try { await loadInvHistory(true); } catch(e) { console.warn('[saveInvoice] post-save cache reload failed:', e); }
 
     // ★ 저장 완료 후 크레딧/선수금 & 수동항목 캐시 초기화 (다음 인보이스에 잔류 방지)
     const _resetKey = agency + '_' + from.slice(0,7);
@@ -21468,6 +21480,13 @@ async function emailInvoice() {
   const client = DB.C.find(c => c.Name === agency) || {};
   let toEmail  = normalizeEmails(client.Email || '');
   const ccEmail = normalizeEmails(client.Email_CC || '');
+  // ★ 2026-05 fix: 캐시 미스 시 새 번호 발급 버그 방지
+  // saveInvoiceToSheet 직후 캐시가 null인 상태에서 emailInvoice 호출되면
+  // getExistingOrNewInvNum이 매칭 실패 → getInvNum이 +1 새 번호 발급 → DB와 PDF 번호 불일치
+  // (예: INV-202605-001 저장 후 즉시 발송 → 이메일은 INV-202605-002로 나감)
+  if (!_invHistoryCache) {
+    try { await loadInvHistory(false); } catch(e) { console.warn('[emailInvoice] cache reload failed:', e); }
+  }
   // ★ 현재 여행사/기간에 맞는 번호 조회 (이력 → 현재 생성분 → 신규 순)
   const invNum = getExistingOrNewInvNum(agency, from);
 
