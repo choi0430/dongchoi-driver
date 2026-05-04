@@ -16038,7 +16038,7 @@ function renderBalDetail(){
   // ★ Agency: 선수금/크레딧 입금 등록 가능, Sub: 수동 추가 가능
   if(type==='agency') {
     document.getElementById('bal-detail-add-btn').style.display='';
-    document.getElementById('bal-detail-add-btn').textContent='+ 선수금/크레딧 입금';
+    document.getElementById('bal-detail-add-btn').textContent='+ 입금/수금 등록';
     document.getElementById('bal-detail-add-btn').onclick = () => openPrepaidCreditInModal(name);
   } else if(type==='sub') {
     document.getElementById('bal-detail-add-btn').style.display='';
@@ -20612,19 +20612,73 @@ function openPartialPayment(invNumber, agency, grandTotal, alreadyPaid) {
 // 선수금/크레딧 입금 등록 모달 (잔액탭에서 사용)
 // ─────────────────────────────────────────
 function openPrepaidCreditInModal(agency) {
+  // ★ 2026-05 update: 인보이스 수금(payment) 옵션 추가 + 미수금 인보이스 자동 매칭
+  // 해당 거래처의 미수금 인보이스 목록 계산
+  const outstandingInvs = (() => {
+    if (!Array.isArray(_invHistoryCache)) return [];
+    // 이 거래처의 인보이스별 CR 합계 계산
+    const crByInv = {};
+    (_balAgencyTxns||[]).forEach(t => {
+      if ((t.Agency||'') !== agency) return;
+      const invId = String(t.InvoiceID||'').trim();
+      if (!invId) return;
+      crByInv[invId] = (crByInv[invId] || 0) + (Number(t.CR) || 0);
+    });
+    return _invHistoryCache
+      .filter(inv => (inv.Agency||'') === agency)
+      .filter(inv => {
+        const status = String(inv.Status||'').toLowerCase();
+        if (status === 'cancelled' || status === 'void') return false;
+        const total = Number(inv.GrandTotal) || 0;
+        const paid = crByInv[String(inv.InvNumber||'').trim()] || 0;
+        return total > 0 && (total - paid) > 0.01;
+      })
+      .map(inv => {
+        const total = Number(inv.GrandTotal) || 0;
+        const paid = crByInv[String(inv.InvNumber||'').trim()] || 0;
+        return {
+          invNumber: String(inv.InvNumber||'').trim(),
+          tourCode: String(inv.TourCode||'').trim(),
+          guide: String(inv.Guide||'').trim(),
+          total,
+          paid,
+          balance: roundMoney(total - paid),
+          periodFrom: inv.PeriodFrom || '',
+          periodTo: inv.PeriodTo || ''
+        };
+      })
+      .sort((a,b) => a.invNumber.localeCompare(b.invNumber));
+  })();
+
   const overlay = document.createElement('div');
   overlay.id = 'pci-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;';
   overlay.innerHTML = `
-    <div style="background:var(--sf);border-radius:16px;padding:20px;width:92%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,.25);">
-      <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:12px;">💳 선수금/크레딧 입금 등록</div>
+    <div style="background:var(--sf);border-radius:16px;padding:20px;width:92%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto;">
+      <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:12px;">💰 입금/수금 등록</div>
       <div style="font-size:12px;color:var(--t2);margin-bottom:10px;font-weight:600;">${escH(agency)}</div>
 
       <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">구분</label>
       <select id="pci-type" style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
+        <option value="payment">💵 인보이스 수금 (미수금 차감)</option>
         <option value="prepaid_in">선수금 입금</option>
         <option value="credit_in">크레딧 부여</option>
       </select>
+
+      <!-- 인보이스 선택 (payment 타입일 때만) -->
+      <div id="pci-inv-wrap" style="margin-bottom:10px;">
+        <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">대상 인보이스 (미수금)</label>
+        <select id="pci-inv" style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:12px;box-sizing:border-box;">
+          ${outstandingInvs.length === 0
+            ? '<option value="">미수금 인보이스 없음</option>'
+            : outstandingInvs.map(inv => {
+                const meta = [inv.tourCode, inv.guide].filter(Boolean).join(' · ');
+                return `<option value="${escH(inv.invNumber)}" data-balance="${inv.balance}" data-from="${escH(inv.periodFrom)}" data-to="${escH(inv.periodTo)}" data-tour="${escH(inv.tourCode)}">${escH(inv.invNumber)} — 잔액 $${inv.balance.toLocaleString('en-AU',{minimumFractionDigits:2})}${meta?' ('+escH(meta)+')':''}</option>`;
+              }).join('')
+          }
+        </select>
+        <div id="pci-inv-info" style="font-size:10px;color:var(--t3);margin-top:3px;"></div>
+      </div>
 
       <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">금액 ($)</label>
       <input id="pci-amount" type="number" step="0.01" min="0.01" placeholder="금액 입력"
@@ -20640,7 +20694,7 @@ function openPrepaidCreditInModal(agency) {
 
       <div style="display:flex;gap:8px;">
         <button id="pci-cancel-btn" style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--b2);background:var(--sf2);color:var(--t2);font-size:13px;font-weight:700;cursor:pointer;">취소</button>
-        <button id="pci-save-btn" style="flex:1;padding:10px;border-radius:10px;border:none;background:var(--ac);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">💳 등록</button>
+        <button id="pci-save-btn" style="flex:1;padding:10px;border-radius:10px;border:none;background:var(--ac);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">💰 등록</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -20648,23 +20702,85 @@ function openPrepaidCreditInModal(agency) {
   overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
   document.getElementById('pci-cancel-btn').onclick = () => overlay.remove();
 
+  // Type 변경 시 인보이스 선택 표시/숨김 + 잔액 자동 채우기
+  const typeSel = document.getElementById('pci-type');
+  const invWrap = document.getElementById('pci-inv-wrap');
+  const invSel = document.getElementById('pci-inv');
+  const amtInput = document.getElementById('pci-amount');
+  const invInfo = document.getElementById('pci-inv-info');
+
+  const updateForType = () => {
+    if (typeSel.value === 'payment') {
+      invWrap.style.display = '';
+      // payment 선택 시 자동으로 첫 인보이스 잔액 채움
+      const opt = invSel.selectedOptions[0];
+      if (opt && opt.value) {
+        amtInput.value = opt.dataset.balance;
+        invInfo.textContent = `📅 ${opt.dataset.from || '?'} ~ ${opt.dataset.to || '?'}`;
+      }
+    } else {
+      invWrap.style.display = 'none';
+      invInfo.textContent = '';
+    }
+  };
+  typeSel.onchange = updateForType;
+  invSel.onchange = () => {
+    const opt = invSel.selectedOptions[0];
+    if (opt && opt.value) {
+      amtInput.value = opt.dataset.balance;
+      invInfo.textContent = `📅 ${opt.dataset.from || '?'} ~ ${opt.dataset.to || '?'}`;
+    }
+  };
+  // 초기 화면: payment 기본 선택, 미수금 없으면 prepaid_in으로
+  if (outstandingInvs.length === 0) {
+    typeSel.value = 'prepaid_in';
+  }
+  updateForType();
+
   document.getElementById('pci-save-btn').onclick = async () => {
     const amt = parseFloat(document.getElementById('pci-amount').value);
     if (!amt || amt <= 0) { toast('⚠️ 금액을 입력하세요','warn'); return; }
-    const txnType = document.getElementById('pci-type').value;
+    const txnType = typeSel.value;
     const dateVal = document.getElementById('pci-date').value || toLocalISO(new Date());
     const note = document.getElementById('pci-note').value.trim();
-    const label = txnType === 'prepaid_in' ? '선수금 입금' : '크레딧 부여';
+
+    let invoiceID = '';
+    let tourCode = '';
+    let startDate = '';
+    let finishDate = '';
+    let label = '';
+
+    if (txnType === 'payment') {
+      const opt = invSel.selectedOptions[0];
+      if (!opt || !opt.value) { toast('⚠️ 대상 인보이스를 선택하세요','warn'); return; }
+      invoiceID = opt.value;
+      tourCode = opt.dataset.tour || '';
+      startDate = opt.dataset.from || '';
+      finishDate = opt.dataset.to || '';
+      const balance = parseFloat(opt.dataset.balance) || 0;
+      if (amt > balance + 0.01) {
+        if (!confirm(`입력 금액 $${amt.toLocaleString('en-AU',{minimumFractionDigits:2})}이 잔액 $${balance.toLocaleString('en-AU',{minimumFractionDigits:2})}보다 큽니다. 그래도 등록하시겠습니까?`)) return;
+      }
+      label = '수금';
+    } else if (txnType === 'prepaid_in') {
+      label = '선수금 입금';
+    } else {
+      label = '크레딧 부여';
+    }
 
     document.getElementById('pci-save-btn').disabled = true;
     document.getElementById('pci-save-btn').textContent = '저장 중...';
 
     try {
+      const remarkBase = txnType === 'payment'
+        ? `수금 (${invoiceID})`
+        : label;
       const txnData = {
-        Agency: agency, Date: dateVal, InvoiceID: '', TourCode: '',
+        Agency: agency, Date: dateVal,
+        InvoiceID: invoiceID, TourCode: tourCode,
         Type: txnType, DR: 0, CR: roundMoney(amt),
-        Remark: `${label}${note ? ' - '+note : ''}`,
-        StartDate: '', FinishDate: '', DueDate: ''
+        Remark: `${remarkBase}${note ? ' - '+note : ''}`,
+        StartDate: startDate, FinishDate: finishDate, DueDate: ''
       };
       const res = await fetch(APPS_SCRIPT_URL, {
         method:'POST', headers:{'Content-Type':'text/plain'},
@@ -20672,6 +20788,30 @@ function openPrepaidCreditInModal(agency) {
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error||'등록 실패');
+
+      // ★ payment 타입이면 인보이스 status도 업데이트 (잔액 0이 됐으면 paid)
+      if (txnType === 'payment' && invoiceID) {
+        const opt = invSel.selectedOptions[0];
+        const balance = parseFloat(opt.dataset.balance) || 0;
+        const newRemaining = roundMoney(balance - amt);
+        if (newRemaining <= 0.01) {
+          // 전액 수금 → status='paid'
+          try {
+            await fetch(APPS_SCRIPT_URL, {
+              method:'POST', headers:{'Content-Type':'text/plain'},
+              body: JSON.stringify({action:'update_invoice_status', invNumber: invoiceID, status:'paid', field:'PaidDate', _user:getAdminUser()})
+            });
+          } catch(e) { console.warn('[Payment] status update failed:', e); }
+        } else {
+          // 부분 수금 → status='partial'
+          try {
+            await fetch(APPS_SCRIPT_URL, {
+              method:'POST', headers:{'Content-Type':'text/plain'},
+              body: JSON.stringify({action:'update_invoice_status', invNumber: invoiceID, status:'partial', _user:getAdminUser()})
+            });
+          } catch(e) { console.warn('[Payment] status update failed:', e); }
+        }
+      }
 
       _balLoaded = false;
       _invHistoryCache = null; // ★ 인보이스 캐시도 무효화
@@ -20683,7 +20823,7 @@ function openPrepaidCreditInModal(agency) {
     } catch(e) {
       toast('❌ 등록 실패: '+e.message,'er');
       document.getElementById('pci-save-btn').disabled = false;
-      document.getElementById('pci-save-btn').textContent = '💳 등록';
+      document.getElementById('pci-save-btn').textContent = '💰 등록';
     }
   };
 }
