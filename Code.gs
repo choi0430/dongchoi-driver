@@ -1491,6 +1491,10 @@ function doGet(e) {
       case 'get_roster':
         return cors(getRosterData(e.parameter.from, e.parameter.to));
 
+      // ── Daily Report Draft (서버 백업) ──
+      case 'get_daily_draft':
+        return cors(getDailyDraftServer(effectiveDriver || e.parameter.driver));
+
       default:
         return cors({ok: false, error: 'Unknown action: ' + action});
     }
@@ -1561,6 +1565,16 @@ function doPost(e) {
 
       case 'save_endofshift':
         return cors(saveReport('End_of_Shift', payload.data));
+
+      // ── Daily Report Draft (서버 백업) ──
+      case 'save_daily_draft':
+        return cors(saveDailyDraftServer(
+          payload.driver || _user,
+          payload.draftJSON || ''
+        ));
+
+      case 'clear_daily_draft':
+        return cors(clearDailyDraftServer(payload.driver || _user));
 
       case 'submit_mot':
         return cors(saveReport('MOT_Report', payload.data));
@@ -6122,4 +6136,117 @@ function _renameInvoiceNumber(OLD_NUM, NEW_NUM) {
   log.push(`▶ 마이그레이션 완료.`);
   Logger.log(log.join('\n'));
   return { ok: true, log: log.join('\n') };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Daily Report Draft — 서버 백업
+// localStorage가 비워진 상황(앱 재설치, PWA 캐시 정리, 다른 기기 접속)에도
+// 작성 중인 Daily Report를 복원할 수 있도록 서버에 보조 저장한다.
+//
+// 시트: Daily_Draft
+// 컬럼: [Driver, Updated_At, DraftJSON]
+// — 드라이버당 1행 (덮어쓰기). 제출 / 명시적 clear 시 행 삭제.
+// — 48시간 지나면 무효(서버에서도 제거).
+// ═══════════════════════════════════════════════════════════════════════════
+const DAILY_DRAFT_SHEET = 'Daily_Draft';
+const DAILY_DRAFT_HEADERS = ['Driver', 'Updated_At', 'DraftJSON'];
+const DAILY_DRAFT_TTL_MS = 48 * 60 * 60 * 1000; // 48h
+
+function _getDailyDraftSheet_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sh = ss.getSheetByName(DAILY_DRAFT_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(DAILY_DRAFT_SHEET);
+    sh.getRange(1, 1, 1, DAILY_DRAFT_HEADERS.length)
+      .setValues([DAILY_DRAFT_HEADERS])
+      .setBackground('#1a56db').setFontColor('white').setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.setColumnWidth(3, 600); // DraftJSON 넓게
+  }
+  return sh;
+}
+
+// 드라이버명 정확 일치 행을 찾아 row index(1-based) 반환. 없으면 -1.
+function _findDailyDraftRow_(sh, driverName) {
+  const last = sh.getLastRow();
+  if (last < 2) return -1;
+  const driverCol = sh.getRange(2, 1, last - 1, 1).getValues();
+  const target = String(driverName || '').trim();
+  for (let i = 0; i < driverCol.length; i++) {
+    if (String(driverCol[i][0] || '').trim() === target) return i + 2;
+  }
+  return -1;
+}
+
+function saveDailyDraftServer(driverName, draftJSON) {
+  try {
+    const name = String(driverName || '').trim();
+    if (!name) return { ok: false, error: 'driver required' };
+    if (typeof draftJSON !== 'string' || !draftJSON) {
+      return { ok: false, error: 'draftJSON required' };
+    }
+    // GAS 셀 한도(50,000자) 안전 마진
+    if (draftJSON.length > 45000) {
+      return { ok: false, error: 'draft too large' };
+    }
+
+    const sh = _getDailyDraftSheet_();
+    const now = new Date();
+    const row = _findDailyDraftRow_(sh, name);
+    if (row > 0) {
+      sh.getRange(row, 1, 1, 3).setValues([[name, now, draftJSON]]);
+    } else {
+      sh.appendRow([name, now, draftJSON]);
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function getDailyDraftServer(driverName) {
+  try {
+    const name = String(driverName || '').trim();
+    if (!name) return { ok: false, error: 'driver required' };
+
+    const sh = _getDailyDraftSheet_();
+    const row = _findDailyDraftRow_(sh, name);
+    if (row < 0) return { ok: true, draft: null };
+
+    const vals = sh.getRange(row, 1, 1, 3).getValues()[0];
+    const updatedAt = vals[1];
+    const json = String(vals[2] || '');
+
+    // TTL 검사
+    const tsMs = (updatedAt instanceof Date) ? updatedAt.getTime()
+               : (typeof updatedAt === 'number' ? updatedAt : Date.parse(updatedAt));
+    if (tsMs && (Date.now() - tsMs) > DAILY_DRAFT_TTL_MS) {
+      sh.deleteRow(row);
+      return { ok: true, draft: null };
+    }
+
+    if (!json) return { ok: true, draft: null };
+
+    return {
+      ok: true,
+      draft: json,
+      updatedAt: tsMs || null
+    };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function clearDailyDraftServer(driverName) {
+  try {
+    const name = String(driverName || '').trim();
+    if (!name) return { ok: false, error: 'driver required' };
+
+    const sh = _getDailyDraftSheet_();
+    const row = _findDailyDraftRow_(sh, name);
+    if (row > 0) sh.deleteRow(row);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
 }
