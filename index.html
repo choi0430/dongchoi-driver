@@ -4403,6 +4403,28 @@ async function syncShiftsFromServer(driverName) {
     else editingShiftId = null;
     localStorage.setItem('shifts_' + driverName, JSON.stringify(activeShifts));
     renderShiftSection();
+
+    // ★ 서버 Daily Report draft prefetch — 로컬에 없을 때만 (앱 재설치/PWA 캐시 정리 대비)
+    // 결과를 localStorage에 주입한 뒤 shift 섹션을 다시 렌더해야 "이어쓰기" 배너가 보인다.
+    try {
+      const localKey = 'dr_draft_' + driverName;
+      if (!localStorage.getItem(localKey)) {
+        fetch(APPS_SCRIPT_URL + '?action=get_daily_draft&driver=' + encodeURIComponent(driverName))
+          .then(r => r.json())
+          .then(j => {
+            if (!j || !j.ok || !j.draft) return;
+            try {
+              localStorage.setItem(localKey, j.draft);
+              if (typeof _draftLastServerPayload !== 'undefined') {
+                _draftLastServerPayload = j.draft;
+              }
+              // 배너 갱신
+              renderShiftSection();
+            } catch(e) {}
+          })
+          .catch(()=>{});
+      }
+    } catch(e) {}
   } catch (e) {
     console.warn('shift 서버 동기화 실패 (오프라인?):', e.message);
     // 오프라인 시에도 48시간 정리 (로컬 전용 shift만)
@@ -5087,6 +5109,13 @@ function _attachDraftListeners(){
       // Daily Report draft
       if(typeof saveDailyDraft === 'function' && document.getElementById('step-2')?.style.display !== 'none'){
         saveDailyDraft();
+        // ★ 페이지 종료 시점에는 디바운스를 기다릴 수 없음 — 즉시 sendBeacon으로 서버 sync
+        try {
+          const raw = localStorage.getItem(_draftKey());
+          if(raw && typeof _flushDraftToServerSync === 'function'){
+            _flushDraftToServerSync(raw);
+          }
+        } catch(e) {}
       }
       // EOS draft
       if(typeof saveEosDraft === 'function' && document.getElementById('step-3')?.style.display !== 'none'){
@@ -6299,6 +6328,87 @@ function _draftKey(){
   return 'dr_draft_' + (currentDriver?.name || 'guest');
 }
 
+// ─────────────────────────────────────────────────────────────
+// 서버 백업 — localStorage가 비워져도 (앱 재설치/PWA 캐시 정리/타기기)
+// 작성 중인 Daily Report draft를 복원할 수 있도록 GAS에 동기화한다.
+// ─────────────────────────────────────────────────────────────
+let _draftServerSyncTimer = null;
+let _draftServerSyncInFlight = false;
+let _draftLastServerPayload = '';
+
+function _scheduleDraftServerSync(jsonPayload){
+  // 디바운스: 입력 폭주 시 마지막 값만 2초 뒤에 한 번 전송
+  if(_draftServerSyncTimer) clearTimeout(_draftServerSyncTimer);
+  _draftServerSyncTimer = setTimeout(()=>{
+    _draftServerSyncTimer = null;
+    _flushDraftToServer(jsonPayload);
+  }, 2000);
+}
+
+function _flushDraftToServer(jsonPayload){
+  try {
+    const driverName = (currentDriver?.name || '').trim();
+    if(!driverName) return;
+    if(_draftServerSyncInFlight) return; // 중복 전송 방지
+    if(jsonPayload === _draftLastServerPayload) return; // 변경 없으면 skip
+    _draftServerSyncInFlight = true;
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action: 'save_daily_draft',
+        driver: driverName,
+        draftJSON: jsonPayload
+      })
+    }).then(r=>r.json()).then(j=>{
+      if(j && j.ok) _draftLastServerPayload = jsonPayload;
+    }).catch(()=>{
+      // 네트워크 실패는 무시 — localStorage가 1차 저장이므로 데이터 손실 없음
+    }).finally(()=>{
+      _draftServerSyncInFlight = false;
+    });
+  } catch(e) {}
+}
+
+function _flushDraftToServerSync(jsonPayload){
+  // pagehide/beforeunload 시 즉시 전송 (sendBeacon 사용 — fetch는 페이지 종료 시 cancel될 수 있음)
+  try {
+    const driverName = (currentDriver?.name || '').trim();
+    if(!driverName) return;
+    if(jsonPayload === _draftLastServerPayload) return;
+    const body = JSON.stringify({
+      action: 'save_daily_draft',
+      driver: driverName,
+      draftJSON: jsonPayload
+    });
+    if(navigator.sendBeacon){
+      const blob = new Blob([body], {type:'text/plain'});
+      navigator.sendBeacon(APPS_SCRIPT_URL, blob);
+      _draftLastServerPayload = jsonPayload;
+    } else {
+      // fallback: keepalive fetch
+      fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body, keepalive:true
+      }).catch(()=>{});
+    }
+  } catch(e) {}
+}
+
+function _clearDraftOnServer(){
+  try {
+    const driverName = (currentDriver?.name || '').trim();
+    if(!driverName) return;
+    _draftLastServerPayload = '';
+    if(_draftServerSyncTimer){ clearTimeout(_draftServerSyncTimer); _draftServerSyncTimer = null; }
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'clear_daily_draft', driver: driverName })
+    }).catch(()=>{});
+  } catch(e) {}
+}
+
 function saveDailyDraft(){
   if(_draftRestoring) return; // 복원 중에는 저장하지 않음
   try {
@@ -6344,12 +6454,16 @@ function saveDailyDraft(){
       _shiftId: editingShiftId || '',
       _ts: Date.now()
     };
-    localStorage.setItem(_draftKey(), JSON.stringify(draft));
+    const payload = JSON.stringify(draft);
+    localStorage.setItem(_draftKey(), payload);
+    // 서버 sync (디바운스 2초)
+    _scheduleDraftServerSync(payload);
   } catch(e) {}
 }
 
 function clearDailyDraft(){
   try { localStorage.removeItem(_draftKey()); } catch(e) {}
+  _clearDraftOnServer();
 }
 // ═══════════════════════════════════════════════════════
 // PRE DEPARTURE DRAFT — 제거됨 (임시저장/복원 비활성화)
@@ -6438,9 +6552,9 @@ function restoreEosDraft(){
 }
 
 // MASTER 로드 완료를 기다렸다가 draft 복원 (최대 5초 폴링)
+// localStorage에 draft가 없으면 서버(Daily_Draft 시트)에서 한 번 가져와 복원 시도.
 function _restoreDailyDraftWhenReady(){
-  const raw = localStorage.getItem(_draftKey());
-  if(!raw) return; // draft 없으면 바로 종료
+  let raw = localStorage.getItem(_draftKey());
 
   const maxWait = 5000;
   const interval = 100;
@@ -6462,7 +6576,31 @@ function _restoreDailyDraftWhenReady(){
     }
     setTimeout(attempt, interval);
   }
-  setTimeout(attempt, 150); // 최초 150ms 후 시작 (DOM 렌더 확보)
+
+  if(raw){
+    // 로컬에 draft 있음 → 평소대로 복원
+    setTimeout(attempt, 150);
+    return;
+  }
+
+  // 로컬에 없으면 서버에서 가져와 본다
+  const driverName = (currentDriver?.name || '').trim();
+  if(!driverName) return;
+
+  fetch(APPS_SCRIPT_URL + '?action=get_daily_draft&driver=' + encodeURIComponent(driverName))
+    .then(r=>r.json())
+    .then(j=>{
+      if(!j || !j.ok || !j.draft) return; // 서버에도 없음
+      try {
+        // 서버에서 받아온 JSON을 localStorage에 주입
+        localStorage.setItem(_draftKey(), j.draft);
+        // 서버 마지막 payload 기록 — 다시 같은 내용을 sync 호출하지 않도록
+        _draftLastServerPayload = j.draft;
+        // 복원 폴링 시작
+        setTimeout(attempt, 150);
+      } catch(e) {}
+    })
+    .catch(()=>{ /* 네트워크 실패 시 그냥 종료 */ });
 }
 
 function restoreDailyDraft(){
