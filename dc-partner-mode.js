@@ -19,11 +19,11 @@
   // ─── 상수 ─────────────────────────────────────────────────────────────────
   const PARTNER_COMPANIES = [
     { id: 'DC',                  label: '🏢 DC (자사)',         color: '#1e40af', bg: '#dbeafe', border: '#3b82f6' },
-    { id: 'EG TOUR PTY LTD',     label: '🤝 EG TOUR (파트너)',  color: '#6d28d9', bg: '#ede9fe', border: '#7c3aed' }
+    { id: 'EG TRAVEL PTY LTD',     label: '🤝 EG TRAVEL (파트너)',  color: '#6d28d9', bg: '#ede9fe', border: '#7c3aed' }
     // 신규 파트너 추가 시 이 배열에만 행 추가
   ];
 
-  const isAdminPage  = !!document.getElementById('scheduleModal')
+  const isAdminPage  = !!document.getElementById('sch-modal')
                      || !!document.getElementById('sm-tourcode')
                      || /admin/.test(location.pathname);
   const isDriverPage = !!document.getElementById('page-report')
@@ -93,7 +93,7 @@
   }
 
   function _ensureBeTabInModal(tourId){
-    const modal = document.getElementById('scheduleModal');
+    const modal = document.getElementById('sch-modal');
     if(!modal) return;
     if(modal.querySelector('.be-tab-row')) {
       // 이미 있음 — 값만 갱신
@@ -134,7 +134,7 @@
   }
 
   function _refreshBeTab(tourId){
-    const modal = document.getElementById('scheduleModal');
+    const modal = document.getElementById('sch-modal');
     if(!modal) return;
 
     // 디폴트 결정
@@ -231,7 +231,7 @@
           const badge = document.createElement('span');
           badge.className = 'be-badge';
           badge.style.cssText = `background:${cfg.bg};color:${cfg.color};`;
-          badge.textContent = be === 'EG TOUR PTY LTD' ? '🤝 EG' : be.split(' ')[0];
+          badge.textContent = be === 'EG TRAVEL PTY LTD' ? '🤝 EG' : be.split(' ')[0];
           tcCell.appendChild(badge);
         }
         row.dataset.beRendered = '1';
@@ -256,7 +256,7 @@
       beWrap.className = 'sch-flt-be';
       beWrap.innerHTML = `
         <button id="sch-flt-be-dc" class="sch-flt-chip on" data-be-filter="DC">🏢 자사 청구</button>
-        <button id="sch-flt-be-eg" class="sch-flt-chip on" data-be-filter="EG TOUR PTY LTD">🤝 EG 청구</button>
+        <button id="sch-flt-be-eg" class="sch-flt-chip on" data-be-filter="EG TRAVEL PTY LTD">🤝 EG 청구</button>
       `;
       container.appendChild(beWrap);
 
@@ -286,7 +286,7 @@
           if(!tour) return;
           const be = tour.BillingEntity || 'DC';
           const isDC = _isDC(be);
-          const isEG = String(be).toUpperCase() === 'EG TOUR PTY LTD';
+          const isEG = String(be).toUpperCase() === 'EG TRAVEL PTY LTD';
           let hide = false;
           if(isDC && !dcOn) hide = true;
           if(isEG && !egOn) hide = true;
@@ -314,7 +314,7 @@
 
     // BillingEntity 강제 (탭이 생성될 때마다)
     setInterval(() => {
-      const modal = document.getElementById('scheduleModal');
+      const modal = document.getElementById('sch-modal');
       if(!modal || modal.style.display === 'none') return;
       modal.querySelectorAll('.be-tab').forEach(btn => {
         if(btn.dataset.be !== partnerCompany){
