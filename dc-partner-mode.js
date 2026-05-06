@@ -145,7 +145,8 @@
       const tour = tours.find(t => t.TourID === tourId);
       current = tour?.BillingEntity || 'DC';
       global._schEditBillingEntity = current;
-    } else if(!current){
+    } else {
+      // 신규 모드 — 항상 DC로 초기화 (이전 모달 stale 값 방지)
       current = 'DC';
       global._schEditBillingEntity = current;
     }
@@ -177,37 +178,25 @@
     }
   }
 
-  // ─── saveScheduleData hook — BillingEntity 저장 ───────────────────────
+  // ─── fetch hook — save_schedule 호출 시 BillingEntity 주입 ────────────
+  // saveScheduleData는 apiPost 대신 fetch(APPS_SCRIPT_URL, ...)를 직접 호출하므로
+  // fetch 자체를 인터셉트해서 body의 action==='save_schedule'인 경우 data에 BillingEntity 추가
   function _hookSaveSchedule(){
-    _wrap('saveScheduleData', function(orig, args){
-      // orig 함수는 내부에서 data 객체를 만들고 apiPost 호출
-      // monkey-patch: 호출 직전에 _schEditBillingEntity를 글로벌에 노출하고
-      //               apiPost('save_schedule', ...) 를 가로챔
-      const apiPostOrig = global.apiPost;
-      let intercepted = false;
-      global.apiPost = function(action, payload){
-        if(action === 'save_schedule' && !intercepted){
-          intercepted = true;
-          try {
-            const data = (typeof payload === 'object' && payload.data)
-              ? (typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data)
-              : payload;
-            if(data && typeof data === 'object'){
-              data.BillingEntity = global._schEditBillingEntity || 'DC';
-              if(typeof payload === 'object' && payload.data){
-                payload.data = typeof payload.data === 'string' ? JSON.stringify(data) : data;
-              }
-            }
-          } catch(e){ console.warn('[partner-mode] BillingEntity injection failed:', e); }
+    if(global.__beFetchHooked) return;
+    global.__beFetchHooked = true;
+    const _origFetch = global.fetch;
+    global.fetch = function(url, options){
+      try {
+        if(options && options.body && typeof options.body === 'string'){
+          const body = JSON.parse(options.body);
+          if(body && body.action === 'save_schedule' && body.data && typeof body.data === 'object'){
+            body.data.BillingEntity = global._schEditBillingEntity || 'DC';
+            options = Object.assign({}, options, { body: JSON.stringify(body) });
+          }
         }
-        const ret = apiPostOrig.apply(this, arguments);
-        // 원복
-        setTimeout(() => { global.apiPost = apiPostOrig; }, 100);
-        return ret;
-      };
-
-      return orig.apply(this, args);
-    });
+      } catch(e){ /* body가 JSON이 아니면 무시 */ }
+      return _origFetch.call(this, url, options);
+    };
   }
 
   // ─── 일정 리스트 — BillingEntity 배지 ─────────────────────────────────
