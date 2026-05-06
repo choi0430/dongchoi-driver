@@ -95,6 +95,8 @@
   function _ensureBeTabInModal(tourId){
     const modal = document.getElementById('sch-modal');
     if(!modal) return;
+    // 신규 모달 — stale 값 방지
+    if(tourId === undefined){ global._schEditBillingEntity = 'DC'; }
     if(modal.querySelector('.be-tab-row')) {
       // 이미 있음 — 값만 갱신
       _refreshBeTab(tourId);
@@ -145,8 +147,7 @@
       const tour = tours.find(t => t.TourID === tourId);
       current = tour?.BillingEntity || 'DC';
       global._schEditBillingEntity = current;
-    } else {
-      // 신규 모드 — 항상 DC로 초기화 (이전 모달 stale 값 방지)
+    } else if(!current){
       current = 'DC';
       global._schEditBillingEntity = current;
     }
