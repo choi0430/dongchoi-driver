@@ -4217,6 +4217,34 @@ async function _schLoadLeaves(){
   }catch(e){ console.warn('leave load failed:', e); }
 }
 
+// 슬롯의 시간 범위(분 단위)를 반환 — 충돌 검사용
+// 시간이 입력되어 있으면 해당 시간을 사용, 없으면 슬롯 키 기반 fallback
+// fallback: morning=05:00~12:00, fullday=00:00~23:59, evening=18:00~23:59
+function _schSlotTimeRange(slot, slotKey){
+  const _hm = (s) => {
+    if(!s) return null;
+    const m = String(s).trim().match(/^(\d{1,2}):(\d{2})/);
+    if(!m) return null;
+    const h = parseInt(m[1],10), mn = parseInt(m[2],10);
+    if(isNaN(h)||isNaN(mn)||h>23||mn>59) return null;
+    return h*60+mn;
+  };
+  let startMin = _hm(slot && slot.startTime);
+  let endMin = _hm(slot && slot.endTime);
+  // 시간이 명시된 경우 그대로 사용 (둘 다 있으면 그대로, 한쪽만 있으면 다른 쪽 fallback)
+  if(startMin == null || endMin == null){
+    let fbStart, fbEnd;
+    if(slotKey === 'morning'){ fbStart = 5*60; fbEnd = 12*60; }
+    else if(slotKey === 'evening'){ fbStart = 18*60; fbEnd = 23*60+59; }
+    else { fbStart = 0; fbEnd = 23*60+59; } // fullday or unknown
+    if(startMin == null) startMin = fbStart;
+    if(endMin == null) endMin = fbEnd;
+  }
+  // 종료 < 시작이면 다음날로 간주 (자정 넘김) — 안전하게 23:59로 클램프
+  if(endMin < startMin) endMin = 23*60+59;
+  return { startMin, endMin };
+}
+
 // 가용성 인덱스 구축
 function _schBuildAvailabilityIndex(){
   // 1. 휴무 by date: Approved 상태만
@@ -4253,15 +4281,17 @@ function _schBuildAvailabilityIndex(){
         if(!s) return;
         // 서브 모드 슬롯은 우리 차량/드라이버 점유 안 함 → 인덱스 제외
         if((s.mode||'dc') === 'sub') return;
+        // ★ 시간 범위 인덱싱: 충돌 검사를 시간 겹침(overlap) 기반으로 하기 위함
+        const _range = _schSlotTimeRange(s, k);
         if(s.driver){
           if(!_schBusyDriverByDate[date]) _schBusyDriverByDate[date] = new Map();
           if(!_schBusyDriverByDate[date].has(s.driver)) _schBusyDriverByDate[date].set(s.driver, []);
-          _schBusyDriverByDate[date].get(s.driver).push({tourId, tourCode, slot:k});
+          _schBusyDriverByDate[date].get(s.driver).push({tourId, tourCode, slot:k, startMin:_range.startMin, endMin:_range.endMin});
         }
         if(s.rego){
           if(!_schBusyRegoByDate[date]) _schBusyRegoByDate[date] = new Map();
           if(!_schBusyRegoByDate[date].has(s.rego)) _schBusyRegoByDate[date].set(s.rego, []);
-          _schBusyRegoByDate[date].get(s.rego).push({tourId, tourCode, slot:k});
+          _schBusyRegoByDate[date].get(s.rego).push({tourId, tourCode, slot:k, startMin:_range.startMin, endMin:_range.endMin});
         }
       });
     });
@@ -4289,7 +4319,8 @@ function _schParseLeaveDate(s){
 
 // 드라이버 가용성: 'available' | 'leave' | 'busy'
 // busy 상태일 때 reason 같이 반환
-function _schDriverStatus(driverName, date, currentTourId){
+// 선택 인자 mySlot, mySlotKey 가 주어지면 시간 겹침 기반으로 판정
+function _schDriverStatus(driverName, date, currentTourId, mySlot, mySlotKey){
   if(!driverName || !date) return { status:'available' };
   // 휴무 우선
   if(_schLeaveByDate && _schLeaveByDate[date] && _schLeaveByDate[date].has(driverName)){
@@ -4297,9 +4328,16 @@ function _schDriverStatus(driverName, date, currentTourId){
   }
   // 다른 일정 배정 (자기 일정 제외)
   if(_schBusyDriverByDate && _schBusyDriverByDate[date] && _schBusyDriverByDate[date].has(driverName)){
-    const conflicts = _schBusyDriverByDate[date].get(driverName).filter(c => c.tourId !== currentTourId);
-    if(conflicts.length){
-      const codes = [...new Set(conflicts.map(c => c.tourCode))].slice(0,2).join(', ');
+    let candidates = _schBusyDriverByDate[date].get(driverName).filter(c => c.tourId !== currentTourId);
+    if(mySlot && mySlotKey){
+      const myRange = _schSlotTimeRange(mySlot, mySlotKey);
+      candidates = candidates.filter(c => {
+        if(c.startMin == null || c.endMin == null) return true; // 시간 없으면 보수적으로 충돌
+        return myRange.startMin < c.endMin && c.startMin < myRange.endMin;
+      });
+    }
+    if(candidates.length){
+      const codes = [...new Set(candidates.map(c => c.tourCode))].slice(0,2).join(', ');
       return { status:'busy', reason: `배정됨: ${codes}` };
     }
   }
@@ -4307,12 +4345,19 @@ function _schDriverStatus(driverName, date, currentTourId){
 }
 
 // 차량 가용성
-function _schRegoStatus(rego, date, currentTourId){
+function _schRegoStatus(rego, date, currentTourId, mySlot, mySlotKey){
   if(!rego || !date) return { status:'available' };
   if(_schBusyRegoByDate && _schBusyRegoByDate[date] && _schBusyRegoByDate[date].has(rego)){
-    const conflicts = _schBusyRegoByDate[date].get(rego).filter(c => c.tourId !== currentTourId);
-    if(conflicts.length){
-      const codes = [...new Set(conflicts.map(c => c.tourCode))].slice(0,2).join(', ');
+    let candidates = _schBusyRegoByDate[date].get(rego).filter(c => c.tourId !== currentTourId);
+    if(mySlot && mySlotKey){
+      const myRange = _schSlotTimeRange(mySlot, mySlotKey);
+      candidates = candidates.filter(c => {
+        if(c.startMin == null || c.endMin == null) return true;
+        return myRange.startMin < c.endMin && c.startMin < myRange.endMin;
+      });
+    }
+    if(candidates.length){
+      const codes = [...new Set(candidates.map(c => c.tourCode))].slice(0,2).join(', ');
       return { status:'busy', reason: `배정됨: ${codes}` };
     }
   }
@@ -5845,9 +5890,9 @@ function _smRebuildDays(){
   // 일자별 가용성 적용 — 정렬: 자사 우선 → 서브, available → busy → leave
   const STATUS_ORDER = { available:0, busy:1, leave:2 };
   const OWNER_ORDER = { dc:0, sub:1 }; // 자사 우선 정렬
-  function buildDriverItemsForDate(date){
+  function buildDriverItemsForDate(date, mySlot, mySlotKey){
     const enriched = baseDriverItems.map(it => {
-      const stt = _schDriverStatus(it.value, date, _schEditTourId);
+      const stt = _schDriverStatus(it.value, date, _schEditTourId, mySlot, mySlotKey);
       // 자사/서브 prefix 배지
       const ownerPrefix = it._isDC ? '🏠 ' : `🏢 `;
       let label = ownerPrefix + it._label;
@@ -5868,9 +5913,9 @@ function _smRebuildDays(){
     });
     return enriched;
   }
-  function buildVehItemsForDate(date){
+  function buildVehItemsForDate(date, mySlot, mySlotKey){
     const enriched = baseVehItems.map(it => {
-      const stt = _schRegoStatus(it.value, date, _schEditTourId);
+      const stt = _schRegoStatus(it.value, date, _schEditTourId, mySlot, mySlotKey);
       const ownerPrefix = it._isDC ? '🏠 ' : '🏢 ';
       let label = ownerPrefix + it._label;
       let sub = it._baseSub;
@@ -5908,15 +5953,14 @@ function _smRebuildDays(){
   });
 
   _schDays.forEach((d, i) => {
-    // 일자별 가용성 인지 옵션
-    const driverItemsDate = buildDriverItemsForDate(d.date);
-    const vehItemsDate = buildVehItemsForDate(d.date);
-
-    // 활성 슬롯마다 드롭다운
+    // 활성 슬롯마다 드롭다운 (시간 정보를 슬롯별로 반영해 가용성 계산)
     SLOT_KEYS.forEach(k => {
       if(d.slots[k] === null) return;
       const cellPrefix = `${i}-${k}`;
       const slotMode = d.slots[k].mode || 'dc';
+      // 슬롯별 가용성 — 해당 슬롯의 시간 정보 기준 (없으면 슬롯 키 fallback)
+      const driverItemsDate = buildDriverItemsForDate(d.date, d.slots[k], k);
+      const vehItemsDate = buildVehItemsForDate(d.date, d.slots[k], k);
 
       if(slotMode === 'dc'){
         // 자사 모드: 차량 + 드라이버
@@ -6970,20 +7014,30 @@ async function saveScheduleData(){
   } catch(e){ console.warn('저장 직전 동기화 오류:', e); }
 
   // ★ 충돌 검사 — 같은 차량/드라이버/가이드가 같은 시간대에 다른 일정에 이미 있는지
+  // 시간 겹침(overlap) 기준: 한쪽 종료시각 ≤ 다른쪽 시작시각이면 충돌 아님
   const conflicts = [];
   try {
     if(!_schBusyDriverByDate || !_schBusyRegoByDate) _schBuildAvailabilityIndex();
+    const _fmtMin = (m) => {
+      const h = Math.floor(m/60), mn = m%60;
+      return String(h).padStart(2,'0')+':'+String(mn).padStart(2,'0');
+    };
     _schDays.forEach(d => {
       ['morning','fullday','evening'].forEach(slotKey => {
         const slot = d.slots && d.slots[slotKey];
         if(!slot) return;
+        const myRange = _schSlotTimeRange(slot, slotKey);
         // 차량 충돌 — 자사 운영 모드일 때만 (서브는 차량명 free-text)
         if(slot.mode !== 'sub' && slot.rego){
           const busy = _schBusyRegoByDate[d.date];
           if(busy && busy.has(slot.rego)){
             const others = busy.get(slot.rego).filter(b => b.tourId !== _schEditTourId);
             others.forEach(o => {
-              conflicts.push(`📅 ${d.date} · 🚐 차량 ${slot.rego} 이미 ${o.tourCode || o.tourId}에 사용 중`);
+              // 시간 겹침 검사: [myStart, myEnd) ∩ [oStart, oEnd) ≠ ∅
+              if(myRange.startMin < o.endMin && o.startMin < myRange.endMin){
+                const tRange = `${_fmtMin(o.startMin)}~${_fmtMin(o.endMin)}`;
+                conflicts.push(`📅 ${d.date} · 🚐 차량 ${slot.rego} 이미 ${o.tourCode || o.tourId}에 사용 중 (${tRange})`);
+              }
             });
           }
         }
@@ -6993,7 +7047,10 @@ async function saveScheduleData(){
           if(busy && busy.has(slot.driver)){
             const others = busy.get(slot.driver).filter(b => b.tourId !== _schEditTourId);
             others.forEach(o => {
-              conflicts.push(`📅 ${d.date} · 👤 드라이버 ${slot.driver} 이미 ${o.tourCode || o.tourId}에 사용 중`);
+              if(myRange.startMin < o.endMin && o.startMin < myRange.endMin){
+                const tRange = `${_fmtMin(o.startMin)}~${_fmtMin(o.endMin)}`;
+                conflicts.push(`📅 ${d.date} · 👤 드라이버 ${slot.driver} 이미 ${o.tourCode || o.tourId}에 사용 중 (${tRange})`);
+              }
             });
           }
         }
