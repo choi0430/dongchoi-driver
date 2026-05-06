@@ -9152,98 +9152,79 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
     // ── 행 1: 헤더 (같은 TourID 가로 병합) ──
     let hdrCells = '';
     {
-      let i = 0;
-      while(i < dates.length){
-        const ds = dates[i];
-        const cellSlots = groups[grp][ds] || {};
-        const slotsHere = ['morning','fullday','evening'].filter(k => cellSlots[k]);
-        if(slotsHere.length === 0){
-          hdrCells += '<div class="sch-cal-cell empty"></div>';
-          i++;
+      const slotKeysH = ['morning','fullday','evening'];
+      const handled = new Set();
+      for(let curDi = 0; curDi < dates.length; curDi++){
+        const cs = groups[grp][dates[curDi]] || {};
+        const tourInfo = {};
+        for(let _si = 0; _si < 3; _si++){
+          const _sk = slotKeysH[_si];
+          if(cs[_sk]){
+            const _t = cs[_sk].tour.TourID;
+            if(!tourInfo[_t]) tourInfo[_t] = {first:_si, last:_si, item:cs[_sk]};
+            else tourInfo[_t].last = _si;
+          }
+        }
+        const allTids = Object.keys(tourInfo);
+        if(allTids.length === 0){
+          hdrCells += `<div class="sch-cal-cell empty" style="grid-column:${curDi+2};"></div>`;
           continue;
         }
-        // 첫 슬롯의 TourID 기준 (한 셀 내 여러 투어가 있어도 첫 것만)
-        const firstSlot = cellSlots[slotsHere[0]];
-        const tid = firstSlot.tour.TourID;
-        const tcode = firstSlot.tour.TourCode || tid;
-        const guide = firstSlot.tour.Guide || '';
-        const seats = firstSlot.tour.Seats || '';
-        const pax = firstSlot.tour.Pax || '';
-        // ★ 인승 표시: "Pax/Seats" 형식 (예: 13/21S). Pax 없으면 Seats만
-        const paxSeats = (pax && seats) ? (pax + '/' + seats) : (seats || pax);
-        const trl = firstSlot.day.trailer ? 'TRAILER' : '';
-        const phone = fixPhone(firstSlot.tour.GuidePhone || '');
-        // 다음 셀로 같은 투어가 이어지는지 확인 (가로 병합)
-        let span = 1;
-        for(let j = i + 1; j < dates.length; j++){
-          const nextSlots = groups[grp][dates[j]] || {};
-          const nextKeys = ['morning','fullday','evening'].filter(k => nextSlots[k]);
-          if(nextKeys.length === 0) break;
-          const nextTid = nextSlots[nextKeys[0]].tour.TourID;
-          if(nextTid === tid) span++;
-          else break;
+        const tids = allTids.filter(t => !handled.has(curDi+':'+t));
+        if(tids.length === 0) continue;
+        tids.sort((a,b) => tourInfo[a].first - tourInfo[b].first);
+        for(const tid of tids){
+          const info = tourInfo[tid];
+          let endDi = curDi;
+          let endSi = info.last;
+          for(let nd = curDi + 1; nd < dates.length; nd++){
+            const ncs = groups[grp][dates[nd]] || {};
+            let foundLast = -1;
+            for(let _si = 0; _si < 3; _si++){
+              const _sk = slotKeysH[_si];
+              if(ncs[_sk]){
+                if(ncs[_sk].tour.TourID === tid) foundLast = _si;
+                else break;
+              }
+            }
+            if(foundLast >= 0){ endDi = nd; endSi = foundLast; handled.add(nd+':'+tid); }
+            else break;
+          }
+          handled.add(curDi+':'+tid);
+          const span = endDi - curDi + 1;
+          let leftPad = info.first;
+          let rightPad = 2 - endSi;
+          const totalSlots = span * 3;
+          const firstSlot = info.item;
+          const tcode = firstSlot.tour.TourCode || tid;
+          const guide = firstSlot.tour.Guide || '';
+          const seats = firstSlot.tour.Seats || '';
+          const pax = firstSlot.tour.Pax || '';
+          const paxSeats = (pax && seats) ? (pax + '/' + seats) : (seats || pax);
+          const trl = firstSlot.day.trailer ? 'TRAILER' : '';
+          const phone = fixPhone(firstSlot.tour.GuidePhone || '');
+          const isFirstCell = (curDi === 0);
+          const isLastCell = (endDi === dates.length - 1);
+          const continueFromPrevWeek = isFirstCell && _schCalMode === 'week' && _hasAdjacentSameTour(grp, tid, prevDayOfFirst);
+          const continueToNextWeek = isLastCell && _schCalMode === 'week' && _hasAdjacentSameTour(grp, tid, nextDayOfLast);
+          if(continueFromPrevWeek) leftPad = 0;
+          if(continueToNextWeek) rightPad = 0;
+          const headerWidth = Math.max(1, totalSlots - leftPad - rightPad);
+          const tourLeftCls = continueFromPrevWeek ? '' : 'tour-left';
+          const tourRightCls = continueToNextWeek ? '' : 'tour-right';
+          const isInvoiced = String(firstSlot.tour.Status||'') === 'invoiced' || String(firstSlot.tour.Status||'') === 'paid';
+          const scenIcon = _schTourScenarioIcon(firstSlot.slot, firstSlot.day && firstSlot.day.trailer);
+          const labelParts = [];
+          if(scenIcon) labelParts.push(scenIcon);
+          if(firstSlot.tour.Agency) labelParts.push(escH(firstSlot.tour.Agency));
+          if(tcode) labelParts.push(escH(tcode));
+          if(paxSeats) labelParts.push(escH(paxSeats));
+          if(trl) labelParts.push(`<span style="color:#dc2626;font-weight:900;">&nbsp;${escH(trl)}&nbsp;</span>`);
+          if(guide) labelParts.push(escH(guide));
+          if(phone) labelParts.push(escH(phone));
+          const headerLabel = labelParts.join(' ');
+          hdrCells += `<div class="sch-cal-hdr-merge-wrap" style="grid-column:${curDi+2} / span ${span};display:grid;grid-template-columns:repeat(${totalSlots}, 1fr);gap:0;">${leftPad > 0 ? `<div style="grid-column:span ${leftPad};"></div>` : ''}<div class="sch-cal-hdr-merge tour-block ${tourLeftCls} ${tourRightCls} ${isInvoiced?'invoiced':''}" data-tour-id="${escH(tid)}" style="grid-column:span ${headerWidth};background:${pickSlotColor(firstSlot.tour)};" onclick="event.stopPropagation();openScheduleModal('${escH(tid)}')">${headerLabel}</div>${rightPad > 0 ? `<div style="grid-column:span ${rightPad};"></div>` : ''}</div>`;
         }
-        // 첫날의 슬롯 패턴 (왼쪽이 어디서 시작하는지)
-        // 첫날 morning이 비활성이면 → 헤더 좌측 1/3 비움
-        // 첫날 morning + fullday 둘 다 비활성이면 → 헤더 좌측 2/3 비움 (PM만 사용)
-        const startSlot = !cellSlots.morning ? (!cellSlots.fullday ? 'evening' : 'fullday') : 'morning';
-        let leftPad = 0;
-        if(startSlot === 'fullday') leftPad = 1; // 1/3 비움
-        if(startSlot === 'evening') leftPad = 2; // 2/3 비움
-
-        // 마지막날의 슬롯 패턴 (우측이 어디서 끝나는지)
-        const lastDay = groups[grp][dates[i + span - 1]] || {};
-        const endSlot = lastDay.evening ? 'evening' : (lastDay.fullday ? 'fullday' : 'morning');
-        let rightPad = 0;
-        if(endSlot === 'fullday') rightPad = 1; // 1/3 비움
-        if(endSlot === 'morning') rightPad = 2; // 2/3 비움
-
-        // ★ 주 경계 연결 검사: 첫 셀이 월요일(dates[0])이고 이전 일요일에 같은 TourID 있으면
-        //   → 좌측 패딩을 헤더 영역으로 확장 (끊김 없이 연결되어 보이도록)
-        const isFirstCellOfWeek = (i === 0);
-        const isLastCellOfWeek = (i + span - 1 === dates.length - 1);
-        const continueFromPrevWeek = isFirstCellOfWeek && _schCalMode === 'week' && _hasAdjacentSameTour(grp, tid, prevDayOfFirst);
-        const continueToNextWeek = isLastCellOfWeek && _schCalMode === 'week' && _hasAdjacentSameTour(grp, tid, nextDayOfLast);
-        // 연결되면 패딩을 0으로 → 헤더가 끝까지 연장
-        if(continueFromPrevWeek) leftPad = 0;
-        if(continueToNextWeek) rightPad = 0;
-
-        // 만약 span === 1 이고 첫날=마지막날이면 한 슬롯만 사용한 경우
-        // span === 1일 때 startSlot ≠ endSlot이 가능 (예: morning + evening 둘 다 사용)
-        const isInvoiced = String(firstSlot.tour.Status||'') === 'invoiced' || String(firstSlot.tour.Status||'') === 'paid';
-        // 시나리오 자동 판별 (첫 활성 슬롯 기준)
-        const scenIcon = _schTourScenarioIcon(firstSlot.slot, firstSlot.day && firstSlot.day.trailer);
-        // 헤더 라벨을 HTML로 — TRAILER만 빨간색 강조 + 앞뒤 공백
-        const labelParts = [];
-        if(scenIcon) labelParts.push(scenIcon);
-        if(firstSlot.tour.Agency) labelParts.push(escH(firstSlot.tour.Agency));
-        if(tcode) labelParts.push(escH(tcode));
-        if(paxSeats) labelParts.push(escH(paxSeats));
-        if(trl) labelParts.push(`<span style="color:#dc2626;font-weight:900;">&nbsp;${escH(trl)}&nbsp;</span>`);
-        if(guide) labelParts.push(escH(guide));
-        if(phone) labelParts.push(escH(phone));
-        const headerLabel = labelParts.join(' ');
-
-        // 헤더 셀 그리드: span개의 컬럼 × 3 슬롯 = (span*3)칸 그리드
-        // 좌측 leftPad칸 비우고, 우측 rightPad칸 비우고, 가운데에만 헤더 텍스트
-        const totalSlots = span * 3;
-        const headerWidth = totalSlots - leftPad - rightPad;
-        // 안전: headerWidth가 0 이하면 1로
-        const safeHeaderWidth = Math.max(1, headerWidth);
-
-        // 좌/우 테두리 클래스 — 주 경계 연결 시 해당 쪽 테두리 제거
-        const tourLeftCls = continueFromPrevWeek ? '' : 'tour-left';
-        const tourRightCls = continueToNextWeek ? '' : 'tour-right';
-
-        hdrCells += `<div class="sch-cal-hdr-merge-wrap" style="grid-column:span ${span};display:grid;grid-template-columns:repeat(${totalSlots}, 1fr);gap:0;">
-          ${leftPad > 0 ? `<div style="grid-column:span ${leftPad};"></div>` : ''}
-          <div class="sch-cal-hdr-merge tour-block ${tourLeftCls} ${tourRightCls} ${isInvoiced?'invoiced':''}" data-tour-id="${escH(tid)}" style="grid-column:span ${safeHeaderWidth};background:${pickSlotColor(firstSlot.tour)};"
-                       onclick="event.stopPropagation();openScheduleModal('${escH(tid)}')">
-            ${headerLabel}
-          </div>
-          ${rightPad > 0 ? `<div style="grid-column:span ${rightPad};"></div>` : ''}
-        </div>`;
-        i += span;
       }
     }
 
