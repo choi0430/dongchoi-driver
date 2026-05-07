@@ -48,13 +48,6 @@
     global[name] = function(){ return wrapper.call(this, original, arguments); };
     return true;
   }
-  // Schedule cache helper - admin.html uses _schCache, fallback to DB.SCH
-  function _getScheduleCache(){
-    if(global._schCache && global._schCache.length) return global._schCache;
-    if(global.DB && global.DB.SCH) return global.DB.SCH;
-    return [];
-  }
-
 
   // ═════════════════════════════════════════════════════════════════════════
   // ADMIN.HTML 통합
@@ -150,7 +143,7 @@
     let current = global._schEditBillingEntity;
     if(tourId !== undefined){
       // 수정 모드 — DB에서 로드
-      const tours = _getScheduleCache();
+      const tours = (global._schCache && global._schCache.length) ? global._schCache : ((global.DB && global.DB.SCH) ? global.DB.SCH : []);
       const tour = tours.find(t => t.TourID === tourId);
       current = tour?.BillingEntity || 'DC';
       global._schEditBillingEntity = current;
@@ -213,7 +206,8 @@
     const observe = () => {
       document.querySelectorAll('[data-tour-id]:not([data-be-rendered])').forEach(row => {
         const tourId = row.dataset.tourId;
-        const tour = _getScheduleCache().find(t => t.TourID === tourId) : null;
+        const _cachePat = (global._schCache && global._schCache.length) ? global._schCache : ((global.DB && global.DB.SCH) ? global.DB.SCH : []);
+        const tour = _cachePat.find(t => t.TourID === tourId) || null;
         if(!tour) return;
         const be = tour.BillingEntity || 'DC';
         if(_isDC(be)){
@@ -277,7 +271,8 @@
         const egOn = document.getElementById('sch-flt-be-eg')?.classList.contains('on');
         document.querySelectorAll('[data-tour-id]').forEach(row => {
           const tourId = row.dataset.tourId;
-          const tour = _getScheduleCache().find(t => t.TourID === tourId) : null;
+          const _cacheP3 = (global._schCache && global._schCache.length) ? global._schCache : ((global.DB && global.DB.SCH) ? global.DB.SCH : []);
+          const tour = _cacheP3.find(t => t.TourID === tourId) || null;
           if(!tour) return;
           const be = tour.BillingEntity || 'DC';
           const isDC = _isDC(be);
