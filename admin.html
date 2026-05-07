@@ -15235,7 +15235,13 @@ function _wageConsistencyCheck() {
 
   const _vehs = DB.V || [];
   const subMap = {};
-  _vehs.forEach(v => { const so = (v.SubOwner||"").trim(); if(so) subMap[(v.Rego||"").trim()] = so; });
+  _vehs.forEach(v => {
+    const so = (v.SubOwner||"").trim();
+    const ow = (v.Owner||"").trim().toUpperCase();
+    // SubOwner 있거나 Owner가 DC가 아니면 자사 차량 아님 (= 외주/EG 등)
+    const isSubOrPartner = so || (ow && ow !== 'DC' && ow !== 'DONG CHOI PTY LTD');
+    if(isSubOrPartner) subMap[(v.Rego||"").trim()] = so || ow;
+  });
 
   const mismatches = [];
   [...weekSet].forEach(mon => {
