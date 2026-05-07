@@ -220,10 +220,13 @@
         if(tcCell && !tcCell.querySelector('.be-badge')){
           const badge = document.createElement('span');
           badge.className = 'be-badge';
-          badge.style.cssText = `background:${cfg.bg};color:${cfg.color};`;
-          badge.textContent = be === 'EG TRAVEL PTY LTD' ? '🤝 EG' : be.split(' ')[0];
+          badge.style.cssText = `background:${cfg.bg};color:${cfg.color};border:1.5px solid ${cfg.border};padding:3px 8px;font-weight:800;`;
+          badge.textContent = be === 'EG TRAVEL PTY LTD' ? '🤝 EG 발행 (자사 청구 X)' : be.split(' ')[0];
           tcCell.appendChild(badge);
         }
+        // Also tint the entire row with EG color stripe (left border + bg)
+        row.style.borderLeft = '4px solid ' + cfg.border;
+        row.style.background = cfg.bg + '40';
         row.dataset.beRendered = '1';
       });
     };
