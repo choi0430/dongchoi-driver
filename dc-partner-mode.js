@@ -51,7 +51,7 @@
   // Schedule cache helper - admin.html uses _schCache, fallback to DB.SCH
   function _getScheduleCache(){
     if(global._schCache && global._schCache.length) return global._schCache;
-    if(_getScheduleCache().length) return _getScheduleCache();
+    if(global.DB && global.DB.SCH) return global.DB.SCH;
     return [];
   }
 
