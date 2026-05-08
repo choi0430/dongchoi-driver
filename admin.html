@@ -16759,7 +16759,38 @@ async function saveBalTxn(){
       if(idx!==null) Object.assign(_balSubTxns[idx], row);
       else { row._rowIndex = json.rowIndex; _balSubTxns.push(row); }
       toast('✅ 저장 완료','ok');
-    } catch(e){ toast('저장 실패: '+e.message,'err'); return; }
+      // ★ Sub_Invoices.Status 동기화 (Sub-tab/Balance-tab 통일)
+      try {
+        if(row.InvoiceNo && row.CR > 0){
+          const inv = (window._invHistoryCache||[]).find(it =>
+            String(it.InvNumber||it.InvoiceNo||'').trim() === row.InvoiceNo &&
+            String(it.invoiceType||'').toUpperCase() === 'SUB'
+          );
+          if(inv && String(inv.Status||'').toLowerCase() !== 'paid'){
+            const total = (Array.isArray(inv.Items) && inv.Items.length)
+              ? inv.Items.reduce((s,it) => s + (+it.total||0), 0)
+              : (+inv.GrandTotal||0);
+            const txnPaid = (window._balSubTxns||[]).filter(t =>
+              String(t.InvoiceNo||'').trim() === row.InvoiceNo && (+t.CR||0) > 0
+            ).reduce((s,t) => s + (+t.CR||0), 0);
+            const totalPaid = txnPaid + (+row.CR||0);
+            if(totalPaid >= total - 0.01){
+              await fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                headers: {'Content-Type': 'text/plain;charset=utf-8'},
+                body: JSON.stringify({
+                  action: 'update_invoice_status',
+                  invNumber: row.InvoiceNo,
+                  status: 'paid',
+                  field: 'Status',
+                  _user: (typeof getAdminUser==='function' ? getAdminUser() : '')
+                })
+              });
+            }
+          }
+        }
+      } catch(e){ console.warn('sync invoice status failed:', e); }
+        } catch(e){ toast('저장 실패: '+e.message,'err'); return; }
   }
 
   closeBalTxnModal();
