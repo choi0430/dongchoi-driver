@@ -15269,8 +15269,13 @@ function _wageConsistencyCheck() {
   });
 
   if (mismatches.length > 0) {
-    console.warn('[정합성 경고] 급여 탭과 잔액 탭 수당 집계 불일치:', mismatches);
-    console.warn('→ 개발자용 진단: 잔액 탭 → 주간요약 → 하단 "🔧 급여 데이터 진단" 버튼');
+    const totalDiff = mismatches.reduce((s, m) => s + (m.diff||0), 0);
+    if (Math.abs(totalDiff) < 0.5) {
+      console.log('[정합성 OK] 총합 일치 — 개별 주별 차이는 묶음 입금에 의한 정상 (' + mismatches.length + '건)');
+    } else {
+      console.warn('[정합성 경고] 급여 탭과 잔액 탭 수당 집계 불일치 (총합 차이 $' + Math.round(totalDiff) + '):', mismatches);
+      console.warn('→ 개발자용 진단: 잔액 탭 → 주간요약 → 하단 "📍 급여 데이터 진단" 버튼');
+    }
   } else {
     console.log('[정합성] 급여↔잔액 탭 OK');
   }
