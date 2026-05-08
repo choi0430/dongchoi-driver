@@ -78,6 +78,7 @@
     _hookRenderScheduleList();
     _injectScheduleFilters();
     _detectPartnerMode();
+    _hookBalDetailEGGroup();
   }
 
   // ─── 일정 모달 — BillingEntity 탭 주입 ─────────────────────────────────
@@ -443,6 +444,73 @@
   }
 
   // 외부 노출 (디버깅용)
+  // ─── EG-billed grouping in bal-detail modal ───
+  function _hookBalDetailEGGroup(){
+    if(!isAdminPage) return;
+    setInterval(() => {
+      const modal = document.getElementById('bal-detail-modal');
+      if(!modal) return;
+      const visible = getComputedStyle(modal).display !== 'none';
+      if(!visible){ modal.dataset.egProcessed = ''; return; }
+      if(modal.dataset.egProcessed === '2') return;
+      modal.dataset.egProcessed = '2';
+      // Build tour code -> BillingEntity map
+      const cache = _getScheduleCache();
+      const tourBE = {};
+      cache.forEach(t => {
+        const tc = String(t.TourCode||'').trim();
+        if(tc) tourBE[tc] = String(t.BillingEntity||'').trim().toUpperCase();
+      });
+      // Find tour code rows by text content matching
+      let egTotal = 0;
+      const allEls = modal.querySelectorAll('div, tr, li');
+      allEls.forEach(el => {
+        if(el.dataset.egMarked) return;
+        const text = (el.textContent||'').trim();
+        if(text.length > 500 || text.length < 5) return;
+        for(const tc of Object.keys(tourBE)){
+          if(text.indexOf(tc) >= 0 && tourBE[tc] === 'EG TRAVEL PTY LTD'){
+            // Mark this row
+            el.style.opacity = '0.55';
+            el.style.background = 'rgba(237,233,254,0.4)';
+            el.style.borderLeft = '3px solid #7c3aed';
+            // Try to find amount in text
+            const m = text.match(/\$([\d,]+(?:\.\d+)?)/);
+            if(m) egTotal += parseFloat(m[1].replace(/,/g,''));
+            // Add badge if not already there
+            if(!el.querySelector('.eg-billed-badge')){
+              const badge = document.createElement('span');
+              badge.className = 'eg-billed-badge';
+              badge.style.cssText = 'background:#ede9fe;color:#7c3aed;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:800;margin-left:6px;display:inline-block;';
+              badge.textContent = '🤝 EG 직접 (자사 지급 제외)';
+              el.appendChild(badge);
+            }
+            el.dataset.egMarked = '1';
+            break;
+          }
+        }
+      });
+      // Show subtotal at top if EG amount > 0
+      if(egTotal > 0 && !modal.querySelector('.eg-subtotal-banner')){
+        const banner = document.createElement('div');
+        banner.className = 'eg-subtotal-banner';
+        banner.style.cssText = 'background:#ede9fe;color:#5b21b6;padding:8px 12px;border-radius:6px;margin:8px 14px;font-size:12px;font-weight:700;border:1px solid #c4b5fd;';
+        banner.innerHTML = '🤝 EG 자체 처리 명세 합계: 
+    version: '1.0.0',
+    PARTNER_COMPANIES: PARTNER_COMPANIES,
+    refreshTab: () => isAdminPage && _refreshBeTab(),
+    getCurrentBE: () => global._schEditBillingEntity,
+    setBE: (id) => { global._schEditBillingEntity = id; _refreshBeTab(); }
+  };
+
+})(window);
+ + egTotal.toLocaleString('en-AU') + ' (자사 지급 제외 — 참고용)';
+        const firstChild = modal.querySelector('.bal-detail-content, [class*="detail"]') || modal.firstElementChild;
+        if(firstChild) firstChild.insertBefore(banner, firstChild.firstChild);
+      }
+    }, 800);
+  }
+
   global.DCPartnerMode = {
     version: '1.0.0',
     PARTNER_COMPANIES: PARTNER_COMPANIES,
