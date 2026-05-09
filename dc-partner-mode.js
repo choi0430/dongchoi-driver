@@ -17,10 +17,10 @@
   'use strict';
 
   // ─── 상수 ─────────────────────────────────────────────────────────────────
-  const PARTNER_COMPANIES = [
-    { id: 'DC',                  label: '🏢 DC (자사)',         color: '#1e40af', bg: '#dbeafe', border: '#3b82f6' },
-    { id: 'EG TRAVEL PTY LTD',     label: '🤝 EG TRAVEL (파트너)',  color: '#6d28d9', bg: '#ede9fe', border: '#7c3aed' }
-    // 신규 파트너 추가 시 이 배열에만 행 추가
+  let PARTNER_COMPANIES = [
+    { id: 'DC',                       label: '🇰🇷 DC (자사)',          color: '#1e40af', bg: '#dbeafe', border: '#3b82f6' },
+    { id: 'EG TRAVEL PTY LTD',        label: '🚌 EG TRAVEL (파트너)',  color: '#6d28d9', bg: '#ede9fe', border: '#7c3aed' }
+    // 신규 파트너 추가 시 이 배열에만 행 추가 (M_PriceSub에서 자동 하이드레이션됨)
   ];
 
   const isAdminPage  = !!document.getElementById('sch-modal')
@@ -98,7 +98,9 @@
     if(!modal) return;
     // 신규 모달 — stale 값 방지
     if(tourId === undefined){ global._schEditBillingEntity = 'DC'; }
-    if(modal.querySelector('.be-tab-row')) {
+    // 동적 하이드레이션: M_PriceSub 에서 서브 회사 추가
+    _hydratePartnersFromCache();
+    if(modal.querySelector('.be-select-wrap')) {
       // 이미 있음 — 값만 갱신
       _refreshBeTab(tourId);
       return;
@@ -110,72 +112,104 @@
     if(!insertBefore) return;
 
     const wrap = document.createElement('div');
+    wrap.className = 'be-select-wrap';
     wrap.style.cssText = 'margin-bottom:12px;';
     wrap.innerHTML = `
       <div style="font-size:11px;font-weight:700;color:var(--t3,#6b7280);margin-bottom:6px;">
         💰 인보이스 발행사 (Billing Entity)
       </div>
-      <div class="be-tab-row">
+      <select class="be-select" style="width:100%;padding:10px 12px;border-radius:8px;border:2px solid #e5e7eb;background:#f9fafb;font-weight:700;font-size:13px;cursor:pointer;transition:all .15s;">
         ${PARTNER_COMPANIES.map(p => `
-          <button type="button" class="be-tab" data-be="${p.id}">${p.label}</button>
+          <option value="${p.id}">${p.label}</option>
         `).join('')}
-      </div>
-      <div class="be-info" id="sm-be-info"></div>
+      </select>
+      <div class="be-info" id="sm-be-info" style="margin-top:6px;font-size:10px;line-height:1.5;"></div>
     `;
     insertBefore.parentElement.insertBefore(wrap, insertBefore);
 
-    // 클릭 핸들러
-    wrap.querySelectorAll('.be-tab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if(btn.disabled) return;
-        global._schEditBillingEntity = btn.dataset.be;
-        _refreshBeTab();
-      });
+    // 변경 핸들러
+    const sel = wrap.querySelector('.be-select');
+    sel.addEventListener('change', () => {
+      global._schEditBillingEntity = sel.value;
+      _refreshBeTab();
     });
 
     _refreshBeTab(tourId);
+  }
+  
+  // M_PriceSub 캐시에서 서브 회사를 PARTNER_COMPANIES 에 추가 (중복 제외)
+  function _hydratePartnersFromCache(){
+    try {
+      const sources = [
+        global._priceSubCache,
+        global._subCompanyCache,
+        global._mPriceSubCache,
+        (global.DB && (global.DB.PRICE_SUB || global.DB.M_PriceSub))
+      ].filter(Array.isArray);
+      if(!sources.length) return;
+      const known = new Set(PARTNER_COMPANIES.map(p => String(p.id||'').trim().toUpperCase()));
+      const seen = new Set();
+      sources.forEach(arr => arr.forEach(r => {
+        const company = String(r.Company || r.SubCompany || r.Sub || r.PartnerCompany || '').trim();
+        if(!company) return;
+        const key = company.toUpperCase();
+        if(seen.has(key)) return;
+        seen.add(key);
+        if(known.has(key)) return;
+        PARTNER_COMPANIES.push({
+          id: company,
+          label: '🚚 ' + company,
+          color: '#475569',
+          bg: '#f1f5f9',
+          border: '#64748b'
+        });
+        known.add(key);
+      }));
+    } catch(e){ console.warn('[partner] hydrate failed', e); }
   }
 
   function _refreshBeTab(tourId){
     const modal = document.getElementById('sch-modal');
     if(!modal) return;
-
     // 디폴트 결정
     let current = global._schEditBillingEntity;
     if(tourId !== undefined){
       // 수정 모드 — DB에서 로드
-      const tours = (global._schCache && global._schCache.length) ? global._schCache : ((global.DB && global.DB.SCH) ? global.DB.SCH : []);
-      const tour = tours.find(t => t.TourID === tourId);
-      current = tour?.BillingEntity || 'DC';
-      global._schEditBillingEntity = current;
+      const cache = (global._schCache && global._schCache.length) ? global._schCache : ((global.DB && global.DB.SCH) ? global.DB.SCH : []);
+      const sch = cache.find(s => String(s.TourID||'').trim() === String(tourId||'').trim()) ||
+                  cache.find(s => String(s.TourCode||'').trim() === String(tourId||'').trim());
+      if(sch && sch.BillingEntity){ current = String(sch.BillingEntity).trim(); global._schEditBillingEntity = current; }
+      else if(!current){ current = 'DC'; global._schEditBillingEntity = current; }
     } else if(!current){
       current = 'DC';
       global._schEditBillingEntity = current;
     }
-
-    // 탭 활성화 표시
-    modal.querySelectorAll('.be-tab').forEach(btn => {
-      const cfg = _getCfg(btn.dataset.be);
-      const on = btn.dataset.be === current;
-      btn.classList.toggle('on', on);
-      btn.style.cssText = `flex:1;padding:10px;border-radius:8px;
-        border:2px solid ${on?cfg.border:'#e5e7eb'};
-        background:${on?cfg.bg:'#f9fafb'};
-        color:${on?cfg.color:'#6b7280'};
-        font-weight:700;font-size:13px;cursor:pointer;
-        opacity:${on?1:.5};transition:all .15s;`;
-    });
-
-    // 안내 문구
-    const info = document.getElementById('sm-be-info');
-    if(info){
+    // select 갱신
+    const sel = modal.querySelector('.be-select');
+    if(sel){
+      // 옵션에 current 값이 없으면 추가 (legacy/unknown BillingEntity 대응)
+      const has = Array.from(sel.options).some(o => o.value === current);
+      if(!has && current){
+        const opt = document.createElement('option');
+        opt.value = current;
+        opt.textContent = '❔ ' + current;
+        sel.appendChild(opt);
+      }
+      sel.value = current || 'DC';
       const cfg = _getCfg(current);
+      sel.style.borderColor = cfg.border;
+      sel.style.background = cfg.bg;
+      sel.style.color = cfg.color;
+    }
+    // 안내 문구
+    const info = modal.querySelector('#sm-be-info');
+    if(info){
       if(_isDC(current)){
-        info.innerHTML = '🏢 본인이 호주로/플러스에 직접 청구. 슬롯 mode가 외주(sub)면 EG에 외주비 발생.';
-        info.style.color = cfg.color;
+        info.style.color = '#3b82f6';
+        info.textContent = '✓ DC가 클라이언트에 인보이스를 발행합니다 (자사 운영)';
       } else {
-        info.innerHTML = `🤝 ${current}가 호주로/플러스에 직접 청구. 본인 시스템엔 ACCRED 리포트만. DC 차량/기사 사용분만 ${current}에 cross-charge.`;
-        info.style.color = cfg.color;
+        info.style.color = '#7c3aed';
+        info.textContent = '⚠ ' + current + '가 클라이언트에 인보이스를 발행합니다 (DC는 서브 계약자)';
       }
     }
   }
