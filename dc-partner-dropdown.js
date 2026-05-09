@@ -1,8 +1,7 @@
 /* ============================================================================
- * DC Fleet — Partner Dropdown v3 (additive, standalone)
- * Adds a BE dropdown above TourCode in schedule edit modal.
- * Reads from window._subCompanies (admin.html main cache).
- * Has own fetch hook to ensure BillingEntity persists on save_schedule.
+ * DC Fleet — Partner Dropdown v5 (additive, standalone)
+ * Re-hydrates options on every modal open from window._subCompanies.
+ * Has own fetch hook + window.__beDdDebug() helper.
  * ============================================================================ */
 (function(){
   'use strict';
@@ -30,52 +29,55 @@
     document.head.appendChild(s);
   }
 
-  function addCompanyToList(out, known, name) {
-    if (name == null) return;
-    var s = String(name).trim();
-    if (!s) return;
-    var key = s.toUpperCase();
-    if (known.has(key)) return;
-    known.add(key);
-    out.push({
-      id: s,
-      label: '\u{1F69A} ' + s,
-      color: '#475569', bg: '#f1f5f9', border: '#64748b'
-    });
+  function tryName(item) {
+    if (item == null) return "";
+    if (typeof item === "string" || typeof item === "number") return String(item);
+    if (typeof item === "object") {
+      return item.SubName || item.subName || item.Sub || item.sub ||
+             item.Company || item.company || item.SubCompany || item.subCompany ||
+             item.PartnerCompany || item.partnerCompany || item.Name || item.name || "";
+    }
+    return "";
   }
 
   function getKnownPartners() {
-    var out = PARTNER_DEFAULTS.slice(); var __subCount = (window._subCompanies && window._subCompanies.length) || 0; if(__subCount && !window.__beDdSubLogged){ window.__beDdSubLogged = true; console.log("[partner-dropdown] _subCompanies has", __subCount, "entries", window._subCompanies); }
+    var out = PARTNER_DEFAULTS.slice();
     var known = new Set(out.map(function(p){ return String(p.id||"").toUpperCase(); }));
-
-    // Source A: window._subCompanies (admin.html main cache)
-    if (Array.isArray(window._subCompanies)) {
-      window._subCompanies.forEach(function(item) {
-        if (typeof item === "string" || typeof item === "number") addCompanyToList(out, known, item);
-        else if (item && typeof item === "object") {
-          addCompanyToList(out, known, item.SubName || item.Company || item.SubCompany || item.Sub || item.PartnerCompany || item.name || item.Name);
-        }
-      });
-    }
-    // Source B: backups
-    ["_priceSubCache", "_subCompanyCache", "_priceSub", "_partners", "_partnerCompanies"].forEach(function(varName) {
-      var v = window[varName];
-      if (Array.isArray(v)) {
-        v.forEach(function(item) {
-          if (typeof item === "string" || typeof item === "number") addCompanyToList(out, known, item);
-          else if (item && typeof item === "object") {
-            addCompanyToList(out, known, item.SubName || item.Company || item.SubCompany || item.Sub || item.PartnerCompany || item.name || item.Name);
-          }
-        });
-      }
+    var sources = [];
+    [
+      "_subCompanies", "_priceSubCache", "_subCompanyCache", "_priceSub",
+      "_partners", "_partnerCompanies", "_subList", "_subs"
+    ].forEach(function(name){
+      var v = window[name];
+      if (Array.isArray(v) && v.length) sources.push({name: name, arr: v});
     });
-    // Source C: DB.PRICE_SUB
-    if (window.DB && Array.isArray(window.DB.PRICE_SUB)) {
-      window.DB.PRICE_SUB.forEach(function(item) {
-        if (item && typeof item === "object") addCompanyToList(out, known, item.Company || item.SubCompany || item.Sub);
-      });
+    if (window.DB && Array.isArray(window.DB.PRICE_SUB) && window.DB.PRICE_SUB.length) {
+      sources.push({name: "DB.PRICE_SUB", arr: window.DB.PRICE_SUB});
     }
-    return out;
+
+    sources.forEach(function(src){
+      src.arr.forEach(function(item){
+        var name = tryName(item);
+        if (!name) return;
+        var key = String(name).trim().toUpperCase();
+        if (!key || known.has(key)) return;
+        known.add(key);
+        out.push({
+          id: String(name).trim(),
+          label: '\u{1F69A} ' + String(name).trim(),
+          color: '#475569', bg: '#f1f5f9', border: '#64748b'
+        });
+      });
+    });
+    return { partners: out, sources: sources.map(function(s){return {name: s.name, count: s.arr.length};}) };
+  }
+
+  function getCurrentTourId() {
+    if (window._schEditTourId) return String(window._schEditTourId);
+    if (window.currentTourId) return String(window.currentTourId);
+    var ti = document.getElementById("sm-tourcode");
+    if (ti && ti.value) return String(ti.value).trim();
+    return "";
   }
 
   function loadSchedule(tourId) {
@@ -97,6 +99,37 @@
     return !be || String(be).toUpperCase() === "DC" || String(be).toUpperCase() === "DONGCHOI";
   }
 
+  function rebuildSelectOptions(select, partners, currentValue) {
+    while (select.firstChild) select.removeChild(select.firstChild);
+    partners.forEach(function(p){
+      var opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.label;
+      select.appendChild(opt);
+    });
+    if (currentValue && !partners.find(function(p){ return p.id === currentValue; })) {
+      var opt = document.createElement("option");
+      opt.value = currentValue;
+      opt.textContent = "\u2754 " + currentValue;
+      select.appendChild(opt);
+    }
+    select.value = currentValue || "DC";
+  }
+
+  function applySelectStyle(select, info, partners) {
+    var cfg = getCfgFor(select.value, partners);
+    select.style.borderColor = cfg.border;
+    select.style.background = cfg.bg;
+    select.style.color = cfg.color;
+    if (isDC(select.value)) {
+      info.style.color = "#3b82f6";
+      info.textContent = "\u2713 DC가 클라이언트에 인보이스를 발행합니다 (자사 운영)";
+    } else {
+      info.style.color = "#7c3aed";
+      info.textContent = "\u26A0 " + select.value + "가 클라이언트에 인보이스를 발행합니다 (DC는 서브 계약자)";
+    }
+  }
+
   function buildDropdown() {
     var modal = document.getElementById("sch-modal");
     if (!modal) return false;
@@ -105,8 +138,6 @@
     if (!tcInput) return false;
     var target = tcInput.parentElement;
     if (!target) return false;
-
-    var partners = getKnownPartners();
 
     var wrap = document.createElement("div");
     wrap.className = "be-dropdown-wrap";
@@ -117,12 +148,6 @@
 
     var select = document.createElement("select");
     select.className = "be-dd-select";
-    partners.forEach(function(p){
-      var opt = document.createElement("option");
-      opt.value = p.id;
-      opt.textContent = p.label;
-      select.appendChild(opt);
-    });
     wrap.appendChild(select);
 
     var info = document.createElement("div");
@@ -131,39 +156,12 @@
 
     target.parentElement.insertBefore(wrap, target);
 
-    var tourId = window._schEditTourId || window.currentTourId || (function(){ var ti = document.getElementById("sm-tourcode"); return ti ? String(ti.value||"").trim() : ""; })() || "";
-    var sch = loadSchedule(tourId);
-    var current = (sch && sch.BillingEntity) ? String(sch.BillingEntity).trim() :
-                  (window._schEditBillingEntity || "DC");
-
-    if (current && !partners.find(function(p){ return p.id === current; })) {
-      var opt = document.createElement("option");
-      opt.value = current;
-      opt.textContent = "\u2754 " + current;
-      select.appendChild(opt);
-    }
-
-    select.value = current;
-    window._schEditBillingEntity = current;
-
-    function updateStyle() {
-      var cfg = getCfgFor(select.value, partners);
-      select.style.borderColor = cfg.border;
-      select.style.background = cfg.bg;
-      select.style.color = cfg.color;
-      if (isDC(select.value)) {
-        info.style.color = "#3b82f6";
-        info.textContent = "\u2713 DC가 클라이언트에 인보이스를 발행합니다 (자사 운영)";
-      } else {
-        info.style.color = "#7c3aed";
-        info.textContent = "\u26A0 " + select.value + "가 클라이언트에 인보이스를 발행합니다 (DC는 서브 계약자)";
-      }
-    }
-    updateStyle();
+    refreshDropdown();
 
     select.addEventListener("change", function(){
       window._schEditBillingEntity = select.value;
-      updateStyle();
+      var p = getKnownPartners();
+      applySelectStyle(select, info, p.partners);
       console.log("[partner-dropdown] BE selected:", select.value);
     });
 
@@ -174,24 +172,23 @@
     var modal = document.getElementById("sch-modal");
     if (!modal) return;
     var select = modal.querySelector(".be-dd-select");
+    var info = modal.querySelector(".be-dd-info");
     if (!select) return;
-    var tourId = window._schEditTourId || window.currentTourId || (function(){ var ti = document.getElementById("sm-tourcode"); return ti ? String(ti.value||"").trim() : ""; })() || "";
+
+    var tourId = getCurrentTourId();
     var sch = loadSchedule(tourId);
     var current = (sch && sch.BillingEntity) ? String(sch.BillingEntity).trim() :
                   (window._schEditBillingEntity || "DC");
-    var opts = Array.prototype.map.call(select.options, function(o){ return o.value; });
-    if (current && opts.indexOf(current) < 0) {
-      var opt = document.createElement("option");
-      opt.value = current;
-      opt.textContent = "\u2754 " + current;
-      select.appendChild(opt);
-    }
-    select.value = current;
+
+    var p = getKnownPartners();
+    rebuildSelectOptions(select, p.partners, current);
     window._schEditBillingEntity = current;
-    select.dispatchEvent(new Event("change"));
+    if (info) applySelectStyle(select, info, p.partners);
+
+    console.log("[partner-dropdown] refresh: tourId=" + tourId + ", BE=" + current + ", options=" + select.options.length + ", sources=" + JSON.stringify(p.sources));
   }
 
-  // Defensive own fetch hook — ensures BillingEntity is in save_schedule body
+  // Defensive own fetch hook
   function injectFetchHook() {
     if (window.__beDdFetchHooked) return;
     window.__beDdFetchHooked = true;
@@ -204,18 +201,19 @@
           var body = JSON.parse(options.body);
           if (body && body.action === "save_schedule" && body.data && typeof body.data === "object") {
             var be = window._schEditBillingEntity;
-            if (be && be !== body.data.BillingEntity) {
+            if (be) {
               body.data.BillingEntity = be;
               injectedBE = be;
               injectedTour = body.data.TourID || body.data.TourCode;
               options = Object.assign({}, options, { body: JSON.stringify(body) });
-              console.log("[partner-dropdown] injected BE=" + be + " into save_schedule");
+              console.log("[partner-dropdown] injected BE=" + be + " into save_schedule (tour=" + injectedTour + ")");
+            } else {
+              console.log("[partner-dropdown] save_schedule but _schEditBillingEntity is empty");
             }
           }
         }
       } catch(e){ /* not JSON */ }
       var p = origFetch(url, options);
-      // After save success, update local cache so re-open shows new value
       if (injectedBE && injectedTour) {
         p.then(function(res){
           var clone = res.clone();
@@ -226,7 +224,7 @@
                   return String(s.TourID||"").trim() === String(injectedTour).trim() ||
                          String(s.TourCode||"").trim() === String(injectedTour).trim();
                 });
-                if (sch) { sch.BillingEntity = injectedBE; console.log("[partner-dropdown] cache updated for " + injectedTour); }
+                if (sch) sch.BillingEntity = injectedBE;
               }
               if (window.DB && Array.isArray(window.DB.SCH)) {
                 var sch2 = window.DB.SCH.find(function(s){
@@ -235,6 +233,7 @@
                 });
                 if (sch2) sch2.BillingEntity = injectedBE;
               }
+              console.log("[partner-dropdown] cache updated for " + injectedTour);
             }
           }).catch(function(){});
         }).catch(function(){});
@@ -252,16 +251,39 @@
     if (!visible) { modal.dataset.beDdInit = ""; return; }
     if (!modal.querySelector(".be-dropdown-wrap")) {
       var ok = buildDropdown();
-      if (ok) modal.dataset.beDdInit = String(window._schEditTourId || "new");
+      if (ok) modal.dataset.beDdInit = String(getCurrentTourId() || "new");
     } else {
+      // Always refresh on visible (re-evaluates partners list each time)
       var lastId = modal.dataset.beDdInit || "";
-      var curId = String(window._schEditTourId || "new");
-      if (lastId !== curId) {
+      var curId = String(getCurrentTourId() || "new");
+      var select = modal.querySelector(".be-dd-select");
+      var p = getKnownPartners();
+      var optsCount = select ? select.options.length : 0;
+      // Refresh if tour changed OR options count is less than expected
+      if (lastId !== curId || optsCount < p.partners.length) {
         modal.dataset.beDdInit = curId;
         refreshDropdown();
       }
     }
   }
+
+  // Diagnostic helper
+  window.__beDdDebug = function(){
+    var p = getKnownPartners();
+    return {
+      version: "v5",
+      hookInstalled: !!window.__beDdFetchHooked,
+      currentBE: window._schEditBillingEntity,
+      tourId: getCurrentTourId(),
+      partners: p.partners.map(function(x){return x.id;}),
+      partnerCount: p.partners.length,
+      sources: p.sources,
+      _subCompanies_sample: window._subCompanies && window._subCompanies[0],
+      _subCompanies_length: (window._subCompanies||[]).length,
+      _schCache_length: (window._schCache||[]).length,
+      DB_SCH_length: (window.DB && window.DB.SCH ? window.DB.SCH.length : null)
+    };
+  };
 
   function init() {
     injectStyle();
@@ -270,7 +292,7 @@
     setInterval(checkAndBuild, 600);
     var obs = new MutationObserver(function(){ checkAndBuild(); });
     obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class"] });
-    console.log("[partner-dropdown] v4 initialized");
+    console.log("[partner-dropdown] v5 initialized — call window.__beDdDebug() for diagnostics");
   }
 
   if (document.readyState === "loading") {
