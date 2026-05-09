@@ -45,7 +45,7 @@
   }
 
   function getKnownPartners() {
-    var out = PARTNER_DEFAULTS.slice();
+    var out = PARTNER_DEFAULTS.slice(); var __subCount = (window._subCompanies && window._subCompanies.length) || 0; if(__subCount && !window.__beDdSubLogged){ window.__beDdSubLogged = true; console.log("[partner-dropdown] _subCompanies has", __subCount, "entries", window._subCompanies); }
     var known = new Set(out.map(function(p){ return String(p.id||"").toUpperCase(); }));
 
     // Source A: window._subCompanies (admin.html main cache)
@@ -53,7 +53,7 @@
       window._subCompanies.forEach(function(item) {
         if (typeof item === "string" || typeof item === "number") addCompanyToList(out, known, item);
         else if (item && typeof item === "object") {
-          addCompanyToList(out, known, item.Company || item.SubCompany || item.Sub || item.PartnerCompany || item.name || item.Name);
+          addCompanyToList(out, known, item.SubName || item.Company || item.SubCompany || item.Sub || item.PartnerCompany || item.name || item.Name);
         }
       });
     }
@@ -64,7 +64,7 @@
         v.forEach(function(item) {
           if (typeof item === "string" || typeof item === "number") addCompanyToList(out, known, item);
           else if (item && typeof item === "object") {
-            addCompanyToList(out, known, item.Company || item.SubCompany || item.Sub || item.PartnerCompany || item.name || item.Name);
+            addCompanyToList(out, known, item.SubName || item.Company || item.SubCompany || item.Sub || item.PartnerCompany || item.name || item.Name);
           }
         });
       }
@@ -131,7 +131,7 @@
 
     target.parentElement.insertBefore(wrap, target);
 
-    var tourId = window._schEditTourId || "";
+    var tourId = window._schEditTourId || window.currentTourId || (function(){ var ti = document.getElementById("sm-tourcode"); return ti ? String(ti.value||"").trim() : ""; })() || "";
     var sch = loadSchedule(tourId);
     var current = (sch && sch.BillingEntity) ? String(sch.BillingEntity).trim() :
                   (window._schEditBillingEntity || "DC");
@@ -175,7 +175,7 @@
     if (!modal) return;
     var select = modal.querySelector(".be-dd-select");
     if (!select) return;
-    var tourId = window._schEditTourId || "";
+    var tourId = window._schEditTourId || window.currentTourId || (function(){ var ti = document.getElementById("sm-tourcode"); return ti ? String(ti.value||"").trim() : ""; })() || "";
     var sch = loadSchedule(tourId);
     var current = (sch && sch.BillingEntity) ? String(sch.BillingEntity).trim() :
                   (window._schEditBillingEntity || "DC");
@@ -270,7 +270,7 @@
     setInterval(checkAndBuild, 600);
     var obs = new MutationObserver(function(){ checkAndBuild(); });
     obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class"] });
-    console.log("[partner-dropdown] v3 initialized");
+    console.log("[partner-dropdown] v4 initialized");
   }
 
   if (document.readyState === "loading") {
