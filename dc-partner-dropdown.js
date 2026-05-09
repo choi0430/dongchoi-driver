@@ -1,7 +1,8 @@
 /* ============================================================================
- * DC Fleet — Partner Dropdown (additive, standalone)
+ * DC Fleet — Partner Dropdown v3 (additive, standalone)
  * Adds a BE dropdown above TourCode in schedule edit modal.
- * Does NOT modify dc-partner-mode.js — coexists with it.
+ * Reads from window._subCompanies (admin.html main cache).
+ * Has own fetch hook to ensure BillingEntity persists on save_schedule.
  * ============================================================================ */
 (function(){
   'use strict';
@@ -29,27 +30,51 @@
     document.head.appendChild(s);
   }
 
+  function addCompanyToList(out, known, name) {
+    if (name == null) return;
+    var s = String(name).trim();
+    if (!s) return;
+    var key = s.toUpperCase();
+    if (known.has(key)) return;
+    known.add(key);
+    out.push({
+      id: s,
+      label: '\u{1F69A} ' + s,
+      color: '#475569', bg: '#f1f5f9', border: '#64748b'
+    });
+  }
+
   function getKnownPartners() {
     var out = PARTNER_DEFAULTS.slice();
     var known = new Set(out.map(function(p){ return String(p.id||"").toUpperCase(); }));
-    var sources = [
-      window._priceSubCache, window._subCompanyCache, window._mPriceSubCache,
-      (window.DB && (window.DB.PRICE_SUB || window.DB.M_PriceSub))
-    ].filter(Array.isArray);
-    sources.forEach(function(arr) {
-      arr.forEach(function(r) {
-        var company = String(r.Company || r.SubCompany || r.Sub || r.PartnerCompany || "").trim();
-        if (!company) return;
-        var key = company.toUpperCase();
-        if (known.has(key)) return;
-        known.add(key);
-        out.push({
-          id: company,
-          label: '\u{1F69A} ' + company,
-          color: '#475569', bg: '#f1f5f9', border: '#64748b'
-        });
+
+    // Source A: window._subCompanies (admin.html main cache)
+    if (Array.isArray(window._subCompanies)) {
+      window._subCompanies.forEach(function(item) {
+        if (typeof item === "string" || typeof item === "number") addCompanyToList(out, known, item);
+        else if (item && typeof item === "object") {
+          addCompanyToList(out, known, item.Company || item.SubCompany || item.Sub || item.PartnerCompany || item.name || item.Name);
+        }
       });
+    }
+    // Source B: backups
+    ["_priceSubCache", "_subCompanyCache", "_priceSub", "_partners", "_partnerCompanies"].forEach(function(varName) {
+      var v = window[varName];
+      if (Array.isArray(v)) {
+        v.forEach(function(item) {
+          if (typeof item === "string" || typeof item === "number") addCompanyToList(out, known, item);
+          else if (item && typeof item === "object") {
+            addCompanyToList(out, known, item.Company || item.SubCompany || item.Sub || item.PartnerCompany || item.name || item.Name);
+          }
+        });
+      }
     });
+    // Source C: DB.PRICE_SUB
+    if (window.DB && Array.isArray(window.DB.PRICE_SUB)) {
+      window.DB.PRICE_SUB.forEach(function(item) {
+        if (item && typeof item === "object") addCompanyToList(out, known, item.Company || item.SubCompany || item.Sub);
+      });
+    }
     return out;
   }
 
@@ -139,6 +164,7 @@
     select.addEventListener("change", function(){
       window._schEditBillingEntity = select.value;
       updateStyle();
+      console.log("[partner-dropdown] BE selected:", select.value);
     });
 
     return true;
@@ -165,6 +191,59 @@
     select.dispatchEvent(new Event("change"));
   }
 
+  // Defensive own fetch hook — ensures BillingEntity is in save_schedule body
+  function injectFetchHook() {
+    if (window.__beDdFetchHooked) return;
+    window.__beDdFetchHooked = true;
+    var origFetch = window.fetch.bind(window);
+    window.fetch = function(url, options) {
+      var injectedBE = null;
+      var injectedTour = null;
+      try {
+        if (options && options.body && typeof options.body === "string") {
+          var body = JSON.parse(options.body);
+          if (body && body.action === "save_schedule" && body.data && typeof body.data === "object") {
+            var be = window._schEditBillingEntity;
+            if (be && be !== body.data.BillingEntity) {
+              body.data.BillingEntity = be;
+              injectedBE = be;
+              injectedTour = body.data.TourID || body.data.TourCode;
+              options = Object.assign({}, options, { body: JSON.stringify(body) });
+              console.log("[partner-dropdown] injected BE=" + be + " into save_schedule");
+            }
+          }
+        }
+      } catch(e){ /* not JSON */ }
+      var p = origFetch(url, options);
+      // After save success, update local cache so re-open shows new value
+      if (injectedBE && injectedTour) {
+        p.then(function(res){
+          var clone = res.clone();
+          clone.json().then(function(j){
+            if (j && j.ok) {
+              if (Array.isArray(window._schCache)) {
+                var sch = window._schCache.find(function(s){
+                  return String(s.TourID||"").trim() === String(injectedTour).trim() ||
+                         String(s.TourCode||"").trim() === String(injectedTour).trim();
+                });
+                if (sch) { sch.BillingEntity = injectedBE; console.log("[partner-dropdown] cache updated for " + injectedTour); }
+              }
+              if (window.DB && Array.isArray(window.DB.SCH)) {
+                var sch2 = window.DB.SCH.find(function(s){
+                  return String(s.TourID||"").trim() === String(injectedTour).trim() ||
+                         String(s.TourCode||"").trim() === String(injectedTour).trim();
+                });
+                if (sch2) sch2.BillingEntity = injectedBE;
+              }
+            }
+          }).catch(function(){});
+        }).catch(function(){});
+      }
+      return p;
+    };
+    console.log("[partner-dropdown] fetch hook installed");
+  }
+
   function checkAndBuild() {
     var modal = document.getElementById("sch-modal");
     if (!modal) return;
@@ -186,11 +265,12 @@
 
   function init() {
     injectStyle();
+    injectFetchHook();
     checkAndBuild();
     setInterval(checkAndBuild, 600);
     var obs = new MutationObserver(function(){ checkAndBuild(); });
     obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class"] });
-    console.log("[partner-dropdown] initialized");
+    console.log("[partner-dropdown] v3 initialized");
   }
 
   if (document.readyState === "loading") {
