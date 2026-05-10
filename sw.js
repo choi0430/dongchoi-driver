@@ -10,7 +10,7 @@
  *   • API 호출은 캐시 안 함 (실시간 데이터)
  */
 
-const CACHE_NAME = 'dc-fleet-v12';
+const CACHE_NAME = 'dc-fleet-v13';
 const STATIC_ASSETS = [
   // GitHub Pages 환경에서 절대경로
   // 실제 캐시는 첫 방문 후 자동으로
