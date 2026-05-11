@@ -232,8 +232,8 @@
     var mode = getMode();
     var detected = lookupBEByTourCode(tourCode);
 
-    if (mode === "auto" && detected) {
-      // Admin schedule found — lock dropdown
+    if (detected) {
+      // ★ Admin schedule has BE — ALWAYS lock (even if user clicked 개인일정 추가)
       if (!partners.find(function(p){ return p.id === detected; })) {
         var opt = document.createElement("option");
         opt.value = detected; opt.textContent = "\u2754 " + detected;
@@ -243,7 +243,7 @@
       select.disabled = true;
       window._drBillingEntity = detected;
     } else if (mode === "personal") {
-      // Personal mode — unlocked
+      // No admin schedule match + personal mode — unlocked
       select.disabled = false;
       var v = window._drBillingEntity || "DC";
       if (!partners.find(function(p){ return p.id === v; })) {
@@ -253,7 +253,7 @@
       }
       select.value = v;
     } else {
-      // Auto mode but no match — fallback to DC, still locked-ish (user can switch to personal)
+      // Auto mode, no admin match — unlocked default
       select.disabled = false;
       select.value = window._drBillingEntity || "DC";
       window._drBillingEntity = select.value;
@@ -359,7 +359,7 @@
     setInterval(checkAndBuild, 600);
     var obs = new MutationObserver(function(){ checkAndBuild(); });
     obs.observe(document.body, { childList: true, subtree: true });
-    console.log("[partner-driver-be] v1 initialized — call window.__beDrDebug() for diagnostics");
+    console.log("[partner-driver-be] v2 initialized — call window.__beDrDebug() for diagnostics");
   }
 
   if (document.readyState === "loading") {
