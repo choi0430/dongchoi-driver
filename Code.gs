@@ -69,7 +69,7 @@ const MASTER_HEADERS = {
   'Driver_Roster': ['Driver','Date','Status','Updated_At','Source'],
   // ── 거래처 잔액 관리 ──
   'Agency_Txn': ['RowID','Agency','Date','InvoiceID','TourCode','Guide','Type','DR','CR','Remark','StartDate','FinishDate','DueDate'],
-  'SUB_Txn':    ['RowID','SubCompany','Category','Date','InvoiceNo','Description','DR','CR','Remark'],
+  'SUB_Txn':    ['RowID','SubCompany','Category','Date','InvoiceNo','TourCode','Description','DR','CR','Remark'],
   // ── 서비스 요금 옵션 (차량 좌석별) ──
   'M_SvcOptions': ['VehicleSize','Label','Amount'],
   // ── 호텔 서차지 옵션 ──
@@ -5790,6 +5790,97 @@ function runScheduleStatusUpdate() {
 /**
  * Schedule 자동 상태 전환 트리거 등록 (한 번만)
  */
+/**
+ * 일회성 마이그레이션 — SUB_Txn 시트에 TourCode 컬럼 추가 + 기존 행 자동 채움
+ *
+ * 사용법: GAS 편집기에서 이 함수를 한 번 실행하면…
+ *  1) SUB_Txn 시트의 헤더에 'TourCode' 컬럼이 InvoiceNo와 Description 사이에 삽입됨
+ *     (이미 있으면 건너뜀)
+ *  2) 기존 행의 Description이 'DRSUB:YYYY-MM-DD_REGO_TOURCODE' 형식이면 TourCode 자동 추출
+ *  3) Description이 'PAID_TC:{tourcode}' 형식이면 그것도 TourCode 자동 채움
+ *
+ * 반복 실행해도 안전 (멱등). 실행 결과는 Logger에 출력됨.
+ */
+function migrateSubTxnAddTourCode() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('SUB_Txn');
+  if (!sheet) {
+    Logger.log('❌ SUB_Txn 시트가 없습니다');
+    return 'SUB_Txn sheet not found';
+  }
+
+  const lastCol = sheet.getLastColumn();
+  const lastRow = sheet.getLastRow();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  // 1) TourCode 컬럼 추가 (InvoiceNo 다음 위치에)
+  let tcIdx = headers.indexOf('TourCode');
+  if (tcIdx < 0) {
+    const invIdx = headers.indexOf('InvoiceNo');
+    const insertAfter = invIdx >= 0 ? invIdx + 1 : lastCol; // InvoiceNo 뒤, 없으면 맨 끝
+    // insertColumnAfter는 1-based
+    sheet.insertColumnAfter(insertAfter);
+    sheet.getRange(1, insertAfter + 1).setValue('TourCode');
+    tcIdx = insertAfter; // 0-based 인덱스로 저장
+    Logger.log('✅ TourCode 컬럼 추가됨 (위치: ' + (insertAfter + 1) + ')');
+  } else {
+    Logger.log('ℹ️ TourCode 컬럼이 이미 존재함 (위치: ' + (tcIdx + 1) + ')');
+  }
+
+  // 2) 기존 행을 다시 읽어서 Description으로부터 TourCode 추출
+  if (lastRow < 2) {
+    Logger.log('ℹ️ 데이터 행 없음 - 헤더만 추가하고 종료');
+    return 'header added, no data rows';
+  }
+
+  const newLastCol = sheet.getLastColumn();
+  const newHeaders = sheet.getRange(1, 1, 1, newLastCol).getValues()[0];
+  const tcIdxFinal = newHeaders.indexOf('TourCode');
+  const descIdx = newHeaders.indexOf('Description');
+  if (tcIdxFinal < 0) {
+    Logger.log('❌ TourCode 컬럼 추가 실패');
+    return 'TourCode column missing after insert';
+  }
+  if (descIdx < 0) {
+    Logger.log('⚠️ Description 컬럼 없음 - 자동 채움 건너뜀');
+    return 'no Description column';
+  }
+
+  const data = sheet.getRange(2, 1, lastRow - 1, newLastCol).getValues();
+  let filled = 0;
+  let skipped = 0;
+  const drsubRE = /^DRSUB:\d{4}-\d{2}-\d{2}_[^_]*_(.+)$/;
+  const paidTcRE = /^PAID_TC:(.+)$/;
+
+  for (let i = 0; i < data.length; i++) {
+    const existingTC = String(data[i][tcIdxFinal] || '').trim();
+    if (existingTC) { skipped++; continue; } // 이미 채워진 행 건너뜀
+
+    const desc = String(data[i][descIdx] || '');
+    let tc = '';
+    let m = desc.match(drsubRE);
+    if (m && m[1]) tc = m[1].trim();
+    if (!tc) {
+      m = desc.match(paidTcRE);
+      if (m && m[1]) tc = m[1].trim();
+    }
+
+    if (tc) {
+      data[i][tcIdxFinal] = tc;
+      filled++;
+    }
+  }
+
+  if (filled > 0) {
+    // 변경된 열만 일괄 업데이트
+    const tcCol = data.map(r => [r[tcIdxFinal]]);
+    sheet.getRange(2, tcIdxFinal + 1, data.length, 1).setValues(tcCol);
+  }
+
+  Logger.log('✅ 마이그레이션 완료: 채움 ' + filled + '건, 기존값 유지 ' + skipped + '건, 총 ' + data.length + '행');
+  return 'Migration complete: filled=' + filled + ', skipped=' + skipped + ', total=' + data.length;
+}
+
 function setupScheduleTrigger() {
   removeScheduleTrigger();
   ScriptApp.newTrigger('runScheduleStatusUpdate')
