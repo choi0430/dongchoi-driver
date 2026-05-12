@@ -10041,6 +10041,71 @@ function calcAgencyTA(r){
   return taBase + otTA + htlTA + dstTA + erlTA + parking + tollTA + trlTA;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// DEBUG: 특정 DR 행의 TA/SUB 계산 분해 표시
+// 사용법: 콘솔에서 _debugSubRow('이재원', '2026-05-08', 'Airport Transfer')
+//        또는 _debugSubRow('이재원', '2026-05-08')  // 같은 날 모두 출력
+// ═══════════════════════════════════════════════════════════════
+window._debugSubRow = function(driver, date, attraction){
+  if(!window._reportsCache && !window._drCache){
+    console.warn('리포트 캐시 비어있음 — 정산 페이지 열어서 데이터 로드 먼저');
+    return;
+  }
+  const cache = window._reportsCache || window._drCache || [];
+  const matches = cache.filter(r => {
+    const dDate = String(r.Date||'').slice(0,10);
+    const dDrv = String(r.Driver||'').trim();
+    if(date && dDate !== date) return false;
+    if(driver && dDrv !== driver && !dDrv.includes(driver)) return false;
+    if(attraction && !String(r.Attraction||'').toLowerCase().includes(attraction.toLowerCase())) return false;
+    return true;
+  });
+  if(matches.length === 0){
+    console.warn('매칭되는 행 없음');
+    return matches;
+  }
+  matches.forEach((r, i) => {
+    console.group(`📋 행 ${i+1}/${matches.length}: ${r.Date} · ${r.Driver} · ${r.Attraction} · ${r.Rego}`);
+    console.log('Raw DR 필드:', {
+      Agency: r.Agency, Seats: r.Seats, Rego: r.Rego,
+      SVC_Charge: r.SVC_Charge, Hotel_Surcharge: r.Hotel_Surcharge,
+      Dist_Surcharge: r.Dist_Surcharge, OT: r.OT, Early: r.Early,
+      Trailer: r.Trailer, Trailer_Number: r.Trailer_Number,
+      Toll: r.Toll, Pickup: r.Pickup, Night_Owner: r.Night_Owner,
+      DR_Cost: r.DR_Cost
+    });
+    const ta = calcAgencyTA(r);
+    console.log('💚 TA 청구:', ta);
+    const sub = calcSubReport(r);
+    console.log('💜 SUB 계산 결과:', {
+      taAmount: sub.taAmount,
+      subBase: '(계산식 내부)',
+      subTotal: sub.subCost.total,
+      breakdown: sub.subCost,
+      drCost: sub.drCost,
+      profit: sub.profit,
+      isSub: sub.isSub, scenario: sub.scenario,
+      trailerSplitToDC: sub.trailerSplitToDC
+    });
+    // Trailer 진단
+    if(r.Trailer_Number){
+      const tn = String(r.Trailer_Number).trim();
+      const tRow = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === tn);
+      console.log('🚐 Trailer 진단:', {
+        trailerNumber: tn,
+        foundInMaster: !!tRow,
+        ownerInMaster: tRow ? tRow.Owner : '(없음)',
+        isDCOwned: tRow ? /dong\s*choi/i.test(tRow.Owner||'') : false,
+        DR_Trailer_amount: parseFloat(r.Trailer)||0
+      });
+    } else {
+      console.log('🚐 Trailer 진단: DR에 Trailer_Number 없음');
+    }
+    console.groupEnd();
+  });
+  return matches;
+};
+
 // ═══════════════════════════════════════
 // 정산 대시보드 (리포트 기반 자동 집계)
 // ═══════════════════════════════════════
