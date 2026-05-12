@@ -13850,7 +13850,8 @@ let _scheduleBillingMap = {};
 function _normCo(n){ return String(n||'').trim().toUpperCase().replace(/\s+/g,' '); }
 async function loadPayoutOverrides(){
   try {
-    const r = await api('get_payout_overrides', null, 'GET');
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_payout_overrides');
+    const r = await res.json();
     if (r && r.ok) {
       _payoutOverrides = r.overrides || {};
       _scheduleBillingMap = r.billingEntities || {};
@@ -13891,7 +13892,16 @@ async function toggleTourPayoutOverride(tourCode, subCompany){
   else if (state === 'MANUAL_INCL') action = 'AUTO';      // 강제포함 → 자동복귀
   else if (state === 'MANUAL_EXCL') action = 'AUTO';      // 강제제외 → 자동복귀
   try {
-    const r = await api('set_payout_override', {data: {tourCode, subCompany, action}}, 'POST');
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action: 'set_payout_override',
+        data: { tourCode, subCompany, action },
+        _user: (typeof getAdminUser === 'function' ? getAdminUser() : '')
+      })
+    });
+    const r = await res.json();
     if (!r || !r.ok) { alert('저장 실패: ' + (r && r.error || 'unknown')); return; }
     // 로컬 캐시 업데이트
     const subKey = _normCo(subCompany);
