@@ -10043,93 +10043,130 @@ function calcAgencyTA(r){
 
 // ═══════════════════════════════════════════════════════════════
 // DEBUG: 특정 DR 행의 TA/SUB 계산 분해 표시
-// 사용법: 콘솔에서 _debugSubRow('이재원', '2026-05-08', 'Airport Transfer')
-//        또는 _debugSubRow('이재원', '2026-05-08')  // 같은 날 모두 출력
-//        또는 _debugSubRow('이재원')                // 그 드라이버 전체
+// 사용법: await _debugSubRow('이재원', '2026-05-08', 'Airport Transfer')
+//        await _dumpDRBrief('이재원')  // 드라이버 전체 운행 테이블
+//        await _dumpDRBrief()          // 전체 운행 테이블
+// 캐시 비어있으면 자동으로 Daily_Report 로드
 // ═══════════════════════════════════════════════════════════════
-window._debugSubRow = function(driver, date, attraction){
-  // 우선순위: window._drCache → _settleData._raw → 다른 캐시
-  let cache = null;
-  let cacheSource = '';
+window._dumpDRBrief = async function(driverFilter){
+  let cache = (typeof _drCache !== 'undefined') ? _drCache : null;
+  if(!cache || !cache.length){
+    console.log('⏳ Daily_Report 로드 중...');
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const json = await res.json();
+      if(json.ok && json.rows){
+        cache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
+        try { _drCache = cache; } catch(e){}
+      }
+    } catch(e){ console.error('로드 실패:', e); return; }
+  }
+  const rows = cache.map(r => ({
+    Date: String(r.Date||'').slice(0,10),
+    Driver: r.Driver||'',
+    Attraction: r.Attraction||'',
+    Rego: r.Rego||'',
+    Agency: r.Agency||'',
+    SVC: r.SVC_Charge, OT: r.OT, Early: r.Early, Hotel: r.Hotel_Surcharge,
+    Trailer: r.Trailer, TrailerNo: r.Trailer_Number||''
+  }));
+  const filtered = driverFilter ? rows.filter(r => String(r.Driver).includes(driverFilter)) : rows;
+  console.log('총 ' + filtered.length + '행' + (driverFilter ? ' (' + driverFilter + ' 필터)' : ''));
+  console.table(filtered);
+  window._lastDRDump = filtered;
+  return filtered;
+};
+
+window._debugSubRow = async function(driver, date, attraction){
+  let cache = null, cacheSource = '';
   if(typeof _drCache !== 'undefined' && _drCache && _drCache.length){
-    cache = _drCache;
-    cacheSource = '_drCache (Daily_Report 전체)';
+    cache = _drCache; cacheSource = '_drCache';
   } else if(typeof _settleData !== 'undefined' && _settleData && _settleData.length){
-    cache = _settleData.map(d => d._raw).filter(Boolean);
-    cacheSource = '_settleData (정산 기간 한정)';
-  } else if(typeof _reportsCache !== 'undefined' && _reportsCache && _reportsCache.length){
-    cache = _reportsCache;
-    cacheSource = '_reportsCache';
+    cache = _settleData.map(d => d._raw).filter(Boolean); cacheSource = '_settleData';
   }
   if(!cache || !cache.length){
-    console.warn('❌ 리포트 캐시 비어있음 — 정산 페이지를 열어서 데이터 로드를 먼저 해주세요.');
-    console.log('상태:',
-      '_drCache=' + (typeof _drCache !== 'undefined' ? (_drCache?.length || 0) : 'undefined'),
-      '_settleData=' + (typeof _settleData !== 'undefined' ? (_settleData?.length || 0) : 'undefined'),
-      '_reportsCache=' + (typeof _reportsCache !== 'undefined' ? (_reportsCache?.length || 0) : 'undefined')
-    );
-    return;
+    console.log('⏳ Daily_Report 자동 로드...');
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const json = await res.json();
+      if(json.ok && json.rows){
+        cache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
+        try { _drCache = cache; } catch(e){}
+        cacheSource = 'API';
+      } else { console.error('rows 없음:', json); return; }
+    } catch(e){ console.error('로드 실패:', e); return; }
   }
-  console.log('📦 캐시 소스:', cacheSource, '(' + cache.length + '행)');
+  console.log('📦', cacheSource, '·', cache.length, '행');
 
   const matches = cache.filter(r => {
     const dDate = String(r.Date||'').slice(0,10);
     const dDrv = String(r.Driver||'').trim();
     if(date && dDate !== date) return false;
-    if(driver && dDrv !== driver && !dDrv.includes(driver)) return false;
+    if(driver && !dDrv.includes(driver)) return false;
     if(attraction && !String(r.Attraction||'').toLowerCase().includes(attraction.toLowerCase())) return false;
     return true;
   });
+  console.log('🔍 매칭:', matches.length);
+
   if(matches.length === 0){
-    console.warn('❌ 매칭되는 행 없음');
-    // 추가 정보 — 그 드라이버의 다른 날짜라도 보여주기
+    console.warn('매칭 행 없음');
     if(driver){
       const drvRows = cache.filter(r => String(r.Driver||'').includes(driver));
       if(drvRows.length){
-        console.log('💡 ' + driver + '의 다른 운행 (' + drvRows.length + '건):');
-        drvRows.slice(0, 10).forEach(r => console.log('  ', String(r.Date||'').slice(0,10), '·', r.Attraction, '·', r.Rego));
+        console.log('💡 ' + driver + ' 운행 ' + drvRows.length + '건:');
+        console.table(drvRows.slice(0,30).map(r => ({
+          Date: String(r.Date||'').slice(0,10),
+          Driver: r.Driver, Attraction: r.Attraction, Rego: r.Rego, Agency: r.Agency
+        })));
+      } else {
+        const allDrivers = [...new Set(cache.map(r => String(r.Driver||'').trim()).filter(Boolean))];
+        console.log('💡 ' + driver + ' 없음. 전체 드라이버:', allDrivers);
       }
+    }
+    if(date){
+      const dateRows = cache.filter(r => String(r.Date||'').slice(0,10) === date);
+      console.log('💡 ' + date + '의 운행 ' + dateRows.length + '건:');
+      if(dateRows.length) console.table(dateRows.map(r => ({
+        Date: String(r.Date||'').slice(0,10),
+        Driver: r.Driver, Attraction: r.Attraction, Rego: r.Rego
+      })));
     }
     return matches;
   }
+
   matches.forEach((r, i) => {
-    console.group(`📋 행 ${i+1}/${matches.length}: ${String(r.Date||'').slice(0,10)} · ${r.Driver} · ${r.Attraction} · ${r.Rego}`);
-    console.log('Raw DR 필드:', {
+    console.group('📋 ' + (i+1) + '/' + matches.length + ': ' + String(r.Date||'').slice(0,10) + ' · ' + r.Driver + ' · ' + r.Attraction + ' · ' + r.Rego);
+    console.log('Raw:', {
       Agency: r.Agency, Seats: r.Seats, Rego: r.Rego,
       SVC_Charge: r.SVC_Charge, Hotel_Surcharge: r.Hotel_Surcharge,
       Dist_Surcharge: r.Dist_Surcharge, OT: r.OT, Early: r.Early,
       Trailer: r.Trailer, Trailer_Number: r.Trailer_Number,
-      Toll: r.Toll, Pickup: r.Pickup, Night_Owner: r.Night_Owner,
-      DR_Cost: r.DR_Cost
+      Toll: r.Toll, Pickup: r.Pickup, DR_Cost: r.DR_Cost
     });
     const ta = calcAgencyTA(r);
-    console.log('💚 TA 청구 (calcAgencyTA):', ta);
+    console.log('💚 TA:', ta);
     const sub = calcSubReport(r);
-    console.log('💜 SUB 계산 결과:', {
-      taAmount: sub.taAmount,
-      subTotal: sub.subCost.total,
-      breakdown: sub.subCost,
-      drCost: sub.drCost,
-      profit: sub.profit,
-      isSub: sub.isSub, scenario: sub.scenario,
+    console.log('💜 SUB:', {
+      taAmount: sub.taAmount, subTotal: sub.subCost.total,
+      breakdown: sub.subCost, drCost: sub.drCost,
+      profit: sub.profit, isSub: sub.isSub, scenario: sub.scenario,
       trailerSplitToDC: sub.trailerSplitToDC
     });
-    // Trailer 진단
     if(r.Trailer_Number){
       const tn = String(r.Trailer_Number).trim();
       const tRow = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === tn);
-      console.log('🚐 Trailer 진단:', {
-        trailerNumber: tn,
-        foundInMaster: !!tRow,
+      console.log('🚐 Trailer:', {
+        trailerNumber: tn, foundInMaster: !!tRow,
         ownerInMaster: tRow ? tRow.Owner : '(없음)',
         isDCOwned: tRow ? /dong\s*choi/i.test(tRow.Owner||'') : false,
         DR_Trailer_amount: parseFloat(r.Trailer)||0
       });
     } else {
-      console.log('🚐 Trailer 진단: DR에 Trailer_Number 없음 (Trailer 금액:', parseFloat(r.Trailer)||0, ')');
+      console.log('🚐 Trailer Number 없음. 금액:', parseFloat(r.Trailer)||0);
     }
     console.groupEnd();
   });
+  window._lastDebugMatches = matches;
   return matches;
 };
 
