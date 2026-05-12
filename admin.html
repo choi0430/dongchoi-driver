@@ -3290,17 +3290,6 @@ function rDash(){
         codes.forEach(c => issuedKeys.add(`${ag}|${c}`));
       });
 
-      // ★ Schedule에서 BillingEntity 맵 구축 — DC가 발행하지 않는 (Agency,TourCode)는 미발행 알림에서 제외
-      const nonDCBillingKeys = new Set(); // "AGENCY|TOURCODE" 형식
-      (_schCache||[]).forEach(s => {
-        const be = String(s.BillingEntity||'').trim().toUpperCase();
-        if(!be || be === 'DC' || /dong\s*choi/i.test(be)) return; // DC면 건너뜀
-        const ag = String(s.Agency||'').trim().toUpperCase();
-        const tc = String(s.TourCode||'').trim().toUpperCase();
-        if(!ag || !tc) return;
-        nonDCBillingKeys.add(`${ag}|${tc}`);
-      });
-
       const uninvoiced = _drCache.filter(r => {
         const dateISO = parseToISO(r.Date||'');
         if(!dateISO || dateISO < lastMonthCutoff) return false;
@@ -3309,10 +3298,7 @@ function rDash(){
         const ag = String(r.Agency||'').trim().toUpperCase();
         if(!tc || !ag) return false;
         const key = `${ag}|${tc}`;
-        if(issuedKeys.has(key)) return false;
-        // ★ DC가 발행하지 않는 일정의 DR은 미발행 알림에서 제외
-        if(nonDCBillingKeys.has(key)) return false;
-        return true;
+        return !issuedKeys.has(key);
       });
 
       if(uninvoiced.length > 0){
@@ -4648,89 +4634,21 @@ async function showDRDiagnostics(tourId){
 
   const slotRows = slotDiagnostics.map(sd => {
     const dt = sd.date.slice(5).replace('-','/');
-    const s = sd.slotData || {};
-    const dr = sd.dr;
-
-    // ── 일정 슬롯 정보 ──
-    const carInfo = s.rego ? `🚌 ${escH(s.rego)}` : '';
-    const drvInfo = s.driver ? `👤 ${escH(s.driver)}` : '';
-    const subInfo = s.mode === 'sub' ? `🏢 ${escH(s.subCompany||'외주')}${s.subDriver?` / ${escH(s.subDriver)}`:''}` : '';
-    const courseInfo = s.course ? `🗺 ${escH(s.course)}` : '';
-
-    // ── 시작 / 종료 장소·시간 ──
-    const placeIcon = (t) => t==='airport' ? '✈️' : t==='hotel' ? '🏨' : '📍';
-    const startBlock = (s.startPlace || s.startTime) ?
-      `<span style="color:var(--t2);">${placeIcon(s.startPlaceType)} ${s.startTime ? `<b>${escH(s.startTime)}</b>` : ''}${s.startPlace ? ` ${escH(s.startPlace)}` : ''}</span>` : '';
-    const endBlock = (s.endPlace || s.endTime) ?
-      `<span style="color:var(--t2);">→ ${placeIcon(s.endPlaceType)} ${s.endTime ? `<b>${escH(s.endTime)}</b>` : ''}${s.endPlace ? ` ${escH(s.endPlace)}` : ''}</span>` : '';
-    const placeTimeRow = (startBlock || endBlock) ?
-      `<div style="font-size:10px;color:var(--t3);margin-top:3px;line-height:1.5;">${startBlock} ${endBlock}</div>` : '';
-
-    // ── 트레일러 표시 ──
-    const trailerInfo = s.trailer ? `🚐 트레일러` : '';
-
-    // ── DR 매칭 시: DR의 비용/서차지 breakdown ──
-    let drDetailBlock = '';
-    if(dr){
-      const fmt$ = (v) => {
-        const n = parseFloat(v)||0;
-        return n === 0 ? '' : `$${n.toLocaleString('en-AU',{minimumFractionDigits: n%1===0?0:2})}`;
-      };
-      const drFields = [
-        { lbl: 'SVC',    val: fmt$(dr.SVC_Charge), color: '#6b7280' },
-        { lbl: 'OT',     val: fmt$(dr.OT),         color: '#f59e0b' },
-        { lbl: 'Early',  val: fmt$(dr.Early),      color: '#0369a1' },
-        { lbl: 'Hotel',  val: fmt$(dr.Hotel_Surcharge), color: '#7c3aed' },
-        { lbl: 'Dist',   val: fmt$(dr.Dist_Surcharge),  color: '#0891b2' },
-        { lbl: 'Toll',   val: fmt$(dr.Toll),       color: '#92400e' },
-        { lbl: 'Parking',val: fmt$(dr.Parking),    color: '#92400e' },
-        { lbl: 'Trailer',val: fmt$(dr.Trailer),    color: '#be185d' },
-        { lbl: 'Night',  val: fmt$(dr.Night_Owner),color: '#312e81' }
-      ].filter(f => f.val);
-      const drBreakdown = drFields.length ?
-        drFields.map(f => `<span style="background:${f.color}15;color:${f.color};padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600;">${f.lbl}: ${f.val}</span>`).join(' ') : '';
-      const drCost = parseFloat(dr.DR_Cost)||0;
-      const trailerNum = String(dr.Trailer_Number||'').trim();
-      let trailerDiag = '';
-      if(trailerNum){
-        const tRow = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === trailerNum);
-        const tOwner = tRow ? tRow.Owner : '(미등록)';
-        const isDCT = tRow && /dong\s*choi/i.test(tRow.Owner||'');
-        trailerDiag = `<div style="font-size:9px;color:var(--t3);margin-top:2px;">🚐 트레일러 #${escH(trailerNum)} · 차주: ${escH(tOwner)}${isDCT?' <span style="color:#16a34a;">✓ DC</span>':''}</div>`;
-      }
-      // TA / SUB 계산 결과
-      let taSubLine = '';
-      try {
-        if(typeof calcAgencyTA === 'function' && typeof calcSubReport === 'function'){
-          const ta = calcAgencyTA(dr);
-          const sub = calcSubReport(dr);
-          const diff = ta - sub.subCost.total;
-          taSubLine = `<div style="font-size:9px;color:var(--t3);margin-top:2px;">💚 TA <b>$${ta.toLocaleString()}</b> · 💜 SUB <b>$${sub.subCost.total.toLocaleString()}</b>${diff!==0?` · <span style="color:#dc2626;">차이 $${diff.toLocaleString()}</span>`:''}${drCost>0?` · 🚗 DR비 $${drCost.toLocaleString()}`:''}</div>`;
-        }
-      } catch(e){}
-      drDetailBlock = `
-        <div style="background:#ffffff90;border:1px dashed ${sd.color}50;border-radius:6px;padding:6px 8px;margin-top:5px;">
-          <div style="font-size:9px;color:var(--t3);margin-bottom:3px;">📋 매칭된 DR (row #${dr._rowIndex||'?'})</div>
-          ${drBreakdown ? `<div style="display:flex;flex-wrap:wrap;gap:3px;">${drBreakdown}</div>` : ''}
-          ${trailerDiag}
-          ${taSubLine}
-        </div>`;
-    }
-
-    const slotInfoRow = [carInfo, drvInfo, subInfo, courseInfo, trailerInfo].filter(Boolean).join(' · ') || '(슬롯 정보 없음)';
-
+    const carInfo = sd.slotData.rego ? `🚌 ${escH(sd.slotData.rego)}` : '';
+    const drvInfo = sd.slotData.driver ? `👤 ${escH(sd.slotData.driver)}` : '';
+    const courseInfo = sd.slotData.course ? `🗺 ${escH(sd.slotData.course)}` : '';
     return `
       <div style="background:${sd.bg};border-left:4px solid ${sd.color};border-radius:8px;padding:10px 12px;margin-bottom:8px;">
         <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:${sd.color};font-weight:800;margin-bottom:4px;">
           <span style="font-size:14px;">${sd.icon}</span>
           <span>${dt} · ${sd.slot}</span>
         </div>
-        <div style="font-size:11px;color:var(--t2);margin-bottom:3px;">${slotInfoRow}</div>
-        ${placeTimeRow}
-        <div style="font-size:11px;color:${sd.color};line-height:1.4;margin-top:4px;">
+        <div style="font-size:11px;color:var(--t2);margin-bottom:3px;">
+          ${[carInfo, drvInfo, courseInfo].filter(Boolean).join(' · ')||'(슬롯 정보 없음)'}
+        </div>
+        <div style="font-size:11px;color:${sd.color};line-height:1.4;">
           ${escH(sd.msg)}
         </div>
-        ${drDetailBlock}
       </div>`;
   }).join('') || '<div style="color:var(--t3);text-align:center;padding:20px;font-size:11px;">분석할 슬롯이 없습니다</div>';
 
@@ -4949,20 +4867,9 @@ function renderScheduleList(){
       }
     }
 
-    // ★ BillingEntity 배지 — DC가 아니면 표시 (EG TRAVEL 등 파트너사 발행)
-    let beBadge = '';
-    const beVal = String(r.BillingEntity||'').trim();
-    const beUp = beVal.toUpperCase();
-    if(beVal && beUp !== 'DC' && !/dong\s*choi/i.test(beUp)){
-      // 회사명 짧게 (첫 단어 또는 약어)
-      const beShort = beVal.split(/\s+/).slice(0, 2).join(' ').slice(0, 20);
-      beBadge = `<span style="background:#ede9fe;color:#5b21b6;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;" title="${escH(beVal)} 발행 (DC 외주)">🧾 ${escH(beShort)} 발행</span>`;
-    }
-
     return `<div class="sch-card s-${st}" onclick="openScheduleModal('${escH(r.TourID)}')">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
         <span class="sch-badge s-${st}">${statusLabel[st]||st}</span>
-        ${beBadge}
         <span style="font-size:11px;color:var(--t3);font-family:var(--fd);">${escH(period)}</span>
         ${inv}
         ${drBadge}
@@ -15028,8 +14935,13 @@ function renderBalSubList(){
     const tgIncl = tgAll.filter(g => !g.excluded);
     const tgExcl = tgAll.filter(g => g.excluded);
     const _renderTourGroup = (g, isExcluded) => {
-      const balColor = isExcluded ? 'var(--t3)' : (g.balance > 0.01 ? '#dc2626' : (g.balance < -0.01 ? 'var(--ac)' : 'var(--gn)'));
-      const dueLabel = (!isExcluded && g.dueDate) ? `<span style="color:#dc2626;background:#fef2f2;padding:1px 5px;border-radius:3px;font-weight:700;">📅 ${fmtDate(g.dueDate)}</span>` : '';
+      // ★ 지급 완료 (balance≈0, dr>0) — 색만 회색으로, 원래 청구 금액 그대로 표시
+      const isFullyPaid = !isExcluded && Math.abs(g.balance) < 0.01 && g.dr > 0.01;
+      const balColor = isExcluded ? 'var(--t3)' :
+                       isFullyPaid ? 'var(--t3)' :
+                       (g.balance > 0.01 ? '#dc2626' : (g.balance < -0.01 ? 'var(--ac)' : 'var(--gn)'));
+      const dueLabel = (!isExcluded && !isFullyPaid && g.dueDate) ? `<span style="color:#dc2626;background:#fef2f2;padding:1px 5px;border-radius:3px;font-weight:700;">📅 ${fmtDate(g.dueDate)}</span>` : '';
+      const paidBadge = isFullyPaid ? `<span style="color:#16a34a;background:#dcfce7;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:3px;">✓ 지급완료</span>` : '';
       const tcLabel = g.tourCode ? escH(g.tourCode) : '<span style="color:var(--t3);">(미식별)</span>';
       const guideLabel = (g.guides && g.guides.length) ? `<span style="color:#0891b2;background:#ecfeff;padding:1px 5px;border-radius:3px;font-weight:600;margin-left:3px;">👤 ${g.guides.map(escH).join(', ')}</span>` : '';
       // 오버라이드 배지 + 토글 버튼 (투어코드 있을 때만)
@@ -15046,10 +14958,16 @@ function renderBalSubList(){
         const safeTC = (g.tourCode || '').replace(/'/g,"\\'");
         toggleBtn = `<button onclick="event.stopPropagation();toggleTourPayoutOverride('${safeTC}','${safeName}')" title="${st.title}" style="background:${st.bg};color:${st.fg};border:none;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700;cursor:pointer;margin-left:4px;white-space:nowrap;">${st.text}</button>`;
       }
-      const amtStyle = isExcluded ? 'text-decoration:line-through;opacity:.6;' : '';
+      // 금액 표시:
+      // - 제외: 청구 금액(g.dr) 취소선
+      // - 지급완료: 청구 금액(g.dr) 회색
+      // - 미지급/부분지급: 잔액(g.balance) 표시
+      const amtStyle = isExcluded ? 'text-decoration:line-through;opacity:.6;' :
+                       isFullyPaid ? 'opacity:.55;' : '';
+      const displayAmt = (isExcluded || isFullyPaid) ? g.dr : g.balance;
       return `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;font-size:10px;color:var(--t2);padding:3px 0;border-top:1px dashed #ddd6fe;">
-        <span style="flex:1;min-width:0;"><b style="color:${isExcluded?'var(--t3)':'#6d28d9'};">${tcLabel}</b> ${guideLabel} <span style="color:var(--t3);">(${g.count}건)</span> ${dueLabel} ${toggleBtn}</span>
-        <span style="font-family:var(--fn);font-weight:700;color:${balColor};white-space:nowrap;${amtStyle}">$${Math.abs(g.balance).toLocaleString('en',{minimumFractionDigits:2})}</span>
+        <span style="flex:1;min-width:0;"><b style="color:${isExcluded?'var(--t3)':(isFullyPaid?'var(--t3)':'#6d28d9')};">${tcLabel}</b> ${guideLabel} <span style="color:var(--t3);">(${g.count}건)</span> ${dueLabel} ${paidBadge} ${toggleBtn}</span>
+        <span style="font-family:var(--fn);font-weight:700;color:${balColor};white-space:nowrap;${amtStyle}">$${Math.abs(displayAmt).toLocaleString('en',{minimumFractionDigits:2})}</span>
       </div>`;
     };
     const tgInclHtml = tgIncl.length > 0 ? tgIncl.map(g => _renderTourGroup(g, false)).join('') : '';
@@ -20095,12 +20013,6 @@ async function generateDraftInvoices(force=false){
       const tc = String(s.TourCode||'').trim().toUpperCase();
       if(!ag || !tc) return false;
       if(issuedKeys.has(`${ag}|${tc}`)) return false;
-      // ★ BillingEntity 체크: DC가 인보이스 발행하는 일정만 드래프트 대상
-      //    BillingEntity가 비어있으면 'DC'로 간주 (기본값)
-      const be = String(s.BillingEntity||'').trim().toUpperCase();
-      if(be && be !== 'DC' && be !== 'DONGCHOI' && be !== 'DONG CHOI' && !/dong\s*choi/i.test(be)){
-        return false; // EG 등 파트너사가 직접 발행하는 일정 → DC 드래프트 안 만듦
-      }
       return true;
     });
     console.log(`[Draft] 오늘=${todayISO}, 종료된 미발행 일정 ${endedSchedules.length}건`);
