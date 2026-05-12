@@ -5570,9 +5570,17 @@ function getDriverSchedule(driver, from, to) {
             .replace(/^[\u{1F535}\u{1F6AB}]\s*/u, '')           // 🔵🚫
             .replace(/^[\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}]\s*/u, '') // 🚐🚌🚙🚛🚜
             .trim();
+          // ★ 슬롯 모드(자사/외주)에 따라 driver 필드 위치가 다름
+          //   자사: slot.driver = 드라이버 이름
+          //   외주: slot.subDriver = 외주 드라이버 이름
+          //   둘 다 매칭 시도 → 외주 드라이버도 자기 일정 볼 수 있게
           const slotDriver = _stripPrefix(slot.driver);
+          const slotSubDriver = _stripPrefix(slot.subDriver);
           const targetDriver = _stripPrefix(driver);
-          if (slotDriver !== targetDriver) return;
+          const isMatch = (slotDriver === targetDriver) || (slotSubDriver === targetDriver);
+          if (!isMatch) return;
+          // ★ 외주 매칭이면 slot에 모드 표시 (드라이버 앱이 사용)
+          const isSubMode = (slot.mode === 'sub') || (slotSubDriver === targetDriver && slotDriver !== targetDriver);
           result.push({
             tourId: tourId,
             tourCode: tourCode,
@@ -5580,6 +5588,7 @@ function getDriverSchedule(driver, from, to) {
             date: dateStr,
             slotKey: slotKey,
             slot: slot,
+            isSubMode: isSubMode,  // ★ 외주 모드 슬롯 식별
             hotel: hotel,
             trailer: trailer,
             guide: guide,
