@@ -10201,12 +10201,34 @@ window._diagDriverSettlement = async function(driver){
     const ta = calcAgencyTA(r);
     const capNum = parseInt(String(r.Seats||'25').replace(/[^0-9]/g,''))||25;
     const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
-    // SUB base 직접 조회
+    // SUB base 직접 조회 + 누락 시 진단
     let subBase = 0;
+    let subBaseSource = '';
+    let _allSubKeysForOwner = '';
     try {
       const subRates = (typeof getSubRates === 'function') ? getSubRates() : {};
-      subBase = parseFloat(subRates[owner]?.[r.Attraction]?.[capKey]) || (DB.PS?.[owner]?.[r.Attraction]?.[capKey]?.rate) || 0;
-    } catch(e){}
+      const subRateVal = parseFloat(subRates[owner]?.[r.Attraction]?.[capKey]);
+      const psRateVal = DB.PS?.[owner]?.[r.Attraction]?.[capKey]?.rate;
+      subBase = subRateVal || psRateVal || 0;
+      subBaseSource = subRateVal ? `subRates[${owner}][${r.Attraction}][${capKey}]=${subRateVal}`
+                     : psRateVal ? `DB.PS[${owner}][${r.Attraction}][${capKey}]=${psRateVal}`
+                     : `❌ 키 매칭 실패`;
+      // 매칭 실패 시 비슷한 키 찾아주기
+      if(subBase === 0){
+        const psOwners = Object.keys(DB.PS||{});
+        const matchOwner = psOwners.find(o => o.toUpperCase() === owner.toUpperCase());
+        if(!matchOwner) subBaseSource += ` · M_PriceSub 미등록 오너 (등록된 오너: ${psOwners.join(', ')})`;
+        else {
+          const attractions = Object.keys(DB.PS[matchOwner]||{});
+          const matchAttr = attractions.find(a => a === r.Attraction);
+          if(!matchAttr) subBaseSource += ` · 코스 미매칭 "${r.Attraction}" (등록된 코스: ${attractions.slice(0,5).join(', ')}...)`;
+          else {
+            const seats = Object.keys(DB.PS[matchOwner][matchAttr]||{});
+            subBaseSource += ` · 인승 미매칭 capKey="${capKey}" (등록된: ${seats.join(', ')})`;
+          }
+        }
+      }
+    } catch(e){ subBaseSource = 'error: '+e.message; }
     // TA base 직접 조회
     let taBase = 0;
     try {
@@ -10226,6 +10248,7 @@ window._diagDriverSettlement = async function(driver){
       TA_서차지: ta - taBase,
       SUB: sub.subCost.total,
       SUB_base: subBase,
+      SUB_base_source: subBaseSource,
       SUB_서차지: sub.subCost.total - subBase,
       DR비: sub.drCost,
       순이익: sub.profit,
