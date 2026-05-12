@@ -9469,8 +9469,17 @@ function calcSubReport(r) {
   // TA 서차지 합계 = taAmount - taBase
   const taSurchargeTotal = taAmount - taBase;
 
-  // SUB 총액 = SUB base + TA 서차지 합계
-  const subTotal = subBase + taSurchargeTotal;
+  // ★ 공항 픽업 주차비는 DC가 가져감 (SUB에 전달하지 않음)
+  //   calcAgencyTA의 parking 로직과 동일 — Pickup이 공항 키워드면 21S/25S=$30, 40S+=$40
+  //   _isHojuro 21S/25S 제외 조건도 동일 (Hojuro는 parking을 별도 처리)
+  const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
+  const isLargeSub = capNum >= 40;
+  const _isHojuroSub = /호주로|hojuro/i.test(agency);
+  const subParkingDeduct = (apPat.test(r.Pickup||'') && !(_isHojuroSub && !isLargeSub))
+    ? (isLargeSub ? 40 : 30) : 0;
+
+  // SUB 총액 = SUB base + (TA 서차지 - 공항 주차비)
+  const subTotal = subBase + taSurchargeTotal - subParkingDeduct;
 
   // 디버그 로그 (진단용 — 추후 제거)
   if(window._debugSub){
