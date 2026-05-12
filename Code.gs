@@ -103,9 +103,13 @@ const MASTER_HEADERS = {
   // ── 운행 일정 (Schedule, 중기 자동화 핵심 데이터) ──
   // Status: scheduled / in_progress / completed / invoiced / paid / cancelled
   // TourPlan: JSON string [{date, course, ot, hotel, pickup, dropoff, note}]
+  // BillingEntity: 인보이스 발행사 ('DC' = 자사 발행, 또는 'EG TRAVEL PTY LTD' 같은 파트너사명)
   'Schedule':   ['TourID','Agency','TourCode','StartDate','EndDate','Pax','Seats','Trailer',
                  'Guide','GuidePhone','Driver','Rego','FlightIn','FlightOut','Hotel',
-                 'TourPlan','Notes','Status','InvoiceID','Quote','CreatedAt','UpdatedAt']
+                 'TourPlan','Notes','Status','InvoiceID','Quote','BillingEntity','CreatedAt','UpdatedAt'],
+  // 외주 지급 오버라이드 — BillingEntity 자동 판단 결과를 수동으로 뒤집을 때 사용
+  // Action: 'INCLUDE' (강제 포함) | 'EXCLUDE' (강제 제외)
+  'PayoutOverrides': ['TourCode','SubCompany','Action','UpdatedAt','UpdatedBy']
 };
 
 // ── Tab Colors ──
@@ -1420,6 +1424,11 @@ function doGet(e) {
         return cors(getDriverSchedule(driver, from, to));
       }
 
+      case 'get_payout_overrides': {
+        // 외주 지급 오버라이드 + Schedule.BillingEntity 맵 반환 (잔액 페이지에서 사용)
+        return cors(getPayoutOverrides());
+      }
+
       case 'get_sub_rates':
         return cors(getSubRatesSheet());
 
@@ -1698,6 +1707,31 @@ function doPost(e) {
         const r = updateScheduleStatus(payload.tourId, payload.status, payload.invoiceId);
         if (r.ok) appendAuditLog(_user, 'update_schedule_status', 'Schedule', payload.tourId||'',
           `Status→${payload.status}${payload.invoiceId?' Inv:'+payload.invoiceId:''}`);
+        return cors(r);
+      }
+
+      // ── PayoutOverride: 외주 지급 자동 판단 수동 오버라이드 ──
+      case 'set_payout_override': {
+        const r = setPayoutOverride(payload.data, _user);
+        if (r.ok) appendAuditLog(_user, 'set_payout_override', 'PayoutOverrides', '',
+          `${(payload.data&&payload.data.tourCode)||''}/${(payload.data&&payload.data.subCompany)||''}=${(payload.data&&payload.data.action)||''}`);
+        return cors(r);
+      }
+
+      // ── 일회성 정리: BillingEntity == SubCompany 인 자동등록 DRSUB 거래 삭제 ──
+      case 'cleanup_self_owned_sub_txns': {
+        const dryRun = (payload.dryRun !== false); // 기본 dry-run
+        const r = cleanupSelfOwnedSubTxns(dryRun);
+        if (r.ok && !r.dryRun) appendAuditLog(_user, 'cleanup_self_owned_sub_txns', 'SUB_Txn', '',
+          `삭제 ${r.deleted||0}건`);
+        return cors(r);
+      }
+
+      // ── 일회성 마이그레이션: Schedule 기존 행에 BillingEntity 기본값 'DC' 백필 ──
+      case 'migrate_schedule_billing_entity': {
+        const r = migrateScheduleBillingEntity();
+        if (r.ok) appendAuditLog(_user, 'migrate_schedule_billing_entity', 'Schedule', '',
+          `백필 ${r.filled||0}건, 유지 ${r.skipped||0}건`);
         return cors(r);
       }
 
@@ -5655,10 +5689,14 @@ function saveSchedule(data, user) {
       else if (today > ed) data.Status = 'completed';
     }
 
-    const rowArr = headers.map(h => data[h] !== undefined ? data[h] : '');
+    // ★ 시트의 실제 헤더 순서로 row 만들기
+    //   ensureSheet이 누락 컬럼(BillingEntity 등)을 시트 끝에 추가하므로
+    //   MASTER_HEADERS 순서가 아닌 시트 헤더 순서가 진실의 출처
+    const actualHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const rowArr = actualHeaders.map(h => data[h] !== undefined ? data[h] : '');
 
     if (existingRow > 0) {
-      sheet.getRange(existingRow, 1, 1, headers.length).setValues([rowArr]);
+      sheet.getRange(existingRow, 1, 1, actualHeaders.length).setValues([rowArr]);
     } else {
       sheet.appendRow(rowArr);
     }
@@ -5879,6 +5917,357 @@ function migrateSubTxnAddTourCode() {
 
   Logger.log('✅ 마이그레이션 완료: 채움 ' + filled + '건, 기존값 유지 ' + skipped + '건, 총 ' + data.length + '행');
   return 'Migration complete: filled=' + filled + ', skipped=' + skipped + ', total=' + data.length;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAYOUT OVERRIDES — 외주 지급 자동 판단(BillingEntity) + 수동 오버라이드
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 외주 지급 오버라이드 + Schedule.BillingEntity 맵 조회
+ * 응답 형식:
+ *   { ok: true,
+ *     billingEntities: { tourCode: 'DC' | 'EG TRAVEL PTY LTD' | ... },
+ *     overrides: { tourCode: { subCompanyUpper: 'INCLUDE' | 'EXCLUDE' } }
+ *   }
+ * Frontend는 이 두 정보로 자동/수동 제외를 판단함
+ */
+function getPayoutOverrides() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+
+    // 1) Schedule에서 TourCode → BillingEntity 맵 추출
+    const scheduleSheet = ss.getSheetByName('Schedule');
+    const billingEntities = {};
+    if (scheduleSheet) {
+      const lastRow = scheduleSheet.getLastRow();
+      const lastCol = scheduleSheet.getLastColumn();
+      if (lastRow >= 2 && lastCol >= 1) {
+        const headers = scheduleSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+        const tcIdx = headers.indexOf('TourCode');
+        const beIdx = headers.indexOf('BillingEntity');
+        if (tcIdx >= 0 && beIdx >= 0) {
+          const data = scheduleSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+          data.forEach(row => {
+            const tc = String(row[tcIdx] || '').trim();
+            if (!tc) return;
+            let be = String(row[beIdx] || '').trim();
+            if (!be) be = 'DC';
+            billingEntities[tc] = be.toUpperCase();
+          });
+        }
+      }
+    }
+
+    // 2) PayoutOverrides 시트에서 수동 오버라이드 로드 (없으면 자동 생성)
+    let overridesSheet = ss.getSheetByName('PayoutOverrides');
+    if (!overridesSheet) {
+      overridesSheet = ss.insertSheet('PayoutOverrides');
+      overridesSheet.appendRow(MASTER_HEADERS.PayoutOverrides);
+      overridesSheet.getRange(1, 1, 1, MASTER_HEADERS.PayoutOverrides.length)
+        .setFontWeight('bold').setBackground('#f3f4f6');
+      overridesSheet.setFrozenRows(1);
+    }
+    const overrides = {};
+    const oLastRow = overridesSheet.getLastRow();
+    const oLastCol = overridesSheet.getLastColumn();
+    if (oLastRow >= 2 && oLastCol >= 1) {
+      const oHeaders = overridesSheet.getRange(1, 1, 1, oLastCol).getValues()[0];
+      const tcI = oHeaders.indexOf('TourCode');
+      const scI = oHeaders.indexOf('SubCompany');
+      const acI = oHeaders.indexOf('Action');
+      if (tcI >= 0 && scI >= 0 && acI >= 0) {
+        const oData = overridesSheet.getRange(2, 1, oLastRow - 1, oLastCol).getValues();
+        oData.forEach(row => {
+          const tc = String(row[tcI] || '').trim();
+          const sc = String(row[scI] || '').trim().toUpperCase().replace(/\s+/g, ' ');
+          const ac = String(row[acI] || '').trim().toUpperCase();
+          if (!tc || !sc || (ac !== 'INCLUDE' && ac !== 'EXCLUDE')) return;
+          if (!overrides[tc]) overrides[tc] = {};
+          overrides[tc][sc] = ac;
+        });
+      }
+    }
+
+    return { ok: true, billingEntities: billingEntities, overrides: overrides };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/**
+ * 외주 지급 오버라이드 저장/삭제
+ * data: { tourCode, subCompany, action: 'INCLUDE' | 'EXCLUDE' | 'AUTO' }
+ *  - AUTO: 해당 행 삭제 (자동 판단으로 복귀)
+ *  - INCLUDE/EXCLUDE: UPSERT
+ */
+function setPayoutOverride(data, user) {
+  try {
+    if (!data || !data.tourCode || !data.subCompany) {
+      return { ok: false, error: 'tourCode + subCompany 필수' };
+    }
+    const tourCode = String(data.tourCode).trim();
+    const subCompany = String(data.subCompany).trim();
+    const subKey = subCompany.toUpperCase().replace(/\s+/g, ' ');
+    const action = String(data.action || '').trim().toUpperCase();
+
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let sheet = ss.getSheetByName('PayoutOverrides');
+    if (!sheet) {
+      sheet = ss.insertSheet('PayoutOverrides');
+      sheet.appendRow(MASTER_HEADERS.PayoutOverrides);
+      sheet.getRange(1, 1, 1, MASTER_HEADERS.PayoutOverrides.length)
+        .setFontWeight('bold').setBackground('#f3f4f6');
+      sheet.setFrozenRows(1);
+    }
+
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const tcI = headers.indexOf('TourCode');
+    const scI = headers.indexOf('SubCompany');
+    const acI = headers.indexOf('Action');
+    const upI = headers.indexOf('UpdatedAt');
+    const ubI = headers.indexOf('UpdatedBy');
+
+    // 기존 행 검색
+    let existingRow = -1;
+    if (lastRow >= 2) {
+      const data2 = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+      for (let i = 0; i < data2.length; i++) {
+        const t = String(data2[i][tcI] || '').trim();
+        const s = String(data2[i][scI] || '').trim().toUpperCase().replace(/\s+/g, ' ');
+        if (t === tourCode && s === subKey) {
+          existingRow = i + 2;
+          break;
+        }
+      }
+    }
+
+    if (action === 'AUTO') {
+      // 자동 복귀 → 행 삭제
+      if (existingRow > 0) {
+        sheet.deleteRow(existingRow);
+        return { ok: true, deleted: true };
+      }
+      return { ok: true, deleted: false };
+    }
+
+    if (action !== 'INCLUDE' && action !== 'EXCLUDE') {
+      return { ok: false, error: 'action은 INCLUDE/EXCLUDE/AUTO 중 하나여야 함' };
+    }
+
+    const now = new Date();
+    const ts = Utilities.formatDate(now, 'Australia/Sydney', "yyyy-MM-dd'T'HH:mm:ss");
+
+    if (existingRow > 0) {
+      sheet.getRange(existingRow, acI + 1).setValue(action);
+      if (upI >= 0) sheet.getRange(existingRow, upI + 1).setValue(ts);
+      if (ubI >= 0) sheet.getRange(existingRow, ubI + 1).setValue(user || '');
+      return { ok: true, updated: true, rowIndex: existingRow };
+    } else {
+      const newRow = new Array(lastCol).fill('');
+      if (tcI >= 0) newRow[tcI] = tourCode;
+      if (scI >= 0) newRow[scI] = subCompany;
+      if (acI >= 0) newRow[acI] = action;
+      if (upI >= 0) newRow[upI] = ts;
+      if (ubI >= 0) newRow[ubI] = user || '';
+      sheet.appendRow(newRow);
+      return { ok: true, inserted: true, rowIndex: sheet.getLastRow() };
+    }
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/**
+ * 일회성 마이그레이션 — Schedule 시트에 BillingEntity 컬럼 백필
+ *
+ * 사용법: GAS 편집기에서 실행하거나 'migrate_schedule_billing_entity' 액션 호출
+ *
+ * 동작:
+ *  1) Schedule 시트에 BillingEntity 컬럼이 없으면 추가
+ *  2) 기존 행의 BillingEntity가 비어있으면 'DC'로 백필
+ *
+ * 반복 실행해도 안전 (멱등)
+ */
+function migrateScheduleBillingEntity() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'Schedule'); // ensureSheet이 누락 컬럼 자동 추가
+
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const beIdx = headers.indexOf('BillingEntity');
+    if (beIdx < 0) {
+      return { ok: false, error: 'BillingEntity 컬럼 추가 실패 — ensureSheet 점검 필요' };
+    }
+
+    if (lastRow < 2) {
+      return { ok: true, filled: 0, skipped: 0, total: 0, note: 'no data rows' };
+    }
+
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    let filled = 0;
+    let skipped = 0;
+    const updates = []; // { rowIndex: int, value: str }
+
+    for (let i = 0; i < data.length; i++) {
+      const current = String(data[i][beIdx] || '').trim();
+      if (current) { skipped++; continue; }
+      updates.push({ rowIndex: i + 2, value: 'DC' });
+      filled++;
+    }
+
+    if (filled > 0) {
+      // 일괄 업데이트
+      updates.forEach(u => {
+        sheet.getRange(u.rowIndex, beIdx + 1).setValue(u.value);
+      });
+    }
+
+    Logger.log('✅ Schedule.BillingEntity 백필 완료: 채움 ' + filled + '건, 기존값 유지 ' + skipped + '건, 총 ' + data.length + '행');
+    return { ok: true, filled: filled, skipped: skipped, total: data.length };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/**
+ * 일회성 정리 — BillingEntity == SubCompany 인 자동등록 DRSUB 거래 삭제
+ *
+ * dryRun=true (기본): 삭제 후보만 반환, 실제 삭제 안 함
+ * dryRun=false: 후보를 실제 삭제 (지급된 CR이 있는 그룹은 보존)
+ *
+ * 안전장치:
+ *  - DRSUB: prefix 행만 대상 (PAID:.. / PAID_TC:.. / 수동 등록 행은 절대 안 건드림)
+ *  - 같은 TourCode + SubCompany 그룹에 CR 지급된 행이 하나라도 있으면 그 그룹 전체 보존
+ *  - Schedule에 BillingEntity가 없는 TourCode는 판단 불가 → 건드리지 않음
+ */
+function cleanupSelfOwnedSubTxns(dryRun) {
+  try {
+    dryRun = (dryRun !== false);
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const subSheet = ss.getSheetByName('SUB_Txn');
+    if (!subSheet) return { ok: false, error: 'SUB_Txn 시트 없음' };
+    const scheduleSheet = ss.getSheetByName('Schedule');
+    if (!scheduleSheet) return { ok: false, error: 'Schedule 시트 없음' };
+
+    // 1) Schedule.BillingEntity 맵 구축
+    const sLastRow = scheduleSheet.getLastRow();
+    const sLastCol = scheduleSheet.getLastColumn();
+    const billingMap = {};
+    if (sLastRow >= 2 && sLastCol >= 1) {
+      const sHeaders = scheduleSheet.getRange(1, 1, 1, sLastCol).getValues()[0];
+      const tcIdx = sHeaders.indexOf('TourCode');
+      const beIdx = sHeaders.indexOf('BillingEntity');
+      if (tcIdx >= 0 && beIdx >= 0) {
+        const sData = scheduleSheet.getRange(2, 1, sLastRow - 1, sLastCol).getValues();
+        sData.forEach(row => {
+          const tc = String(row[tcIdx] || '').trim();
+          if (!tc) return;
+          let be = String(row[beIdx] || '').trim();
+          if (!be) be = 'DC';
+          billingMap[tc] = be.toUpperCase().replace(/\s+/g, ' ');
+        });
+      }
+    }
+
+    // 2) SUB_Txn 스캔
+    const lastRow = subSheet.getLastRow();
+    const lastCol = subSheet.getLastColumn();
+    if (lastRow < 2) return { ok: true, dryRun: dryRun, candidates: [], blocked: [], candidateCount: 0, blockedCount: 0 };
+
+    const headers = subSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const scI = headers.indexOf('SubCompany');
+    const tcI = headers.indexOf('TourCode');
+    const dcI = headers.indexOf('Description');
+    const drI = headers.indexOf('DR');
+    const crI = headers.indexOf('CR');
+    const dtI = headers.indexOf('Date');
+    if (scI < 0 || dcI < 0) return { ok: false, error: 'SubCompany 또는 Description 컬럼 없음' };
+
+    const data = subSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const candidates = [];          // 삭제 후보
+    const groupHasPayment = {};     // key = tc + '|' + scKey → CR 있으면 true
+
+    data.forEach((row, i) => {
+      const rowIndex = i + 2;
+      const sc = String(row[scI] || '').trim();
+      const scKey = sc.toUpperCase().replace(/\s+/g, ' ');
+      const desc = String(row[dcI] || '');
+      const dr = Number(row[drI] || 0);
+      const cr = Number(row[crI] || 0);
+
+      // TourCode 추출 (시트 컬럼 우선, Description fallback)
+      let tc = tcI >= 0 ? String(row[tcI] || '').trim() : '';
+      if (!tc) {
+        const m = desc.match(/^DRSUB:\d{4}-\d{2}-\d{2}_[^_]+_(.+)$/);
+        if (m && m[1]) tc = m[1].trim();
+      }
+      if (!tc || !sc) return;
+
+      const key = tc + '|' + scKey;
+      if (cr > 0) groupHasPayment[key] = true;
+
+      if (dr <= 0) return;
+      if (!desc.startsWith('DRSUB:')) return;
+
+      const be = billingMap[tc];
+      if (!be) return; // Schedule에 없으면 건드리지 않음
+
+      if (be === scKey) {
+        // BillingEntity == SubCompany → 자기 차로 자기 손님 운행 → 삭제 후보
+        candidates.push({
+          rowIndex: rowIndex,
+          tourCode: tc,
+          subCompany: sc,
+          dr: dr,
+          date: dtI >= 0 ? String(row[dtI] || '') : '',
+          desc: desc
+        });
+      }
+    });
+
+    // CR 있는 그룹의 후보 제거 (이미 일부 지급된 그룹은 데이터 보존)
+    const safe = candidates.filter(c => {
+      const key = c.tourCode + '|' + c.subCompany.toUpperCase().replace(/\s+/g, ' ');
+      return !groupHasPayment[key];
+    });
+    const blocked = candidates.filter(c => {
+      const key = c.tourCode + '|' + c.subCompany.toUpperCase().replace(/\s+/g, ' ');
+      return groupHasPayment[key];
+    });
+
+    if (dryRun) {
+      // 합계도 같이 반환
+      const totalDR = safe.reduce((s, c) => s + Number(c.dr || 0), 0);
+      return {
+        ok: true,
+        dryRun: true,
+        candidates: safe,
+        blocked: blocked,
+        candidateCount: safe.length,
+        blockedCount: blocked.length,
+        totalDR: totalDR
+      };
+    }
+
+    // 실제 삭제 — 아래에서 위로 (인덱스 안 꼬임)
+    const sortedRows = safe.map(c => c.rowIndex).sort((a, b) => b - a);
+    sortedRows.forEach(r => subSheet.deleteRow(r));
+
+    return {
+      ok: true,
+      dryRun: false,
+      deleted: sortedRows.length,
+      blocked: blocked.length,
+      deletedRows: sortedRows.length
+    };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
 }
 
 function setupScheduleTrigger() {
