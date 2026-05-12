@@ -4947,7 +4947,8 @@ function buildSearchSelect(containerId, options){
     const it = inst.items.find(x => String(x.value) === String(val));
     if(it){
       inst.value = it.value;
-      inp.value = it.label;
+      // ★ showRawInInput 옵션 동일 적용 — 옵션 클릭 후에도 input은 raw value 유지
+      inp.value = options.showRawInInput ? String(it.value) : it.label;
       list.classList.remove('open');
       inst.onSelect(it);
     }
@@ -4976,7 +4977,10 @@ function buildSearchSelect(containerId, options){
     const it = inst.items.find(x => String(x.value) === String(val));
     if(it){
       inst.value = it.value;
-      inp.value = it.label;
+      // ★ options.showRawInInput=true 일 때는 input에 raw value 표시 (label의 emoji prefix 제거 효과)
+      //   목적: input은 항상 깨끗한 값으로 유지 → 같은 셀 재클릭해도 표시 변하지 않음
+      //         + 저장 안전망에서 input.value를 읽을 때 항상 raw value 들어가게
+      inp.value = options.showRawInInput ? String(it.value) : it.label;
     } else {
       inst.value = '';
       inp.value = '';
@@ -5970,6 +5974,7 @@ function _smRebuildDays(){
           items: vehItemsDate,
           value: d.slots[k].rego || '',
           placeholder: '차량',
+          showRawInInput: true,  // ★ input에 라벨 prefix(🏠/🏢) 표시 안 함 → 항상 raw Rego만
           onSelect: (it) => {
             _propagateSlotField(i, k, 'rego', it.value);
             // ★ input 값을 prefix 제거된 순수 Rego로 (라벨엔 🏠/🏢/⚠️ 포함)
@@ -5978,7 +5983,13 @@ function _smRebuildDays(){
           },
           onClear: () => { _schDays[i].slots[k].rego = ''; }
         });
-        if(d.slots[k].rego) _schDayCsels['rego-'+cellPrefix].setValue(d.slots[k].rego);
+        if(d.slots[k].rego){
+          _schDayCsels['rego-'+cellPrefix].setValue(d.slots[k].rego);
+          // ★ setValue가 input에 label(🏠 TV1071)을 넣는 부작용 → 즉시 raw value로 덮어쓰기
+          //   같은 셀을 재클릭/포커스해도 prefix 없는 깔끔한 값 유지 → 리포트 시 mismatch 방지
+          const _regoInp = _schDayCsels['rego-'+cellPrefix]?.input;
+          if(_regoInp) _regoInp.value = d.slots[k].rego;
+        }
         // ★ 데이터에 prefix가 들어간 경우 자동 정리 + input blur 안전망
         const regoInp = _schDayCsels['rego-'+cellPrefix]?.input;
         if(regoInp){
@@ -5998,6 +6009,7 @@ function _smRebuildDays(){
           items: driverItemsDate,
           value: d.slots[k].driver || '',
           placeholder: '드라이버',
+          showRawInInput: true,  // ★ input에 라벨 prefix 표시 안 함 → 항상 raw 이름만
           onSelect: (it) => {
             _propagateSlotField(i, k, 'driver', it.value);
             // ★ input 값을 prefix 제거된 순수 이름으로
@@ -6006,7 +6018,12 @@ function _smRebuildDays(){
           },
           onClear: () => { _schDays[i].slots[k].driver = ''; }
         });
-        if(d.slots[k].driver) _schDayCsels['driver-'+cellPrefix].setValue(d.slots[k].driver);
+        if(d.slots[k].driver){
+          _schDayCsels['driver-'+cellPrefix].setValue(d.slots[k].driver);
+          // ★ 동일: setValue가 input에 label(👤 이름)을 넣는 부작용 → raw value로 덮어쓰기
+          const _drvInp = _schDayCsels['driver-'+cellPrefix]?.input;
+          if(_drvInp) _drvInp.value = d.slots[k].driver;
+        }
         const driverInp = _schDayCsels['driver-'+cellPrefix]?.input;
         if(driverInp){
           driverInp.addEventListener('blur', () => {
@@ -6966,6 +6983,11 @@ async function saveScheduleData(){
 
   // ★ 저장 직전 안전망: 모든 csel input의 현재 값을 _schDays에 강제 동기화
   // 이유: 일부 브라우저/iOS 환경에서 input 이벤트가 누락될 수 있어 마지막 상태 강제 반영
+  // ★ 추가 안전: csel input은 라벨(🏠 TV1071 등 prefix 포함)을 표시할 수 있으므로
+  //   slot에 저장하기 전에 emoji prefix를 제거하여 항상 raw value만 저장
+  //   (DR/Schedule 매칭 시 prefix 차이로 인한 mismatch 방지)
+  const _stripEmojiPrefix = (s) => String(s||'').trim()
+    .replace(/^[\u2B50\u26A0\u{1F3E0}\u{1F3E2}\u{1F3E8}\u{1F535}\u26AA\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}\u{1F6AB}\uFE0F]+\s*/u, '').trim();
   try {
     _schDays.forEach((d, di) => {
       ['morning','fullday','evening'].forEach(sk => {
@@ -6977,7 +6999,7 @@ async function saveScheduleData(){
           ['driver','rego','course','startPlace','endPlace'].forEach(field => {
             const csel = _schDayCsels[field+'-'+prefix];
             if(csel && csel.input){
-              const v = csel.input.value.trim();
+              const v = _stripEmojiPrefix(csel.input.value);
               if(v && slot[field] !== v) slot[field] = v;
             }
           });
@@ -6989,7 +7011,7 @@ async function saveScheduleData(){
                             field === 'subVehicleNote' ? 'subveh' : field;
             const csel = _schDayCsels[cselKey+'-'+prefix];
             if(csel && csel.input){
-              const v = csel.input.value.trim();
+              const v = _stripEmojiPrefix(csel.input.value);
               if(v && slot[field] !== v) slot[field] = v;
             }
           });
