@@ -14076,6 +14076,14 @@ async function syncBalanceData(force){
   try {
     // DR 리포트 캐시 확보 (드라이버 잔액 계산에 필요)
     if(!_reportsCache) await ensureReportsCache();
+    // ★ Schedule 캐시 확보 (가이드 정보 fallback에 필요)
+    if(typeof _schCache !== 'undefined' && (!_schCache || !_schCache.length)){
+      try {
+        const schRes = await fetch(APPS_SCRIPT_URL+'?action=get_schedule');
+        const schJson = await schRes.json();
+        if(schJson.ok && schJson.rows) _schCache = schJson.rows;
+      } catch(e){ console.warn('[Schedule cache load for balance]', e); }
+    }
     const [agRes, subRes, invRes, poRes] = await Promise.all([
       fetch(APPS_SCRIPT_URL+'?action=get_agency_txn'),
       fetch(APPS_SCRIPT_URL+'?action=get_sub_txn'),
@@ -14765,6 +14773,23 @@ function _extractSubGuide(r){
   if(invNum && Array.isArray(_invHistoryCache)){
     const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNum);
     if(inv && inv.Guide) return String(inv.Guide).trim();
+  }
+  // ★ Schedule 캐시 fallback — TourCode로 매칭해서 Schedule.Guide 가져오기
+  //   SUBINV/DRSUB 거래는 가이드 컬럼이 비어있는 경우가 많지만, Schedule에는 등록돼 있음
+  const tc = String(r.TourCode||'').trim().toUpperCase();
+  if(tc && typeof _schCache !== 'undefined' && Array.isArray(_schCache)){
+    const sch = _schCache.find(s => String(s.TourCode||'').trim().toUpperCase() === tc);
+    if(sch && sch.Guide) return String(sch.Guide).trim();
+  }
+  // Description에서 TourCode 파싱 (SUBINV:invnum의 경우 invoice에서, DRSUB는 패턴에서)
+  const desc = String(r.Description||'');
+  const dm = desc.match(/^(?:DRSUB|LEDGER):\d{4}-\d{2}-\d{2}_[^_]+_(.+)$/);
+  if(dm){
+    const tc2 = dm[1].trim().toUpperCase();
+    if(typeof _schCache !== 'undefined' && Array.isArray(_schCache)){
+      const sch = _schCache.find(s => String(s.TourCode||'').trim().toUpperCase() === tc2);
+      if(sch && sch.Guide) return String(sch.Guide).trim();
+    }
   }
   return '';
 }
