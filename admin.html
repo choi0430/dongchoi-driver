@@ -10170,6 +10170,95 @@ window._debugSubRow = async function(driver, date, attraction){
   return matches;
 };
 
+// ═══════════════════════════════════════════════════════════════
+// DEBUG: 드라이버별 정산 한 번에 진단 — 차량/오너/TA/SUB/DR/순이익 + SUB breakdown
+// 사용법: await _diagDriverSettlement('유성훈')
+// ═══════════════════════════════════════════════════════════════
+window._diagDriverSettlement = async function(driver){
+  if(!driver){ console.warn('driver 이름을 입력하세요. 예: _diagDriverSettlement("유성훈")'); return; }
+  let cache = (typeof _drCache !== 'undefined') ? _drCache : null;
+  if(!cache || !cache.length){
+    console.log('⏳ Daily_Report 로드 중...');
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const json = await res.json();
+      if(json.ok && json.rows){
+        cache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
+        try { _drCache = cache; } catch(e){}
+      }
+    } catch(e){ console.error('로드 실패:', e); return; }
+  }
+  const rows = cache.filter(r => String(r.Driver||'').includes(driver));
+  if(!rows.length){ console.warn('매칭되는 행 없음:', driver); return; }
+
+  // 1) 요약 표
+  const summary = rows.map(r => {
+    const rego = String(r.Rego||'').trim();
+    const veh = (DB.V||[]).find(v => v.Rego === rego);
+    const owner = veh ? (veh.Owner||'').trim() : '(차량 없음)';
+    const isDCVeh = !owner || /dong\s*choi/i.test(owner) || (typeof DC_OWNERS!=='undefined' && DC_OWNERS.includes(owner));
+    const sub = calcSubReport(r);
+    const ta = calcAgencyTA(r);
+    const capNum = parseInt(String(r.Seats||'25').replace(/[^0-9]/g,''))||25;
+    const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
+    // SUB base 직접 조회
+    let subBase = 0;
+    try {
+      const subRates = (typeof getSubRates === 'function') ? getSubRates() : {};
+      subBase = parseFloat(subRates[owner]?.[r.Attraction]?.[capKey]) || (DB.PS?.[owner]?.[r.Attraction]?.[capKey]?.rate) || 0;
+    } catch(e){}
+    // TA base 직접 조회
+    let taBase = 0;
+    try {
+      const ce = DB.PC?.[r.Agency]?.[r.Attraction];
+      if(ce){ taBase = parseFloat((ce[capKey]||ce['21'])?.rate)||0; }
+    } catch(e){}
+    return {
+      Date: String(r.Date||'').slice(0,10),
+      Rego: rego,
+      Owner: owner.length > 18 ? owner.slice(0,15)+'...' : owner,
+      차종: capKey + 'S',
+      자사: isDCVeh ? '✓' : '',
+      Agency: String(r.Agency||'').slice(0, 15),
+      코스: r.Attraction,
+      TA: ta,
+      TA_base: taBase,
+      TA_서차지: ta - taBase,
+      SUB: sub.subCost.total,
+      SUB_base: subBase,
+      SUB_서차지: sub.subCost.total - subBase,
+      DR비: sub.drCost,
+      순이익: sub.profit,
+      Trailer_No: r.Trailer_Number || ''
+    };
+  });
+  console.log('🔍 ' + driver + ' 운행 총 ' + rows.length + '건:');
+  console.table(summary);
+
+  // 2) 자사 vs 외주 차량 카운트
+  const subOnly = summary.filter(s => !s['자사']);
+  const dcOnly = summary.filter(s => s['자사']);
+  console.log(`📊 자사 차량 ${dcOnly.length}건 / 외주 차량 ${subOnly.length}건`);
+
+  // 3) 외주 차량 운행 — 오너별 합계
+  if(subOnly.length){
+    const byOwner = {};
+    subOnly.forEach(s => {
+      if(!byOwner[s.Owner]) byOwner[s.Owner] = { 건수:0, TA합:0, SUB합:0, DR합:0, 순이익합:0 };
+      byOwner[s.Owner].건수++;
+      byOwner[s.Owner].TA합 += s.TA;
+      byOwner[s.Owner].SUB합 += s.SUB;
+      byOwner[s.Owner].DR합 += s.DR비;
+      byOwner[s.Owner].순이익합 += s.순이익;
+    });
+    console.log('🏢 외주 차량 오너별 합계:');
+    console.table(byOwner);
+  }
+
+  window._lastDriverDiag = summary;
+  return summary;
+};
+
 // ═══════════════════════════════════════
 // 정산 대시보드 (리포트 기반 자동 집계)
 // ═══════════════════════════════════════
