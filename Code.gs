@@ -6296,6 +6296,297 @@ function removeScheduleTrigger() {
 }
 
 /**
+ * 진단: SUB 인보이스 → SUB_Txn 동기화 상태 점검
+ *
+ * 목적: Sub 인보이스가 발행됐는데 잔액 화면에 안 나오는 원인 파악
+ *  - Invoices 시트의 Source='SUB' 행과 SUB_Txn의 SUBINV: 행을 1:1 대조
+ *  - sync 누락 / 중복 / 금액 불일치 / SubCompany 누락 등 케이스 식별
+ *
+ * 옵션: subCompanyFilter (선택) — 특정 SUB 업체만 점검
+ * 사용법:
+ *   - 전체 점검: diagnoseSubInvoiceSync()
+ *   - 특정 업체: diagnoseSubInvoiceSync('Sydney Edu Tours P/L')
+ *
+ * 반환: 진단 결과 객체 (Logger.log로 사람이 읽기 좋은 형식도 출력)
+ */
+function diagnoseSubInvoiceSync(subCompanyFilter) {
+  const result = {
+    ok: true,
+    summary: {},
+    issues: [],
+    invoices: [],
+    matches: []
+  };
+  const log = [];
+  const filter = subCompanyFilter ? String(subCompanyFilter).trim() : '';
+  log.push('═══ SUB 인보이스 ↔ SUB_Txn 동기화 진단 ═══');
+  if (filter) log.push('필터: SubCompany = "' + filter + '"');
+
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+
+    // ── 1) Invoices 시트에서 SUB 인보이스 추출 ──
+    const invSheet = ss.getSheetByName('Invoices');
+    if (!invSheet) {
+      result.ok = false;
+      log.push('❌ Invoices 시트 없음');
+      Logger.log(log.join('\n'));
+      return result;
+    }
+    const invLastRow = invSheet.getLastRow();
+    const invLastCol = invSheet.getLastColumn();
+    const subInvs = []; // { rowIndex, invNum, subCompany, grandTotal, source, status, issuedDate }
+    if (invLastRow >= 2 && invLastCol >= 1) {
+      const invHeaders = invSheet.getRange(1, 1, 1, invLastCol).getValues()[0];
+      const idx = {};
+      ['InvNumber','Source','SubCompany','GrandTotal','Status','IssuedDate','PeriodFrom','PeriodTo'].forEach(h => {
+        idx[h] = invHeaders.indexOf(h);
+      });
+      const invData = invSheet.getRange(2, 1, invLastRow - 1, invLastCol).getValues();
+      invData.forEach((row, i) => {
+        const source = idx.Source >= 0 ? String(row[idx.Source] || '').trim() : '';
+        const invNum = idx.InvNumber >= 0 ? String(row[idx.InvNumber] || '').trim() : '';
+        // SUB 인보이스 식별: Source='SUB' 또는 패턴 (INV-가 아니고 알파벳1~3자+숫자)
+        const isSub = source === 'SUB' ||
+          (invNum && !/^INV-/i.test(invNum) && /^[A-Z]{1,3}\d+$/.test(invNum));
+        if (!isSub) return;
+        const subCo = idx.SubCompany >= 0 ? String(row[idx.SubCompany] || '').trim() : '';
+        if (filter && subCo !== filter) return;
+        subInvs.push({
+          rowIndex: i + 2,
+          invNum: invNum,
+          subCompany: subCo,
+          grandTotal: idx.GrandTotal >= 0 ? Number(row[idx.GrandTotal] || 0) : 0,
+          source: source,
+          status: idx.Status >= 0 ? String(row[idx.Status] || '').trim() : '',
+          issuedDate: idx.IssuedDate >= 0 ? String(row[idx.IssuedDate] || '').trim() : '',
+          periodFrom: idx.PeriodFrom >= 0 ? String(row[idx.PeriodFrom] || '').trim() : '',
+          periodTo: idx.PeriodTo >= 0 ? String(row[idx.PeriodTo] || '').trim() : ''
+        });
+      });
+    }
+    log.push('\n--- 1) Invoices 시트 SUB 인보이스 ---');
+    log.push('총 ' + subInvs.length + '건' + (filter ? ' (필터 적용)' : ''));
+
+    // ── 2) SUB_Txn에서 SUBINV: 거래 추출 ──
+    const subSheet = ss.getSheetByName('SUB_Txn');
+    if (!subSheet) {
+      result.ok = false;
+      log.push('❌ SUB_Txn 시트 없음');
+      Logger.log(log.join('\n'));
+      return result;
+    }
+    const sLastRow = subSheet.getLastRow();
+    const sLastCol = subSheet.getLastColumn();
+    const subTxns = []; // SUBINV: 거래만
+    const allTxns = []; // 같은 SubCompany 전체 거래 (CR 합계용)
+    if (sLastRow >= 2 && sLastCol >= 1) {
+      const sHeaders = subSheet.getRange(1, 1, 1, sLastCol).getValues()[0];
+      const idx2 = {};
+      ['SubCompany','Description','DR','CR','InvoiceNo','Date'].forEach(h => {
+        idx2[h] = sHeaders.indexOf(h);
+      });
+      const sData = subSheet.getRange(2, 1, sLastRow - 1, sLastCol).getValues();
+      sData.forEach((row, i) => {
+        const sc = idx2.SubCompany >= 0 ? String(row[idx2.SubCompany] || '').trim() : '';
+        if (filter && sc !== filter) return;
+        const desc = idx2.Description >= 0 ? String(row[idx2.Description] || '').trim() : '';
+        const dr = idx2.DR >= 0 ? Number(row[idx2.DR] || 0) : 0;
+        const cr = idx2.CR >= 0 ? Number(row[idx2.CR] || 0) : 0;
+        const invNo = idx2.InvoiceNo >= 0 ? String(row[idx2.InvoiceNo] || '').trim() : '';
+        const tx = {
+          rowIndex: i + 2, subCompany: sc, description: desc,
+          dr: dr, cr: cr, invoiceNo: invNo,
+          date: idx2.Date >= 0 ? String(row[idx2.Date] || '').trim() : ''
+        };
+        allTxns.push(tx);
+        if (desc.indexOf('SUBINV:') === 0) {
+          subTxns.push(tx);
+        }
+      });
+    }
+    log.push('\n--- 2) SUB_Txn 시트 SUBINV: 거래 ---');
+    log.push('총 ' + subTxns.length + '건' + (filter ? ' (필터 적용)' : ''));
+
+    // ── 3) 대조 분석 ──
+    log.push('\n--- 3) 인보이스 vs SUB_Txn 대조 ---');
+    const txnByInvNum = {};
+    subTxns.forEach(t => {
+      // SUBINV:invNum 또는 InvoiceNo 칼럼으로 매칭
+      const m = String(t.description).match(/^SUBINV:(.+)$/);
+      const key = m ? m[1].trim() : (t.invoiceNo || '');
+      if (!key) return;
+      if (!txnByInvNum[key]) txnByInvNum[key] = [];
+      txnByInvNum[key].push(t);
+    });
+
+    let missing = 0, duplicate = 0, mismatch = 0, ok = 0, noSubCo = 0;
+    subInvs.forEach(inv => {
+      const item = {
+        invNum: inv.invNum,
+        subCompany: inv.subCompany,
+        grandTotal: inv.grandTotal,
+        status: inv.status,
+        issuedDate: inv.issuedDate,
+        matched: false,
+        txns: []
+      };
+
+      // 진단: SubCompany 누락
+      if (!inv.subCompany) {
+        item.issue = 'SubCompany 비어있음 (sync 대상 제외)';
+        noSubCo++;
+        result.issues.push(item);
+        log.push('⚠️ ' + inv.invNum + ' — SubCompany 비어있음 (row ' + inv.rowIndex + ')');
+        result.invoices.push(item);
+        return;
+      }
+
+      // 진단: 금액 0
+      if (inv.grandTotal <= 0) {
+        item.issue = 'GrandTotal 0 이하 (sync 대상 제외)';
+        result.issues.push(item);
+        log.push('⚠️ ' + inv.invNum + ' — GrandTotal=' + inv.grandTotal + ' (sync 안 됨)');
+        result.invoices.push(item);
+        return;
+      }
+
+      const matchedTxns = txnByInvNum[inv.invNum] || [];
+      item.txns = matchedTxns;
+
+      if (matchedTxns.length === 0) {
+        item.issue = 'SUB_Txn에 sync 안 됨';
+        missing++;
+        result.issues.push(item);
+        log.push('❌ ' + inv.invNum + ' (' + inv.subCompany + ') $' + inv.grandTotal + ' — SUB_Txn에 sync 안 됨');
+      } else if (matchedTxns.length > 1) {
+        item.issue = '중복 ' + matchedTxns.length + '건';
+        duplicate++;
+        result.issues.push(item);
+        log.push('⚠️ ' + inv.invNum + ' — SUB_Txn에 ' + matchedTxns.length + '건 중복');
+      } else {
+        const t = matchedTxns[0];
+        // 금액 일치 확인
+        if (Math.abs(t.dr - inv.grandTotal) > 0.01) {
+          item.issue = '금액 불일치: 인보이스 $' + inv.grandTotal + ' vs SUB_Txn DR $' + t.dr;
+          mismatch++;
+          result.issues.push(item);
+          log.push('⚠️ ' + inv.invNum + ' — 금액 불일치 $' + inv.grandTotal + ' vs DR $' + t.dr);
+        } else {
+          item.matched = true;
+          ok++;
+          result.matches.push(item);
+        }
+      }
+      result.invoices.push(item);
+    });
+
+    // ── 4) 같은 SubCompany 잔액 시뮬레이션 ──
+    log.push('\n--- 4) SubCompany별 잔액 시뮬레이션 ---');
+    const balByCompany = {};
+    allTxns.forEach(t => {
+      const sc = t.subCompany || '(없음)';
+      if (!balByCompany[sc]) balByCompany[sc] = { dr: 0, cr: 0, drCount: 0, crCount: 0 };
+      balByCompany[sc].dr += t.dr;
+      balByCompany[sc].cr += t.cr;
+      if (t.dr > 0) balByCompany[sc].drCount++;
+      if (t.cr > 0) balByCompany[sc].crCount++;
+    });
+    Object.keys(balByCompany).sort().forEach(sc => {
+      const b = balByCompany[sc];
+      log.push('  ' + sc + ' → DR $' + b.dr.toFixed(2) + ' (' + b.drCount + '건) / CR $' + b.cr.toFixed(2) + ' (' + b.crCount + '건) = $' + (b.dr - b.cr).toFixed(2));
+    });
+
+    result.summary = {
+      totalInvoices: subInvs.length,
+      totalSubTxns: subTxns.length,
+      ok: ok,
+      missing: missing,
+      duplicate: duplicate,
+      mismatch: mismatch,
+      noSubCompany: noSubCo
+    };
+
+    log.push('\n═══ 요약 ═══');
+    log.push('  ✅ 정상: ' + ok + '건');
+    log.push('  ❌ Sync 누락: ' + missing + '건');
+    log.push('  ⚠️ 중복: ' + duplicate + '건');
+    log.push('  ⚠️ 금액 불일치: ' + mismatch + '건');
+    log.push('  ⚠️ SubCompany 누락: ' + noSubCo + '건');
+    log.push('');
+
+    Logger.log(log.join('\n'));
+    return result;
+  } catch (e) {
+    result.ok = false;
+    result.error = String(e);
+    Logger.log('진단 오류: ' + e);
+    return result;
+  }
+}
+
+/**
+ * 누락된 SUB 인보이스를 SUB_Txn에 재동기화
+ *
+ * diagnoseSubInvoiceSync()에서 missing 으로 식별된 인보이스를 SUB_Txn에 등록
+ * 안전장치: SubCompany 비어있거나 GrandTotal=0 이면 스킵
+ * 멱등: 이미 SUB_Txn에 있으면 추가 등록 안 함
+ *
+ * 사용법:
+ *   - 전체: resyncMissingSubInvoices()
+ *   - 특정 업체: resyncMissingSubInvoices('Sydney Edu Tours P/L')
+ */
+function resyncMissingSubInvoices(subCompanyFilter) {
+  const result = { ok: true, registered: 0, skipped: 0, errors: [] };
+  try {
+    const diag = diagnoseSubInvoiceSync(subCompanyFilter);
+    if (!diag.ok) return { ok: false, error: diag.error || 'diagnose failed' };
+
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const subSheet = ss.getSheetByName('SUB_Txn');
+    if (!subSheet) return { ok: false, error: 'SUB_Txn 시트 없음' };
+
+    const sLastCol = subSheet.getLastColumn();
+    const headers = subSheet.getRange(1, 1, 1, sLastCol).getValues()[0];
+
+    // missing 건만 추출
+    const missing = diag.invoices.filter(i => i.issue === 'SUB_Txn에 sync 안 됨');
+    Logger.log('재동기화 대상: ' + missing.length + '건');
+
+    missing.forEach(inv => {
+      try {
+        const issuedDate = (inv.issuedDate || '').slice(0, 10);
+        const newRow = {};
+        newRow.SubCompany = inv.subCompany;
+        newRow.Category = 'Outsourcing';
+        newRow.Date = issuedDate;
+        newRow.InvoiceNo = inv.invNum;
+        newRow.Description = 'SUBINV:' + inv.invNum;
+        newRow.DR = inv.grandTotal;
+        newRow.CR = 0;
+        newRow.Remark = inv.invNum + ' (재동기화)';
+
+        const rowArr = headers.map(h => newRow[h] !== undefined ? newRow[h] : '');
+        subSheet.appendRow(rowArr);
+        result.registered++;
+        Logger.log('  ✅ ' + inv.invNum + ' 등록됨');
+      } catch (e) {
+        result.errors.push({ invNum: inv.invNum, error: String(e) });
+        Logger.log('  ❌ ' + inv.invNum + ' 실패: ' + e);
+      }
+    });
+
+    result.skipped = diag.invoices.length - missing.length;
+    Logger.log('\n재동기화 완료: 등록 ' + result.registered + '건, 스킵 ' + result.skipped + '건, 오류 ' + result.errors.length + '건');
+    return result;
+  } catch (e) {
+    result.ok = false;
+    result.error = String(e);
+    return result;
+  }
+}
+
+/**
  * 진단: Schedule 시트 + 트리거 상태를 한 번에 점검
  * Apps Script 에디터에서 직접 실행 → Logger 확인
  */
