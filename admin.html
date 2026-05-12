@@ -10043,35 +10043,47 @@ function calcAgencyTA(r){
 
 // ═══════════════════════════════════════════════════════════════
 // DEBUG: 특정 DR 행의 TA/SUB 계산 분해 표시
-// 사용법: 콘솔에서 _debugSubRow('이재원', '2026-05-08', 'Airport Transfer')
-//        또는 _debugSubRow('이재원', '2026-05-08')  // 같은 날 모두 출력
-//        또는 _debugSubRow('이재원')                // 그 드라이버 전체
+// 사용법: 콘솔에서 await _debugSubRow('이재원', '2026-05-08', 'Airport Transfer')
+//        또는 await _debugSubRow('이재원', '2026-05-08')  // 같은 날 모두
+//        또는 await _debugSubRow('이재원')                // 그 드라이버 전체
+// 캐시 비어있으면 자동으로 Daily_Report 로드
 // ═══════════════════════════════════════════════════════════════
-window._debugSubRow = function(driver, date, attraction){
-  // 우선순위: window._drCache → _settleData._raw → 다른 캐시
+window._debugSubRow = async function(driver, date, attraction){
   let cache = null;
   let cacheSource = '';
+
+  // 1) 캐시 탐색
   if(typeof _drCache !== 'undefined' && _drCache && _drCache.length){
     cache = _drCache;
     cacheSource = '_drCache (Daily_Report 전체)';
   } else if(typeof _settleData !== 'undefined' && _settleData && _settleData.length){
     cache = _settleData.map(d => d._raw).filter(Boolean);
     cacheSource = '_settleData (정산 기간 한정)';
-  } else if(typeof _reportsCache !== 'undefined' && _reportsCache && _reportsCache.length){
-    cache = _reportsCache;
-    cacheSource = '_reportsCache';
   }
-  if(!cache || !cache.length){
-    console.warn('❌ 리포트 캐시 비어있음 — 정산 페이지를 열어서 데이터 로드를 먼저 해주세요.');
-    console.log('상태:',
-      '_drCache=' + (typeof _drCache !== 'undefined' ? (_drCache?.length || 0) : 'undefined'),
-      '_settleData=' + (typeof _settleData !== 'undefined' ? (_settleData?.length || 0) : 'undefined'),
-      '_reportsCache=' + (typeof _reportsCache !== 'undefined' ? (_reportsCache?.length || 0) : 'undefined')
-    );
-    return;
-  }
-  console.log('📦 캐시 소스:', cacheSource, '(' + cache.length + '행)');
 
+  // 2) 캐시 없으면 자동 로드
+  if(!cache || !cache.length){
+    console.log('⏳ 캐시 비어있음 — Daily_Report 자동 로드 중...');
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const json = await res.json();
+      if(json.ok && json.rows){
+        cache = json.rows.map((r,i) => ({...r, _rowIndex: i+2}));
+        try { _drCache = cache; } catch(e){}
+        cacheSource = 'API 직접 로드 (' + cache.length + '행)';
+        console.log('✅ 로드 완료:', cache.length, '행');
+      } else {
+        console.error('❌ API 응답에 rows 없음:', json);
+        return;
+      }
+    } catch(e){
+      console.error('❌ Daily_Report 로드 실패:', e);
+      return;
+    }
+  }
+  console.log('📦 캐시 소스:', cacheSource, '·', cache.length, '행');
+
+  // 3) 필터링
   const matches = cache.filter(r => {
     const dDate = String(r.Date||'').slice(0,10);
     const dDrv = String(r.Driver||'').trim();
@@ -10082,7 +10094,6 @@ window._debugSubRow = function(driver, date, attraction){
   });
   if(matches.length === 0){
     console.warn('❌ 매칭되는 행 없음');
-    // 추가 정보 — 그 드라이버의 다른 날짜라도 보여주기
     if(driver){
       const drvRows = cache.filter(r => String(r.Driver||'').includes(driver));
       if(drvRows.length){
@@ -10092,8 +10103,10 @@ window._debugSubRow = function(driver, date, attraction){
     }
     return matches;
   }
+
+  // 4) 진단 출력
   matches.forEach((r, i) => {
-    console.group(`📋 행 ${i+1}/${matches.length}: ${String(r.Date||'').slice(0,10)} · ${r.Driver} · ${r.Attraction} · ${r.Rego}`);
+    console.group('📋 행 ' + (i+1) + '/' + matches.length + ': ' + String(r.Date||'').slice(0,10) + ' · ' + r.Driver + ' · ' + r.Attraction + ' · ' + r.Rego);
     console.log('Raw DR 필드:', {
       Agency: r.Agency, Seats: r.Seats, Rego: r.Rego,
       SVC_Charge: r.SVC_Charge, Hotel_Surcharge: r.Hotel_Surcharge,
@@ -10114,7 +10127,6 @@ window._debugSubRow = function(driver, date, attraction){
       isSub: sub.isSub, scenario: sub.scenario,
       trailerSplitToDC: sub.trailerSplitToDC
     });
-    // Trailer 진단
     if(r.Trailer_Number){
       const tn = String(r.Trailer_Number).trim();
       const tRow = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === tn);
