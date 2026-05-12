@@ -13817,6 +13817,70 @@ window.markSubInvPaid = markSubInvPaid;
 
 // ═══════════════════════════════════════════════════════════════════
 // BALANCE MODULE (거래처 잔액 관리: 여행사 / 외주 SUB / 드라이버)
+// ─── PAYOUT OVERRIDE: 서브 회사별 투어 포함/제외 ──────────────────
+// _payoutOverrides: { tourCode: { subCompanyNormalizedUpper: 'INCLUDE'|'EXCLUDE', ... } }
+// _scheduleBillingMap: { tourCode: BillingEntityNormalizedUpper }
+let _payoutOverrides = {};
+let _scheduleBillingMap = {};
+function _normCo(n){ return String(n||'').trim().toUpperCase().replace(/\s+/g,' '); }
+async function loadPayoutOverrides(){
+  try {
+    const r = await api('get_payout_overrides', null, 'GET');
+    if (r && r.ok) {
+      _payoutOverrides = r.overrides || {};
+      _scheduleBillingMap = r.billingEntities || {};
+    }
+  } catch(e) { console.warn('[payout-override] load failed', e); }
+}
+// 자동 판단: BillingEntity == SubCompany 면 자동 제외
+function _autoExclude(tourCode, subCompany){
+  const be = _scheduleBillingMap[tourCode];
+  if (!be) return false;
+  return be === _normCo(subCompany);
+}
+// 최종 제외 여부 (자동 + 수동 오버라이드)
+function _isTourPayoutExcluded(tourCode, subCompany){
+  const subKey = _normCo(subCompany);
+  const ov = _payoutOverrides[tourCode];
+  if (ov && ov[subKey]) {
+    return ov[subKey] === 'EXCLUDE';
+  }
+  return _autoExclude(tourCode, subCompany);
+}
+// 오버라이드 상태 (UI 표시용): 'AUTO_INCL' | 'AUTO_EXCL' | 'MANUAL_INCL' | 'MANUAL_EXCL'
+function _payoutOverrideState(tourCode, subCompany){
+  const subKey = _normCo(subCompany);
+  const ov = _payoutOverrides[tourCode];
+  const auto = _autoExclude(tourCode, subCompany);
+  if (ov && ov[subKey]) {
+    return ov[subKey] === 'EXCLUDE' ? 'MANUAL_EXCL' : 'MANUAL_INCL';
+  }
+  return auto ? 'AUTO_EXCL' : 'AUTO_INCL';
+}
+async function toggleTourPayoutOverride(tourCode, subCompany){
+  // 3-state 순환: AUTO → 반대값 강제 → AUTO
+  const state = _payoutOverrideState(tourCode, subCompany);
+  let action = 'AUTO';
+  if (state === 'AUTO_INCL') action = 'EXCLUDE';          // 자동포함 → 강제제외
+  else if (state === 'AUTO_EXCL') action = 'INCLUDE';     // 자동제외 → 강제포함
+  else if (state === 'MANUAL_INCL') action = 'AUTO';      // 강제포함 → 자동복귀
+  else if (state === 'MANUAL_EXCL') action = 'AUTO';      // 강제제외 → 자동복귀
+  try {
+    const r = await api('set_payout_override', {data: {tourCode, subCompany, action}}, 'POST');
+    if (!r || !r.ok) { alert('저장 실패: ' + (r && r.error || 'unknown')); return; }
+    // 로컬 캐시 업데이트
+    const subKey = _normCo(subCompany);
+    if (!_payoutOverrides[tourCode]) _payoutOverrides[tourCode] = {};
+    if (action === 'AUTO') {
+      delete _payoutOverrides[tourCode][subKey];
+      if (Object.keys(_payoutOverrides[tourCode]).length === 0) delete _payoutOverrides[tourCode];
+    } else {
+      _payoutOverrides[tourCode][subKey] = action;
+    }
+    renderBalSubList();
+  } catch(e) { alert('저장 오류: ' + e); }
+}
+
 // ═══════════════════════════════════════════════════════════════════
 let _balAgencyTxns = [];   // Agency_Txn rows from sheet
 let _balInvoices = [];     // Invoices 시트 (PeriodTo로 정확한 due date 계산용)
@@ -13848,14 +13912,23 @@ async function syncBalanceData(force){
   try {
     // DR 리포트 캐시 확보 (드라이버 잔액 계산에 필요)
     if(!_reportsCache) await ensureReportsCache();
-    const [agRes, subRes, invRes] = await Promise.all([
+    const [agRes, subRes, invRes, poRes] = await Promise.all([
       fetch(APPS_SCRIPT_URL+'?action=get_agency_txn'),
       fetch(APPS_SCRIPT_URL+'?action=get_sub_txn'),
-      fetch(APPS_SCRIPT_URL+'?action=get_invoices')
+      fetch(APPS_SCRIPT_URL+'?action=get_invoices'),
+      fetch(APPS_SCRIPT_URL+'?action=get_payout_overrides')
     ]);
     const agJson = await agRes.json();
     const subJson = await subRes.json();
     const invJson = await invRes.json();
+    // ★ Payout Override 로드 — 서브 회사별 투어 포함/제외 설정
+    try {
+      const poJson = await poRes.json();
+      if (poJson && poJson.ok) {
+        _payoutOverrides = poJson.overrides || {};
+        _scheduleBillingMap = poJson.billingEntities || {};
+      }
+    } catch(e) { console.warn('[payout-override] load failed:', e); }
     if(agJson.ok && agJson.rows) _balAgencyTxns = agJson.rows;
     if(subJson.ok && subJson.rows) _balSubTxns = subJson.rows;
     if(invJson.ok && invJson.rows) {
@@ -14178,7 +14251,6 @@ async function _syncDailyReportSubToSubTxn(){
         Date: dateISO,
         FinishDate: dateISO,
         InvoiceNo: '',
-        TourCode: tourCode || '',
         Description: drsubKey,
         DR: subCost,
         CR: 0,
@@ -14623,10 +14695,32 @@ function _subBalances(){
         lastISO: g.lastISO,
         balance: g.dr - g.cr,
         dueDate: _calcSubDueFromLastDate(g.lastISO),
-        guides: Array.from(g.guideSet || [])
+        guides: Array.from(g.guideSet || []),
+        // ★ Payout override: 자동 + 수동 통합 판단
+        excluded: g.tourCode ? _isTourPayoutExcluded(g.tourCode, a.name) : false,
+        overrideState: g.tourCode ? _payoutOverrideState(g.tourCode, a.name) : 'AUTO_INCL'
       }))
       .sort((a,b)=> (a.lastISO||'').localeCompare(b.lastISO||''));
-    return {...a, outsourcingBal, wageBal, balance: outsourcingBal + wageBal, driverWageTotal, tourGroups};
+    // ★ 외주 잔액을 포함분/제외분으로 분리
+    let includedDr = 0, includedCr = 0, excludedDr = 0, excludedCr = 0;
+    tourGroups.forEach(g => {
+      if (g.excluded) { excludedDr += g.dr; excludedCr += g.cr; }
+      else { includedDr += g.dr; includedCr += g.cr; }
+    });
+    const outsourcingBalIncl = includedDr - includedCr;
+    const outsourcingBalExcl = excludedDr - excludedCr;
+    // 미식별 항목(투어코드 없음)은 dr/cr 합계에서 위 분류 안 됨 → 그 차이만큼은 무조건 포함
+    const unassignedDr = a.dr - includedDr - excludedDr;
+    const unassignedCr = a.cr - includedCr - excludedCr;
+    const finalIncludedBal = outsourcingBalIncl + (unassignedDr - unassignedCr);
+    return {...a, outsourcingBal, wageBal,
+      balance: finalIncludedBal + wageBal,  // ★ 합계에서 제외분 빠짐
+      outsourcingBalIncl: finalIncludedBal,
+      outsourcingBalExcl,
+      includedDr: includedDr + unassignedDr,
+      includedCr: includedCr + unassignedCr,
+      excludedDr, excludedCr,
+      driverWageTotal, tourGroups};
   }).sort((a,b)=>b.balance-a.balance);
 }
 
@@ -14672,21 +14766,47 @@ function renderBalSubList(){
         <div style="display:flex;justify-content:space-between;font-size:10px;padding:4px 0 0 0;margin-top:4px;border-top:1px solid #c4b5fd;font-weight:700;color:#7c3aed;"><span>\uD569\uACC4 (\uCC38\uACE0)</span><span style="font-family:var(--fn);">$${(a.driverWageTotal||0).toLocaleString('en',{minimumFractionDigits:2})}</span></div>
       </div>` : '';
 
-    // ★ 투어코드별 그룹 미니 리스트 (외주 항목만, 잔액>0인 것 우선)
-    const tg = (a.tourGroups||[]).filter(g => g.balance > 0.01 || g.dr > 0);
-    const tgHtml = tg.length > 0 ? `
+    // ★ 투어코드별 그룹 미니 리스트 — 포함분/제외분 분리 렌더링 + 수동 토글
+    const tgAll = (a.tourGroups||[]).filter(g => g.balance > 0.01 || g.dr > 0);
+    const tgIncl = tgAll.filter(g => !g.excluded);
+    const tgExcl = tgAll.filter(g => g.excluded);
+    const _renderTourGroup = (g, isExcluded) => {
+      const balColor = isExcluded ? 'var(--t3)' : (g.balance > 0.01 ? '#dc2626' : (g.balance < -0.01 ? 'var(--ac)' : 'var(--gn)'));
+      const dueLabel = (!isExcluded && g.dueDate) ? `<span style="color:#dc2626;background:#fef2f2;padding:1px 5px;border-radius:3px;font-weight:700;">📅 ${fmtDate(g.dueDate)}</span>` : '';
+      const tcLabel = g.tourCode ? escH(g.tourCode) : '<span style="color:var(--t3);">(미식별)</span>';
+      const guideLabel = (g.guides && g.guides.length) ? `<span style="color:#0891b2;background:#ecfeff;padding:1px 5px;border-radius:3px;font-weight:600;margin-left:3px;">👤 ${g.guides.map(escH).join(', ')}</span>` : '';
+      // 오버라이드 배지 + 토글 버튼 (투어코드 있을 때만)
+      let toggleBtn = '';
+      if (g.tourCode) {
+        const stateLabels = {
+          'AUTO_INCL':   { text: '자동 포함',  bg: '#dbeafe', fg: '#1e40af', title: '자동 판단(포함). 클릭 → 강제 제외' },
+          'AUTO_EXCL':   { text: '자동 제외',  bg: '#fee2e2', fg: '#991b1b', title: '자동 판단(제외). 클릭 → 강제 포함' },
+          'MANUAL_INCL': { text: '강제 포함',  bg: '#fef3c7', fg: '#92400e', title: '수동 포함. 클릭 → 자동으로 복귀' },
+          'MANUAL_EXCL': { text: '강제 제외',  bg: '#f3e8ff', fg: '#6b21a8', title: '수동 제외. 클릭 → 자동으로 복귀' }
+        };
+        const st = stateLabels[g.overrideState] || stateLabels['AUTO_INCL'];
+        const safeName = (a.name || '').replace(/'/g,"\\'");
+        const safeTC = (g.tourCode || '').replace(/'/g,"\\'");
+        toggleBtn = `<button onclick="event.stopPropagation();toggleTourPayoutOverride('${safeTC}','${safeName}')" title="${st.title}" style="background:${st.bg};color:${st.fg};border:none;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700;cursor:pointer;margin-left:4px;white-space:nowrap;">${st.text}</button>`;
+      }
+      const amtStyle = isExcluded ? 'text-decoration:line-through;opacity:.6;' : '';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;font-size:10px;color:var(--t2);padding:3px 0;border-top:1px dashed #ddd6fe;">
+        <span style="flex:1;min-width:0;"><b style="color:${isExcluded?'var(--t3)':'#6d28d9'};">${tcLabel}</b> ${guideLabel} <span style="color:var(--t3);">(${g.count}건)</span> ${dueLabel} ${toggleBtn}</span>
+        <span style="font-family:var(--fn);font-weight:700;color:${balColor};white-space:nowrap;${amtStyle}">$${Math.abs(g.balance).toLocaleString('en',{minimumFractionDigits:2})}</span>
+      </div>`;
+    };
+    const tgInclHtml = tgIncl.length > 0 ? tgIncl.map(g => _renderTourGroup(g, false)).join('') : '';
+    const tgExclHtml = tgExcl.length > 0 ? `
+        <div style="margin-top:6px;padding-top:6px;border-top:2px dashed #c4b5fd;font-size:10px;font-weight:700;color:#6b7280;display:flex;justify-content:space-between;align-items:center;">
+          <span>📎 참조 — 계산 제외 (${tgExcl.length}건)</span>
+          <span style="font-family:var(--fn);color:var(--t3);">$${(a.excludedDr - a.excludedCr).toLocaleString('en',{minimumFractionDigits:2})}</span>
+        </div>
+        ${tgExcl.map(g => _renderTourGroup(g, true)).join('')}` : '';
+    const tgHtml = (tgIncl.length + tgExcl.length) > 0 ? `
       <div style="margin-top:8px;padding:8px;background:#faf5ff;border-left:3px solid #c4b5fd;border-radius:6px;">
-        <div style="font-size:10px;font-weight:700;color:#6d28d9;margin-bottom:5px;">\uD83C\uDFF7 \uD22C\uC5B4\ucf54\ub4dc\ubcc4 \ubaa8\uc544\ubcf4\uae30 (${tg.length}\uAC1C)</div>
-        ${tg.map(g => {
-          const balColor = g.balance > 0.01 ? '#dc2626' : (g.balance < -0.01 ? 'var(--ac)' : 'var(--gn)');
-          const dueLabel = g.dueDate ? `<span style="color:#dc2626;background:#fef2f2;padding:1px 5px;border-radius:3px;font-weight:700;">\uD83D\uDCC5 ${fmtDate(g.dueDate)}</span>` : '';
-          const tcLabel = g.tourCode ? escH(g.tourCode) : '<span style="color:var(--t3);">(\uBBF8\uC2DD\uBCC4)</span>';
-          const guideLabel = (g.guides && g.guides.length) ? `<span style="color:#0891b2;background:#ecfeff;padding:1px 5px;border-radius:3px;font-weight:600;margin-left:3px;">\uD83D\uDC64 ${g.guides.map(escH).join(', ')}</span>` : '';
-          return `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;font-size:10px;color:var(--t2);padding:3px 0;border-top:1px dashed #ddd6fe;">
-            <span style="flex:1;min-width:0;"><b style="color:#6d28d9;">${tcLabel}</b> ${guideLabel} <span style="color:var(--t3);">(${g.count}\uAC74)</span> ${dueLabel}</span>
-            <span style="font-family:var(--fn);font-weight:700;color:${balColor};white-space:nowrap;">$${Math.abs(g.balance).toLocaleString('en',{minimumFractionDigits:2})}</span>
-          </div>`;
-        }).join('')}
+        <div style="font-size:10px;font-weight:700;color:#6d28d9;margin-bottom:5px;">🏷 투어코드별 모아보기 (${tgIncl.length + tgExcl.length}개)${tgExcl.length>0?` <span style="color:var(--t3);font-weight:400;">· 제외 ${tgExcl.length}건</span>`:''}</div>
+        ${tgInclHtml}
+        ${tgExclHtml}
       </div>` : '';
 
     return `
@@ -14697,7 +14817,7 @@ function renderBalSubList(){
           <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--rd)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px;font-size:10px;color:var(--t3);">
-          <div>외주: DR $${a.dr.toLocaleString()} / CR $${a.cr.toLocaleString()} = <span style="color:${a.outsourcingBal>0?'var(--or)':'var(--gn)'}">$${a.outsourcingBal.toLocaleString()}</span></div>
+          <div>외주: DR $${(a.includedDr||a.dr).toLocaleString()} / CR $${(a.includedCr||a.cr).toLocaleString()} = <span style="color:${a.outsourcingBalIncl>0?'var(--or)':'var(--gn)'}">$${(a.outsourcingBalIncl||a.outsourcingBal).toLocaleString()}</span></div>
           <div>급여: DR $${a.wageDr.toLocaleString()} / CR $${a.wageCr.toLocaleString()} = <span style="color:${a.wageBal>0?'var(--or)':'var(--gn)'}">$${a.wageBal.toLocaleString()}</span></div>
         </div>
       </div>
@@ -16201,69 +16321,8 @@ function _quickAddPayment(type, name, balance){
     });
     const unpaidTxns = Object.values(txnByInv).filter(g => g.remaining > 0.01);
 
-    // 3순위: InvoiceNo가 비어있는 미지급 DR 거래 → TourCode별로 그룹화
-    //         SUB_Txn 시트엔 TourCode 전용 컬럼이 없으므로 Description의 'DRSUB:DATE_REGO_TOURCODE'
-    //         형식에서 TourCode 부분을 파싱하여 그룹 키로 사용
-    const _extractTC = (tx) => {
-      // 1) 시트에 TourCode 필드가 있으면 우선 사용 (향후 컬럼 추가 대비)
-      const direct = String(tx.TourCode||'').trim();
-      if(direct) return direct.toUpperCase();
-      // 2) Description의 DRSUB:YYYY-MM-DD_REGO_TOURCODE 파싱
-      const desc = String(tx.Description||'');
-      const m = desc.match(/^DRSUB:\d{4}-\d{2}-\d{2}_[^_]*_(.+)$/);
-      if(m && m[1]) return m[1].trim().toUpperCase();
-      // 3) Remark의 마지막 슬래시 토큰 시도 ("어트랙션 / Rego / TourCode / D:.. / G:..")
-      //    안전을 위해 Remark 파싱은 생략 — TourCode가 확실치 않음
-      return '';
-    };
-    const txnByTC = {};
-    (_balSubTxns||[]).forEach(tx => {
-      if((tx.SubCompany||'').trim() !== name) return;
-      const dr = Number(tx.DR)||0;
-      if(dr <= 0) return;
-      const invNo = String(tx.InvoiceNo||'').trim();
-      if(invNo) return; // InvoiceNo 있는 건 위에서 처리됨
-      const tc = _extractTC(tx);
-      if(!tc) return; // TourCode 추출 실패 → fallthrough
-      const desc = String(tx.Description||'');
-      if(desc.startsWith('PAID:') || desc.startsWith('PAID_TC:')) return;
-      if(!txnByTC[tc]){
-        txnByTC[tc] = {
-          type: 'tourcode',
-          tourCode: tc,
-          invNum: tc, // 셀렉터 표시용
-          total: 0,
-          paid: 0,
-          remaining: 0,
-          dates: [],
-          descs: []
-        };
-      }
-      txnByTC[tc].total += dr;
-      const txDate = tx.Date || tx.FinishDate || '';
-      if(txDate) txnByTC[tc].dates.push(txDate);
-      if(desc) txnByTC[tc].descs.push(desc);
-    });
-    // TourCode별 기지급 차감 — PAID_TC:{tourcode} Description으로 식별
-    Object.keys(txnByTC).forEach(tc => {
-      const paid = (_balSubTxns||[]).filter(t => {
-        if((t.SubCompany||'').trim() !== name) return false;
-        if(!(Number(t.CR||0) > 0)) return false;
-        const desc = String(t.Description||'');
-        // PAID_TC:tourcode 정확 매칭
-        if(desc === `PAID_TC:${tc}`) return true;
-        // 시트에 TourCode 컬럼이 있고 PAID 표시 거래라면
-        const t_tc = String(t.TourCode||'').trim().toUpperCase();
-        if(t_tc === tc && (desc.startsWith('PAID_TC:') || desc.startsWith('PAID:'))) return true;
-        return false;
-      }).reduce((s,t)=>s+Number(t.CR||0),0);
-      txnByTC[tc].paid = paid;
-      txnByTC[tc].remaining = txnByTC[tc].total - paid;
-    });
-    const unpaidTCs = Object.values(txnByTC).filter(g => g.remaining > 0.01);
-
-    // 통합 목록 — 인보이스 → 인보이스 거래 → TourCode 거래 순
-    const allUnpaid = [...unpaidInvs, ...unpaidTxns, ...unpaidTCs];
+    // 통합 목록
+    const allUnpaid = [...unpaidInvs, ...unpaidTxns];
 
     if(allUnpaid.length > 0){
       _showSubInvoiceSelectorModal(name, allUnpaid);
@@ -16325,16 +16384,14 @@ function _quickAddPayment(type, name, balance){
 //   - type:'txn'     = SUB_Txn에 InvoiceNo 있는 거래 → 직접 CR 등록 (PAID:invNum 형식)
 // ─────────────────────────────────────────────────────
 function _showSubInvoiceSelectorModal(subName, items){
-  // 정렬 — 인보이스 발행된 것 우선, 그 다음 발행 안 된 거래, 그 다음 TourCode 그룹
-  const _typeOrder = (t) => t === 'invoice' ? 0 : t === 'txn' ? 1 : 2;
+  // 정렬 — 인보이스 발행된 것 우선, 그 다음 발행 안 된 거래
   const sorted = items.slice().sort((a,b)=>{
-    if(a.type !== b.type) return _typeOrder(a.type) - _typeOrder(b.type);
+    if(a.type !== b.type) return a.type === 'invoice' ? -1 : 1;
     return String(a.invNum).localeCompare(String(b.invNum));
   });
   const totalRemaining = sorted.reduce((s,i)=>s+i.remaining, 0);
   const invCount = sorted.filter(i=>i.type==='invoice').length;
   const txnCount = sorted.filter(i=>i.type==='txn').length;
-  const tcCount  = sorted.filter(i=>i.type==='tourcode').length;
 
   const overlay = document.createElement('div');
   overlay.id = 'sis-overlay';
@@ -16343,7 +16400,7 @@ function _showSubInvoiceSelectorModal(subName, items){
     <div style="background:var(--sf);border-radius:16px;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.25);">
       <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:4px;">💰 ${escH(subName)} 지급 처리</div>
       <div style="font-size:11px;color:var(--t3);margin-bottom:12px;">
-        ${invCount > 0 ? `📄 발행된 인보이스 ${invCount}건` : ''}${invCount > 0 && (txnCount > 0 || tcCount > 0) ? ' · ' : ''}${txnCount > 0 ? `📌 미발행 거래 ${txnCount}건` : ''}${txnCount > 0 && tcCount > 0 ? ' · ' : ''}${tcCount > 0 ? `🎫 투어코드 ${tcCount}건` : ''}
+        ${invCount > 0 ? `📄 발행된 인보이스 ${invCount}건` : ''}${invCount > 0 && txnCount > 0 ? ' · ' : ''}${txnCount > 0 ? `📌 미발행 거래 ${txnCount}건` : ''}
         · 합계 잔액 <b style="color:var(--or);">$${totalRemaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
       </div>
 
@@ -16356,12 +16413,9 @@ function _showSubInvoiceSelectorModal(subName, items){
       <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;">
         ${sorted.map(i => {
           const isInv = i.type === 'invoice';
-          const isTC  = i.type === 'tourcode';
           const badge = isInv
             ? '<span style="background:#dbeafe;color:#1e40af;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">📄 발행</span>'
-            : isTC
-              ? '<span style="background:#ede9fe;color:#5b21b6;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">🎫 투어코드</span>'
-              : '<span style="background:#fef3c7;color:#92400e;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">📌 거래</span>';
+            : '<span style="background:#fef3c7;color:#92400e;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;">📌 거래</span>';
           let subLine = '';
           if(isInv){
             subLine = (i.periodFrom?escH(i.periodFrom):'') + (i.periodTo?' ~ '+escH(i.periodTo):'');
@@ -16410,9 +16464,6 @@ function _showSubInvoiceSelectorModal(subName, items){
         } else {
           toast('SUB 인보이스 지급 함수를 찾을 수 없습니다','er');
         }
-      } else if(itemType === 'tourcode'){
-        // TourCode 그룹 → TourCode 기반 PAID_TC 거래 등록 모달
-        _showSubTourCodePaymentModal(subName, invNum, items.find(i=>i.invNum===invNum && i.type==='tourcode'));
       } else {
         // SUB_Txn 거래 → 직접 CR 등록 모달 (InvoiceNo prefilled, PAID:invNum 형식)
         _showSubTxnPaymentModal(subName, invNum, items.find(i=>i.invNum===invNum));
@@ -16540,124 +16591,6 @@ function _showSubTxnPaymentModal(subName, invNum, item){
         toast(isFull
           ? `✅ ${invNum} 전액 지급 완료 ($${payAmt.toLocaleString()})`
           : `💰 ${invNum} 부분지급 등록 ($${payAmt.toLocaleString()})`,
-          'ok');
-        // 화면 새로고침
-        if(typeof renderBalSubList === 'function') renderBalSubList();
-        if(typeof renderBalWeeklySummary === 'function') renderBalWeeklySummary();
-      } else {
-        toast('❌ 저장 실패: '+(j.error||'unknown'),'er');
-      }
-    } catch(e){
-      overlay.remove();
-      toast('❌ 저장 오류: '+e.message,'er');
-    }
-  };
-}
-
-// ─────────────────────────────────────────────────────
-// SUB TourCode 그룹 지급 모달 — InvoiceNo 없는 미지급 DR 거래를 TourCode별로 지급
-// 같은 TourCode로 CR 거래 등록 (Description: PAID_TC:{tourcode}) — 중복 방지
-// ─────────────────────────────────────────────────────
-function _showSubTourCodePaymentModal(subName, tourCode, item){
-  const remaining = item ? item.remaining : 0;
-  const total     = item ? item.total : 0;
-  const prevPaid  = item ? item.paid : 0;
-
-  const overlay = document.createElement('div');
-  overlay.id = 'stcp-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;';
-  overlay.innerHTML = `
-    <div style="background:var(--sf);border-radius:16px;padding:20px;width:92%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,.25);">
-      <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:12px;">🎫 SUB 투어코드 지급 처리</div>
-      <div style="font-size:12px;color:var(--t2);margin-bottom:12px;line-height:1.6;">
-        <b>${escH(tourCode)}</b> · ${escH(subName)}<br>
-        총액 <b>$${total.toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
-        ${prevPaid > 0 ? `&nbsp;|&nbsp; 기지급 <b>$${prevPaid.toLocaleString('en-AU',{minimumFractionDigits:2})}</b>` : ''}
-        &nbsp;|&nbsp; <span style="color:var(--or);font-weight:700;">잔액 $${remaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
-      </div>
-
-      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">지급 금액 ($)</label>
-      <input id="stcp-amount" type="number" step="0.01" min="0.01" max="${remaining}" value="${remaining}"
-        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:14px;font-weight:700;box-sizing:border-box;margin-bottom:6px;">
-      <div style="display:flex;gap:6px;margin-bottom:10px;">
-        <button id="stcp-quick-half" style="flex:1;padding:6px;border-radius:6px;border:1px solid var(--b2);background:var(--sf2);font-size:11px;cursor:pointer;">절반 ($${roundMoney(remaining/2).toLocaleString()})</button>
-        <button id="stcp-quick-full" style="flex:1;padding:6px;border-radius:6px;border:1px solid var(--b2);background:var(--sf2);font-size:11px;cursor:pointer;">전액 ($${remaining.toLocaleString()})</button>
-      </div>
-
-      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">인보이스 No (선택)</label>
-      <input id="stcp-invno" type="text" placeholder="외주 인보이스 번호 (있다면 입력)"
-        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
-
-      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">지급일</label>
-      <input id="stcp-date" type="date" value="${toLocalISO(new Date())}"
-        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
-
-      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">지급 방법</label>
-      <select id="stcp-method" style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
-        <option value="이체">이체 (Bank Transfer)</option>
-        <option value="현금">현금 (Cash)</option>
-        <option value="카드">카드 (Card)</option>
-        <option value="기타">기타 (Other)</option>
-      </select>
-
-      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px;">메모 (선택)</label>
-      <input id="stcp-note" type="text" placeholder="메모 입력 (선택)"
-        style="width:100%;padding:9px 10px;border:1px solid var(--b2);border-radius:8px;font-size:13px;box-sizing:border-box;margin-bottom:14px;">
-
-      <div style="display:flex;gap:8px;">
-        <button id="stcp-cancel-btn" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--b2);background:var(--sf2);color:var(--t2);font-size:13px;cursor:pointer;">취소</button>
-        <button id="stcp-save-btn" style="flex:2;padding:10px;border-radius:8px;border:none;background:#16a34a;color:white;font-size:13px;font-weight:700;cursor:pointer;">💰 지급 등록</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-
-  overlay.addEventListener('click', e => { if(e.target === overlay) overlay.remove(); });
-  document.getElementById('stcp-cancel-btn').onclick = () => overlay.remove();
-  document.getElementById('stcp-quick-half').onclick = () => { document.getElementById('stcp-amount').value = roundMoney(remaining/2); };
-  document.getElementById('stcp-quick-full').onclick = () => { document.getElementById('stcp-amount').value = remaining; };
-
-  document.getElementById('stcp-save-btn').onclick = async () => {
-    const amtInput = parseFloat(document.getElementById('stcp-amount').value);
-    if(!amtInput || amtInput <= 0){ toast('⚠️ 금액을 입력하세요','warn'); return; }
-    if(amtInput > remaining + 0.01){ toast('⚠️ 잔액보다 큰 금액입니다','warn'); return; }
-    const payAmt = roundMoney(amtInput);
-    const payDate = document.getElementById('stcp-date').value || toLocalISO(new Date());
-    const method = document.getElementById('stcp-method').value;
-    const note = document.getElementById('stcp-note').value.trim();
-    const userInvNo = document.getElementById('stcp-invno').value.trim();
-
-    const isFull = prevPaid + payAmt >= total - 0.01;
-    const remarkPrefix = isFull ? '지급 완료' : '부분지급';
-    const remark = `${remarkPrefix} (TC:${tourCode}) [${method}]${note ? ' - '+note : ''}`;
-
-    document.getElementById('stcp-save-btn').disabled = true;
-    document.getElementById('stcp-save-btn').textContent = '저장 중...';
-
-    try {
-      const txnData = {
-        SubCompany: subName,
-        Category: 'Outsourcing',
-        Date: payDate,
-        FinishDate: payDate,
-        InvoiceNo: userInvNo || '',
-        TourCode: tourCode,
-        Description: `PAID_TC:${tourCode}`,
-        DR: 0,
-        CR: payAmt,
-        Remark: remark
-      };
-      const r = await fetch(APPS_SCRIPT_URL, {
-        method:'POST', headers:{'Content-Type':'text/plain'},
-        body: JSON.stringify({action:'add_sub_txn', data:txnData, _user:getAdminUser()})
-      });
-      const j = await r.json();
-      overlay.remove();
-      if(j.ok){
-        _balSubTxns.push({...txnData, _rowIndex: j.row||j.rowIndex});
-        toast(isFull
-          ? `✅ ${tourCode} 전액 지급 완료 ($${payAmt.toLocaleString()})`
-          : `💰 ${tourCode} 부분지급 등록 ($${payAmt.toLocaleString()})`,
           'ok');
         // 화면 새로고침
         if(typeof renderBalSubList === 'function') renderBalSubList();
@@ -29239,4 +29172,3 @@ function renderSMSChecklist(){
     <script src="dc-partner-dropdown.js" defer></script>
 </body>
 </html>
-
