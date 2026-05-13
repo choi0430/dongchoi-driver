@@ -3558,32 +3558,51 @@ function updateDriverInfo(driverName, data) {
       bank: 'Bank', bsb: 'BSB', account: 'Account'
     };
 
+    // ★ 진단: 매핑된 컬럼이 실제 시트에 있는지 미리 검증 (저장 누락 디버깅용)
+    const missingColumns = [];
+    Object.values(fieldMap).forEach(col => {
+      if (headers.indexOf(col) === -1) missingColumns.push(col);
+    });
+    if (missingColumns.length > 0) {
+      Logger.log('[updateDriverInfo] 누락된 시트 컬럼: ' + missingColumns.join(', '));
+    }
+
     for (let r = 1; r < sheetData.length; r++) {
       if (sheetData[r][nameENIdx] === driverName || sheetData[r][nameKRIdx] === driverName) {
         const PHONE_SAVE_FIELDS = ['Mobile_1', 'Moblie_2', 'Phone', 'Mobile'];
         const DATE_SAVE_FIELDS = ['License_Expiry', 'Authority_Expiry', 'WWC_Expiry'];
+        const savedFields = [];
+        const skippedFields = [];
         Object.entries(data).forEach(([key, val]) => {
           const col = fieldMap[key];
           if (col) {
             const colIdx = headers.indexOf(col);
             if (colIdx !== -1) {
               const cell = sheet.getRange(r + 1, colIdx + 1);
-              // ★ 전화번호 필드: 텍스트 서식 강제 적용 (앞 0 보존)
               if (PHONE_SAVE_FIELDS.includes(col)) {
                 let s = String(val||'').replace(/[^0-9]/g, '');
                 if (s.length === 9) s = '0' + s;
                 cell.setNumberFormat('@').setValue(s);
               } else if (DATE_SAVE_FIELDS.includes(col)) {
-                // ★ 날짜 필드: 정규화 후 저장 (잘못된 형식이면 빈 값)
                 const norm = _normalizeDateForSheet(val);
                 cell.setNumberFormat('@').setValue(norm);
               } else {
                 cell.setValue(val);
               }
+              savedFields.push(key + '→' + col);
+            } else {
+              skippedFields.push(key + '→' + col + ' (시트에 컬럼 없음)');
             }
+          } else if (key !== 'savedAt' && !key.startsWith('photoUrl_')) {
+            skippedFields.push(key + ' (매핑 없음)');
           }
         });
-        return {ok: true};
+        return {
+          ok: true,
+          saved: savedFields,
+          skipped: skippedFields,
+          missingColumns: missingColumns
+        };
       }
     }
 
