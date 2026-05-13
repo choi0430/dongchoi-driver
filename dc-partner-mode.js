@@ -495,16 +495,7 @@
         const banner = document.createElement('div');
         banner.className = 'eg-subtotal-banner';
         banner.style.cssText = 'background:#ede9fe;color:#5b21b6;padding:8px 12px;border-radius:6px;margin:8px 14px;font-size:12px;font-weight:700;border:1px solid #c4b5fd;';
-        banner.innerHTML = '🤝 EG 자체 처리 명세 합계: 
-    version: '1.0.0',
-    PARTNER_COMPANIES: PARTNER_COMPANIES,
-    refreshTab: () => isAdminPage && _refreshBeTab(),
-    getCurrentBE: () => global._schEditBillingEntity,
-    setBE: (id) => { global._schEditBillingEntity = id; _refreshBeTab(); }
-  };
-
-})(window);
- + egTotal.toLocaleString('en-AU') + ' (자사 지급 제외 — 참고용)';
+        banner.innerHTML = '🤝 EG 자체 처리 명세 합계: $' + egTotal.toLocaleString('en-AU') + ' (자사 지급 제외 — 참고용)';
         const firstChild = modal.querySelector('.bal-detail-content, [class*="detail"]') || modal.firstElementChild;
         if(firstChild) firstChild.insertBefore(banner, firstChild.firstChild);
       }
