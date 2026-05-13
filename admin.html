@@ -9466,33 +9466,8 @@ function calcSubReport(r) {
   if(ce){ const sd = ce[capKey] || ce['21']; taBase = parseFloat(sd?.rate)||0; }
   if(taBase === 0) taBase = parseFloat(r.SVC_Charge)||0;
 
-  // TA 서차지 합계 = taAmount - taBase
+  // TA 서차지 합계 = taAmount - taBase (TA 표시용)
   const taSurchargeTotal = taAmount - taBase;
-
-  // ★ 공항 픽업 주차비는 DC가 가져감 (SUB에 전달하지 않음)
-  //   calcAgencyTA의 parking 로직과 100% 동일하게 계산
-  //   - _isHojuro 정규식은 calcAgencyTA와 일치: 호주로 + Plus Australia (둘 다 21S/25S는 parking 면제)
-  //   - calcAgencyTA가 parking을 실제로 더했을 때만 SUB에서 차감
-  const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
-  const isLargeSub = capNum >= 40;
-  const _isHojuroSub = /호주로|hojuro|plus\s*australia/i.test(agency);
-  const _pickupHasAirport = apPat.test(r.Pickup||'');
-  // calcAgencyTA의 parking 조건과 100% 동일: (공항 키워드 && !(호주로/Plus Australia && 소형))
-  const _taHasParking = _pickupHasAirport && !(_isHojuroSub && !isLargeSub);
-  const subParkingDeduct = _taHasParking ? (isLargeSub ? 40 : 30) : 0;
-
-  // SUB 총액 = SUB base + (TA 서차지 - 공항 주차비)
-  const subTotal = subBase + taSurchargeTotal - subParkingDeduct;
-
-  // 디버그 로그 (진단용 — 추후 제거)
-  if(window._debugSub){
-    console.log('[calcSubReport]', {
-      driver, attraction, agency, owner, capKey,
-      taAmount, taBase, taSurchargeTotal,
-      subBase, subTotal,
-      raw_OT: r.OT, raw_Hotel: r.Hotel_Surcharge, raw_Dist: r.Dist_Surcharge, raw_Trailer: r.Trailer
-    });
-  }
 
   // 표시용 breakdown (UI에서 분해해 보여주기 위해)
   // Hotel/Dist/Trailer는 헬퍼로 다시 계산 (TA값과 동일)
@@ -9512,6 +9487,25 @@ function calcSubReport(r) {
     : Math.round((otRateDR>0 ? otDR/otRateDR : 0) * otRateTA);
   // Night_Owner (야경 차주 납입금)
   const nightOwner = parseFloat(r.Night_Owner)||0;
+
+  // ★★ SUB 총액 계산 — TA 서차지를 그대로 전달하는 게 아니라,
+  //   SUB의 실제 서차지(SUB가 받아야 할 금액)를 직접 합산.
+  //   - 포함: Hotel, Dist, Trailer, OT (SUB가 실제 운행하면서 발생한 서차지)
+  //   - 제외: Parking (DC가 여행사에 청구 → DC 수입, SUB 무관)
+  //   - 제외: Toll, Early (DC 직접 정산)
+  //   이게 정확한 모델 — 이전 "subTotal = subBase + taSurchargeTotal - parking" 회피 트릭 대신
+  //   서차지 구성요소를 명시적으로 더함
+  const subTotal = subBase + hotelSub + distSub + trailerSub + subOT;
+
+  // 디버그 로그 (진단용 — 추후 제거)
+  if(window._debugSub){
+    console.log('[calcSubReport]', {
+      driver, attraction, agency, owner, capKey,
+      taAmount, taBase, taSurchargeTotal,
+      subBase, hotelSub, distSub, trailerSub, subOT, subTotal,
+      raw_OT: r.OT, raw_Hotel: r.Hotel_Surcharge, raw_Dist: r.Dist_Surcharge, raw_Trailer: r.Trailer
+    });
+  }
 
   // ── 드라이버 비용 (M_PriceDriver 기준 — SUB 오너가 지급) ──
   const drCost = parseFloat(r.DR_Cost)||0;
@@ -12522,6 +12516,7 @@ async function editDailyReportRow(rowIndex){
             <div><label class="fl">Dist ($)</label><input class="fi" type="number" id="dre-Dist_Surcharge" value="${escH(_v('Dist_Surcharge'))}"></div>
 
             <div><label class="fl">Trailer ($)</label><input class="fi" type="number" id="dre-Trailer" value="${escH(_v('Trailer'))}"></div>
+            <div><label class="fl">Trailer 번호</label><input class="fi" id="dre-Trailer_Number" value="${escH(_v('Trailer_Number'))}" placeholder="예: S47013 (M_Trailers 등록 번호)"></div>
             <div><label class="fl">Early ($)</label><input class="fi" type="number" id="dre-Early" value="${escH(_v('Early'))}"></div>
             <div><label class="fl">Toll ($)</label><input class="fi" type="number" id="dre-Toll" value="${escH(_v('Toll'))}"></div>
 
@@ -12660,6 +12655,7 @@ async function adminCreateMissingDR(missingInfo){
           <div><label>Hotel ($)</label><input id="dre-Hotel_Surcharge" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
           <div><label>Distance ($)</label><input id="dre-Dist_Surcharge" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
           <div><label>Trailer ($)</label><input id="dre-Trailer" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>Trailer 번호</label><input id="dre-Trailer_Number" value="" placeholder="예: S47013" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
           <div><label>Early ($)</label><input id="dre-Early" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
           <div><label>Toll ($)</label><input id="dre-Toll" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
           <div><label>Toll 개인 ($)</label><input id="dre-Toll_Personal" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
@@ -12697,7 +12693,7 @@ async function adminSaveNewDR(){
     'Date','Driver','Rego','Seats','Agency','Attraction','Guide','Tour_Code',
     'Pickup','Dropoff','Time_Start','Time_End','KM_Start','KM_End',
     'SVC_Label','SVC_Charge','DR_Cost',
-    'OT','Hotel_Surcharge','Dist_Surcharge','Trailer','Early',
+    'OT','Hotel_Surcharge','Dist_Surcharge','Trailer','Trailer_Number','Early',
     'Toll','Toll_Personal','Fuel','Fuel_Personal',
     'Night_Type','Night_DR','Night_Owner',
     'Wash','Meal','Tip','Etc','Etc_Desc','Remarks'
@@ -12766,7 +12762,7 @@ async function saveDailyReportEdit(rowIndex){
     'Date','Driver','Rego','Seats','Agency','Attraction','Guide','Tour_Code',
     'Pickup','Dropoff','Time_Start','Time_End','KM_Start','KM_End',
     'SVC_Label','SVC_Charge','DR_Cost',
-    'OT','Hotel_Surcharge','Dist_Surcharge','Trailer','Early',
+    'OT','Hotel_Surcharge','Dist_Surcharge','Trailer','Trailer_Number','Early',
     'Toll','Toll_Personal','Fuel','Fuel_Personal',
     'Night_Type','Night_DR','Night_Owner',
     'Wash','Meal','Tip','Etc','Etc_Desc','Remarks'
