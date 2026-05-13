@@ -4655,6 +4655,10 @@ function getMotChecks(items) {
 }
 
 async function submitMotReport() {
+  // ★ 중복 제출 방지 가드
+  const _motBtn = _lockSubmitBtn('button[onclick="submitMotReport()"]', '⏳ 검증 중...');
+  if(!_motBtn) return;
+
   const date     = document.getElementById('mot-date')?.value;
   const time     = document.getElementById('mot-time')?.value;
   const driver   = document.getElementById('mot-driver')?.value || window._loggedInDriver || '';
@@ -4668,12 +4672,12 @@ async function submitMotReport() {
   const notes    = document.getElementById('mot-notes')?.value?.trim();
 
   if (!date || !type || !result) {
+    _unlockSubmitBtn(_motBtn);
     alert('날짜, 검사 유형, 검사 결과는 필수 입력 항목입니다.');
     return;
   }
-  if (!rego) { alert('차량 번호(Rego)를 입력하세요.'); return; }
-  const _motBtn = document.querySelector('button[onclick="submitMotReport()"]');
-  if(_motBtn){ _motBtn.disabled=true; _motBtn.textContent='⏳ 제출 중...'; }
+  if (!rego) { _unlockSubmitBtn(_motBtn); alert('차량 번호(Rego)를 입력하세요.'); return; }
+  if(_motBtn) _motBtn.innerHTML = '⏳ 저장 중...';
   try {
 
   const driverChecks  = getMotChecks(MOT_DRIVER_CHECKS);
@@ -4730,7 +4734,8 @@ async function submitMotReport() {
     pass:'✅ 이상 없음', advisory:'⚠️ 경고 발부', defect_notice:'🔴 결함 통지서',
     grounded:'🚫 운행 정지', infringement:'💳 인프링먼트'
   }[result]||result;
-  alert(`✅ MOT 검사 기록이 저장되었습니다.\n결과: ${resultLabel}${failedItems.length>0?'\n⚠️ NO 항목: '+failedItems.length+'건':''}`);
+  _markBtnDone(_motBtn, '✅ MOT 검사 저장 완료');
+      alert(`✅ MOT 검사 기록이 저장되었습니다.\n결과: ${resultLabel}${failedItems.length>0?'\n⚠️ NO 항목: '+failedItems.length+'건':''}`);
   } finally {
     if(_motBtn){ _motBtn.disabled=false; _motBtn.textContent='📤 MOT 검사 기록 제출'; }
   }
@@ -5844,6 +5849,10 @@ function compressImage(file, maxPx, quality, cb) {
 }
 
 async function saveMyInfo() {
+  // ★ 중복 제출 방지 가드
+  const _myinfoBtn = _lockSubmitBtn('button[onclick="saveMyInfo()"]', '⏳ 저장 중...');
+  if(!_myinfoBtn) return;
+
   const key = 'myinfo_' + (currentDriver?.name || '');
   const existing = JSON.parse(localStorage.getItem(key) || '{}');
 
@@ -5859,6 +5868,7 @@ async function saveMyInfo() {
   if (_rawAuthExp && !_normAuthExp) _badDates.push('Authority Expiry (자격증 만료일)');
   if (_rawWwcExp  && !_normWwcExp)  _badDates.push('WWC Expiry (WWC 만료일)');
   if (_badDates.length) {
+    _unlockSubmitBtn(_myinfoBtn);
     showToast('⚠️ 날짜 형식 오류: ' + _badDates.join(', ') + '\ndd/mm/yyyy 형식으로 입력해주세요 (예: 13/01/2027)');
     return;
   }
@@ -5953,6 +5963,7 @@ async function saveMyInfo() {
 
   updateMyInfoView(localData);
   toggleMyInfoEdit();
+  _markBtnDone(_myinfoBtn, '✅ 저장 완료');
   showToast('✅ 정보가 저장됐어요!');
 }
 
@@ -9424,6 +9435,10 @@ async function syncDefectReportsFromGAS() {
 }
 
 function submitDefectReport(){
+  // ★ 중복 제출 방지 가드
+  const _defectBtn = _lockSubmitBtn('button[onclick="submitDefectReport()"]', '⏳ 검증 중...');
+  if(!_defectBtn) return;
+
   const rego     = document.getElementById('def-rego')?.value||'';
   const cat      = document.getElementById('def-cat')?.value||'';
   const location = document.getElementById('def-location')?.value||'';
@@ -9431,8 +9446,8 @@ function submitDefectReport(){
   const severity = document.getElementById('def-severity')?.value||'low';
   const km       = parseInt(document.getElementById('def-km')?.value)||null;
 
-  if(!rego){ showToast('차량을 선택하세요','error'); return; }
-  if(!desc){ showToast('결함 내용을 입력하세요','error'); return; }
+  if(!rego){ _unlockSubmitBtn(_defectBtn);showToast('차량을 선택하세요','error'); return; }
+  if(!desc){ _unlockSubmitBtn(_defectBtn);showToast('결함 내용을 입력하세요','error'); return; }
   const _defBtn = document.querySelector('button[onclick="submitDefectReport()"]');
   if(_defBtn){ _defBtn.disabled=true; _defBtn.textContent='⏳ 제출 중...'; }
 
@@ -9473,6 +9488,7 @@ function submitDefectReport(){
   renderMyDefects();
 
   const sev = {low:'🟢 낮음', medium:'🟡 중간', high:'🔴 높음'}[severity]||'';
+  _markBtnDone(_defectBtn, '✅ 결함 리포트 제출 완료');
   showToast(`⚠️ 결함 리포트 제출 완료 (${sev})`,'success');
   if(_defBtn){ _defBtn.disabled=false; _defBtn.textContent='📤 결함 리포트 제출'; }
 }
@@ -12744,15 +12760,19 @@ function updateSrSeatsHint(){
 }
 
 async function submitSubReport(){
+  // ★ 중복 제출 방지 가드
+  const _subBtn = _lockSubmitBtn('button[onclick="submitSubReport()"]', '⏳ 저장 중...');
+  if(!_subBtn) return;
+
   const date = document.getElementById('sr-date')?.value;
   const rego = document.getElementById('sr-rego')?.value;
   const seats = document.getElementById('sr-seats')?.value;
   const course = document.getElementById('sr-course')?.value?.trim();
   const isPrivate = document.getElementById('sr-private')?.checked;
-  if(!date){ showToast('날짜를 선택하세요','error'); return; }
-  if(!rego){ showToast('차량을 선택하세요','error'); return; }
-  if(!seats){ showToast('인승을 선택하세요','error'); return; }
-  if(!isPrivate && !course){ showToast('코스를 입력하세요','error'); return; }
+  if(!date){ _unlockSubmitBtn(_subBtn);showToast('날짜를 선택하세요','error'); return; }
+  if(!rego){ _unlockSubmitBtn(_subBtn);showToast('차량을 선택하세요','error'); return; }
+  if(!seats){ _unlockSubmitBtn(_subBtn);showToast('인승을 선택하세요','error'); return; }
+  if(!isPrivate && !course){ _unlockSubmitBtn(_subBtn);showToast('코스를 입력하세요','error'); return; }
 
   // 중복 체크 (같은 날짜+차량)
   const dupWarn = document.getElementById('sr-dup-warn');
@@ -12808,6 +12828,7 @@ async function submitSubReport(){
       body:JSON.stringify({action:'save_report', ...reportData, _user:currentDriver?.name||''})});
     const json = await res.json();
     if(json.ok){
+      _markBtnDone(_subBtn, '✅ SUB 리포트 저장 완료');
       showToast('✅ 리포트 저장 완료','success');
       // 폼 리셋 (날짜+차량 유지)
       ['sr-driver','sr-agency','sr-course','sr-tourcode','sr-km-start','sr-km-end','sr-time-start','sr-time-end'].forEach(id=>{
@@ -12852,10 +12873,14 @@ function closeCorrectionModal() {
 }
 
 async function submitCorrectionRequest() {
+  // ★ 중복 제출 방지 가드
+  const _correctiBtn = _lockSubmitBtn('button[onclick="submitCorrectionRequest()"]', '⏳ 검증 중...');
+  if(!_correctiBtn) return;
+
   if (!_correctionTarget) return;
   const {r, type} = _correctionTarget;
   const desc = (document.getElementById('correction-desc')?.value||'').trim();
-  if (!desc) { showToast('수정 내용을 입력해주세요','error'); return; }
+  if (!desc) { _unlockSubmitBtn(_correctiBtn);showToast('수정 내용을 입력해주세요','error'); return; }
 
   const typeLabel = type==='pre' ? 'Pre Departure' : 'End of Shift';
   const driver = currentDriver?.name || r.Driver || '';
@@ -12864,6 +12889,7 @@ async function submitCorrectionRequest() {
   // 클립보드에 복사 후 카카오톡 오픈채팅으로 이동
   try { await navigator.clipboard.writeText(msgText); } catch(e) {}
   closeCorrectionModal();
+  _markBtnDone(_correctiBtn, '✅ 수정 요청 전송 완료');
   showToast('📋 수정 요청 내용이 복사되었습니다. 카카오톡에서 붙여넣기 해주세요','success');
   setTimeout(()=>{ window.open('https://open.kakao.com/o/gwqO8ili','_blank'); }, 500);
 }
@@ -12883,6 +12909,10 @@ function showLeaveForm(){
 function hideLeaveForm(){ document.getElementById('leave-form-container').style.display='none'; const n=document.getElementById('leave-note'); if(n)n.value=''; }
 
 async function submitLeaveRequest(){
+  // ★ 중복 제출 방지 가드
+  const _leaveBtn = _lockSubmitBtn('button[onclick="submitLeaveRequest()"]', '⏳ 검증 중...');
+  if(!_leaveBtn) return;
+
   const dateFrom=document.getElementById('leave-date-from').value; // already dd/MM/yyyy
   const dateTo=document.getElementById('leave-date-to').value;
   let reason=document.getElementById('leave-reason').value;
@@ -12895,8 +12925,7 @@ async function submitLeaveRequest(){
   if(reason==='기타') reason=document.getElementById('leave-reason-etc').value||'기타';
   const note=document.getElementById('leave-note')?.value?.trim()||'';
 
-  const btn=document.querySelector('button[onclick="submitLeaveRequest()"]');
-  if(btn){btn.disabled=true;btn.textContent='⏳ Submitting (제출 중)...';}
+  if(_leaveBtn) _leaveBtn.innerHTML = '⏳ 제출 중...';
   try{
     const res=await submitToSheets('submit_leave_request',{
       Driver:currentDriver?.name||'',
@@ -12905,6 +12934,7 @@ async function submitLeaveRequest(){
       Reason:reason+(note?' — '+note:'')
     });
     if(res?.ok){
+      _markBtnDone(_leaveBtn, '✅ 휴가 신청 완료');
       showToast('✅ Leave request submitted. Awaiting approval (휴무 요청 제출됨. 관리자 승인 대기)','success');
       hideLeaveForm(); loadMyLeaves();
     } else { showToast('⚠️ '+(res?.error||'Submit failed (제출 실패)'),'error'); }
@@ -13182,6 +13212,10 @@ function hideIncidentForm(){
 }
 
 async function submitIncidentReport(){
+  // ★ 중복 제출 방지 가드
+  const _incidentBtn = _lockSubmitBtn('button[onclick="submitIncidentReport()"]', '⏳ 검증 중...');
+  if(!_incidentBtn) return;
+
   const date = document.getElementById('inc-date').value;
   const time = document.getElementById('inc-time').value;
   const rego = document.getElementById('inc-rego').value;
@@ -13191,6 +13225,7 @@ async function submitIncidentReport(){
   const desc = document.getElementById('inc-desc').value.trim();
 
   if(!date||!time||!rego||!type||!location||!desc){
+    _unlockSubmitBtn(_incidentBtn);
     alert('Please fill in all required fields (필수 항목을 모두 입력하세요)'); return;
   }
 
@@ -13221,6 +13256,7 @@ async function submitIncidentReport(){
     });
     const json = await res.json();
     if(json.ok){
+      _markBtnDone(_incidentBtn, '✅ 사고 보고서 제출 완료');
       alert('Incident report submitted successfully!\n사고 보고서가 제출되었습니다.\nID: '+(json.id||''));
       hideIncidentForm();
       // clear form
@@ -13230,9 +13266,11 @@ async function submitIncidentReport(){
       document.querySelectorAll('#inc-reported-to input[type=checkbox]').forEach(cb=>cb.checked=false);
       loadMyIncidents();
     } else {
+      _unlockSubmitBtn(_incidentBtn);
       alert('Error: '+(json.error||'Unknown error'));
     }
   } catch(e){
+    _unlockSubmitBtn(_incidentBtn);
     alert('Network error: '+e.message);
   }
 }
