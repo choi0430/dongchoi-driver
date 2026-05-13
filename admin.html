@@ -14956,6 +14956,59 @@ async function _syncLedgerToSubTxn(){
 // 사용법: await cleanupNonDCBilledSubTxns()
 // → DR에서 BillingEntity가 DC가 아닌 운행의 DRSUB:* 행을 삭제
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// DEBUG: SUB_Txn 시트의 특정 회사 거래를 콘솔에 표로 출력
+// 사용: await inspectSubTxn('Sydney Edu Tours')
+// ═══════════════════════════════════════════════════════════════
+window.inspectSubTxn = async function(companyKeyword){
+  console.log('🔍 SUB_Txn 거래 조회:', companyKeyword);
+  let rows;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_sub_txn');
+    const j = await res.json();
+    rows = j.ok ? (j.rows||[]).map((r,i)=>({...r, _rowIndex:i+2})) : [];
+  } catch(e){ console.error('로드 실패', e); return; }
+
+  const re = new RegExp(companyKeyword, 'i');
+  const matched = rows.filter(t => re.test(String(t.SubCompany||'')) || re.test(String(t.Description||'')) || re.test(String(t.InvoiceNo||'')));
+  console.log('매칭 행:', matched.length, '건');
+  console.table(matched.map(t => ({
+    row: t._rowIndex,
+    Date: t.Date, SubCompany: t.SubCompany,
+    InvNo: t.InvoiceNo,
+    Desc: String(t.Description||'').slice(0,50),
+    DR: t.DR, CR: t.CR,
+    Due: t.DueDate
+  })));
+  return matched;
+};
+
+// ═══════════════════════════════════════════════════════════════
+// DEBUG: 특정 행 번호의 SUB_Txn 삭제 (콘솔에서 직접 호출)
+// 사용: await deleteSubTxnRow(15)
+// ═══════════════════════════════════════════════════════════════
+window.deleteSubTxnRow = async function(rowIndex){
+  if(!confirm('SUB_Txn 시트의 row '+rowIndex+'번 행을 삭제합니다. 계속 하시겠습니까?')) return;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'delete_sub_txn', rowIndex, _user:getAdminUser()})
+    });
+    const j = await res.json();
+    if(j.ok){
+      console.log('✅ row', rowIndex, '삭제 완료');
+      try { _balLoaded = false; _balSubTxns = null; } catch(e){}
+      toast('✅ 삭제 완료', 'ok');
+    } else {
+      console.error('삭제 실패:', j);
+      toast('❌ 삭제 실패: '+(j.error||''), 'er');
+    }
+  } catch(e){
+    console.error('삭제 오류:', e);
+    toast('❌ 삭제 오류', 'er');
+  }
+};
+
 window.cleanupNonDCBilledSubTxns = async function(){
   console.log('🧹 BillingEntity≠DC 운행의 잘못된 SUB_Txn DRSUB 행 정리 시작...');
 
@@ -15164,10 +15217,8 @@ async function _syncSubInvoicesToSubTxn(){
     const skipped = [];
     subInvs.forEach(inv => {
       const invNum = String(inv.InvNumber||'').trim();
-      // ★ SubCompany fallback chain — 빈 경우 Agency 사용 (이전 인보이스는 Agency만 채워졌을 수 있음)
-      let subCompany = String(inv.SubCompany||'').trim();
-      if(!subCompany) subCompany = String(inv.Agency||'').trim();
-      if(!subCompany){ skipped.push({invNum, reason:'SubCompany/Agency 모두 비어있음'}); return; }
+      const subCompany = String(inv.SubCompany||'').trim();
+      if(!subCompany){ skipped.push({invNum, reason:'SubCompany 비어있음'}); return; }
       if(existingKeys.has(invNum)) return; // 이미 등록됨
 
       // ★ GrandTotal이 0이어도 등록 (이전엔 0 미만이면 skip — 너무 엄격)
