@@ -9695,6 +9695,28 @@ function calcSubReport(r) {
   // ── TA 금액 (여행사 청구) ──
   const taAmount = calcAgencyTA(r);
 
+  // ★★ BillingEntity 분기
+  //   - BillingEntity = DC (또는 비어있음) → DC가 인보이스 발행 → 정상 SUB 계산
+  //   - BillingEntity = 다른 회사 (EG TRAVEL 등) → 그 회사가 인보이스 발행
+  //       → DC는 SUB 지급 의무 없음 (운행기록만 보존)
+  //       → TA도 DC 수입 아님 (다른 회사가 직접 청구)
+  const billingEntity = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
+  const _isBEDC = !billingEntity || billingEntity === 'DC' ||
+                  /DONG\s*CHOI/i.test(billingEntity);
+  if(!_isBEDC){
+    // BillingEntity가 다른 회사 → 회계 무관, 표시용 정보만 반환
+    return {
+      isSub: false, isPrivate: false,
+      subOwner: owner, rego, capKey, attraction, agency, driver,
+      taAmount: 0,  // DC 수입 아님
+      subCost: { base:0, ot:0, hotel:0, dist:0, trailer:0, night:0, total:0 },
+      drCost: 0,
+      profit: 0,
+      billingEntity: billingEntity,
+      excludedReason: 'BillingEntity=' + billingEntity + ' (DC 회계 외)'
+    };
+  }
+
   if(!isSub || isPrivate) {
     const drCost = parseFloat(r.DR_Cost||r.SVC_Charge)||0;
     return { isSub: isSub && !isPrivate, isPrivate, subOwner: (isSub && isPrivate) ? owner : '', rego, capKey, attraction, agency, driver,
@@ -11028,11 +11050,11 @@ function renderSettleDashboard() {
   const tcSearch = (document.getElementById('settle-tc-search')?.value||'').trim().toUpperCase();
   // 투어코드 검색이 있으면 _settleData_tc 사용 (기간 무시 검색 결과), 없으면 _settleData (기간 필터링됨)
   const baseData = (tcSearch && window._settleData_tc) ? window._settleData_tc : _settleData;
-  let data = filter ? baseData.filter(d=>d.subOwner===filter) : baseData;
+  let allData = filter ? baseData.filter(d=>d.subOwner===filter) : baseData;
   // 투어코드 필터링 (대소문자 무시, 부분 매칭)
   if(tcSearch){
     const tcNorm = tcSearch.replace(/[\s\-_\.]/g, '');
-    data = data.filter(d => {
+    allData = allData.filter(d => {
       const code = (d.tourCode||'').toUpperCase();
       const guide = (d._raw?.Guide||'').toUpperCase();
       const codeNorm = code.replace(/[\s\-_\.]/g, '');
@@ -11041,7 +11063,13 @@ function renderSettleDashboard() {
     });
   }
 
-  if (!data.length) {
+  // ★★ BillingEntity 기반 분리:
+  //   - data: BillingEntity=DC (또는 비어있음) → 정상 계산 대상
+  //   - referenceData: BillingEntity=다른 회사 (EG TRAVEL 등) → 참고용만, 합계 미포함
+  const data = allData.filter(d => !d.excludedReason);
+  const referenceData = allData.filter(d => d.excludedReason);
+
+  if (!data.length && !referenceData.length) {
     sumEl.innerHTML = '';
     bdEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3);font-size:13px;">해당 기간에 SUB 차량 운행 기록이 없습니다.</div>';
     return;
@@ -11279,6 +11307,55 @@ function renderSettleDashboard() {
       }).join('')}
     </div>`;
   });
+
+  // ★★ BillingEntity≠DC 참고용 섹션 (계산 미포함)
+  //   예: EG TRAVEL이 인보이스 발행 + EG 차량 → DC는 회계 무관, 운행기록만 보존
+  if(referenceData.length){
+    const refByCo = {};
+    referenceData.forEach(d => {
+      const co = d.billingEntity || '기타';
+      if(!refByCo[co]) refByCo[co] = [];
+      refByCo[co].push(d);
+    });
+    html += `<div style="margin-top:24px;background:#f8fafc;border:1px dashed #94a3b8;border-radius:12px;padding:14px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <div style="font-size:13px;font-weight:800;color:#475569;">📋 참고용 — DC 회계 외 운행 (${referenceData.length}건)</div>
+      </div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:12px;line-height:1.5;">
+        아래 운행은 다른 회사가 인보이스를 발행한 항목입니다. DC 회계(TA/SUB/이익)에는 포함되지 않지만,
+        Accreditation 의무로 운행기록은 보존됩니다.
+      </div>`;
+    Object.entries(refByCo).forEach(([co, items]) => {
+      html += `<div style="margin-bottom:10px;background:white;border:1px solid var(--bd);border-radius:8px;overflow:hidden;">
+        <div style="background:#f1f5f9;padding:8px 12px;font-size:12px;font-weight:700;color:#334155;border-bottom:1px solid var(--bd);">
+          🏢 ${escH(co)} <span style="font-weight:400;color:var(--t3);">(${items.length}건)</span>
+        </div>
+        <table style="width:100%;font-size:11px;border-collapse:collapse;">
+          <thead>
+            <tr style="background:#fafafa;">
+              <th style="padding:6px 8px;text-align:left;color:var(--t3);font-weight:600;">날짜</th>
+              <th style="padding:6px 8px;text-align:left;color:var(--t3);font-weight:600;">차량</th>
+              <th style="padding:6px 8px;text-align:left;color:var(--t3);font-weight:600;">여행사</th>
+              <th style="padding:6px 8px;text-align:left;color:var(--t3);font-weight:600;">투어코드</th>
+              <th style="padding:6px 8px;text-align:left;color:var(--t3);font-weight:600;">코스</th>
+              <th style="padding:6px 8px;text-align:left;color:var(--t3);font-weight:600;">드라이버</th>
+            </tr>
+          </thead>
+          <tbody>`;
+      items.sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(d => {
+        html += `<tr style="border-top:1px solid var(--bd);">
+          <td style="padding:6px 8px;color:var(--t2);">${escH(d.date||'')}</td>
+          <td style="padding:6px 8px;color:var(--t2);font-family:var(--fn);">${escH(d.rego||'')}</td>
+          <td style="padding:6px 8px;color:var(--t2);">${escH(d.agency||'')}</td>
+          <td style="padding:6px 8px;color:var(--t2);font-family:var(--fn);">${escH(d.tourCode||'')}</td>
+          <td style="padding:6px 8px;color:var(--t2);">${escH(d.attraction||'')}</td>
+          <td style="padding:6px 8px;color:var(--t2);">${escH(d.driver||'')}</td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    });
+    html += `</div>`;
+  }
 
   bdEl.innerHTML = html;
 }
@@ -14874,6 +14951,99 @@ async function _syncLedgerToSubTxn(){
 }
 
 // ★ SUB 인보이스(D1,D2...) → SUB_Txn 자동 동기화
+// ═══════════════════════════════════════════════════════════════
+// CLEANUP: BillingEntity≠DC 운행에 대해 잘못 등록된 SUB_Txn DRSUB 행 정리
+// 사용법: await cleanupNonDCBilledSubTxns()
+// → DR에서 BillingEntity가 DC가 아닌 운행의 DRSUB:* 행을 삭제
+// ═══════════════════════════════════════════════════════════════
+window.cleanupNonDCBilledSubTxns = async function(){
+  console.log('🧹 BillingEntity≠DC 운행의 잘못된 SUB_Txn DRSUB 행 정리 시작...');
+
+  // DR 캐시 fresh
+  let drs;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error||'load fail');
+    drs = (json.rows||[]).map((r,i)=>({...r, _rowIndex:i+2}));
+  } catch(e){ console.error('DR 로드 실패', e); return; }
+
+  // SUB_Txn fresh
+  let subTxns;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_sub_txn');
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error||'load fail');
+    subTxns = (json.rows||[]).map((t,i)=>({...t, _rowIndex:i+2}));
+  } catch(e){ console.error('SUB_Txn 로드 실패', e); return; }
+
+  // BillingEntity≠DC인 DR 식별
+  const nonDCDrs = drs.filter(r => {
+    const be = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
+    return be && be !== 'DC' && !/DONG\s*CHOI/i.test(be);
+  });
+  console.log('📜 BillingEntity≠DC인 DR 수:', nonDCDrs.length, '건');
+
+  // 각 DR에 대한 DRSUB key 생성
+  const targetKeys = new Set();
+  nonDCDrs.forEach(r => {
+    const dateISO = parseToISO(r.Date||'');
+    if(!dateISO) return;
+    const rego = String(r.Rego||'').trim();
+    if(!rego) return;
+    const tourCode = pickTourCode(r);
+    targetKeys.add(`DRSUB:${dateISO}_${rego}_${tourCode}`);
+    // tourCode 없을 수도
+    targetKeys.add(`DRSUB:${dateISO}_${rego}_`);
+  });
+
+  // SUB_Txn에서 해당 DRSUB 행 식별
+  const toDelete = subTxns.filter(t => {
+    const desc = String(t.Description||'').trim();
+    if(!desc.startsWith('DRSUB:')) return false;
+    for(const key of targetKeys){
+      if(desc.startsWith(key)) return true;
+    }
+    return false;
+  });
+
+  if(!toDelete.length){
+    console.log('✅ 정리할 항목 없음 (이미 깨끗하거나 BillingEntity=DC만 있음)');
+    return;
+  }
+
+  console.warn('🗑️ 삭제 대상:', toDelete.length, '건');
+  console.table(toDelete.map(t => ({
+    Date: t.Date, SubCompany: t.SubCompany,
+    InvoiceNo: t.InvoiceNo, DR: t.DR,
+    Description: String(t.Description||'').slice(0,60),
+    rowIndex: t._rowIndex
+  })));
+
+  if(!confirm(`${toDelete.length}건의 DRSUB 행을 SUB_Txn 시트에서 삭제합니다.\n\n(BillingEntity가 DC가 아닌 운행의 자동 등록분)\n\n계속 하시겠습니까?`)){
+    console.log('취소됨');
+    return;
+  }
+
+  let deleted = 0;
+  for(const t of toDelete){
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'delete_sub_txn', rowIndex:t._rowIndex, _user:getAdminUser()})
+      });
+      const j = await res.json();
+      if(j.ok) deleted++;
+      else console.warn('삭제 실패:', t._rowIndex, j);
+    } catch(e){ console.warn('삭제 오류:', t._rowIndex, e); }
+  }
+  console.log(`✅ ${deleted}/${toDelete.length}건 삭제 완료`);
+
+  // 잔액 캐시 무효화
+  try { _balLoaded = false; _balSubTxns = null; } catch(e){}
+  toast(`✅ ${deleted}건 정리 완료`, 'ok');
+};
+
 async function _syncSubInvoicesToSubTxn(){
   try {
     // 인보이스 캐시 강제 새로고침 — stale 데이터로 인한 매칭 실패 방지
@@ -15074,6 +15244,18 @@ async function _syncDailyReportSubToSubTxn(){
       if(!owner) return;
       // DC 차량 제외 (SUB 차량만)
       if(DC_OWNERS.includes(owner)) return;
+
+      // ★★ BillingEntity 분기 — DC가 인보이스 발행할 때만 SUB 지급 등록
+      //   - BillingEntity = DC (또는 비어있음 = 기본 자사) → DC가 차주(EG 등)에게 지급
+      //   - BillingEntity = EG TRAVEL → EG가 클라이언트에 직접 인보이스 발행
+      //     → DC는 EG에게 지급할 게 없음 (회계 무관, 운행기록만 보존)
+      const billingEntity = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
+      const _isBEDC = !billingEntity || billingEntity === 'DC' ||
+                      /DONG\s*CHOI/i.test(billingEntity);
+      if(!_isBEDC){
+        // BillingEntity가 다른 회사 (EG TRAVEL 등) → SUB 지급 자동 등록 안 함
+        return;
+      }
 
       const dateISO = parseToISO(r.Date||'');
       if(!dateISO) return;
