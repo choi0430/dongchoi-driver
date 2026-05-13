@@ -20177,11 +20177,15 @@ async function saveInvoiceToSheet() {
       if (!lastDate) { lastDate = new Date(to + 'T00:00:00'); if(isNaN(lastDate.getTime())) lastDate = new Date(); }
       const actualFrom = toLocalISO(firstDate);
       const actualTo = toLocalISO(lastDate);
-      // ★ Due date = IssuedDate + 14일 (인보이스 발행일 = 저장 시점 = 오늘)
+      // ★ Due date = IssuedDate + payment terms
+      //   - Sunjin Tour: +3일 (계약 정책)
+      //   - 그 외 여행사: +14일 (기본)
       //   GAS는 IssuedDate를 저장 시 자동으로 오늘로 설정하므로 클라이언트에서도 동일한 값 사용
       const _issuedD = new Date();
       const dueBaseDate = new Date(_issuedD);
-      dueBaseDate.setDate(dueBaseDate.getDate() + 14);
+      const _isSunjinAgency = /sunjin/i.test(String(agency||''));
+      const _paymentTermDays = _isSunjinAgency ? 3 : 14;
+      dueBaseDate.setDate(dueBaseDate.getDate() + _paymentTermDays);
       const dueDateStr = toLocalISO(dueBaseDate);
       const todayStr = toLocalISO(new Date());
       const _allTxnItems = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)]);
@@ -22023,9 +22027,13 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
   const invNum = invNumOverride || getInvNum(agency, from);
   const _todayD = new Date();
   const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
-  // ★ Due date = IssuedDate (인보이스 생성일) + 14일
-  //   - 이미 저장된 인보이스: 캐시의 IssuedDate + 14
-  //   - 미저장/미리보기: 오늘 + 14 (저장 시점 기준 가정)
+  // ★ Due date = IssuedDate (인보이스 생성일) + payment terms
+  //   - Sunjin Tour: +3일 (계약 정책)
+  //   - 그 외 여행사: +14일 (기본)
+  //   - 이미 저장된 인보이스: 캐시의 IssuedDate + payment terms
+  //   - 미저장/미리보기: 오늘 + payment terms (저장 시점 기준 가정)
+  const _isSunjinAgency = /sunjin/i.test(String(agency||''));
+  const _paymentTermDays = _isSunjinAgency ? 3 : 14;
   const _dueD = (function(){
     if (invNum && Array.isArray(_invHistoryCache)) {
       const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNum);
@@ -22034,15 +22042,15 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
         if (issuedISO) {
           const ed = new Date(issuedISO + 'T00:00:00');
           if (!isNaN(ed.getTime())) {
-            ed.setDate(ed.getDate() + 14);
+            ed.setDate(ed.getDate() + _paymentTermDays);
             return ed;
           }
         }
       }
     }
-    // 미저장 — 오늘 + 14일 가정
+    // 미저장 — 오늘 + payment terms 일 가정
     const d = new Date();
-    d.setDate(d.getDate() + 14);
+    d.setDate(d.getDate() + _paymentTermDays);
     return d;
   })();
   const dueDateStr = String(_dueD.getDate()).padStart(2,'0')+'/'+String(_dueD.getMonth()+1).padStart(2,'0')+'/'+_dueD.getFullYear();
