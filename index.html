@@ -9245,6 +9245,10 @@ function applySchedulePrefill(){
   const tc = document.getElementById('dr-tourcode');
   if(tc && data.tourCode){
     tc.value = data.tourCode;
+    // ★ input/change 이벤트 dispatch — BillingEntity dropdown 등이 자동 갱신되어 잠기도록
+    //   (dc-partner-driver-be.js의 refreshDropdown 트리거)
+    tc.dispatchEvent(new Event('input', {bubbles:true}));
+    tc.dispatchEvent(new Event('change', {bubbles:true}));
     filled.push('투어코드');
   }
 
@@ -9338,6 +9342,23 @@ function applySchedulePrefill(){
   } else if(filled.length && typeof toast === 'function'){
     toast(`✅ 일정 자동 입력: ${filled.length}개 필드`,'ok');
   }
+
+  // ★ Billing Entity dropdown 강제 갱신 — prefill 후 일정의 BillingEntity로 잠기도록
+  //   dc-partner-driver-be.js가 로드되어 있으면 refreshDropdown 직접 호출
+  setTimeout(() => {
+    try {
+      // 1) 외부 모듈 직접 호출 (가장 확실)
+      if(window.__partnerDriverBE && typeof window.__partnerDriverBE.refreshDropdown === 'function'){
+        window.__partnerDriverBE.refreshDropdown();
+      }
+      // 2) Fallback: tourcode input에 다시 이벤트 발생 (모듈이 외부 노출 안 됐어도 작동)
+      const tcRef = document.getElementById('dr-tourcode');
+      if(tcRef){
+        tcRef.dispatchEvent(new Event('input', {bubbles:true}));
+        tcRef.dispatchEvent(new Event('change', {bubbles:true}));
+      }
+    } catch(e){ console.warn('[prefill] BE refresh:', e); }
+  }, 300);
 }
 
 // 일정 카드 클릭 → 그 일정 데이터를 임시 저장하고 DR로 이동
