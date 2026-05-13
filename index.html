@@ -5230,14 +5230,18 @@ function renderShiftSection(){
 }
 
 async function completePre(){
+  // ★ 중복 제출 방지 가드 — 검증 시작 전 즉시 버튼 잠금
+  const _preBtn = _lockSubmitBtn('button[onclick="completePre()"]', '⏳ 검증 중...');
+  if(!_preBtn) return; // 이미 처리 중
+
   const rego = document.getElementById('pre-rego').value;
   const km = document.getElementById('pre-km').value;
-  if(!rego||!km){showToast('차량(Rego)과 출발 KM을 입력하세요. Please enter Rego & KM.','error');return;}
+  if(!rego||!km){_unlockSubmitBtn(_preBtn);showToast('차량(Rego)과 출발 KM을 입력하세요. Please enter Rego & KM.','error');return;}
   // Safety Declaration 확인
   const declChecked = document.getElementById('pre-decl-check').checked;
-  if(!declChecked){showToast('⚖️ Safety Declaration을 먼저 확인하세요. Please confirm the Safety Declaration.','error');return;}
+  if(!declChecked){_unlockSubmitBtn(_preBtn);showToast('⚖️ Safety Declaration을 먼저 확인하세요. Please confirm the Safety Declaration.','error');return;}
   // 서명 확인
-  if(isSigEmpty('pre-sig-canvas')){showToast('✏️ 드라이버 서명을 해주세요. Driver signature required.','error');return;}
+  if(isSigEmpty('pre-sig-canvas')){_unlockSubmitBtn(_preBtn);showToast('✏️ 드라이버 서명을 해주세요. Driver signature required.','error');return;}
 
   // ── 차량 중복 운행 체크 ──
   // 1) 같은 드라이버가 이미 해당 날짜·차량으로 운행 중인지 (로컬 체크)
@@ -5296,6 +5300,7 @@ async function completePre(){
           'Continue anyway? (그래도 진행하시겠습니까?)'
         );
         if(!confirmed){
+          _unlockSubmitBtn(_preBtn);
           showToast('🛑 Pre Departure cancelled — Rest required (출발 취소 — 휴식 필요)','error');
           return;
         }
@@ -5309,9 +5314,13 @@ async function completePre(){
   const trailerUse = document.getElementById('pre-trailer-use')?.checked || false;
   const trailerNum = trailerUse ? (document.getElementById('pre-trailer-num')?.value || '').trim() : '';
   if(trailerUse && !trailerNum){
+    _unlockSubmitBtn(_preBtn);
     showToast('🚐 트레일러를 선택하세요. Please select a trailer.', 'error');
     return;
   }
+
+  // ★ 검증 통과 → 저장 단계 표시
+  if(_preBtn){ _preBtn.innerHTML = '⏳ 저장 중...'; }
 
   const id = 'shift_'+Date.now();
   const shift = {
@@ -5334,6 +5343,8 @@ async function completePre(){
   if(currentDriver?.name) {
     localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
   }
+  // ★ 성공 — 버튼을 "완료" 상태로 마킹 (중복 제출 방지)
+  _markBtnDone(_preBtn, '✅ 완료');
   showToast(`✅ ${rego} Pre Departure 완료 Complete${trailerNum?' (트레일러 '+trailerNum+')':''}`,'success');
   // ── Google Sheets 자동 전송 (Pre Departure) ──
   postToSheetsWithRetry('save_predeparture', {
@@ -5511,6 +5522,10 @@ function updateStep2UI(){
 }
 
 function submitDailyReport(){
+  // ★ 중복 제출 방지 가드 — 검증 시작 전 즉시 버튼 잠금
+  const _drBtn = _lockSubmitBtn('button[onclick="submitDailyReport()"]', '⏳ 검증 중...');
+  if(!_drBtn) return; // 이미 처리 중
+
   try {
   const agency = document.getElementById('dr-agency').value;
   const att = document.getElementById('dr-attraction').value;
@@ -5519,11 +5534,11 @@ function submitDailyReport(){
   const _isPrivateRun = document.getElementById('dr-private')?.checked || false;
   // 개인 야경(Private Night Tour) 또는 자체운행(Private)은 여행사/관광지/인승 필수 아님
   const _skipValidation = _isPrivateNight || _isPrivateRun;
-  if(!_skipValidation && !agency){ showToast('⚠️ 여행사를 입력하세요','error'); return; }
-  if(!_skipValidation && !att){ showToast('⚠️ 관광지를 선택하세요','error'); return; }
+  if(!_skipValidation && !agency){ _unlockSubmitBtn(_drBtn);showToast('⚠️ 여행사를 입력하세요','error'); return; }
+  if(!_skipValidation && !att){ _unlockSubmitBtn(_drBtn);showToast('⚠️ 관광지를 선택하세요','error'); return; }
   /* ── 개선: 인승 미선택 경고 ── */
   const _seatsVal = document.getElementById('dr-seats')?.value;
-  if(!_skipValidation && !_seatsVal){ showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
+  if(!_skipValidation && !_seatsVal){ _unlockSubmitBtn(_drBtn);showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
 
   // ★ 여행사 / 투어코드 검증 — 마스터/일정에 없으면 사용자 확인 받기
   if(!_skipValidation){
@@ -5568,8 +5583,8 @@ function submitDailyReport(){
   const _drBtn = document.querySelector('button[onclick="submitDailyReport()"]');
   if(_drBtn){ _drBtn.disabled=true; _drBtn.textContent='⏳ 저장 중...'; }
   const shift = activeShifts.find(s=>s.id===editingShiftId);
-  if(!shift){ showToast('⚠️ Pre Departure를 먼저 완료하세요','error'); return; }
-  if(!editingShiftId){ showToast('⚠️ editingShiftId 없음','error'); return; }
+  if(!shift){ _unlockSubmitBtn(_drBtn);showToast('⚠️ Pre Departure를 먼저 완료하세요','error'); return; }
+  if(!editingShiftId){ _unlockSubmitBtn(_drBtn);showToast('⚠️ editingShiftId 없음','error'); return; }
   // 제출 직전 항상 재계산 (SVC 자동선택 후 calcTotal이 안 불린 경우 대비)
   autoRate();
   calcTotal();
@@ -5642,6 +5657,7 @@ function submitDailyReport(){
   todayReports.push({...report, rego: shift.rego, driver: currentDriver?.name||''});
   // 투어 코드 최근 목록에 저장
   if(report.tourcode) tcSaveCode(report.tourcode);
+  _markBtnDone(_drBtn, '✅ Daily Report 저장 완료');
   showToast(`✅ Daily Report 저장됨 (지급액 $${_drPay})`,'success');
   // 드라이버별 localStorage 저장
   if(currentDriver?.name) {
@@ -5722,11 +5738,11 @@ function submitDailyReport(){
   setTimeout(()=>{ _draftRestoring = false; }, 300);
   } catch(err) {
     console.error('submitDailyReport error:', err);
+    _unlockSubmitBtn(_drBtn);  // 에러 시 다시 시도 가능하게
     showToast('❌ 저장 오류: ' + err.message, 'error');
-  } finally {
-    const _drBtnF = document.querySelector('button[onclick="submitDailyReport()"]');
-    if(_drBtnF){ _drBtnF.disabled=false; _drBtnF.textContent='✓ Daily Report 저장'; }
   }
+  // ★ 성공 시 unlock 안 함 — 중복 제출 방지를 위해 "완료" 상태 유지
+  //   _markBtnDone은 submitDailyReport 내 성공 직전에 호출하도록 별도 처리
 }
 
 // ═══════════════════════════════════════════════
@@ -6177,8 +6193,12 @@ async function changePin() {
 const SHEET_URL = APPS_SCRIPT_URL; // alias
 
 function submitEndShift(){
+  // ★ 중복 제출 방지 가드 — 검증 시작 전 즉시 버튼 잠금
+  const _eosBtn = _lockSubmitBtn('button[onclick="submitEndShift()"]', '⏳ 검증 중...');
+  if(!_eosBtn) return; // 이미 처리 중
+
   const km = document.getElementById('end-km').value;
-  if(!km){showToast('종료 KM을 입력하세요. End KM required.','error');return;}
+  if(!km){_unlockSubmitBtn(_eosBtn);showToast('종료 KM을 입력하세요. End KM required.','error');return;}
 
   // ★ 미저장 Daily Report 감지 — 폼에 의미있는 데이터 있는데 제출 안 한 경우 경고
   //   사용자가 EOS만 누르고 DR 잊어버린 경우 데이터 손실 방지
@@ -6212,21 +6232,22 @@ function submitEndShift(){
     );
     if(!proceed){
       // DR 화면으로 자동 이동
+      _unlockSubmitBtn(_eosBtn);
       if(typeof goStep === 'function') goStep(2);
       return;
     }
   }
 
-  const _eosBtn = document.querySelector('button[onclick="submitEndShift()"]');
-  if(_eosBtn){ _eosBtn.disabled=true; _eosBtn.textContent='⏳ 완료 중...'; }
   // Passenger & lost property check
-  if(!document.getElementById('eos-pax-check').checked){showToast('🚌 승객 탑승 여부를 확인하세요. Passenger check required.','error');return;}
-  if(!document.getElementById('eos-lost-check').checked){showToast('🔍 분실물 확인을 완료하세요. Lost property check required.','error');return;}
-  if(!document.getElementById('eos-fuel-chk').checked){showToast('🅿️ 차량 주차 및 잠금을 확인하세요. Vehicle secured check required.','error');return;}
+  if(!document.getElementById('eos-pax-check').checked){_unlockSubmitBtn(_eosBtn);showToast('🚌 승객 탑승 여부를 확인하세요. Passenger check required.','error');return;}
+  if(!document.getElementById('eos-lost-check').checked){_unlockSubmitBtn(_eosBtn);showToast('🔍 분실물 확인을 완료하세요. Lost property check required.','error');return;}
+  if(!document.getElementById('eos-fuel-chk').checked){_unlockSubmitBtn(_eosBtn);showToast('🅿️ 차량 주차 및 잠금을 확인하세요. Vehicle secured check required.','error');return;}
   // Declaration check
-  if(!document.getElementById('eos-decl-check').checked){showToast('📋 End of Shift 서약을 확인하세요. Please confirm the declaration.','error');return;}
+  if(!document.getElementById('eos-decl-check').checked){_unlockSubmitBtn(_eosBtn);showToast('📋 End of Shift 서약을 확인하세요. Please confirm the declaration.','error');return;}
   // Signature check
-  if(isSigEmpty('sig-canvas')){showToast('✏️ 드라이버 서명을 해주세요. Driver signature required.','error');return;}
+  if(isSigEmpty('sig-canvas')){_unlockSubmitBtn(_eosBtn);showToast('✏️ 드라이버 서명을 해주세요. Driver signature required.','error');return;}
+  // ★ 검증 통과 → 저장 단계 표시
+  if(_eosBtn){ _eosBtn.innerHTML = '⏳ 저장 중...'; }
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(!shift){return;}
   // KM 유효성 검사
@@ -6311,6 +6332,8 @@ function submitEndShift(){
   // 완료된 시프트를 PDF용으로 복사 (localStorage에 보관, 이후 필요 시 접근)
   const completedShiftSnapshot = JSON.parse(JSON.stringify(shift));
   activeShifts = activeShifts.filter(s=>s.id!==editingShiftId);
+  // ★ 성공 — 버튼을 "완료" 상태로 마킹 (중복 제출 방지)
+  _markBtnDone(_eosBtn, '✅ 운행 종료 완료');
   showToast(`🏁 ${shift.rego} End of Shift 완료`,'success');
   // 드라이버별 저장
   if(currentDriver?.name) {
@@ -11347,6 +11370,49 @@ function showToast(msg,type=''){
   const t=document.getElementById('toast');
   t.textContent=msg; t.className='toast show '+(type||'');
   setTimeout(()=>t.classList.remove('show'),2500);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 중복 제출 방지 가드 — Pre/DR/EOS 제출 버튼 보호
+//
+// 사용법:
+//   const btn = _lockSubmitBtn('selector', '⏳ 저장 중...');
+//   if(!btn) return; // 이미 처리 중
+//   try { ...작업... }
+//   catch(e) { _unlockSubmitBtn(btn); throw e; }  // 에러 시 복원
+//   finally { /* 성공 시엔 unlock 안 함 - 중복 제출 방지 */ }
+//
+// 검증 실패 시: showToast 후 _unlockSubmitBtn(btn) 호출하면 다시 시도 가능
+// ═══════════════════════════════════════════════════════════════
+function _lockSubmitBtn(btnOrSelector, loadingText){
+  const btn = (typeof btnOrSelector === 'string')
+    ? document.querySelector(btnOrSelector) : btnOrSelector;
+  if(!btn) return null;
+  if(btn.dataset.submitting === '1') return null; // 이미 처리 중 → null 리턴
+  btn.dataset.submitting = '1';
+  btn.dataset.originalText = btn.innerHTML;
+  btn.dataset.originalBg = btn.style.background || '';
+  btn.disabled = true;
+  btn.innerHTML = loadingText || '⏳ 저장 중...';
+  btn.style.opacity = '0.7';
+  btn.style.cursor = 'not-allowed';
+  return btn;
+}
+function _unlockSubmitBtn(btn){
+  if(!btn) return;
+  btn.dataset.submitting = '';
+  btn.disabled = false;
+  if(btn.dataset.originalText) btn.innerHTML = btn.dataset.originalText;
+  btn.style.opacity = '';
+  btn.style.cursor = '';
+}
+function _markBtnDone(btn, doneText){
+  if(!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = doneText || '✅ 제출 완료';
+  btn.style.background = '#16a34a';
+  btn.style.opacity = '1';
+  btn.style.cursor = 'default';
 }
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 
