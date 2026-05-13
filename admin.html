@@ -3584,13 +3584,21 @@ function openHvisBooking(rego){
   overlay.appendChild(modal);document.body.appendChild(overlay);
 }
 async function saveHvisBookingEntry(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   var entry={id:Date.now().toString(),rego:gv('hb-rego'),inspDate:fmtDate(gv('hb-date')),inspTime:gv('hb-time'),
     location:gv('hb-location'),customerNo:gv('hb-custno'),bookingNo:gv('hb-bookno'),
     ownerName:gv('hb-owner'),bookingDate:fmtDate(toLocalISO(new Date()))};
   if(!entry.rego){toast('Select a vehicle (차량을 선택하세요)','er');return;}
   if(!entry.inspDate){toast('Enter inspection date (점검 날짜를 입력하세요)','er');return;}
   try {
-    toast('저장 중...','ok');
+    _done(); toast('저장 중...','ok');
     const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'save_hvis_booking', data:{
         ID: entry.id, Rego: entry.rego, InspDate: entry.inspDate, InspTime: entry.inspTime,
@@ -3605,22 +3613,30 @@ async function saveHvisBookingEntry(){
     renderHvis();
     rDash();
     toast('HVIS Booking Saved (HVIS 부킹 저장 완료)','ok');
-  } catch(e) {
+  } catch(e) { _fail();
     toast('서버 오류: '+e.message,'er');
   }
 }
 async function deleteHvisBooking(id){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   if(!confirm('Delete this booking?'))return;
   try {
-    toast('삭제 중...','ok');
+    _done(); toast('삭제 중...','ok');
     const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'delete_hvis_booking', id: id})});
     const json = await res.json();
     if(!json.ok){ toast('삭제 실패: '+(json.error||''),'er'); return; }
     setHvisBookingsCache(getHvisBookings().filter(function(b){return b.id!==id;}));
     document.getElementById('hvis-modal-overlay').remove();
-    renderHvis();rDash();toast('Deleted','ok');
-  } catch(e) {
+    renderHvis();rDash();_done(); toast('Deleted','ok');
+  } catch(e) { _fail();
     toast('서버 오류: '+e.message,'er');
   }
 }
@@ -3749,11 +3765,19 @@ function openMaintEntry(id){
   overlay.appendChild(modal);document.body.appendChild(overlay);
 }
 async function saveMaintEntry(id){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   var entry={id:id||Date.now().toString(),rego:gv('mt-rego'),date:gv('mt-date'),
     km:parseInt(gv('mt-km'))||null,type:gv('mt-type'),description:gv('mt-desc'),
     workshop:gv('mt-shop'),cost: roundMoney(gv('mt-cost'))||0,nextServiceKM:parseInt(gv('mt-nextkm'))||null};
-  if(!entry.rego){toast('Select a vehicle','er');return;}
-  if(!entry.date){toast('Enter date','er');return;}
+  if(!entry.rego){_fail();toast('Select a vehicle','er');return;}
+  if(!entry.date){_fail();toast('Enter date','er');return;}
   // 로컬 캐시 업데이트
   var recs=getMaintRecords();
   if(id){var ix=recs.findIndex(function(r){return r.id===id;});if(ix>=0)recs[ix]=entry;else recs.push(entry);}
@@ -3761,7 +3785,7 @@ async function saveMaintEntry(id){
   setMaintRecordsCache(recs);
   if(entry.km){var vi=DB.V.findIndex(function(v){return v.Rego===entry.rego;});if(vi>=0){if(entry.nextServiceKM)DB.V[vi].Next_Service_KM=entry.nextServiceKM;}}
   document.getElementById('maint-modal-overlay').remove();
-  renderMaint();toast('Maintenance record saved','ok');
+  renderMaint();_done(); toast('Maintenance record saved','ok');
   // 서버 저장
   try {
     await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
@@ -3770,16 +3794,24 @@ async function saveMaintEntry(id){
         Type:entry.type, Description:entry.description, Workshop:entry.workshop,
         Cost:entry.cost, NextServiceKM:entry.nextServiceKM||''
       }})});
-  } catch(e){ console.warn('Maint save to server failed:', e); }
+  } catch(e){ _fail(); console.warn('Maint save to server failed:', e); }
 }
 async function deleteMaint(id){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   if(!confirm('Delete this maintenance record?'))return;
   setMaintRecordsCache(getMaintRecords().filter(function(r){return r.id!==id;}));
-  renderMaint();toast('Deleted','ok');
+  renderMaint();_done(); toast('Deleted','ok');
   try {
     await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'delete_maint_record', id:id})});
-  } catch(e){ console.warn('Maint delete from server failed:', e); }
+  } catch(e){ _fail(); console.warn('Maint delete from server failed:', e); }
 }
 
 function populateDefectFilter(){
@@ -6900,6 +6932,14 @@ function _schSerializeFlight(code, date, time, type){
 // 저장 / 삭제
 // ═══════════════════════════════════════
 async function saveScheduleData(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const errEl = document.getElementById('sm-err');
   const showErr = (msg) => { if(errEl){ errEl.textContent = msg; errEl.style.display = 'block'; } };
   errEl && (errEl.style.display = 'none');
@@ -7039,7 +7079,7 @@ async function saveScheduleData(){
     // TourPlan을 다시 JSON 직렬화 (강제 동기화된 값 반영)
     data.TourPlan = JSON.stringify(_schDays);
     console.log('[Schedule Save] 저장 직전 강제 동기화 완료');
-  } catch(e){ console.warn('저장 직전 동기화 오류:', e); }
+  } catch(e){ _fail(); console.warn('저장 직전 동기화 오류:', e); }
 
   // ★ 충돌 검사 — 같은 차량/드라이버/가이드가 같은 시간대에 다른 일정에 이미 있는지
   // 시간 겹침(overlap) 기준: 한쪽 종료시각 ≤ 다른쪽 시작시각이면 충돌 아님
@@ -7100,7 +7140,7 @@ async function saveScheduleData(){
         }
       });
     }
-  } catch(e) { console.warn('충돌 검사 오류:', e); }
+  } catch(e) { _fail(); console.warn('충돌 검사 오류:', e); }
 
   if(conflicts.length > 0){
     const msg = '⚠️ 다음 충돌이 감지되었습니다:\n\n' + conflicts.slice(0, 8).join('\n') +
@@ -7122,16 +7162,16 @@ async function saveScheduleData(){
     });
     const json = await res.json();
     if(!json.ok) throw new Error(json.error || '저장 실패');
-    toast(`✅ ${json.updated?'수정':'등록'} 완료 · ${json.tourId}`,'ok');
+    _done(); toast(`✅ ${json.updated?'수정':'등록'} 완료 · ${json.tourId}`,'ok');
 
     // ★ 마스터에 없는 서브 드라이버 자동 등록 (백그라운드)
     try {
       await _autoRegisterSubDrivers();
-    } catch(e){ console.warn('서브 드라이버 자동 등록 오류:', e); }
+    } catch(e){ _fail(); console.warn('서브 드라이버 자동 등록 오류:', e); }
 
     closeScheduleModal();
     await loadSchedule();
-  }catch(e){
+  }catch(e){ _fail();
     showErr('저장 실패: ' + e.message);
   }
 }
@@ -7391,6 +7431,14 @@ function _renderBulkRows(){
 }
 
 async function saveBulkBlocks(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const errEl = document.getElementById('sch-bulk-err');
   const showErr = (msg) => { if(errEl){ errEl.textContent = msg; errEl.style.display = 'block'; } };
   errEl && (errEl.style.display = 'none');
@@ -7447,11 +7495,11 @@ async function saveBulkBlocks(){
       const json = await res.json();
       if(json.ok) okCount++;
       else failCount++;
-    }catch(e){ failCount++; }
+    }catch(e){ _fail(); failCount++; }
   }
 
   if(failCount === 0){
-    toast(`✅ ${okCount}건 등록 완료`, 'ok');
+    _done(); toast(`✅ ${okCount}건 등록 완료`, 'ok');
   } else {
     toast(`⚠️ 성공 ${okCount}건 / 실패 ${failCount}건`, 'er');
   }
@@ -7461,6 +7509,14 @@ async function saveBulkBlocks(){
 
 
 async function deleteScheduleConfirm(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   if(!_schEditTourId) return;
   if(!confirm('이 일정을 삭제하시겠습니까?\n(인보이스가 발행된 일정은 신중히 삭제하세요)')) return;
   toast('🗑️ 삭제 중...','in');
@@ -7476,7 +7532,7 @@ async function deleteScheduleConfirm(){
     });
     const json = await res.json();
     if(!json.ok) throw new Error(json.error || '삭제 실패');
-    toast('✅ 삭제 완료','ok');
+    _done(); toast('✅ 삭제 완료','ok');
     closeScheduleModal();
     await loadSchedule();
   }catch(e){
@@ -9769,8 +9825,16 @@ async function loadSubRatesFromSheet(){
   }catch(e){console.warn('서브 요금 로드 실패:',e);}
 }
 async function saveSubRates(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const subCo = ST.curSub;
-  if(!subCo){toast('서브 회사를 선택하세요','er');return;}
+  if(!subCo){_fail();toast('서브 회사를 선택하세요','er');return;}
   const rates = getSubRates();
   if(!rates[subCo]) rates[subCo]={};
   document.querySelectorAll('#subRatesTbody tr').forEach(tr=>{
@@ -11281,10 +11345,18 @@ async function syncLedgerEntryToSheet(entry, rowIndex){
       const json=await res.json();
       return json.row; // 새 rowIndex 반환
     }
-  }catch(e){console.warn('Ledger sync 실패:',e);}
+  }catch(e){ _fail();console.warn('Ledger sync 실패:',e);}
 }
 
 async function deleteLedgerEntryFromSheet(rowIndex){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   if(!rowIndex) return;
   try{
     await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
@@ -11333,7 +11405,15 @@ function addLedgerWeek(){
 }
 
 async function deleteLedgerWeek(){
-  if(!ST.ledgerWeek){toast('주간을 선택하세요','er');return;}
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
+  if(!ST.ledgerWeek){_fail();toast('주간을 선택하세요','er');return;}
   const ledger = getLedger();
   const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
   if(!week) return;
@@ -11344,7 +11424,7 @@ async function deleteLedgerWeek(){
   saveLedger(newLedger);
   ST.ledgerWeek = newLedger[0]?.weekStart||null;
   initLedger();
-  toast('주간 삭제 완료 ☁️','ok');
+  _done(); toast('주간 삭제 완료 ☁️','ok');
   try{
     const rows=[];
     newLedger.forEach(w=>w.entries?.forEach(e=>rows.push({
@@ -11652,6 +11732,14 @@ function ledgerPreview(){
 }
 
 async function saveLedgerEntry(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const entry = {
     date:  fmtDate(document.getElementById('le-date')?.value||''),
     rego:  document.getElementById('le-rego')?.value||'',
@@ -11665,13 +11753,13 @@ async function saveLedgerEntry(){
     hotel: parseFloat(document.getElementById('le-hotel2')?.value)||0,
     note:  document.getElementById('le-note')?.value||'',
   };
-  if(!entry.date){toast('날짜를 입력하세요','er');return;}
-  if(!entry.tour){toast('투어 코스를 선택하세요','er');return;}
-  if(entry.ta===0){toast('여행사 청구 금액을 입력하세요','er');return;}
+  if(!entry.date){_fail();toast('날짜를 입력하세요','er');return;}
+  if(!entry.tour){_fail();toast('투어 코스를 선택하세요','er');return;}
+  if(entry.ta===0){_fail();toast('여행사 청구 금액을 입력하세요','er');return;}
 
   const ledger = getLedger();
   const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
-  if(!week){toast('주간을 먼저 선택하세요','er');return;}
+  if(!week){_fail();toast('주간을 먼저 선택하세요','er');return;}
 
   const isEdit = ST.ledgerEditIdx!==null;
   const existingRow = isEdit ? week.entries[ST.ledgerEditIdx]?._rowIndex : null;
@@ -11681,7 +11769,7 @@ async function saveLedgerEntry(){
   saveLedger(ledger);
   document.getElementById('ledger-modal-overlay')?.remove();
   renderLedger();
-  toast(isEdit ? '수정 완료 ☁️' : '건 추가 완료 ☁️', 'ok');
+  _done(); toast(isEdit ? '수정 완료 ☁️' : '건 추가 완료 ☁️', 'ok');
   // 시트 sync
   syncLedgerEntryToSheet(entry, existingRow).then(newRow=>{
     if(newRow && !isEdit){
@@ -12035,8 +12123,16 @@ function openSubCompanyForm(idx){
 }
 
 async function saveSubCompany(idx){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const name = document.getElementById('sc-name').value.trim();
-  if(!name){ toast('업체명을 입력하세요','er'); return; }
+  if(!name){ _fail();toast('업체명을 입력하세요','er'); return; }
   const data = {
     SubName: name,
     ABN: document.getElementById('sc-abn').value.trim(),
@@ -12073,14 +12169,14 @@ async function saveSubCompany(idx){
       try{
         await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
           body:JSON.stringify({action:'delete_sub_by_name', name:oldName})});
-      }catch(e){ console.warn('delete_sub_by_name failed:', e); }
+      }catch(e){ _fail(); console.warn('delete_sub_by_name failed:', e); }
     }
   }
   try{
     toast('저장 중...','in');
     const json = await gasPost(body);
     if(json.ok){
-      toast('✅ SUB 업체 저장 완료','ok');
+      _done(); toast('✅ SUB 업체 저장 완료','ok');
       closeGenModal();
       await loadSubCompanies(true);
       renderSubCompanyList();
@@ -12088,20 +12184,28 @@ async function saveSubCompany(idx){
       await syncSub();
       if(ST.subTab==='rates') rSub();
     } else { toast('❌ 저장 실패: '+(json.error||''),'er'); }
-  }catch(e){
+  }catch(e){ _fail();
     console.error('saveSubCompany error:', e);
     toast('❌ 저장 오류: '+e.message,'er');
   }
 }
 
 async function deleteSubCompany(idx){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const s = _subCompanies[idx];
   if(!s) return;
   if(!confirm(`"${s.SubName}" 업체를 삭제하시겠습니까?`)) return;
   try{
     const json = await gasPost({action:'delete_master', sheet:'M_SUB', rowIndex: s._rowIndex});
     if(json.ok){
-      toast('🗑 삭제 완료','ok');
+      _done(); toast('🗑 삭제 완료','ok');
       await loadSubCompanies(true);
       renderSubCompanyList();
       window._psLastSync = 0;
@@ -12692,6 +12796,14 @@ async function adminCreateMissingDR(missingInfo){
 
 // 관리자가 대신 작성한 DR 저장 (save_report action — 신규 행 append)
 async function adminSaveNewDR(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   // 폼 값 수집 (필드명은 시트 헤더와 동일)
   const fields = [
     'Date','Driver','Rego','Seats','Agency','Attraction','Guide','Tour_Code',
@@ -12710,7 +12822,7 @@ async function adminSaveNewDR(){
 
   // 기본 검증
   if(!data.Date || !data.Driver || !data.Rego){
-    toast('날짜, 드라이버, 차량은 필수입니다','er');
+    _fail();toast('날짜, 드라이버, 차량은 필수입니다','er');
     return;
   }
 
@@ -12747,20 +12859,28 @@ async function adminSaveNewDR(){
 
     // 운행 리포트 페이지 재로드 (있으면)
     if(typeof loadDriverReports === 'function'){
-      try { await loadDriverReports(); } catch(e){}
+      try { await loadDriverReports(); } catch(e){ _fail();}
     }
     // 정산 페이지 재로드
     if(typeof loadSettleDashboard === 'function' && document.getElementById('settle-summary')){
-      try { await loadSettleDashboard(); } catch(e){}
+      try { await loadSettleDashboard(); } catch(e){ _fail();}
     }
-  } catch(e){
+  } catch(e){ _fail();
     toast('저장 오류: ' + e.message, 'er');
     if(btn){ btn.disabled = false; btn.textContent = '✏️ 대신 작성 저장'; }
   }
 }
 
 async function saveDailyReportEdit(rowIndex){
-  if(!rowIndex || rowIndex < 2){ toast('rowIndex 오류','er'); return; }
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
+  if(!rowIndex || rowIndex < 2){ _fail();toast('rowIndex 오류','er'); return; }
   // 폼 값 수집
   const fields = [
     'Date','Driver','Rego','Seats','Agency','Attraction','Guide','Tour_Code',
@@ -12795,7 +12915,7 @@ async function saveDailyReportEdit(rowIndex){
     const json = await res.json();
     if(!json.ok) throw new Error(json.error || json.msg || '저장 실패');
 
-    toast('✅ 저장 완료 — 모든 페이지 재계산','ok');
+    _done(); toast('✅ 저장 완료 — 모든 페이지 재계산','ok');
 
     // 모든 캐시 무효화 → 인보이스/정산/급여 모두 새 데이터 사용
     _drCache = null;
@@ -12808,12 +12928,12 @@ async function saveDailyReportEdit(rowIndex){
 
     // 현재 페이지 재로드
     if(typeof loadSettleDashboard === 'function' && document.getElementById('settle-summary')){
-      try { await loadSettleDashboard(); } catch(e){}
+      try { await loadSettleDashboard(); } catch(e){ _fail();}
     }
     if(typeof loadSubDriverPay === 'function' && document.getElementById('sdp-result')){
-      try { await loadSubDriverPay(); } catch(e){}
+      try { await loadSubDriverPay(); } catch(e){ _fail();}
     }
-  } catch(e){
+  } catch(e){ _fail();
     toast('❌ 저장 실패: ' + e.message, 'er');
     if(btn){ btn.disabled = false; btn.textContent = '💾 저장'; }
   }
@@ -17476,6 +17596,14 @@ function _todayISO(){
 }
 
 async function saveBalTxn(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const type = window._balDetailType;
   const idx = _balEditIdx;
 
@@ -17514,7 +17642,7 @@ async function saveBalTxn(){
         const linkedInv = _invHistoryCache.find(inv => String(inv.InvNumber||'').trim() === _syncInvId);
         if(linkedInv){
           try {
-            const _pI = (json) => { try { return (json && typeof json==='string' && json.trim().startsWith('[')) ? JSON.parse(json) : []; } catch(e){ return []; } };
+            const _pI = (json) => { try { return (json && typeof json==='string' && json.trim().startsWith('[')) ? JSON.parse(json) : []; } catch(e){ _fail(); return []; } };
             let items = _pI(linkedInv.Items);
             let changed = false;
             if(row.Guide && items.length){
@@ -17541,20 +17669,20 @@ async function saveBalTxn(){
                 if(j.ok) console.log('[TxnEdit→Invoice] Items 동기화 완료:', _syncInvId);
               }).catch(e=>console.warn('[TxnEdit→Invoice] sync error:', e));
             }
-          } catch(e){ console.warn('[TxnEdit→Invoice] parse error:', e); }
+          } catch(e){ _fail(); console.warn('[TxnEdit→Invoice] parse error:', e); }
         }
       }
 
-      toast('✅ 저장 완료','ok');
+      _done(); toast('✅ 저장 완료','ok');
 
       // ★ 수금 처리 시 Schedule.Status = 'paid' 자동 갱신
       // 조건: CR>0 (수금) + 연결된 인보이스 InvoiceID 있음
       if(row.CR > 0 && row.InvoiceID){
         try {
           await _updateSchedulesAfterPayment(row.InvoiceID, row.Agency);
-        } catch(e){ console.warn('[Schedule Update] 수금 후 paid 갱신 실패:', e); }
+        } catch(e){ _fail(); console.warn('[Schedule Update] 수금 후 paid 갱신 실패:', e); }
       }
-    } catch(e){ toast('저장 실패: '+e.message,'err'); return; }
+    } catch(e){ _fail(); toast('저장 실패: '+e.message,'err'); return; }
 
   } else if(type==='sub'){
     let sub = document.getElementById('btx-sub').value;
@@ -17580,7 +17708,7 @@ async function saveBalTxn(){
       if(!json.ok) throw new Error(json.error||'저장 실패');
       if(idx!==null) Object.assign(_balSubTxns[idx], row);
       else { row._rowIndex = json.rowIndex; _balSubTxns.push(row); }
-      toast('✅ 저장 완료','ok');
+      _done(); toast('✅ 저장 완료','ok');
       // ★ Sub_Invoices.Status 동기화 (Sub-tab/Balance-tab 통일)
       try {
         if(row.InvoiceNo && row.CR > 0){
@@ -17611,8 +17739,8 @@ async function saveBalTxn(){
             }
           }
         }
-      } catch(e){ console.warn('sync invoice status failed:', e); }
-        } catch(e){ toast('저장 실패: '+e.message,'err'); return; }
+      } catch(e){ _fail(); console.warn('sync invoice status failed:', e); }
+        } catch(e){ _fail(); toast('저장 실패: '+e.message,'err'); return; }
   }
 
   closeBalTxnModal();
@@ -17624,6 +17752,14 @@ async function saveBalTxn(){
 }
 
 async function deleteBalTxn(type, idx){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   if(!confirm('이 거래를 삭제하시겠습니까?')) return;
   try {
     if(type==='agency'){
@@ -18795,6 +18931,14 @@ const DC_COMPANY = {
 };
 
 function saveCompanyInfo() {
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const abn = document.getElementById('inv-abn')?.value || '';
   DC_COMPANY.abn = abn;
   // 서버 저장 (비동기)
@@ -18858,6 +19002,14 @@ function toggleInvSettings() {
 }
 
 function saveInvSettings() {
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const name    = document.getElementById('inv-company-name')?.value || '';
   const abn     = document.getElementById('inv-abn')?.value          || '';
   const phone   = document.getElementById('inv-phone')?.value        || '';
@@ -18885,7 +19037,7 @@ function saveInvSettings() {
       bsb: DC_COMPANY.bsb, acc: DC_COMPANY.acc, accname: DC_COMPANY.accname
     }})
   }).catch(e => console.warn('Company profile save failed:', e));
-  toast('회사 정보 저장 완료','ok');
+  _done(); toast('회사 정보 저장 완료','ok');
 }
 
 
@@ -19833,20 +19985,28 @@ function _updateInvTotals(agency, from, to) {
 
 // ─── 인보이스 GAS 시트 저장 ───
 async function saveInvoiceToSheet() {
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const agency = document.getElementById('inv-agency')?.value;
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
-  if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요','er'); return; }
+  if (!agency || !from || !to) { _fail();toast('여행사와 기간을 선택하세요','er'); return; }
 
   const rows = _buildInvRows(agency, from, to);
-  if (!rows.length) { toast('항목이 없습니다','er'); return; }
+  if (!rows.length) { _fail();toast('항목이 없습니다','er'); return; }
 
   const grandTotal = _calcInvGrandTotal(rows);
   const gst   = roundMoney(grandTotal / 11);
   const exGST = roundMoney(grandTotal - gst);
   // ★ 2026-05 fix: 캐시가 null이면 reload (이중 발행 방지 및 정확한 번호 조회)
   if (!_invHistoryCache) {
-    try { await loadInvHistory(false); } catch(e) { console.warn('[saveInvoice] cache reload failed:', e); }
+    try { await loadInvHistory(false); } catch(e) { _fail(); console.warn('[saveInvoice] cache reload failed:', e); }
   }
   // 현재 여행사/기간에 맞는 번호 조회 (이력 → 현재 생성분 → 신규 순)
   const invNum = getExistingOrNewInvNum(agency, from);
@@ -19857,7 +20017,7 @@ async function saveInvoiceToSheet() {
   if (_invHistoryCache && !_isEditMode) {
     const dup = _invHistoryCache.find(inv => String(inv.InvNumber).trim() === invNum);
     if (dup) {
-      toast(`⚠️ ${invNum}은 이미 발행된 인보이스입니다. 페이지를 새로고침하세요.`, 'er');
+      _fail();toast(`⚠️ ${invNum}은 이미 발행된 인보이스입니다. 페이지를 새로고침하세요.`, 'er');
       return;
     }
   }
@@ -19944,7 +20104,7 @@ async function saveInvoiceToSheet() {
     if (!json.ok) throw new Error(json.error||'저장 실패');
     // localStorage 발행 기록도 동기화
     localStorage.setItem(`dc_inv_issued_${invNum}`, new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}));
-    toast(`✅ 인보이스 ${invNum} 저장 완료`,'ok');
+    _done(); toast(`✅ 인보이스 ${invNum} 저장 완료`,'ok');
 
     // ★ 거래처 잔액에 Agency_Txn 자동 등록 (행 분리 방식)
     // Type별 개별 행: invoice(DR), prepaid_use(CR), credit_use(CR)
@@ -20041,7 +20201,7 @@ async function saveInvoiceToSheet() {
           _balLoaded = false;
         }
       }
-    } catch(e) { console.warn('[Invoice→Balance] 거래 등록 오류:', e); }
+    } catch(e) { _fail(); console.warn('[Invoice→Balance] 거래 등록 오류:', e); }
 
     _invHistoryCache = null; // 캐시 무효화
     _balLoaded = false; // ★ 잔액 캐시도 무효화
@@ -20049,7 +20209,7 @@ async function saveInvoiceToSheet() {
 
     // ★ 2026-05 fix: 캐시 즉시 reload (저장 직후 발송/미리보기 클릭 시 새 번호 발급되는 버그 방지)
     // INV-202605-001 저장 후 즉시 ✉️발송 클릭 → 캐시 null + _lastGen null → 새 번호 INV-202605-002 발급되는 케이스 방지
-    try { await loadInvHistory(true); } catch(e) { console.warn('[saveInvoice] post-save cache reload failed:', e); }
+    try { await loadInvHistory(true); } catch(e) { _fail(); console.warn('[saveInvoice] post-save cache reload failed:', e); }
 
     // ★ 저장 완료 후 크레딧/선수금 & 수동항목 캐시 초기화 (다음 인보이스에 잔류 방지)
     const _resetKey = agency + '_' + from.slice(0,7);
@@ -20062,7 +20222,7 @@ async function saveInvoiceToSheet() {
     //   인보이스의 TourCode + 날짜 기준으로 매칭되는 Schedule 찾기
     try {
       await _updateSchedulesAfterInvoice(invNum, agency, rows, manualItems, from, to);
-    } catch(e){ console.warn('[Schedule Update] 인보이스 발행 후 status 갱신 실패:', e); }
+    } catch(e){ _fail(); console.warn('[Schedule Update] 인보이스 발행 후 status 갱신 실패:', e); }
 
     _refreshInvPreview();
   } catch(e) {
@@ -21286,10 +21446,18 @@ async function markAsSent(invNumber) {
     toast('✉️ ' + invNumber + ' 발송완료 표시','ok');
     _invHistoryCache = null;
     await loadInvHistory(true);
-  } catch(e) { toast('⚠️ 상태 변경 실패: ' + e.message, 'er'); }
+  } catch(e) { _fail(); toast('⚠️ 상태 변경 실패: ' + e.message, 'er'); }
 }
 
 async function updateInvStatus(invNumber, status, field) {
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   if (!confirm(`인보이스 ${invNumber} 상태를 "${status}"로 변경하시겠습니까?`)) return;
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
@@ -21298,7 +21466,7 @@ async function updateInvStatus(invNumber, status, field) {
     });
     const json = await res.json();
     if (!json.ok) throw new Error(json.error||'상태 변경 실패');
-    toast(`✅ ${invNumber} → ${status}`,'ok');
+    _done(); toast(`✅ ${invNumber} → ${status}`,'ok');
 
     // ★ 결제 시 Agency_Txn에 CR(수금) 자동 등록 → 잔액 탭 연동
     // PaidCR(백엔드 계산) 활용, 잔액만 payment 타입으로 등록
@@ -21315,7 +21483,7 @@ async function updateInvStatus(invNumber, status, field) {
             // 캐시도 새로 채워둠
             _invHistoryCache = (j2.rows||[]).slice().reverse();
           }
-        } catch(e) { console.warn('[Payment→Balance] cache fallback fetch error:', e); }
+        } catch(e) { _fail(); console.warn('[Payment→Balance] cache fallback fetch error:', e); }
       }
       if (inv) {
         const grandTotal = parseFloat(inv.GrandTotal) || 0;
@@ -21351,7 +21519,7 @@ async function updateInvStatus(invNumber, status, field) {
               } else {
                 lastErr = j.error || 'unknown';
               }
-            } catch(e) {
+            } catch(e) { _fail();
               lastErr = e.message || String(e);
             }
             if (!crOk && attempt===1) await new Promise(r=>setTimeout(r,800));
@@ -21372,10 +21540,18 @@ async function updateInvStatus(invNumber, status, field) {
 
     await loadInvHistory(true);
     _syncBalanceAndInvoice(); // ★ 잔액 탭 동기화
-  } catch(e) { toast('❌ '+e.message,'er'); }
+  } catch(e) { _fail(); toast('❌ '+e.message,'er'); }
 }
 
 async function deleteInvoiceRecord(invNumber) {
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   if (!confirm(`인보이스 ${invNumber}을(를) 완전히 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
@@ -21384,7 +21560,7 @@ async function deleteInvoiceRecord(invNumber) {
     });
     const json = await res.json();
     if (!json.ok) throw new Error(json.error||'삭제 실패');
-    toast(`🗑️ ${invNumber} 삭제 완료`,'ok');
+    _done(); toast(`🗑️ ${invNumber} 삭제 완료`,'ok');
     await loadInvHistory(true);
     _syncBalanceAndInvoice(); // ★ 잔액 탭 동기화
   } catch(e) { toast('❌ '+e.message,'er'); }
@@ -22716,6 +22892,14 @@ function closeNoticeModal() {
 }
 
 function saveNotice() {
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const title = document.getElementById('notice-title')?.value?.trim();
   const body  = document.getElementById('notice-body')?.value?.trim();
   const type  = document.querySelector('input[name="notice-type"]:checked')?.value || 'info';
@@ -22748,15 +22932,23 @@ function saveNotice() {
   saveAdminNotices(notices);
   closeNoticeModal();
   renderAdminNotices();
-  toast('공지 저장 완료 — 드라이버 앱에 즉시 반영됩니다', 'ok');
+  _done(); toast('공지 저장 완료 — 드라이버 앱에 즉시 반영됩니다', 'ok');
 }
 
 function deleteNotice(id) {
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   if (!confirm('이 공지를 삭제하시겠습니까?')) return;
   const notices = (getAdminNotices() || []).filter(x => String(x.id) !== String(id));
   saveAdminNotices(notices);
   renderAdminNotices();
-  toast('공지 삭제됨', 'ok');
+  _done(); toast('공지 삭제됨', 'ok');
 }
 
 function renderAdminNotices() {
@@ -23730,11 +23922,19 @@ function closeDRModal(){
 }
 
 async function saveDREdit(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const rowIndex = window._drEditRow;
-  if(!rowIndex){ toast('수정 대상 없음','er'); return; }
+  if(!rowIndex){ _fail();toast('수정 대상 없음','er'); return; }
 
   const orig = (_drCache||[]).find(x=>x._rowIndex===rowIndex);
-  if(!orig){ toast('원본 데이터 없음','er'); return; }
+  if(!orig){ _fail();toast('원본 데이터 없음','er'); return; }
 
   const errEl = document.getElementById('dr-modal-err');
 
@@ -23816,11 +24016,19 @@ async function saveDREdit(){
 
     closeDRModal();
     renderDR();
-    toast('✅ 리포트 수정 완료','ok');
-  }catch(e){ errEl.textContent='저장 실패: '+e.message; errEl.style.display='block'; }
+    _done(); toast('✅ 리포트 수정 완료','ok');
+  }catch(e){ _fail(); errEl.textContent='저장 실패: '+e.message; errEl.style.display='block'; }
 }
 
 async function deleteDR(rowIndex){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const r = (_drCache||[]).find(x=>x._rowIndex===rowIndex);
   if(!r) return;
   const label = `${fmtDate(r.Date)} · ${r.Driver} · ${r.Agency}`;
@@ -23841,7 +24049,7 @@ async function deleteDR(rowIndex){
     _invReports = null;
 
     renderDR();
-    toast('🗑 리포트 삭제 완료','ok');
+    _done(); toast('🗑 리포트 삭제 완료','ok');
   }catch(e){ toast('삭제 실패: '+e.message,'er'); }
 }
 
@@ -24667,21 +24875,29 @@ function _refreshWageView(){
     if (balDetailModal && balDetailModal.style.display !== 'none' && typeof renderBalDetail === 'function') {
       renderBalDetail();
     }
-  } catch(e){ console.warn('[_refreshWageView] balance sync:', e); }
+  } catch(e){ _fail(); console.warn('[_refreshWageView] balance sync:', e); }
 }
 
 async function saveWageEntry(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const rawDate = document.getElementById('we-date')?.value||'';
   const date   = parseToISO(rawDate) || rawDate; // ★ 항상 ISO (YYYY-MM-DD) 형식으로 저장
   const amount = parseFloat(document.getElementById('we-amount')?.value)||0;
   const method = document.getElementById('we-method')?.value||'현금';
   const note   = document.getElementById('we-note')?.value||'';
-  if(!date){toast('날짜를 입력하세요','er');return;}
-  if(amount<=0){toast('금액을 입력하세요','er');return;}
+  if(!date){_fail();toast('날짜를 입력하세요','er');return;}
+  if(amount<=0){_fail();toast('금액을 입력하세요','er');return;}
 
   // ★ openWageEntry에서 지정한 실제 주차 키 사용 (ALL이 아닌 실제 주차)
   let weekKey = ST._wageEntryWeek || ST.wageWeek;
-  if(!weekKey || weekKey==='ALL'){toast('주차 정보 오류','er');return;}
+  if(!weekKey || weekKey==='ALL'){_fail();toast('주차 정보 오류','er');return;}
   // ★ weekKey를 월요일로 정규화 (겹치는 주간 방지)
   weekKey = getMondayOfDate(weekKey) || weekKey;
 
@@ -24728,10 +24944,10 @@ async function saveWageEntry(){
     // ★ GAS 저장 성공 시에만 시트에서 재로드 (실패 시 로컬 데이터 보존)
     if(gasSaveOk) {
       _wagesLastSync = 0;
-      try { await loadWagesFromSheet(true); } catch(e2){ console.warn('Wage reload 실패, 로컬 유지:', e2); }
+      try { await loadWagesFromSheet(true); } catch(e2){ _fail(); console.warn('Wage reload 실패, 로컬 유지:', e2); }
     }
     _refreshWageView();
-  }catch(e){
+  }catch(e){ _fail();
     console.warn('급여 시트 sync 실패:',e);
     toast('✅ 로컬 저장 완료 (시트 동기화는 나중에)','ok');
     _refreshWageView();
@@ -24739,9 +24955,17 @@ async function saveWageEntry(){
 }
 
 async function deleteWageEntry(idx, weekKey){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   if(!confirm('이 지급 기록을 삭제하시겠습니까?')) return;
   const wk = weekKey || (ST.wageWeek==='ALL' ? null : ST.wageWeek);
-  if(!wk){toast('주차 정보 오류','er');return;}
+  if(!wk){_fail();toast('주차 정보 오류','er');return;}
   const wages = getWages();
   const entries = wages[ST.wageDriver]?.[wk]?.entries;
   const rowIndex = entries?.[idx]?._rowIndex;
@@ -24762,14 +24986,22 @@ async function deleteWageEntry(idx, weekKey){
     _wagesLastSync=0;
     await loadWagesFromSheet(true);
     _refreshWageView();
-  }catch(e){
+  }catch(e){ _fail();
     console.warn('급여 삭제 sync 실패:',e);
     toast('삭제됨 (오프라인)','ok');
   }
 }
 
 async function deleteWageWeek(){
-  if(!ST.wageWeek||!ST.wageDriver){toast('드라이버와 주간을 선택하세요','er');return;}
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
+  if(!ST.wageWeek||!ST.wageDriver){_fail();toast('드라이버와 주간을 선택하세요','er');return;}
   const wages = getWages();
   const cnt = wages[ST.wageDriver]?.[ST.wageWeek]?.entries?.length||0;
   if(!confirm(getWeekLabel(ST.wageWeek)+' 주간 기록을 삭제하시겠습니까?'+(cnt>0?'\n('+cnt+'건의 지급 기록도 함께 삭제됩니다)':''))) return;
@@ -25629,6 +25861,53 @@ function toast(msg,type=''){
   clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('on'),2400);
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 중복 클릭 방지 가드 — admin의 모든 저장/제출 버튼에 적용
+// 드라이버 앱의 _lockSubmitBtn/_unlockSubmitBtn/_markBtnDone와 동일 패턴
+//
+// 사용법:
+//   const btn = _lockBtn(buttonElement, '⏳ 저장 중...');
+//   if(!btn) return;  // 이미 처리 중 — 함수 즉시 종료
+//   try {
+//     ...작업...
+//     _markDone(btn, '✅ 저장 완료');  // 성공
+//   } catch(e) {
+//     _unlockBtn(btn);  // 실패 시 다시 시도 가능
+//   }
+// 검증 실패 시: toast() 후 _unlockBtn(btn) + return
+// ═══════════════════════════════════════════════════════════════
+function _lockBtn(btnOrSelector, loadingText){
+  const btn = (typeof btnOrSelector === 'string')
+    ? document.querySelector(btnOrSelector) : btnOrSelector;
+  if(!btn) return null;
+  if(btn.dataset.submitting === '1') return null;  // 이미 처리 중
+  btn.dataset.submitting = '1';
+  btn.dataset.originalText = btn.innerHTML;
+  btn.dataset.originalBg = btn.style.background || '';
+  btn.disabled = true;
+  btn.innerHTML = loadingText || '⏳ 저장 중...';
+  btn.style.opacity = '0.7';
+  btn.style.cursor = 'not-allowed';
+  return btn;
+}
+function _unlockBtn(btn){
+  if(!btn) return;
+  btn.dataset.submitting = '';
+  btn.disabled = false;
+  if(btn.dataset.originalText) btn.innerHTML = btn.dataset.originalText;
+  btn.style.opacity = '';
+  btn.style.cursor = '';
+}
+function _markDone(btn, doneText){
+  if(!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = doneText || '✅ 완료';
+  btn.style.background = '#16a34a';
+  btn.style.color = 'white';
+  btn.style.opacity = '1';
+  btn.style.cursor = 'default';
+}
+
 // ── 관리자 PIN 변경 ──
 function openChangePinModal(){
   document.getElementById('pin-current').value='';
@@ -25641,11 +25920,19 @@ function closePinModal(){
   document.getElementById('pin-modal').style.display='none';
 }
 async function saveAdminPin(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const cur  = document.getElementById('pin-current').value.trim();
   const nw   = document.getElementById('pin-new').value.trim();
   const conf = document.getElementById('pin-confirm').value.trim();
   const adminName = localStorage.getItem('dc_admin_session') || '';
-  if(!adminName){ toast('로그인 상태가 아닙니다','er'); return; }
+  if(!adminName){ _fail();toast('로그인 상태가 아닙니다','er'); return; }
   if(nw.length < 4 || !/^\d{4,}$/.test(nw)){toast('새 PIN은 최소 4자리 이상의 숫자여야 합니다','er');return}
   if(nw!==conf){toast('새 PIN이 일치하지 않습니다','er');return}
 
@@ -25655,14 +25942,14 @@ async function saveAdminPin(){
       body:JSON.stringify({action:'login', name:adminName, pin:cur, ua:'pin-change-verify'})});
     const verifyJson = await verifyRes.json();
     if(!verifyJson.ok || !verifyJson.token){
-      toast('현재 PIN이 올바르지 않습니다','er');
+      _fail();toast('현재 PIN이 올바르지 않습니다','er');
       return;
     }
     // 검증용 토큰 폐기 (원래 세션 토큰 유지)
     try {
       fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
         body: JSON.stringify({action:'logout', token: verifyJson.token})});
-    } catch(e){}
+    } catch(e){ _fail();}
 
     // PIN 변경 (세션 토큰은 fetch interceptor가 자동 첨부)
     const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
@@ -25701,6 +25988,14 @@ function closeCompanyModal(){
   document.getElementById('company-modal').style.display='none';
 }
 function saveCompanyModal(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const name    = document.getElementById('ci-name').value.trim();
   const abn     = document.getElementById('ci-abn').value.trim();
   const phone   = document.getElementById('ci-phone').value.trim();
@@ -25736,7 +26031,7 @@ function saveCompanyModal(){
   }).catch(e => console.warn('Company profile save failed:', e));
 
   closeCompanyModal();
-  toast('✅ 회사 정보가 저장되었습니다','ok');
+  _done(); toast('✅ 회사 정보가 저장되었습니다','ok');
 }
 
 // ═══════════════════════════════════════
@@ -25817,6 +26112,14 @@ function initPriceClientForAgency(agencyName) {
   }).catch(() => toast('요금표 GAS 연결 오류', 'er'));
 }
 async function savePSToSheets(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   try {
     const rows=[];
     Object.entries(DB.PS).forEach(([sub,courses])=>{
@@ -26780,10 +27083,18 @@ async function apiDeleteMaster(sheetName, rowIndex){
       window._psLastSync=0;
       syncSub().then(()=>{ if(ST.subTab==='rates') rSub(); });
     }
-  } catch(e){ console.error('apiDeleteMaster error:', e); }
+  } catch(e){ _fail(); console.error('apiDeleteMaster error:', e); }
 }
 
 async function savePCToSheets(){
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   try {
     const rows=[];
     Object.entries(DB.PC).forEach(([ag,courses])=>{
@@ -27425,6 +27736,14 @@ function closeShiftEdit() {
 
 // ── 삭제 ──
 async function deleteShiftReport(rowIndex, type) {
+  // ★ 중복 클릭 방지 가드
+  const _btn = (typeof event !== 'undefined' && event?.target)
+    ? (event.target.closest('button') || event.target) : null;
+  const _g = _btn ? _lockBtn(_btn, '⏳ 처리 중...') : null;
+  if(_btn && !_g) return;  // 이미 처리 중
+  const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
+  const _fail = () => { if(_g) _unlockBtn(_g); };
+
   const cache = type==='pre' ? _shiftCache.pre : _shiftCache.eos;
   const r = cache.find(x=>x._rowIndex===rowIndex);
   if (!r) return;
@@ -27442,7 +27761,7 @@ async function deleteShiftReport(rowIndex, type) {
     const idx = cache.findIndex(x=>x._rowIndex===rowIndex);
     if (idx!==-1) cache.splice(idx,1);
     renderShiftTab();
-    toast('🗑️ 삭제 완료','ok');
+    _done(); toast('🗑️ 삭제 완료','ok');
   } catch(e) { toast('❌ 삭제 실패: '+e.message,'er'); }
 }
 
