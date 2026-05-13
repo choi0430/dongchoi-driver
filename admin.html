@@ -14661,6 +14661,97 @@ async function _syncLedgerToSubTxn(){
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// DEBUG: SUB 인보이스 ↔ SUB_Txn 동기화 상태 진단
+// 사용법: await diagnoseSubInvoiceSync()
+// 결과: 인보이스 vs SUB_Txn 매칭 상태 + 누락된 인보이스 목록
+// ═══════════════════════════════════════════════════════════════
+window.diagnoseSubInvoiceSync = async function(){
+  console.log('🔍 SUB 인보이스 ↔ SUB_Txn 동기화 진단 시작...');
+
+  // 1) 최신 인보이스 로드
+  let invs = _invHistoryCache;
+  if(!invs){
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+    const json = await res.json();
+    invs = json.ok ? json.rows||[] : [];
+  }
+  const subInvs = invs.filter(inv => inv.Source==='SUB' || _isSubInvNumber(inv.InvNumber||''));
+  console.log('📜 SUB 인보이스 총:', subInvs.length, '건');
+
+  // 2) 최신 SUB_Txn 로드
+  if(!_balSubTxns || !_balSubTxns.length){
+    console.log('⏳ SUB_Txn 로드 중...');
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=SUB_Txn');
+      const json = await res.json();
+      if(json.ok && json.rows) _balSubTxns = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
+    } catch(e){ console.warn('SUB_Txn 로드 실패', e); }
+  }
+
+  // 3) SUB_Txn에 자동 등록된 SUBINV: 키 추출
+  const txnKeys = new Set(
+    (_balSubTxns||[]).filter(t => String(t.Description||'').startsWith('SUBINV:'))
+      .map(t => String(t.Description).replace('SUBINV:',''))
+  );
+  console.log('💾 SUB_Txn에 자동 등록된 인보이스:', txnKeys.size, '건');
+
+  // 4) 인보이스별 매칭 상태
+  const status = subInvs.map(inv => ({
+    InvNumber: inv.InvNumber,
+    SubCompany: inv.SubCompany,
+    GrandTotal: Number(inv.GrandTotal||0),
+    Status: inv.Status,
+    Source: inv.Source,
+    IssuedDate: (inv.IssuedDate||'').slice(0,10),
+    매칭됨: txnKeys.has(inv.InvNumber||'') ? '✓' : '❌ 누락'
+  }));
+  console.table(status);
+
+  const missing = status.filter(s => s.매칭됨 === '❌ 누락');
+  if(missing.length){
+    console.warn('⚠️ ' + missing.length + '건의 SUB 인보이스가 SUB_Txn에 없습니다.');
+    console.warn('   → resyncMissingSubInvoices() 호출로 강제 재동기화 가능');
+  } else {
+    console.log('✅ 모든 SUB 인보이스가 SUB_Txn에 매칭됨');
+  }
+
+  window._lastSubInvSyncDiag = { subInvs, txnKeys: [...txnKeys], missing };
+  return status;
+};
+
+// ★ 누락된 SUB 인보이스를 SUB_Txn에 강제 재동기화
+window.resyncMissingSubInvoices = async function(){
+  console.log('🔄 누락된 SUB 인보이스 강제 재동기화 시작...');
+
+  // 캐시 강제 새로고침
+  _invHistoryCache = null;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+    const json = await res.json();
+    _invHistoryCache = json.ok ? json.rows||[] : [];
+  } catch(e){ console.error('인보이스 로드 실패', e); return; }
+
+  if(!_balSubTxns) _balSubTxns = [];
+  // SUB_Txn 강제 재로드
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=SUB_Txn');
+    const json = await res.json();
+    if(json.ok && json.rows) _balSubTxns = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
+  } catch(e){ console.warn('SUB_Txn 재로드 실패', e); }
+
+  // sync 함수 직접 호출
+  await _syncSubInvoicesToSubTxn();
+
+  // 잔액 화면 재렌더
+  if(typeof renderBalance === 'function'){
+    try { renderBalance(); } catch(e){}
+  }
+
+  console.log('✅ 재동기화 완료. 결과 확인:');
+  return await diagnoseSubInvoiceSync();
+};
+
 // ★ SUB 인보이스(D1,D2...) → SUB_Txn 자동 동기화
 async function _syncSubInvoicesToSubTxn(){
   try {
