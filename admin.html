@@ -23325,16 +23325,45 @@ function renderDR(){
     const drDriver = _stripPfx(r.Driver);
     const candidates = _scheduleSlotsForDate(isoDate);
     if(!candidates.length) return { noSchedule: true };
+
+    // ★ 슬롯의 차량/드라이버 추출 — 자사/외주 모드 모두 지원
+    //   자사 모드: slot.rego + slot.driver
+    //   외주 모드: slot.subVehicleNote + slot.subDriver (회사 운영)
+    //   prefix(🏠/🏢/⚠️ 등) 제거 후 비교
+    const _slotRego = (c) => {
+      const s = c.slot || {};
+      const fromSubVeh = _stripPfx(s.subVehicleNote);
+      const fromRego   = _stripPfx(s.rego);
+      // mode='sub'면 subVehicleNote 우선, 비어있으면 rego fallback
+      if(s.mode === 'sub') return (fromSubVeh || fromRego).toUpperCase();
+      return (fromRego || fromSubVeh).toUpperCase();
+    };
+    const _slotDriver = (c) => {
+      const s = c.slot || {};
+      const fromSubDrv = _stripPfx(s.subDriver);
+      const fromDrv    = _stripPfx(s.driver);
+      if(s.mode === 'sub') return fromSubDrv || fromDrv;
+      return fromDrv || fromSubDrv;
+    };
+
+    // 매칭 시도 — 둘 다 일치 > 차량 일치 > 드라이버 일치 > 투어코드 일치
     let matched = candidates.find(c =>
-      String(c.slot.rego||'').trim().toUpperCase() === drRego &&
-      _stripPfx(c.slot.driver) === drDriver
+      _slotRego(c) === drRego && _slotDriver(c) === drDriver
     );
-    if(!matched) matched = candidates.find(c => String(c.slot.rego||'').trim().toUpperCase() === drRego);
-    if(!matched) matched = candidates.find(c => _stripPfx(c.slot.driver) === drDriver);
+    if(!matched) matched = candidates.find(c => _slotRego(c) === drRego);
+    if(!matched) matched = candidates.find(c => _slotDriver(c) === drDriver);
+    // ★ 추가 fallback: 투어코드 일치 (rego/driver 다 못 매치한 경우 — 외주 차량 일정에서 자주 발생)
+    if(!matched && r.Tour_Code){
+      const drTC = String(r.Tour_Code).trim().toUpperCase();
+      matched = candidates.find(c => String(c.tourCode||'').trim().toUpperCase() === drTC);
+    }
     if(!matched) return { noMatch: true, candidates: candidates.length };
 
     const issues = [];
     const _norm = (v) => String(v||'').trim().toUpperCase();
+
+    // ★ 외주 모드면 차량/드라이버 검증은 felexible — DR.Rego가 자사 백업이고 slot.subVehicleNote가 외주 차량인 경우 흔함
+    const slotIsSub = (matched.slot.mode === 'sub');
 
     if(matched.agency && _norm(matched.agency) !== _norm(r.Agency)){
       issues.push({field:'여행사', expected:matched.agency, actual:r.Agency});
@@ -23359,9 +23388,14 @@ function renderDR(){
       const exp = _isAirportP(matched.slot.startPlaceType, matched.slot.startPlace) ? 'AIRPORT' : matched.slot.startPlace;
       const expN = _norm(exp);
       const drN = _norm(r.Pickup);
+      // ★ 공항 매칭 완화: AIRPORT, SYD, KINGSFORD, MASCOT, INTL, DOM, TERMINAL, T1, T2, T3 등 모두 OK
+      const airportKw = /\b(AIRPORT|SYD|KINGSFORD|MASCOT|INTERNATIONAL|DOMESTIC|TERMINAL|T1|T2|T3|국제|국내)\b/i;
       const airportOK = _isAirportP(matched.slot.startPlaceType, matched.slot.startPlace) &&
-                        (drN === 'AIRPORT' || drN === _norm(matched.slot.startPlace));
-      if(expN !== drN && !airportOK){
+                        (airportKw.test(drN) || drN === _norm(matched.slot.startPlace));
+      // ★ 부분 매칭 허용 — 한쪽이 다른 쪽 포함 (예: "ROYAL PACIFIC LANE COVE" vs "ROYAL PACIFIC")
+      const partialOK = expN.length > 5 && drN.length > 5 &&
+                        (expN.includes(drN) || drN.includes(expN));
+      if(expN !== drN && !airportOK && !partialOK){
         issues.push({field:'픽업', expected:exp, actual:r.Pickup});
       }
     }
@@ -23369,9 +23403,12 @@ function renderDR(){
       const exp = _isAirportP(matched.slot.endPlaceType, matched.slot.endPlace) ? 'AIRPORT' : matched.slot.endPlace;
       const expN = _norm(exp);
       const drN = _norm(r.Dropoff);
+      const airportKw = /\b(AIRPORT|SYD|KINGSFORD|MASCOT|INTERNATIONAL|DOMESTIC|TERMINAL|T1|T2|T3|국제|국내)\b/i;
       const airportOK = _isAirportP(matched.slot.endPlaceType, matched.slot.endPlace) &&
-                        (drN === 'AIRPORT' || drN === _norm(matched.slot.endPlace));
-      if(expN !== drN && !airportOK){
+                        (airportKw.test(drN) || drN === _norm(matched.slot.endPlace));
+      const partialOK = expN.length > 5 && drN.length > 5 &&
+                        (expN.includes(drN) || drN.includes(expN));
+      if(expN !== drN && !airportOK && !partialOK){
         issues.push({field:'드롭', expected:exp, actual:r.Dropoff});
       }
     }
