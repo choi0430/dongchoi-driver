@@ -23562,6 +23562,20 @@ function renderDR(){
     if(!isoDate) return null;
     const drRego = String(r.Rego||'').trim().toUpperCase();
     const drDriver = _stripPfx(r.Driver);
+
+    // ★★ DR의 차량이 DC 책임 범위 밖이면 (SUB 자체 운영) 검증 자체 생략
+    //   - DC 소유 또는 DC Accreditation 사용 차량만 일정/DR 매칭 검증
+    //   - SUB 자체 Accreditation 차량은 DC 운행기록 의무 없음 → 알림 표시 안 함
+    if(drRego){
+      const veh = (DB.V||[]).find(v => String(v.Rego||'').trim().toUpperCase() === drRego);
+      if(veh){
+        const isDCOwned = isDongChoiVehicle(veh);
+        const isDCAccr = isDCAccredited(veh);
+        if(!isDCOwned && !isDCAccr) return null;  // SUB 자체 운영 — 검증 불필요
+      }
+      // 차량 마스터에 등록 안 됨 — 일단 검증 진행 (외주 자체 운영일 수도, 신규 차량일 수도)
+    }
+
     const candidates = _scheduleSlotsForDate(isoDate);
     if(!candidates.length) return { noSchedule: true };
 
@@ -23690,9 +23704,35 @@ function renderDR(){
           if(!slot) return;
           // 자체운행은 검증 제외 (mode === 'private')
           if(slot.mode === 'private') return;
-          const slotDriver = _stripPfx(slot.driver);
-          const slotRego = String(slot.rego||'').trim().toUpperCase();
+
+          // ★ 슬롯의 실제 차량 추출 — 외주 모드는 subVehicleNote, 자사는 rego
+          const isSubMode = (slot.mode === 'sub');
+          const slotRegoRaw = isSubMode
+            ? _stripPfx(slot.subVehicleNote)
+            : _stripPfx(slot.rego);
+          const slotRego = slotRegoRaw.toUpperCase();
+          const slotDriver = isSubMode
+            ? _stripPfx(slot.subDriver)
+            : _stripPfx(slot.driver);
           if(!slotDriver && !slotRego) return; // 미배정 슬롯 제외
+
+          // ★★ 차량이 DC 책임 범위 내인지 확인
+          //   - DC 소유 (Owner = Dong Choi 또는 비어있음)
+          //   - 또는 DC Accreditation 사용 (Accreditation = DONG CHOI PTY LTD)
+          //   둘 다 아니면 — SUB 자체 운영 차량 → DC는 운행 기록 의무 없음 → 알림 제외
+          if(slotRego){
+            const veh = (DB.V||[]).find(v => String(v.Rego||'').trim().toUpperCase() === slotRego);
+            if(veh){
+              const isDCOwned = isDongChoiVehicle(veh);  // Owner 기반
+              const isDCAccr = isDCAccredited(veh);       // Accreditation 기반
+              if(!isDCOwned && !isDCAccr) return;  // SUB 자체 운영 → 알림 제외
+            } else {
+              // 차량 마스터에 등록 안 됨 — 보수적으로 알림 제외
+              // (등록되지 않은 외주 차량일 가능성 높음 — DC 책임 범위 아닐 가능성)
+              return;
+            }
+          }
+
           allScheduleSlots.push({
             tourId: t.TourID, tourCode: t.TourCode, agency: t.Agency,
             date: dDate, slotKey, driver: slotDriver, rego: slotRego, slot
