@@ -12563,6 +12563,199 @@ function closeDailyReportEdit(){
   if(w) w.remove();
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 관리자가 누락된 DR을 대신 작성 (드라이버가 제출 못 한 경우)
+// 일정(Schedule) 데이터로 prefill된 빈 DR 모달 열기
+// rowIndex 대신 isNew=true 플래그로 신규 추가 모드 처리
+// ═══════════════════════════════════════════════════════════════
+async function adminCreateMissingDR(missingInfo){
+  if(!missingInfo){ toast('일정 정보가 없습니다','er'); return; }
+  // _drCache 보장 — 모달 내부에서 코스 옵션 등 빌드용
+  if(!_drCache){
+    toast('데이터 로딩 중...','in');
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const json = await res.json();
+      if(json.ok && json.rows) _drCache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
+    } catch(e){ toast('캐시 로드 실패: '+e.message,'er'); return; }
+  }
+
+  // prefill용 가짜 row 객체 — editDailyReportRow와 동일한 모달 빌드, 단 rowIndex 대신 isNew
+  const date = missingInfo.date || '';  // 이미 ISO (YYYY-MM-DD)
+  const fakeRow = {
+    _rowIndex: -1,  // 신규 추가 신호
+    Date: fmtDate(date),  // DD/MM/YYYY 표시용
+    Driver: missingInfo.driver || '',
+    Rego: missingInfo.rego || '',
+    Seats: missingInfo.seats || '',
+    Agency: missingInfo.agency || '',
+    Attraction: missingInfo.course || '',
+    Guide: missingInfo.guide || '',
+    Tour_Code: missingInfo.tourCode || '',
+    Pickup: missingInfo.startPlace || '',
+    Dropoff: missingInfo.endPlace || '',
+    Time_Start: missingInfo.startTime || '',
+    Time_End: missingInfo.endTime || '',
+    KM_Start: '', KM_End: '',
+    SVC_Label: '', SVC_Charge: '', DR_Cost: '',
+    OT: 0, Hotel_Surcharge: 0, Dist_Surcharge: 0, Trailer: 0, Early: 0,
+    Toll: 0, Toll_Personal: 0, Fuel: 0, Fuel_Personal: 0,
+    Night_Type: '', Night_DR: 0, Night_Owner: 0,
+    Wash: 0, Meal: 0, Tip: 0, Etc: 0, Etc_Desc: '',
+    Remarks: '[관리자 대신 작성] 일정 '+(missingInfo.tourCode||missingInfo.tourId)+' · '+(missingInfo.slotKey||'')
+  };
+
+  // 모달 HTML 생성 (editDailyReportRow와 동일 구조)
+  const driversOpts = (DB.D||[]).map(d=>{
+    const n = d.Name_KR||d.Name_EN||'';
+    return `<option value="${escH(n)}"${fakeRow.Driver===n?' selected':''}>${escH(n)}</option>`;
+  }).join('');
+  const vehOpts = (DB.V||[]).map(v=>`<option value="${escH(v.Rego)}"${fakeRow.Rego===v.Rego?' selected':''}>${escH(v.Rego)} (${v.Capacity}석)</option>`).join('');
+  const agencyOpts = (DB.C||[]).map(c=>`<option value="${escH(c.Name)}"${fakeRow.Agency===c.Name?' selected':''}>${escH(c.Name)}</option>`).join('');
+  const guideOpts = (DB.G||[]).map(g=>{
+    const gn = g.Guide_Name||'';
+    return `<option value="${escH(gn)}"${fakeRow.Guide===gn?' selected':''}>${escH(gn)}</option>`;
+  }).join('');
+  const coursesSet = new Set();
+  Object.values(DB.PC||{}).forEach(pc=>Object.keys(pc).forEach(c=>coursesSet.add(c)));
+  Object.keys(DB.PD||{}).forEach(c=>coursesSet.add(c));
+  if(fakeRow.Attraction) coursesSet.add(fakeRow.Attraction);
+  const courseOpts = [...coursesSet].sort().map(c=>`<option value="${escH(c)}"${fakeRow.Attraction===c?' selected':''}>${escH(c)}</option>`).join('');
+  const seatsOpts = ['21S','25S','40S','50S'].map(s=>`<option value="${s}"${fakeRow.Seats===s?' selected':''}>${s}</option>`).join('');
+  const nightTypes = ['none', ...Object.keys(NIGHT_RATES||{})];
+  const nightOpts = nightTypes.map(n=>`<option value="${n==='none'?'':n}"${fakeRow.Night_Type===(n==='none'?'':n)?' selected':''}>${n}</option>`).join('');
+
+  const html = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:10px;" id="dr-edit-mask" onclick="if(event.target.id==='dr-edit-mask')closeDailyReportEdit()">
+      <div style="background:var(--sf,#fff);border-radius:14px;max-width:720px;width:100%;max-height:90vh;overflow-y:auto;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:1px solid var(--bd);padding-bottom:10px;">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#dc2626;">✏️ 관리자 대신 작성 — 새 Daily Report</div>
+            <div style="font-size:11px;color:var(--t3);margin-top:2px;">일정: ${escH(missingInfo.tourCode||missingInfo.tourId||'-')} · ${escH(missingInfo.slotKey||'')}</div>
+          </div>
+          <button class="btn brd sm" onclick="closeDailyReportEdit()" style="padding:4px 10px;">✕</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:12px;">
+          <div><label>날짜</label><input id="dre-Date" value="${escH(fakeRow.Date)}" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>드라이버</label><select id="dre-Driver" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"><option value="">선택</option>${driversOpts}</select></div>
+          <div><label>차량 (Rego)</label><select id="dre-Rego" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"><option value="">선택</option>${vehOpts}</select></div>
+          <div><label>인승</label><select id="dre-Seats" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"><option value="">선택</option>${seatsOpts}</select></div>
+          <div><label>여행사</label><select id="dre-Agency" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"><option value="">선택</option>${agencyOpts}</select></div>
+          <div><label>코스 (Attraction)</label><select id="dre-Attraction" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"><option value="">선택</option>${courseOpts}</select></div>
+          <div><label>가이드</label><select id="dre-Guide" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"><option value="">선택</option>${guideOpts}</select></div>
+          <div><label>투어코드</label><input id="dre-Tour_Code" value="${escH(fakeRow.Tour_Code)}" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>출발 장소</label><input id="dre-Pickup" value="${escH(fakeRow.Pickup)}" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>종료 장소</label><input id="dre-Dropoff" value="${escH(fakeRow.Dropoff)}" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>시작 시간</label><input id="dre-Time_Start" value="${escH(fakeRow.Time_Start)}" placeholder="HH:MM" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>종료 시간</label><input id="dre-Time_End" value="${escH(fakeRow.Time_End)}" placeholder="HH:MM" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>출발 KM</label><input id="dre-KM_Start" type="number" value="${escH(fakeRow.KM_Start)}" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>종료 KM</label><input id="dre-KM_End" type="number" value="${escH(fakeRow.KM_End)}" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>SVC 레이블</label><input id="dre-SVC_Label" value="${escH(fakeRow.SVC_Label)}" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>SVC 금액 ($)</label><input id="dre-SVC_Charge" type="number" step="0.01" value="${escH(fakeRow.SVC_Charge)}" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>DR 비용 ($)</label><input id="dre-DR_Cost" type="number" step="0.01" value="${escH(fakeRow.DR_Cost)}" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>OT ($)</label><input id="dre-OT" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>Hotel ($)</label><input id="dre-Hotel_Surcharge" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>Distance ($)</label><input id="dre-Dist_Surcharge" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>Trailer ($)</label><input id="dre-Trailer" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>Early ($)</label><input id="dre-Early" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>Toll ($)</label><input id="dre-Toll" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>Toll 개인 ($)</label><input id="dre-Toll_Personal" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>주유 ($)</label><input id="dre-Fuel" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>주유 개인 ($)</label><input id="dre-Fuel_Personal" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>야경 유형</label><select id="dre-Night_Type" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;">${nightOpts}</select></div>
+          <div><label>야경 DR ($)</label><input id="dre-Night_DR" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>야경 오너 ($)</label><input id="dre-Night_Owner" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>세차 ($)</label><input id="dre-Wash" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>식사 ($)</label><input id="dre-Meal" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>팁 ($)</label><input id="dre-Tip" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>기타 금액 ($)</label><input id="dre-Etc" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div style="grid-column:span 2;"><label>기타 설명</label><input id="dre-Etc_Desc" value="" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div style="grid-column:span 2;"><label>비고</label><input id="dre-Remarks" value="${escH(fakeRow.Remarks)}" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;border-top:1px solid var(--bd);padding-top:12px;">
+          <button class="btn brd" onclick="closeDailyReportEdit()" style="padding:8px 18px;">취소</button>
+          <button class="btn bac" onclick="adminSaveNewDR()" style="padding:8px 18px;font-weight:700;background:#dc2626;color:white;">✏️ 대신 작성 저장</button>
+        </div>
+      </div>
+    </div>`;
+
+  // 기존 모달이 열려있으면 닫고
+  closeDailyReportEdit();
+  const wrap = document.createElement('div');
+  wrap.id = 'dr-edit-wrap';
+  wrap.innerHTML = html;
+  document.body.appendChild(wrap);
+}
+
+// 관리자가 대신 작성한 DR 저장 (save_report action — 신규 행 append)
+async function adminSaveNewDR(){
+  // 폼 값 수집 (필드명은 시트 헤더와 동일)
+  const fields = [
+    'Date','Driver','Rego','Seats','Agency','Attraction','Guide','Tour_Code',
+    'Pickup','Dropoff','Time_Start','Time_End','KM_Start','KM_End',
+    'SVC_Label','SVC_Charge','DR_Cost',
+    'OT','Hotel_Surcharge','Dist_Surcharge','Trailer','Early',
+    'Toll','Toll_Personal','Fuel','Fuel_Personal',
+    'Night_Type','Night_DR','Night_Owner',
+    'Wash','Meal','Tip','Etc','Etc_Desc','Remarks'
+  ];
+  const data = {};
+  fields.forEach(f => {
+    const el = document.getElementById('dre-'+f);
+    if(el) data[f] = el.value;
+  });
+
+  // 기본 검증
+  if(!data.Date || !data.Driver || !data.Rego){
+    toast('날짜, 드라이버, 차량은 필수입니다','er');
+    return;
+  }
+
+  // 제출 시간 자동 채우기 (관리자가 작성한 시각)
+  const _now = new Date();
+  data.Submitted = _now.toLocaleString('en-AU', {timeZone:'Australia/Sydney'});
+
+  // 저장 버튼 비활성화
+  const btn = document.querySelector('#dr-edit-wrap button.bac');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 저장 중...'; }
+
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action: 'save_report',
+        data: data,
+        _user: getAdminUser()
+      })
+    });
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error || json.msg || '저장 실패');
+
+    toast('✅ DR 저장 완료 (관리자 대신 작성)','ok');
+
+    // 캐시 무효화
+    _drCache = null;
+    _settleData = null;
+    if(window._wagesCache) window._wagesCache = null;
+    window._wagesLastSync = 0;
+
+    closeDailyReportEdit();
+
+    // 운행 리포트 페이지 재로드 (있으면)
+    if(typeof loadDriverReports === 'function'){
+      try { await loadDriverReports(); } catch(e){}
+    }
+    // 정산 페이지 재로드
+    if(typeof loadSettleDashboard === 'function' && document.getElementById('settle-summary')){
+      try { await loadSettleDashboard(); } catch(e){}
+    }
+  } catch(e){
+    toast('저장 오류: ' + e.message, 'er');
+    if(btn){ btn.disabled = false; btn.textContent = '✏️ 대신 작성 저장'; }
+  }
+}
+
 async function saveDailyReportEdit(rowIndex){
   if(!rowIndex || rowIndex < 2){ toast('rowIndex 오류','er'); return; }
   // 폼 값 수집
@@ -23263,15 +23456,24 @@ function renderDR(){
     });
 
     const showLimit = 5;
-    const items = uniqMissing.slice(0, showLimit).map(m =>
-      `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:white;border-radius:6px;margin-bottom:4px;">
+    const items = uniqMissing.slice(0, showLimit).map((m, idx) => {
+      // ★ 일정 데이터를 버튼 dataset에 JSON으로 저장 (대신 작성 시 prefill 정보)
+      const slotData = JSON.stringify({
+        date: m.date, tourId: m.tourId, tourCode: m.tourCode || '',
+        agency: m.agency || '', rego: m.rego || '', driver: m.driver || '',
+        slotKey: m.slotKey, course: m.course || '', seats: m.seats || '',
+        startTime: m.startTime || '', endTime: m.endTime || '',
+        startPlace: m.startPlace || '', endPlace: m.endPlace || '',
+        guide: m.guide || ''
+      }).replace(/"/g, '&quot;');
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:white;border-radius:6px;margin-bottom:4px;gap:6px;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:11px;font-weight:700;color:var(--t1);">${escH(fmtDate(m.date))} · ${escH(m.tourCode||m.tourId)} · ${escH(m.agency||'')}</div>
           <div style="font-size:10px;color:var(--t3);margin-top:1px;">🚐 ${escH(m.rego||'-')} · 👤 ${escH(m.driver||'-')} · ${m.slotKey}</div>
         </div>
-        <div style="font-size:10px;color:#dc2626;font-weight:700;flex-shrink:0;">DR 미제출</div>
-      </div>`
-    ).join('');
+        <button onclick='adminCreateMissingDR(${JSON.stringify(m).replace(/'/g,"&#39;")})' style="background:#dc2626;color:white;border:none;border-radius:6px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">✏️ 대신 작성</button>
+      </div>`;
+    }).join('');
     const more = uniqMissing.length > showLimit ? `<div style="text-align:center;font-size:10px;color:#dc2626;margin-top:4px;">... 외 ${uniqMissing.length - showLimit}건 더</div>` : '';
 
     alertEl.innerHTML = `
