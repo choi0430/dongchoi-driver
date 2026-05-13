@@ -17598,6 +17598,39 @@ function _quickAddPayment(type, name, balance){
     // 미지급 인보이스/거래 없으면 → 기존 일반 지급 모달로 fallthrough
   }
 
+  // ★ Wage 지급 — 주별 그룹화 후 selector modal
+  if(type === 'wage'){
+    const drRows = (_balWageTxns||[]).filter(t => t.driver === name && t.type === 'DR');
+    const crRows = (_balWageTxns||[]).filter(t => t.driver === name && t.type === 'CR');
+    // 주별 그룹화 (DR 발생액)
+    const weekMap = {};
+    drRows.forEach(r => {
+      const wk = String(r.date||'').slice(0,10);
+      if(!wk) return;
+      if(!weekMap[wk]) weekMap[wk] = { weekStart:wk, total:0, paid:0, count:0, descs:[] };
+      weekMap[wk].total += Number(r.amount)||0;
+      weekMap[wk].count++;
+      if(r.desc) weekMap[wk].descs.push(r.desc);
+    });
+    // 주별 지급액 (CR)
+    crRows.forEach(r => {
+      const wk = String(r.date||'').slice(0,10);
+      if(!wk || !weekMap[wk]) return;
+      weekMap[wk].paid += Number(r.amount)||0;
+    });
+    // 미지급만 추출
+    const unpaidWeeks = Object.values(weekMap)
+      .map(w => ({...w, remaining: w.total - w.paid, type:'week', invNum: w.weekStart}))
+      .filter(w => w.remaining > 0.01)
+      .sort((a,b) => (a.weekStart||'').localeCompare(b.weekStart||''));
+
+    if(unpaidWeeks.length > 0){
+      _showWageSelectorModal(name, unpaidWeeks);
+      return;
+    }
+    // 미지급 주 없으면 → fallthrough
+  }
+
   // 모달 열기 (기존 흐름)
   openBalTxnModal(type, null);
   // 약간 대기 후 prefill (모달 렌더 대기)
@@ -17768,6 +17801,163 @@ function _showSubInvoiceSelectorModal(subName, items){
       } catch(e){}
     }, 50);
   };
+}
+
+// ─────────────────────────────────────────────────────
+// 드라이버 급여 — 주별 미지급 선택 모달
+// SUB 인보이스 지급과 동일한 UX 패턴
+// 주별 단위로 그룹화 + 체크박스 선택 + 일괄 지급
+// ─────────────────────────────────────────────────────
+function _showWageSelectorModal(driverName, weeks){
+  const sorted = weeks.slice().sort((a,b)=>(a.weekStart||'').localeCompare(b.weekStart||''));
+  const totalRemaining = sorted.reduce((s,w)=>s+w.remaining, 0);
+  const weekCount = sorted.length;
+
+  const fmtWeek = (iso) => {
+    const d = new Date(iso+'T00:00:00');
+    if(isNaN(d.getTime())) return iso;
+    const end = new Date(d); end.setDate(end.getDate()+6);
+    const pad = n => String(n).padStart(2,'0');
+    return `${pad(d.getDate())}/${pad(d.getMonth()+1)}~${pad(end.getDate())}/${pad(end.getMonth()+1)}`;
+  };
+
+  const overlay = document.createElement('div');
+  overlay.id = 'wages-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML = `
+    <div style="background:var(--sf);border-radius:16px;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.25);">
+      <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:4px;">💰 ${escH(driverName)} 급여 지급</div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:12px;">
+        📅 미지급 주 ${weekCount}건 · 합계 잔액 <b style="color:var(--or);">$${totalRemaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
+        <button onclick="_wageSelectAll(true)" style="background:#f1f5f9;border:1px solid var(--bd);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">전체 선택</button>
+        <button onclick="_wageSelectAll(false)" style="background:#f1f5f9;border:1px solid var(--bd);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">전체 해제</button>
+      </div>
+      <div id="wages-items-list" style="max-height:50vh;overflow-y:auto;border:1px solid var(--bd);border-radius:8px;padding:8px;margin-bottom:12px;">
+        ${sorted.map((w,idx)=>{
+          const isPartial = w.paid > 0.01;
+          return `<label style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid var(--bd);cursor:pointer;" data-wk-idx="${idx}">
+            <input type="checkbox" class="wages-item-cb" data-idx="${idx}" data-week="${escH(w.weekStart)}" data-remaining="${w.remaining}" checked style="width:16px;height:16px;cursor:pointer;">
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;font-weight:700;color:var(--t1);">📅 ${fmtWeek(w.weekStart)}</div>
+              <div style="font-size:10px;color:var(--t3);">${w.count}건 · ${isPartial?`부분지급 $${w.paid.toLocaleString()}/$${w.total.toLocaleString()}`:`발생 $${w.total.toLocaleString()}`}</div>
+            </div>
+            <div style="font-size:13px;font-weight:700;color:var(--or);font-family:var(--fn);white-space:nowrap;">$${w.remaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</div>
+          </label>`;
+        }).join('')}
+      </div>
+      <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-size:12px;font-weight:700;color:var(--t1);">선택 합계</span>
+          <span id="wages-selected-total" style="font-size:14px;font-weight:800;color:var(--or);font-family:var(--fn);">$${totalRemaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <label style="font-size:11px;color:var(--t3);flex:1;">실제 지급액 (조정 가능)</label>
+          <input id="wages-payment-amount" type="number" step="0.01" value="${totalRemaining.toFixed(2)}" style="width:120px;padding:6px;border:1px solid var(--bd);border-radius:6px;font-size:13px;text-align:right;font-family:var(--fn);">
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+          <label style="font-size:11px;color:var(--t3);flex:1;">지급일</label>
+          <input id="wages-payment-date" type="date" value="${(new Date()).toISOString().slice(0,10)}" style="padding:6px;border:1px solid var(--bd);border-radius:6px;font-size:12px;">
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+          <label style="font-size:11px;color:var(--t3);flex:1;">메모</label>
+          <input id="wages-payment-note" type="text" placeholder="(선택)" style="flex:2;padding:6px;border:1px solid var(--bd);border-radius:6px;font-size:12px;">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button onclick="document.getElementById('wages-overlay').remove()" style="background:#f1f5f9;border:1px solid var(--bd);border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;">취소</button>
+        <button id="wages-submit-btn" onclick="_submitWagePayment('${driverName.replace(/'/g,"\\\\'")}')" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;">💰 지급 처리</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  // 선택 합계 자동 갱신
+  const updateTotal = () => {
+    const cbs = overlay.querySelectorAll('.wages-item-cb');
+    let sum = 0;
+    cbs.forEach(cb => { if(cb.checked) sum += parseFloat(cb.dataset.remaining)||0; });
+    const totalEl = overlay.querySelector('#wages-selected-total');
+    const amtEl = overlay.querySelector('#wages-payment-amount');
+    if(totalEl) totalEl.textContent = '$' + sum.toLocaleString('en-AU',{minimumFractionDigits:2});
+    if(amtEl) amtEl.value = sum.toFixed(2);
+  };
+  overlay.querySelectorAll('.wages-item-cb').forEach(cb => cb.addEventListener('change', updateTotal));
+  window._wageSelectAll = (val) => {
+    overlay.querySelectorAll('.wages-item-cb').forEach(cb => cb.checked = val);
+    updateTotal();
+  };
+}
+
+// 주별 급여 지급 처리 — Wages 시트에 entry 추가 (각 선택된 주마다)
+async function _submitWagePayment(driverName){
+  const overlay = document.getElementById('wages-overlay');
+  if(!overlay) return;
+  const btn = overlay.querySelector('#wages-submit-btn');
+  const _g = _lockBtn(btn, '⏳ 지급 처리 중...');
+  if(!_g) return;
+
+  const cbs = [...overlay.querySelectorAll('.wages-item-cb')].filter(cb => cb.checked);
+  if(!cbs.length){ _unlockBtn(_g); toast('선택된 주가 없습니다','er'); return; }
+  const totalAmt = parseFloat(overlay.querySelector('#wages-payment-amount').value)||0;
+  if(totalAmt <= 0){ _unlockBtn(_g); toast('지급액을 입력하세요','er'); return; }
+  const paymentDate = overlay.querySelector('#wages-payment-date').value || (new Date()).toISOString().slice(0,10);
+  const note = (overlay.querySelector('#wages-payment-note').value || '').trim();
+
+  // 선택된 주들에 비례 분배 (조정된 totalAmt 기준)
+  const selectedWeeks = cbs.map(cb => ({
+    weekStart: cb.dataset.week,
+    remaining: parseFloat(cb.dataset.remaining)||0
+  }));
+  const remainingSum = selectedWeeks.reduce((s,w)=>s+w.remaining, 0);
+  // 각 주에 비례 분배
+  const allocations = selectedWeeks.map(w => ({
+    weekStart: w.weekStart,
+    amount: remainingSum > 0 ? roundMoney(totalAmt * w.remaining / remainingSum) : 0
+  }));
+  // 반올림 오차는 마지막 항목에 흡수
+  const allocSum = allocations.reduce((s,a)=>s+a.amount, 0);
+  if(allocations.length && Math.abs(allocSum - totalAmt) > 0.01){
+    allocations[allocations.length-1].amount = roundMoney(allocations[allocations.length-1].amount + (totalAmt - allocSum));
+  }
+
+  let saved = 0, failed = [];
+  for(const alloc of allocations){
+    if(alloc.amount <= 0) continue;
+    try {
+      // Wages 시트에 entry 추가 — 기존 addWage 패턴 사용
+      const entry = {
+        WeekStart: alloc.weekStart,
+        Driver: driverName,
+        Date: paymentDate,
+        Notes: note || '급여 지급',
+        Amount: alloc.amount,
+        PayMethod: 'Payment'
+      };
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'add_wage', data:entry, _user:getAdminUser()})
+      });
+      const j = await res.json();
+      if(j.ok) saved++;
+      else failed.push(alloc.weekStart);
+    } catch(e){
+      console.error('wage payment save:', e);
+      failed.push(alloc.weekStart);
+    }
+  }
+  if(failed.length){
+    _unlockBtn(_g);
+    toast(`❌ ${failed.length}건 실패 (${failed.join(', ')})`, 'er');
+    return;
+  }
+  _markDone(_g, '✅ 지급 완료');
+  toast(`✅ ${saved}건 지급 처리 완료`, 'ok');
+  overlay.remove();
+  // 잔액 캐시 무효화 + 화면 갱신
+  try { _balLoaded = false; } catch(e){}
+  if(typeof syncBalanceData === 'function') await syncBalanceData(true);
+  if(typeof renderBalance === 'function') renderBalance();
 }
 
 // ─────────────────────────────────────────────────────
