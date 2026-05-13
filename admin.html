@@ -15044,6 +15044,77 @@ window.cleanupNonDCBilledSubTxns = async function(){
   toast(`✅ ${deleted}건 정리 완료`, 'ok');
 };
 
+// ═══════════════════════════════════════════════════════════════
+// DEBUG: SUB 인보이스 ↔ SUB_Txn 동기화 상태 진단/복구
+// ═══════════════════════════════════════════════════════════════
+window.diagnoseSubInvoiceSync = async function(){
+  console.log('🔍 SUB 인보이스 ↔ SUB_Txn 동기화 진단 시작...');
+
+  let invs;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+    const json = await res.json();
+    invs = json.ok ? json.rows||[] : [];
+  } catch(e){ console.error('인보이스 로드 실패', e); return; }
+
+  const subInvs = invs.filter(inv => inv.Source==='SUB' || _isSubInvNumber(inv.InvNumber||''));
+  console.log('📜 SUB 인보이스 총:', subInvs.length, '건');
+
+  let subTxns;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_sub_txn');
+    const json = await res.json();
+    subTxns = json.ok ? json.rows||[] : [];
+  } catch(e){ console.error('SUB_Txn 로드 실패', e); return; }
+
+  const txnKeys = new Set();
+  subTxns.forEach(t => {
+    const desc = String(t.Description||'');
+    if(desc.startsWith('SUBINV:')) txnKeys.add(desc.replace('SUBINV:',''));
+    const invNo = String(t.InvoiceNo||'').trim();
+    if(invNo && _isSubInvNumber(invNo)) txnKeys.add(invNo);
+  });
+  console.log('💾 SUB_Txn에 자동 등록된 인보이스:', txnKeys.size, '건');
+
+  const status = subInvs.map(inv => ({
+    InvNumber: inv.InvNumber,
+    SubCompany: inv.SubCompany,
+    GrandTotal: Number(inv.GrandTotal||0),
+    Status: inv.Status,
+    Source: inv.Source||'',
+    IssuedDate: String(inv.IssuedDate||'').slice(0,10),
+    PeriodTo: String(inv.PeriodTo||'').slice(0,10),
+    매칭됨: txnKeys.has(inv.InvNumber||'') ? '✓' : '❌ 누락'
+  }));
+  console.table(status);
+
+  const missing = status.filter(s => s.매칭됨 === '❌ 누락');
+  if(missing.length){
+    console.warn('⚠️ ' + missing.length + '건 누락. resyncMissingSubInvoices()로 강제 동기화 가능');
+  } else {
+    console.log('✅ 모든 SUB 인보이스 매칭됨');
+  }
+  return { missing, all: status };
+};
+
+window.resyncMissingSubInvoices = async function(){
+  console.log('🔄 누락 SUB 인보이스 강제 재동기화 시작...');
+  _invHistoryCache = null;
+  _balSubTxns = null;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_sub_txn');
+    const j = await res.json();
+    if(j.ok && j.rows) _balSubTxns = j.rows;
+  } catch(e){ console.warn('SUB_Txn 로드 실패', e); }
+  await _syncSubInvoicesToSubTxn();
+  try { _balLoaded = false; } catch(e){}
+  if(typeof loadBalances === 'function'){
+    try { await loadBalances(); } catch(e){}
+  }
+  console.log('✅ 재동기화 완료. 결과 확인:');
+  return await diagnoseSubInvoiceSync();
+};
+
 async function _syncSubInvoicesToSubTxn(){
   try {
     // 인보이스 캐시 강제 새로고침 — stale 데이터로 인한 매칭 실패 방지
@@ -15101,12 +15172,31 @@ async function _syncSubInvoicesToSubTxn(){
       const total = Number(inv.GrandTotal||0);
       if(total < 0){ skipped.push({invNum, reason:'GrandTotal 음수: '+total}); return; }
 
-      const issuedDate = String(inv.IssuedDate||'').slice(0,10);
+      // ★ IssuedDate 파싱 강화 — ISO, en-AU(dd/mm/yyyy), 기타 모두 대응
+      //   parseToISO 사용 (다양한 형식 자동 인식)
+      let issuedDate = parseToISO(inv.IssuedDate||'');
+      if(!issuedDate) issuedDate = String(inv.IssuedDate||'').slice(0,10);
+      if(!issuedDate || !/^\d{4}-\d{2}-\d{2}$/.test(issuedDate)){
+        // fallback: 오늘
+        const d = new Date();
+        issuedDate = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      }
       const periodFrom = _fmtSubInvDate(inv.PeriodFrom||'');
       const periodTo = _fmtSubInvDate(inv.PeriodTo||'');
       let finishISO = parseToISO(inv.PeriodTo||'');
       if(!finishISO) finishISO = parseToISO(inv.PeriodFrom||'');
       if(!finishISO) finishISO = issuedDate;
+
+      // ★ DueDate 계산 — PeriodTo + 14일 (SUB 인보이스 표준 기한)
+      let dueDate = '';
+      try {
+        const baseISO = finishISO || issuedDate;
+        const d = new Date(baseISO + 'T00:00:00');
+        if(!isNaN(d.getTime())){
+          d.setDate(d.getDate() + 14);
+          dueDate = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        }
+      } catch(e){}
 
       newTxns.push({
         SubCompany: subCompany,
@@ -15117,6 +15207,7 @@ async function _syncSubInvoicesToSubTxn(){
         DR: total,
         CR: 0,
         FinishDate: finishISO,
+        DueDate: dueDate,
         Remark: invNum + ' (' + periodFrom + '~' + periodTo + ')'
       });
     });
