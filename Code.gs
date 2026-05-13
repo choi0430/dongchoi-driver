@@ -42,7 +42,7 @@ const MASTER_HEADERS = {
                  'Current_KM','Last_Service_KM','Service_Interval','VIN','Engine_Number',
                  'Accreditation','Current_Status','Transmission','Active',
                  'Photo_Front','Photo_Back','Photo_Left','Photo_Right'],
-  'M_Drivers':  ['Name_EN','Name_KR','Initials','DriverID','Mobile_1','NEXT_OF_KIN','Moblie_2','License_Class',
+  'M_Drivers':  ['Name_EN','Name_KR','Initials','DriverID','Mobile_1','NEXT_OF_KIN','Mobile_2','License_Class',
                  'License_No','License_Expiry','Authority_No','Authority_Expiry','WWC_No','WWC_Expiry',
                  'Address','Suburb','Bank_Name','BSB','Account_Number','PIN','Owner','Active'],
   'M_Clients':  ['Name','ClientID','ABN','Mobile','Email','Email_CC','Address','Bank_Name','BSB','Account_Number'],
@@ -3553,7 +3553,7 @@ function updateDriverInfo(driverName, data) {
       licClass: 'License_Class', licNo: 'License_No', licExp: 'License_Expiry',
       authNo: 'Authority_No', authExp: 'Authority_Expiry',
       wwcNo: 'WWC_No', wwcExp: 'WWC_Expiry',
-      nokName: 'NEXT_OF_KIN', nokPhone: 'Moblie_2',
+      nokName: 'NEXT_OF_KIN', nokPhone: 'Mobile_2',
       address: 'Address', suburb: 'Suburb',
       bank: 'Bank', bsb: 'BSB', account: 'Account'
     };
@@ -3569,7 +3569,7 @@ function updateDriverInfo(driverName, data) {
 
     for (let r = 1; r < sheetData.length; r++) {
       if (sheetData[r][nameENIdx] === driverName || sheetData[r][nameKRIdx] === driverName) {
-        const PHONE_SAVE_FIELDS = ['Mobile_1', 'Moblie_2', 'Phone', 'Mobile'];
+        const PHONE_SAVE_FIELDS = ['Mobile_1', 'Mobile_2', 'Phone', 'Mobile'];
         const DATE_SAVE_FIELDS = ['License_Expiry', 'Authority_Expiry', 'WWC_Expiry'];
         const savedFields = [];
         const skippedFields = [];
