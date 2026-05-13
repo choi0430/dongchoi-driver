@@ -5909,14 +5909,31 @@ async function saveMyInfo() {
   // GAS에 텍스트 데이터만 저장
   const gasData = {...localData};
   Object.keys(gasData).forEach(k => { if(k.startsWith('photoUrl_')) delete gasData[k]; });
-  fetch(APPS_SCRIPT_URL, {
-    method: 'POST', headers: {'Content-Type':'text/plain'},
-    body: JSON.stringify({
-      action: 'update_driver_info',
-      driverName: currentDriver?.name,
-      data: gasData
-    })
-  }).catch(()=>{});
+  try {
+    const _res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action: 'update_driver_info',
+        driverName: currentDriver?.name,
+        data: gasData
+      })
+    });
+    const _json = await _res.json();
+    // ★ 저장 결과 진단 — skipped 또는 missingColumns가 있으면 사용자에게 알림
+    if(_json && _json.ok){
+      if(_json.skipped && _json.skipped.length > 0){
+        console.warn('[saveMyInfo] 일부 필드 저장 안 됨:', _json.skipped);
+      }
+      if(_json.missingColumns && _json.missingColumns.length > 0){
+        console.warn('[saveMyInfo] 시트에 누락된 컬럼:', _json.missingColumns);
+      }
+    } else if(_json && !_json.ok){
+      console.error('[saveMyInfo] 저장 실패:', _json);
+      showToast('⚠️ 저장 일부 실패: ' + (_json.msg || _json.error || 'unknown'));
+    }
+  } catch(e) {
+    console.error('[saveMyInfo] 네트워크 오류:', e);
+  }
 
   updateMyInfoView(localData);
   toggleMyInfoEdit();
