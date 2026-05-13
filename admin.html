@@ -9454,6 +9454,22 @@ function _renderScheduleWeekViewBody(wrap, periodEl){
 const DC_OWNERS = ['DONG CHOI PTY LTD', null, ''];
 const DC_ACCREDITATION_NAME = 'DONG CHOI PTY LTD';
 
+// ═══════════════════════════════════════════════════════════════
+// 여행사별 Payment Terms (인보이스 결제 기한 — 일 단위)
+// M_Clients 시트의 Payment_Terms 컬럼에서 가져옴 (기본값 14일)
+// ═══════════════════════════════════════════════════════════════
+const DEFAULT_PAYMENT_TERMS = 14;
+function getPaymentTermsForAgency(agencyName){
+  if(!agencyName) return DEFAULT_PAYMENT_TERMS;
+  const target = String(agencyName).trim().toLowerCase();
+  // DB.C가 M_Clients 데이터 (관리자 페이지 로드 시 채워짐)
+  const client = (DB.C||[]).find(c => String(c.Name||'').trim().toLowerCase() === target);
+  if(!client) return DEFAULT_PAYMENT_TERMS;
+  const days = parseInt(client.Payment_Terms);
+  if(isNaN(days) || days < 0) return DEFAULT_PAYMENT_TERMS;
+  return days;
+}
+
 function getSubVehicles(){
   return DB.V.filter(v => !DC_OWNERS.includes(v.Owner));
 }
@@ -20177,14 +20193,12 @@ async function saveInvoiceToSheet() {
       if (!lastDate) { lastDate = new Date(to + 'T00:00:00'); if(isNaN(lastDate.getTime())) lastDate = new Date(); }
       const actualFrom = toLocalISO(firstDate);
       const actualTo = toLocalISO(lastDate);
-      // ★ Due date = IssuedDate + payment terms
-      //   - Sunjin Tour: +3일 (계약 정책)
-      //   - 그 외 여행사: +14일 (기본)
-      //   GAS는 IssuedDate를 저장 시 자동으로 오늘로 설정하므로 클라이언트에서도 동일한 값 사용
+      // ★ Due date = IssuedDate + payment terms (M_Clients 시트의 Payment_Terms 컬럼에서 조회)
+      //   - 시트에 등록 없으면 기본값 14일
+      //   - GAS는 IssuedDate를 저장 시 자동으로 오늘로 설정하므로 클라이언트에서도 동일한 값 사용
       const _issuedD = new Date();
       const dueBaseDate = new Date(_issuedD);
-      const _isSunjinAgency = /sunjin/i.test(String(agency||''));
-      const _paymentTermDays = _isSunjinAgency ? 3 : 14;
+      const _paymentTermDays = getPaymentTermsForAgency(agency);
       dueBaseDate.setDate(dueBaseDate.getDate() + _paymentTermDays);
       const dueDateStr = toLocalISO(dueBaseDate);
       const todayStr = toLocalISO(new Date());
@@ -22028,12 +22042,10 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
   const _todayD = new Date();
   const today   = String(_todayD.getDate()).padStart(2,'0')+'/'+String(_todayD.getMonth()+1).padStart(2,'0')+'/'+_todayD.getFullYear();
   // ★ Due date = IssuedDate (인보이스 생성일) + payment terms
-  //   - Sunjin Tour: +3일 (계약 정책)
-  //   - 그 외 여행사: +14일 (기본)
+  //   M_Clients 시트의 Payment_Terms 컬럼에서 조회 (기본값 14일)
   //   - 이미 저장된 인보이스: 캐시의 IssuedDate + payment terms
   //   - 미저장/미리보기: 오늘 + payment terms (저장 시점 기준 가정)
-  const _isSunjinAgency = /sunjin/i.test(String(agency||''));
-  const _paymentTermDays = _isSunjinAgency ? 3 : 14;
+  const _paymentTermDays = getPaymentTermsForAgency(agency);
   const _dueD = (function(){
     if (invNum && Array.isArray(_invHistoryCache)) {
       const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNum);
@@ -25627,7 +25639,11 @@ function openM(type,idx){
       <div class="fr3">
         <div><label class="fl">은행</label><input class="fi" id="f4" value="${d.Bank_Name||''}"></div>
         <div><label class="fl">BSB</label><input class="fi" id="f5" value="${d.BSB||''}"></div>
-        <div><label class="fl">계좌번호</label><input class="fi" id="f6" value="${d.Account_Number||''}"></div></div>`;
+        <div><label class="fl">계좌번호</label><input class="fi" id="f6" value="${d.Account_Number||''}"></div></div>
+      <div class="fr">
+        <label class="fl">Payment Terms (인보이스 결제 기한 — 일)</label>
+        <input class="fi" id="f7" type="number" min="0" value="${d.Payment_Terms||''}" placeholder="기본 14일 (예: Sunjin=3, Hojuro=7)">
+      </div>`;
   }
   else if(type==='G'){
     h=`<div class="fr2">
@@ -25821,7 +25837,8 @@ function saveM(){
     obj={_rowIndex:ie?(DB.C[idx]?._rowIndex||null):null,
          Name:gv('f0'),ClientID:gv('f1')||Date.now().toString(16).slice(-8),
          ABN:gv('f1b')||'',
-         Mobile:gv('f2'),Email:gv('f2b')||'',Email_CC:gv('f2c')||'',Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6')};
+         Mobile:gv('f2'),Email:gv('f2b')||'',Email_CC:gv('f2c')||'',Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6'),
+         Payment_Terms:gv('f7')||''};
     ie?DB.C[idx]=obj:DB.C.push(obj);
     if(obj.Name && !DB.PC[obj.Name]) {
       initPriceClientForAgency(obj.Name); // M_PriceClient에 모든 Course 빈 행 자동 생성
@@ -26337,7 +26354,7 @@ async function syncClients(){
     _rowIndex: r._rowIndex||null,
     Name:r.Name||'', ClientID:r.ClientID||'', ABN:r.ABN||'', Mobile:ph, Phone:ph, Email:r.Email||'',
     Email_CC:r.Email_CC||r['Email_CC']||'',
-    Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||''
+    Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||'', Payment_Terms:r.Payment_Terms||''
   };});
   // PC 동기화
   Object.keys(DB.PC).forEach(ag=>{ if(!DB.C.find(c=>c.Name===ag)) DB.C.push({Name:ag,ClientID:Date.now().toString(16).slice(-8),ABN:'',Mobile:'',Address:'',Bank_Name:'',BSB:'',Account_Number:''}); });
@@ -26504,7 +26521,7 @@ async function _applyAdminBundle(bundle){
     const ph = getPhoneFromRow(r);
     return {
     Name:r.Name||'', ClientID:r.ClientID||'', ABN:r.ABN||'', Mobile:ph, Phone:ph, Email:r.Email||'',
-    Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||''
+    Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||'', Payment_Terms:r.Payment_Terms||''
   };});
   // ── M_Guides → DB.G ──
   if(d.M_Guides?.length) DB.G = d.M_Guides.map(r=>{
@@ -26785,7 +26802,7 @@ async function loadAllFromSheets(){
       const ph = getPhoneFromRow(r);
       return {
       Name:r.Name||'', ClientID:r.ClientID||'', ABN:r.ABN||'', Mobile:ph, Phone:ph, Email:r.Email||'',
-      Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||''
+      Address:r.Address||'', Bank_Name:r.Bank_Name||r['Bank Name']||'', BSB:r.BSB||'', Account_Number:r.Account_Number||r['Account Number']||'', Payment_Terms:r.Payment_Terms||''
     };});
 
     // M_Guides → DB.G (Mobile/Phone 두 컬럼명 모두 지원)
