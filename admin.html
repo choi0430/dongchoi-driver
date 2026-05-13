@@ -13943,7 +13943,17 @@ async function generateSubInvoice(){
     console.error('generateSubInvoice error:', e);
     toast('❌ 인보이스 생성 오류: '+e.message,'er');
   }
-  try { if(typeof _syncSubInvoicesToSubTxn === 'function') await _syncSubInvoicesToSubTxn(); } catch(e){ console.warn('sync after invoice failed:', e); }
+
+  // ★ 인보이스 발행 직후 SUB_Txn 자동 등록 (성공/실패 무관)
+  //   _balSubTxns 강제 fresh 로드 후 sync 호출 (stale 캐시 방지)
+  try {
+    const r = await fetch(APPS_SCRIPT_URL+'?action=get_sub_txn');
+    const j = await r.json();
+    if(j.ok && j.rows) _balSubTxns = j.rows;
+  } catch(e){ console.warn('SUB_Txn reload failed', e); }
+  try {
+    if(typeof _syncSubInvoicesToSubTxn === 'function') await _syncSubInvoicesToSubTxn();
+  } catch(e){ console.warn('sync after invoice failed:', e); }
 
   // ★ 잔액 캐시 무효화 — 다음 잔액 탭 진입 시 최신 SUB_Txn(SUBINV 자동 등록 포함) 재로드
   try { _balLoaded = false; } catch(e){}
@@ -14661,136 +14671,67 @@ async function _syncLedgerToSubTxn(){
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// DEBUG: SUB 인보이스 ↔ SUB_Txn 동기화 상태 진단
-// 사용법: await diagnoseSubInvoiceSync()
-// 결과: 인보이스 vs SUB_Txn 매칭 상태 + 누락된 인보이스 목록
-// ═══════════════════════════════════════════════════════════════
-window.diagnoseSubInvoiceSync = async function(){
-  console.log('🔍 SUB 인보이스 ↔ SUB_Txn 동기화 진단 시작...');
-
-  // 1) 최신 인보이스 로드
-  let invs = _invHistoryCache;
-  if(!invs){
-    const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
-    const json = await res.json();
-    invs = json.ok ? json.rows||[] : [];
-  }
-  const subInvs = invs.filter(inv => inv.Source==='SUB' || _isSubInvNumber(inv.InvNumber||''));
-  console.log('📜 SUB 인보이스 총:', subInvs.length, '건');
-
-  // 2) 최신 SUB_Txn 로드
-  if(!_balSubTxns || !_balSubTxns.length){
-    console.log('⏳ SUB_Txn 로드 중...');
-    try {
-      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=SUB_Txn');
-      const json = await res.json();
-      if(json.ok && json.rows) _balSubTxns = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
-    } catch(e){ console.warn('SUB_Txn 로드 실패', e); }
-  }
-
-  // 3) SUB_Txn에 자동 등록된 SUBINV: 키 추출
-  const txnKeys = new Set(
-    (_balSubTxns||[]).filter(t => String(t.Description||'').startsWith('SUBINV:'))
-      .map(t => String(t.Description).replace('SUBINV:',''))
-  );
-  console.log('💾 SUB_Txn에 자동 등록된 인보이스:', txnKeys.size, '건');
-
-  // 4) 인보이스별 매칭 상태
-  const status = subInvs.map(inv => ({
-    InvNumber: inv.InvNumber,
-    SubCompany: inv.SubCompany,
-    GrandTotal: Number(inv.GrandTotal||0),
-    Status: inv.Status,
-    Source: inv.Source,
-    IssuedDate: (inv.IssuedDate||'').slice(0,10),
-    매칭됨: txnKeys.has(inv.InvNumber||'') ? '✓' : '❌ 누락'
-  }));
-  console.table(status);
-
-  const missing = status.filter(s => s.매칭됨 === '❌ 누락');
-  if(missing.length){
-    console.warn('⚠️ ' + missing.length + '건의 SUB 인보이스가 SUB_Txn에 없습니다.');
-    console.warn('   → resyncMissingSubInvoices() 호출로 강제 재동기화 가능');
-  } else {
-    console.log('✅ 모든 SUB 인보이스가 SUB_Txn에 매칭됨');
-  }
-
-  window._lastSubInvSyncDiag = { subInvs, txnKeys: [...txnKeys], missing };
-  return status;
-};
-
-// ★ 누락된 SUB 인보이스를 SUB_Txn에 강제 재동기화
-window.resyncMissingSubInvoices = async function(){
-  console.log('🔄 누락된 SUB 인보이스 강제 재동기화 시작...');
-
-  // 캐시 강제 새로고침
-  _invHistoryCache = null;
-  try {
-    const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
-    const json = await res.json();
-    _invHistoryCache = json.ok ? json.rows||[] : [];
-  } catch(e){ console.error('인보이스 로드 실패', e); return; }
-
-  if(!_balSubTxns) _balSubTxns = [];
-  // SUB_Txn 강제 재로드
-  try {
-    const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=SUB_Txn');
-    const json = await res.json();
-    if(json.ok && json.rows) _balSubTxns = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
-  } catch(e){ console.warn('SUB_Txn 재로드 실패', e); }
-
-  // sync 함수 직접 호출
-  await _syncSubInvoicesToSubTxn();
-
-  // 잔액 화면 재렌더
-  if(typeof renderBalance === 'function'){
-    try { renderBalance(); } catch(e){}
-  }
-
-  console.log('✅ 재동기화 완료. 결과 확인:');
-  return await diagnoseSubInvoiceSync();
-};
-
 // ★ SUB 인보이스(D1,D2...) → SUB_Txn 자동 동기화
 async function _syncSubInvoicesToSubTxn(){
   try {
-    // 인보이스 캐시 로드
-    let invs = _invHistoryCache;
+    // 인보이스 캐시 강제 새로고침 — stale 데이터로 인한 매칭 실패 방지
+    let invs = null;
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
+      const json = await res.json();
+      if(json.ok) invs = json.rows||[];
+    } catch(e){ console.warn('[SUB Sync] Invoice load failed', e); }
     if(!invs){
-      try {
-        const res = await fetch(APPS_SCRIPT_URL + '?action=get_invoices');
-        const json = await res.json();
-        if(json.ok) invs = json.rows||[];
-      } catch(e){ console.warn('Invoice load for sync failed', e); return; }
+      invs = _invHistoryCache || [];
+    } else {
+      _invHistoryCache = invs;  // 캐시 갱신
     }
-    if(!invs || !invs.length) return;
+    if(!invs.length){ console.log('[SUB Sync] 인보이스 없음 — 건너뜀'); return; }
+
+    // SUB_Txn도 강제 fresh 로드 — 매번 잔액 탭 진입 시 시트 최신 상태 반영
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_sub_txn');
+      const json = await res.json();
+      if(json.ok && json.rows) _balSubTxns = json.rows;
+    } catch(e){ console.warn('[SUB Sync] SUB_Txn reload failed', e); }
 
     // SUB 인보이스만 필터 (Source=SUB 또는 _isSubInvNumber 패턴)
-    const subInvs = invs.filter(inv => inv.Source==='SUB' || _isSubInvNumber(inv.InvNumber||''));
-    if(!subInvs.length) return;
+    const subInvs = invs.filter(inv => {
+      const invNum = String(inv.InvNumber||'').trim();
+      if(!invNum) return false;
+      return inv.Source==='SUB' || _isSubInvNumber(invNum);
+    });
+    if(!subInvs.length){ console.log('[SUB Sync] SUB 인보이스 없음'); return; }
 
     // 기존 SUB_Txn에서 인보이스 자동 등록분 식별 (Description에 "SUBINV:" 접두사)
-    const existingKeys = new Set(
-      _balSubTxns.filter(t => String(t.Description||'').startsWith('SUBINV:'))
-        .map(t => String(t.Description||''))
-    );
+    //   ★ InvoiceNo 필드도 함께 체크 (Description이 어쩌다 수정된 경우 대비)
+    const existingKeys = new Set();
+    (_balSubTxns||[]).forEach(t => {
+      const desc = String(t.Description||'');
+      if(desc.startsWith('SUBINV:')){
+        existingKeys.add(desc.replace('SUBINV:',''));
+      }
+      const invNo = String(t.InvoiceNo||'').trim();
+      if(invNo && _isSubInvNumber(invNo)){
+        existingKeys.add(invNo);  // InvoiceNo로도 매칭
+      }
+    });
 
     const newTxns = [];
+    const skipped = [];
     subInvs.forEach(inv => {
-      const invNum = inv.InvNumber||'';
-      const subCompany = (inv.SubCompany||'').trim();
-      if(!subCompany) return;
-      const key = 'SUBINV:' + invNum;
-      if(existingKeys.has(key)) return; // 이미 등록됨
+      const invNum = String(inv.InvNumber||'').trim();
+      const subCompany = String(inv.SubCompany||'').trim();
+      if(!subCompany){ skipped.push({invNum, reason:'SubCompany 비어있음'}); return; }
+      if(existingKeys.has(invNum)) return; // 이미 등록됨
 
+      // ★ GrandTotal이 0이어도 등록 (이전엔 0 미만이면 skip — 너무 엄격)
       const total = Number(inv.GrandTotal||0);
-      if(total <= 0) return;
+      if(total < 0){ skipped.push({invNum, reason:'GrandTotal 음수: '+total}); return; }
 
-      const issuedDate = (inv.IssuedDate||'').slice(0,10);
+      const issuedDate = String(inv.IssuedDate||'').slice(0,10);
       const periodFrom = _fmtSubInvDate(inv.PeriodFrom||'');
       const periodTo = _fmtSubInvDate(inv.PeriodTo||'');
-      // ★ FinishDate: PeriodTo를 ISO로 변환 (예정일 계산용)
       let finishISO = parseToISO(inv.PeriodTo||'');
       if(!finishISO) finishISO = parseToISO(inv.PeriodFrom||'');
       if(!finishISO) finishISO = issuedDate;
@@ -14800,7 +14741,7 @@ async function _syncSubInvoicesToSubTxn(){
         Category: 'Outsourcing',
         Date: issuedDate,
         InvoiceNo: invNum,
-        Description: key,
+        Description: 'SUBINV:' + invNum,
         DR: total,
         CR: 0,
         FinishDate: finishISO,
@@ -14808,9 +14749,17 @@ async function _syncSubInvoicesToSubTxn(){
       });
     });
 
-    if(newTxns.length === 0) return;
-    console.log('[SUB Sync] SubInvoice→SUB_Txn 자동 등록:', newTxns.length, '건');
+    if(skipped.length){
+      console.warn('[SUB Sync] 등록 skip된 인보이스:', skipped);
+    }
 
+    if(newTxns.length === 0){
+      console.log('[SUB Sync] 모든 SUB 인보이스 이미 등록됨 (' + subInvs.length + '건)');
+      return;
+    }
+    console.log('[SUB Sync] SubInvoice→SUB_Txn 자동 등록 시도:', newTxns.length, '건');
+
+    let added = 0;
     for(const txn of newTxns) {
       try {
         const res = await fetch(APPS_SCRIPT_URL, {
@@ -14821,9 +14770,13 @@ async function _syncSubInvoicesToSubTxn(){
         let j; try{ j = JSON.parse(txt); }catch(e){ continue; }
         if(j.ok) {
           _balSubTxns.push({...txn, _rowIndex:j.row||j.rowIndex});
+          added++;
+        } else {
+          console.warn('[SUB Sync] GAS 응답 실패:', txn.InvoiceNo, j);
         }
-      } catch(e2) { console.warn('[SUB Sync] 등록 실패:', txn.Description, e2); }
+      } catch(e2) { console.warn('[SUB Sync] 등록 실패:', txn.InvoiceNo, e2); }
     }
+    console.log('[SUB Sync] 등록 완료:', added, '/', newTxns.length, '건');
   } catch(e) {
     console.warn('[SUB Sync] SubInvoice→SUB_Txn 동기화 오류:', e);
   }
