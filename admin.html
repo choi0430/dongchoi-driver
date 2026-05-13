@@ -9471,13 +9471,13 @@ function calcSubReport(r) {
 
   // ★ 공항 픽업 주차비는 DC가 가져감 (SUB에 전달하지 않음)
   //   calcAgencyTA의 parking 로직과 100% 동일하게 계산
-  //   _isHojuro 21S/25S는 calcAgencyTA에서 parking을 0으로 처리 → SUB에서도 차감 안 함
-  //   ★ 중요: calcAgencyTA가 parking을 실제로 더했을 때만 차감 (City Tour 등 공항 픽업 아니면 차감 0)
+  //   - _isHojuro 정규식은 calcAgencyTA와 일치: 호주로 + Plus Australia (둘 다 21S/25S는 parking 면제)
+  //   - calcAgencyTA가 parking을 실제로 더했을 때만 SUB에서 차감
   const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
   const isLargeSub = capNum >= 40;
-  const _isHojuroSub = /호주로|hojuro/i.test(agency);
+  const _isHojuroSub = /호주로|hojuro|plus\s*australia/i.test(agency);
   const _pickupHasAirport = apPat.test(r.Pickup||'');
-  // calcAgencyTA의 parking 로직과 동일: (공항 키워드 && !(호주로 && 소형))이어야 parking 발생
+  // calcAgencyTA의 parking 조건과 100% 동일: (공항 키워드 && !(호주로/Plus Australia && 소형))
   const _taHasParking = _pickupHasAirport && !(_isHojuroSub && !isLargeSub);
   const subParkingDeduct = _taHasParking ? (isLargeSub ? 40 : 30) : 0;
 
