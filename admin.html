@@ -3042,7 +3042,13 @@ function rDash(){
     }
   });
   // ── 차량 Rego / HVIS / 서비스 KM ──
+  //   ★ DC 책임 차량만 알림 (DC 소유 또는 DC Accreditation 사용 차량)
+  //   SUB 자체 운영 차량은 외주 자체 책임이므로 알림 제외
   DB.V.forEach(v=>{
+    const isDCOwned = (typeof isDongChoiVehicle === 'function') ? isDongChoiVehicle(v) : !v.Owner;
+    const isDCAccr = (typeof isDCAccredited === 'function') ? isDCAccredited(v) : false;
+    if(!isDCOwned && !isDCAccr) return;  // SUB 자체 운영 — 알림 제외
+
     const rd=du(v.Rego_Date),hd=du(v.HVIS_Date);
     // ★ 데이터 미등록 차량 경고
     const _isHvis=isHvisVehicle(v);
@@ -9739,7 +9745,9 @@ function checkVehicleRecords(v, opts={}){
 
 /** DONG CHOI 전체 차량의 기록 미비 요약 */
 function getDCRecordSummary(){
-  const dcVehicles = DB.V.filter(v=>isDCAccredited(v));
+  // ★ DC 책임 차량 = DC 소유 (Owner=Dong Choi 또는 비어있음) + DC Accreditation 사용 외주
+  //   SUB 자체 운영 차량은 제외
+  const dcVehicles = DB.V.filter(v => isDongChoiVehicle(v) || isDCAccredited(v));
   const result = [];
   dcVehicles.forEach(v=>{
     const issues = checkVehicleRecords(v, {checkDrivers:true});
