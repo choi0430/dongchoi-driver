@@ -359,6 +359,15 @@
     setInterval(checkAndBuild, 600);
     var obs = new MutationObserver(function(){ checkAndBuild(); });
     obs.observe(document.body, { childList: true, subtree: true });
+    // ★ 외부에서 접근 가능하도록 노출 (prefill 후 강제 refresh 등)
+    window.__partnerDriverBE = {
+      refreshDropdown: refreshDropdown,
+      setMode: setMode,
+      getMode: getMode,
+      lookupBEByTourCode: lookupBEByTourCode,
+      bridgeGlobals: bridgeGlobals,
+      checkAndBuild: checkAndBuild
+    };
     console.log("[partner-driver-be] v2 initialized — call window.__beDrDebug() for diagnostics");
   }
 
