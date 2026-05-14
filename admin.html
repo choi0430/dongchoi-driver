@@ -17603,15 +17603,32 @@ function _quickAddPayment(type, name, balance){
     const drRows = (_balWageTxns||[]).filter(t => t.driver === name && t.type === 'DR');
     const crRows = (_balWageTxns||[]).filter(t => t.driver === name && t.type === 'CR');
     // 주별 그룹화 — 각 거래의 date를 해당 주의 월요일로 정규화 후 그룹
+    //   getPaymentWeekKey 가 호주 표준 (월요일 시작) 으로 정규화함
     const _normWeek = (iso) => {
-      if(typeof getPaymentWeekKey === 'function'){
-        try { return getPaymentWeekKey(iso); } catch(e){}
+      // 다양한 형식 정규화 (ISO/en-AU/Date object 등)
+      let isoStr = '';
+      if(iso instanceof Date){
+        isoStr = iso.getFullYear() + '-' + String(iso.getMonth()+1).padStart(2,'0') + '-' + String(iso.getDate()).padStart(2,'0');
+      } else {
+        isoStr = String(iso||'').slice(0,10);
+        // dd/MM/yyyy 형식이면 parseToISO 사용
+        if(/^\d{1,2}\/\d{1,2}\/\d{4}/.test(isoStr) && typeof parseToISO === 'function'){
+          isoStr = parseToISO(isoStr) || isoStr;
+        }
       }
-      // fallback: 일요일 시작이면 7로, 월~토면 (요일-1) 빼기
-      const d = new Date(String(iso||'').slice(0,10) + 'T00:00:00');
+      if(!isoStr) return '';
+      // getMondayOfDate로 정규화 (월요일 ISO 반환)
+      if(typeof getMondayOfDate === 'function'){
+        try {
+          const wk = getMondayOfDate(isoStr);
+          if(wk) return wk;
+        } catch(e){}
+      }
+      // fallback: 직접 계산
+      const d = new Date(isoStr + 'T00:00:00');
       if(isNaN(d.getTime())) return '';
-      const day = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-      const diff = (day === 0 ? -6 : 1 - day);
+      const day = d.getDay(); // 0=Sun, 1=Mon
+      const diff = (day === 0) ? -6 : 1 - day;
       d.setDate(d.getDate() + diff);
       return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     };
@@ -17625,17 +17642,26 @@ function _quickAddPayment(type, name, balance){
       weekMap[wk].count++;
       if(r.desc) weekMap[wk].descs.push(r.desc);
     });
-    // 주별 지급액 (CR)
+    // 주별 지급액 (CR) — CR의 date 필드도 weekMon이지만, 안전을 위해 다시 정규화
     crRows.forEach(r => {
       const wk = _normWeek(r.date);
-      if(!wk || !weekMap[wk]) return;
+      if(!wk) return;
+      if(!weekMap[wk]){
+        // DR 없이 CR만 있는 주 (드물지만 사전지급 등) — 무시 (DR 발생 안 한 주 표시 안 함)
+        return;
+      }
       weekMap[wk].paid += Number(r.amount)||0;
     });
     // 미지급만 추출
     const unpaidWeeks = Object.values(weekMap)
-      .map(w => ({...w, remaining: w.total - w.paid, type:'week', invNum: w.weekStart}))
+      .map(w => ({...w, remaining: roundMoney(w.total - w.paid), type:'week', invNum: w.weekStart}))
       .filter(w => w.remaining > 0.01)
       .sort((a,b) => (a.weekStart||'').localeCompare(b.weekStart||''));
+
+    // 진단 로그 (콘솔)
+    console.log('[wage payment]', name, '— DR:', drRows.length, 'CR:', crRows.length,
+      '미지급 주:', unpaidWeeks.length,
+      'unpaid:', unpaidWeeks.map(w=>w.weekStart+'($'+w.remaining+')').join(', '));
 
     if(unpaidWeeks.length > 0){
       _showWageSelectorModal(name, unpaidWeeks);
