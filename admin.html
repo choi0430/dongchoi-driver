@@ -16094,15 +16094,6 @@ function _subBalances(){
     });
   }
 
-  // ★★ Partner 회사명 — SubCompany 직접 매칭 (DR 정보 없어도 작동)
-  const _partnerCompanyNames = new Set();
-  try {
-    const list = (window.DCPartnerMode && window.DCPartnerMode.PARTNER_COMPANIES) || [];
-    list.forEach(p => {
-      if(p.id && p.id !== 'DC') _partnerCompanyNames.add(String(p.id).toUpperCase());
-    });
-  } catch(e){}
-
   const map = {};
   (_balSubTxns || []).forEach(t=>{
     if(_isSubLedgerSuppressed(t)) return;
@@ -16778,7 +16769,7 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
 
   // ★★ BillingEntity≠DC 운행의 DRSUB key 식별 — 계산 제외
   //    DR 캐시에서 BillingEntity가 DC가 아닌 운행을 찾아 DRSUB key 생성
-  //    이 key에 해당하는 SUB_Txn 행은 subPayables에서 제외 (EG TRAVEL 등 자체 발행 운행)
+  //    이 key에 해당하는 SUB_Txn 행은 subPayables에서 제외 (다른 회사가 인보이스 발행한 운행)
   const _nonDCBilledDRSUB = new Set();
   if(Array.isArray(_drCache)){
     (_drCache || []).forEach(r => {
@@ -16790,21 +16781,11 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
       if(!dateISO || !rego) return;
       const tc = typeof pickTourCode === 'function' ? pickTourCode(r) : (r.Tour_Code||'');
       _nonDCBilledDRSUB.add(`DRSUB:${dateISO}_${rego}_${tc}`);
-      _nonDCBilledDRSUB.add(`DRSUB:${dateISO}_${rego}_`); // tourCode 없는 케이스
-      _nonDCBilledDRSUB.add(`${dateISO}|${rego}`); // 짧은 key (DRSUB prefix 없는 경우 대비)
+      _nonDCBilledDRSUB.add(`DRSUB:${dateISO}_${rego}_`);
+      _nonDCBilledDRSUB.add(`${dateISO}|${rego}`);
     });
   }
 
-  // ★★ Partner 회사 (BillingEntity 후보) — SubCompany명으로 직접 제외
-  //   DR의 BillingEntity 필드가 비어있어도, SUB_Txn의 SubCompany가 partner 회사명이면
-  //   인보이스 미발행분이므로 자동 등록된 DRSUB는 제외 (인보이스 발행분 SUBINV는 포함)
-  const _partnerCompanyNames = new Set();
-  try {
-    const list = (window.DCPartnerMode && window.DCPartnerMode.PARTNER_COMPANIES) || [];
-    list.forEach(p => {
-      if(p.id && p.id !== 'DC') _partnerCompanyNames.add(String(p.id).toUpperCase());
-    });
-  } catch(e){}
 
   (_balSubTxns || []).forEach(tx => {
     if(_isSubLedgerSuppressed(tx)) return; // SUBINV 우선 정책: 가림
@@ -16817,18 +16798,14 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
 
     // ★★ BillingEntity≠DC 운행의 DRSUB/LEDGER 제외
     //   해당 행의 날짜+차량이 비-DC 운행 set에 있으면 skip
+    //   (DC가 인보이스 발행하는 운행만 회계에 포함, 다른 회사 발행 인보이스 운행은 제외)
     if(desc.startsWith('DRSUB:') || desc.startsWith('LEDGER:')){
       const m = desc.match(/^(?:DRSUB|LEDGER):(\d{4}-\d{2}-\d{2})_([^_]+)/);
       if(m){
         const shortKey = m[1] + '|' + m[2];
         if(_nonDCBilledDRSUB.has(shortKey)) return; // 비-DC 발행 — 계산 제외
-        // 전체 DRSUB key로도 체크
         if(_nonDCBilledDRSUB.has(desc.split('|')[0])) return;
       }
-      // ★★ SubCompany명 fallback — DR에 BillingEntity가 비어있어도 partner 회사명이면 제외
-      //   (자동 등록된 DRSUB만 제외, 사용자가 발행한 SUBINV는 별도 prefix라 통과)
-      const subCo = String(tx.SubCompany||'').trim().toUpperCase();
-      if(subCo && _partnerCompanyNames.has(subCo)) return;
     }
 
     const dr = Number(tx.DR) || 0;
