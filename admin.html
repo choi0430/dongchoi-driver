@@ -15009,6 +15009,72 @@ window.deleteSubTxnRow = async function(rowIndex){
   }
 };
 
+// ═══════════════════════════════════════════════════════════════
+// CLEANUP: 특정 SUB 회사의 DRSUB(자동 등록) 행을 일괄 삭제
+// 사용: await cleanupSubCompanyDRSUB('EG TRAVEL')
+// → 해당 회사의 SUB_Txn 시트의 DRSUB:* 행만 삭제 (인보이스 발행분 SUBINV는 유지)
+// 인보이스 미발행 회사의 잘못된 자동 등록 정리용
+// ═══════════════════════════════════════════════════════════════
+window.cleanupSubCompanyDRSUB = async function(companyKeyword){
+  if(!companyKeyword){ console.error('회사명 키워드 필요 (예: EG TRAVEL)'); return; }
+  console.log('🧹 ' + companyKeyword + ' DRSUB 자동 등록 행 정리 시작...');
+
+  // SUB_Txn fresh
+  let subTxns;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_sub_txn');
+    const j = await res.json();
+    if(!j.ok) throw new Error(j.error||'load fail');
+    subTxns = (j.rows||[]).map((t,i)=>({...t, _rowIndex:i+2}));
+  } catch(e){ console.error('SUB_Txn 로드 실패', e); return; }
+
+  const re = new RegExp(companyKeyword, 'i');
+  // DRSUB: prefix만 (SUBINV: 등 발행 인보이스 보존)
+  const toDelete = subTxns.filter(t => {
+    if(!re.test(String(t.SubCompany||''))) return false;
+    const desc = String(t.Description||'');
+    return desc.startsWith('DRSUB:') || desc.startsWith('LEDGER:');
+  });
+
+  if(!toDelete.length){
+    console.log('✅ 해당 회사의 DRSUB/LEDGER 행 없음');
+    return;
+  }
+
+  console.warn('🗑️ 삭제 대상:', toDelete.length, '건');
+  console.table(toDelete.map(t => ({
+    row: t._rowIndex,
+    Date: t.Date, SubCompany: t.SubCompany,
+    InvNo: t.InvoiceNo, DR: t.DR, CR: t.CR,
+    Desc: String(t.Description||'').slice(0,50)
+  })));
+
+  const totalDR = toDelete.reduce((s,t)=>s+(Number(t.DR)||0), 0);
+  if(!confirm(`${companyKeyword}의 ${toDelete.length}건 DRSUB/LEDGER 자동 등록 행을 삭제합니다.\n총 DR: $${totalDR.toLocaleString()}\n\n(발행된 인보이스 SUBINV:* 행은 보존됨)\n\n계속 하시겠습니까?`)){
+    console.log('취소됨');
+    return;
+  }
+
+  let deleted = 0;
+  // 역순으로 삭제 (rowIndex 변경 방지)
+  toDelete.sort((a,b) => b._rowIndex - a._rowIndex);
+  for(const t of toDelete){
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'delete_sub_txn', rowIndex:t._rowIndex, _user:getAdminUser()})
+      });
+      const j = await res.json();
+      if(j.ok) deleted++;
+      else console.warn('삭제 실패 row', t._rowIndex, j);
+    } catch(e){ console.warn('삭제 오류 row', t._rowIndex, e); }
+  }
+  console.log(`✅ ${deleted}/${toDelete.length}건 삭제 완료`);
+  // 잔액 캐시 무효화
+  try { _balLoaded = false; _balSubTxns = null; } catch(e){}
+  toast(`✅ ${companyKeyword} ${deleted}건 정리 완료`, 'ok');
+};
+
 window.cleanupNonDCBilledSubTxns = async function(){
   console.log('🧹 BillingEntity≠DC 운행의 잘못된 SUB_Txn DRSUB 행 정리 시작...');
 
