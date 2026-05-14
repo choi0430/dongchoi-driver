@@ -15022,6 +15022,105 @@ window.deleteSubTxnRow = async function(rowIndex){
 // 중복 기준: 같은 SubCompany + 같은 Description (DRSUB:date_rego_tour)
 // 중복 그룹에서 첫 번째 행만 유지, 나머지 삭제 (rowIndex 큰 순으로)
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// CLEANUP: Invoice_Manual_Items 시트의 자동 등록 [자동·DR] 행 정리
+// 사용:
+//   await inspectInvoiceManualItems('EG TRAVEL')  → 미리보기
+//   await cleanupInvoiceManualAutoItems('EG TRAVEL') → 실제 삭제
+// 대상: Note에 '[자동·DR]'이 포함된 항목 (Agency 매칭)
+// 수동 입력 항목은 보존
+// ═══════════════════════════════════════════════════════════════
+window.inspectInvoiceManualItems = async function(agencyKeyword){
+  console.log('🔍 Invoice_Manual_Items 조회:', agencyKeyword || '(전체)');
+  const manual = window._invoiceManualServer || {};
+  const re = agencyKeyword ? new RegExp(agencyKeyword, 'i') : null;
+  const all = [];
+  Object.entries(manual).forEach(([key, items]) => {
+    (items||[]).forEach(item => {
+      const agency = String(item.agency||'').trim();
+      if(re && !re.test(agency)) return;
+      all.push({...item, _key: key});
+    });
+  });
+  console.log('매칭 항목:', all.length, '건');
+  console.table(all.map(it => ({
+    Agency: it.agency || '', Date: it.date || '',
+    Rego: it.rego || '', TourCode: it.tourcode || '',
+    Amount: it.amount || 0,
+    isAuto: String(it.note||'').indexOf('[자동·DR]') >= 0 ? '✓ 자동' : '수동',
+    Note: String(it.note||'').slice(0,50),
+    ID: it.id || ''
+  })));
+  return all;
+};
+
+window.cleanupInvoiceManualAutoItems = async function(agencyKeyword){
+  if(!agencyKeyword){ console.error('Agency 키워드 필요 (예: EG TRAVEL)'); return; }
+  console.log('🧹 Invoice_Manual_Items [자동·DR] 정리:', agencyKeyword);
+
+  const manual = window._invoiceManualServer || {};
+  const re = new RegExp(agencyKeyword, 'i');
+  const toDelete = [];
+  Object.entries(manual).forEach(([key, items]) => {
+    (items||[]).forEach(item => {
+      const agency = String(item.agency||'').trim();
+      if(!re.test(agency)) return;
+      // [자동·DR] 라벨이 있는 항목만
+      if(String(item.note||'').indexOf('[자동·DR]') < 0) return;
+      toDelete.push({...item, _key: key});
+    });
+  });
+
+  if(!toDelete.length){
+    console.log('✅ 삭제 대상 없음');
+    return;
+  }
+
+  console.warn('🗑️ 삭제 대상:', toDelete.length, '건');
+  console.table(toDelete.map(it => ({
+    Agency: it.agency, Date: it.date, Rego: it.rego,
+    TourCode: it.tourcode, Amount: it.amount, ID: it.id
+  })));
+
+  const total = toDelete.reduce((s,it)=>s+(Number(it.amount)||0), 0);
+  if(!confirm(`${agencyKeyword}의 ${toDelete.length}건 [자동·DR] 항목 삭제\n총액: $${total.toLocaleString()}\n\n계속 하시겠습니까?`)){
+    console.log('취소됨');
+    return;
+  }
+
+  let deleted = 0, failed = 0;
+  for(const item of toDelete){
+    if(!item.id){
+      console.warn('ID 없는 항목 skip:', item);
+      failed++;
+      continue;
+    }
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'delete_invoice_manual_item', id:item.id, _user:getAdminUser()})
+      });
+      const j = await res.json();
+      if(j.ok){
+        deleted++;
+        // 캐시에서도 제거
+        if(window._invoiceManualServer && window._invoiceManualServer[item._key]){
+          window._invoiceManualServer[item._key] =
+            window._invoiceManualServer[item._key].filter(x => x.id !== item.id);
+        }
+      } else {
+        console.warn('삭제 실패:', item.id, j);
+        failed++;
+      }
+    } catch(e){
+      console.warn('삭제 오류:', item.id, e);
+      failed++;
+    }
+  }
+  console.log(`✅ ${deleted}/${toDelete.length}건 삭제 완료 (실패 ${failed}건)`);
+  toast(`✅ ${deleted}건 정리 완료`, 'ok');
+};
+
 window.findDuplicateDRSUB = async function(companyKeyword){
   if(!companyKeyword){ console.error('회사명 키워드 필요'); return; }
   console.log('🔍 ' + companyKeyword + ' 중복 DRSUB 검색...');
