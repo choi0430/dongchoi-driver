@@ -27879,14 +27879,32 @@ async function apiSaveMaster(sheetName, obj, isEdit, idx){
       body.rowIndex = storedRowIdx || (idx + 2); // 헤더(1) + 0-based fallback
     }
 
+    // ★ 진단 모드: window._SAVE_DEBUG = true 면 상세 alert 표시
+    if(window._SAVE_DEBUG){
+      const dbg = {
+        sheet: sheetName, isEdit, idx,
+        rowIndex: body.rowIndex,
+        storedRowIdx_at_DB: isEdit ? (DB[({M_Vehicles:'V',M_Drivers:'D',M_Clients:'C',M_Guides:'G',M_Hotels:'H'})[sheetName]]?.[idx]?._rowIndex) : null,
+        keys_in_obj: Object.keys(obj),
+        obj_preview: JSON.stringify(obj).slice(0,600)
+      };
+      console.log('[SAVE_DEBUG] body:', dbg);
+      alert('[SAVE_DEBUG] 요청\n'+JSON.stringify(dbg,null,2));
+    }
+
     // ★ 응답 검사: 미리 성공 토스트 띄우지 않고, GAS 응답 확인 후 결정
     const _res = await fetch(APPS_SCRIPT_URL, {
       method:'POST',
       headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(body)
     });
+    const _txt = await _res.text();
     let _json = null;
-    try { _json = await _res.json(); } catch(e){ _json = null; }
+    try { _json = JSON.parse(_txt); } catch(e){ _json = null; }
+    console.log('[apiSaveMaster] 요청 body:', body, '\n응답 raw:', _txt, '\n응답 json:', _json);
+    if(window._SAVE_DEBUG){
+      alert('[SAVE_DEBUG] 응답\nHTTP '+_res.status+' ok='+_res.ok+'\nraw: '+_txt.slice(0,400));
+    }
     if(_json && _json.ok){
       toast((isEdit?'수정':'추가')+' 완료 ✓','ok');
     } else {
