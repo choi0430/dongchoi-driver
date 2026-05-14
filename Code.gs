@@ -2473,6 +2473,14 @@ function _autoAddInvoiceDraftItem(data) {
   // 자체운행/Private은 청구 안 함
   if (String(data.Night_Owner || '').toLowerCase() === 'private') return;
 
+  // ★★ BillingEntity 분기 — DC가 인보이스 발행할 운행만 등록
+  //    BillingEntity = DC (또는 비어있음 = 기본 자사) → 정상 등록
+  //    BillingEntity = 다른 회사 (EG TRAVEL 등) → 그 회사가 자체 발행 → 등록 안 함
+  const billingEntity = String(data.Billing_Entity || data.BillingEntity || '').trim().toUpperCase();
+  if (billingEntity && billingEntity !== 'DC' && !/DONG\s*CHOI/i.test(billingEntity)) {
+    return; // 비-DC 발행 운행 → Manual Items 등록 안 함
+  }
+
   // Period 결정 — TourCode 있으면 TC 단위, 없으면 월별
   const period = tourCode ? ('TC-' + tourCode) : ('AG-' + agency + '-' + date.slice(0,7));
 
