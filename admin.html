@@ -15015,6 +15015,93 @@ window.deleteSubTxnRow = async function(rowIndex){
 // → 해당 회사의 SUB_Txn 시트의 DRSUB:* 행만 삭제 (인보이스 발행분 SUBINV는 유지)
 // 인보이스 미발행 회사의 잘못된 자동 등록 정리용
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// CLEANUP: SUB_Txn 시트에서 중복된 DRSUB 행 식별 + 삭제
+// 사용: await findDuplicateDRSUB('EG TRAVEL')  → 미리보기
+//      await cleanupDuplicateDRSUB('EG TRAVEL') → 실제 삭제
+// 중복 기준: 같은 SubCompany + 같은 Description (DRSUB:date_rego_tour)
+// 중복 그룹에서 첫 번째 행만 유지, 나머지 삭제 (rowIndex 큰 순으로)
+// ═══════════════════════════════════════════════════════════════
+window.findDuplicateDRSUB = async function(companyKeyword){
+  if(!companyKeyword){ console.error('회사명 키워드 필요'); return; }
+  console.log('🔍 ' + companyKeyword + ' 중복 DRSUB 검색...');
+
+  let subTxns;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL+'?action=get_sub_txn');
+    const j = await res.json();
+    if(!j.ok) throw new Error(j.error||'load fail');
+    subTxns = (j.rows||[]).map((t,i)=>({...t, _rowIndex:i+2}));
+  } catch(e){ console.error('SUB_Txn 로드 실패', e); return; }
+
+  const re = new RegExp(companyKeyword, 'i');
+  const candidates = subTxns.filter(t => {
+    if(!re.test(String(t.SubCompany||''))) return false;
+    const desc = String(t.Description||'');
+    return desc.startsWith('DRSUB:') || desc.startsWith('LEDGER:');
+  });
+
+  // 중복 그룹화 — Description이 정확히 같은 행들
+  const groups = {};
+  candidates.forEach(t => {
+    const key = String(t.Description||'').trim();
+    if(!groups[key]) groups[key] = [];
+    groups[key].push(t);
+  });
+
+  const dupGroups = Object.entries(groups).filter(([k,v]) => v.length > 1);
+  if(!dupGroups.length){
+    console.log('✅ 중복 DRSUB 없음 (Description 기준)');
+    return { duplicates: [], all: candidates };
+  }
+
+  console.warn('⚠️ 중복 그룹:', dupGroups.length, '개');
+  const allDups = [];
+  dupGroups.forEach(([desc, rows]) => {
+    console.log('  ─', desc, '→', rows.length, '건');
+    console.table(rows.map(t => ({
+      row: t._rowIndex, Date: t.Date, DR: t.DR, CR: t.CR, InvNo: t.InvoiceNo
+    })));
+    // 첫 행 유지, 나머지 = 중복
+    allDups.push(...rows.slice(1));
+  });
+  const dupTotalDR = allDups.reduce((s,t)=>s+(Number(t.DR)||0), 0);
+  console.warn('🗑️ 중복 행 합계:', allDups.length, '건 / DR 총합 $' + dupTotalDR.toLocaleString());
+  console.log('실행: await cleanupDuplicateDRSUB(\'' + companyKeyword + '\')');
+  return { duplicates: allDups, all: candidates };
+};
+
+window.cleanupDuplicateDRSUB = async function(companyKeyword){
+  const result = await findDuplicateDRSUB(companyKeyword);
+  if(!result || !result.duplicates || !result.duplicates.length){
+    console.log('정리할 중복 행 없음');
+    return;
+  }
+  const dups = result.duplicates;
+  const totalDR = dups.reduce((s,t)=>s+(Number(t.DR)||0), 0);
+  if(!confirm(`${companyKeyword}의 중복 DRSUB ${dups.length}건 삭제 (총 $${totalDR.toLocaleString()})\n\n각 중복 그룹의 첫 행은 유지됩니다.\n\n계속 하시겠습니까?`)){
+    console.log('취소됨');
+    return;
+  }
+  // 역순 삭제 (rowIndex 큰 순)
+  dups.sort((a,b) => b._rowIndex - a._rowIndex);
+  let deleted = 0;
+  for(const t of dups){
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'delete_sub_txn', rowIndex:t._rowIndex, _user:getAdminUser()})
+      });
+      const j = await res.json();
+      if(j.ok) deleted++;
+      else console.warn('삭제 실패 row', t._rowIndex, j);
+    } catch(e){ console.warn('삭제 오류 row', t._rowIndex, e); }
+  }
+  console.log(`✅ ${deleted}/${dups.length}건 중복 삭제 완료`);
+  try { _balLoaded = false; _balSubTxns = null; } catch(e){}
+  toast(`✅ ${deleted}건 중복 정리 완료`, 'ok');
+};
+
 window.cleanupSubCompanyDRSUB = async function(companyKeyword){
   if(!companyKeyword){ console.error('회사명 키워드 필요 (예: EG TRAVEL)'); return; }
   console.log('🧹 ' + companyKeyword + ' DRSUB 자동 등록 행 정리 시작...');
