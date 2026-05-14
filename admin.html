@@ -17602,10 +17602,23 @@ function _quickAddPayment(type, name, balance){
   if(type === 'wage'){
     const drRows = (_balWageTxns||[]).filter(t => t.driver === name && t.type === 'DR');
     const crRows = (_balWageTxns||[]).filter(t => t.driver === name && t.type === 'CR');
+    // 주별 그룹화 — 각 거래의 date를 해당 주의 월요일로 정규화 후 그룹
+    const _normWeek = (iso) => {
+      if(typeof getPaymentWeekKey === 'function'){
+        try { return getPaymentWeekKey(iso); } catch(e){}
+      }
+      // fallback: 일요일 시작이면 7로, 월~토면 (요일-1) 빼기
+      const d = new Date(String(iso||'').slice(0,10) + 'T00:00:00');
+      if(isNaN(d.getTime())) return '';
+      const day = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+      const diff = (day === 0 ? -6 : 1 - day);
+      d.setDate(d.getDate() + diff);
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    };
     // 주별 그룹화 (DR 발생액)
     const weekMap = {};
     drRows.forEach(r => {
-      const wk = String(r.date||'').slice(0,10);
+      const wk = _normWeek(r.date);
       if(!wk) return;
       if(!weekMap[wk]) weekMap[wk] = { weekStart:wk, total:0, paid:0, count:0, descs:[] };
       weekMap[wk].total += Number(r.amount)||0;
@@ -17614,7 +17627,7 @@ function _quickAddPayment(type, name, balance){
     });
     // 주별 지급액 (CR)
     crRows.forEach(r => {
-      const wk = String(r.date||'').slice(0,10);
+      const wk = _normWeek(r.date);
       if(!wk || !weekMap[wk]) return;
       weekMap[wk].paid += Number(r.amount)||0;
     });
