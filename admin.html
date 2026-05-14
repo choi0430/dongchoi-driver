@@ -3376,7 +3376,7 @@ function rDash(){
       const driverPay = {}; // driver → {earned, paid}
       // 발생: Daily_Report에서 (DR_Cost - Night_Owner)
       if(_drCache){
-        _drCache.forEach(r => {
+        (_drCache || []).forEach(r => {
           const dn = String(r.Driver||'').trim();
           if(!dn) return;
           const earned = (parseFloat(r.DR_Cost||0)||0) - (parseFloat(r.Night_Owner||0)||0);
@@ -4611,7 +4611,7 @@ function _schBuildDRMatchIndex(){
   if(!_drCache) return;
   let skippedNoDate = 0;
   let firstSkippedSamples = [];
-  _drCache.forEach(r => {
+  (_drCache || []).forEach(r => {
     // ★ DR.Date는 dd/mm/yyyy [HH:mm] 또는 ISO timestamp 형식 → parseToISO 사용
     const date = parseToISO(r.Date||r._iso||'');
     const rego = String(r.Rego||'').trim();
@@ -14941,6 +14941,7 @@ async function _syncLedgerToSubTxn(){
         });
         const j = await res.json();
         if(j.ok) {
+          if(!Array.isArray(_balSubTxns)) _balSubTxns = [];
           _balSubTxns.push({...txn, _rowIndex:j.row||j.rowIndex});
         }
       } catch(e2) { console.warn('[SUB Sync] 등록 실패:', txn.Description, e2); }
@@ -15556,7 +15557,7 @@ async function _syncSubInvoicesToSubTxn(){
 async function _cleanupDuplicateSubTxn(){
   if(!_balSubTxns || !_balSubTxns.length) return;
   const byDesc = {};
-  _balSubTxns.forEach(t => {
+  (_balSubTxns || []).forEach(t => {
     const d = String(t.Description||'').trim();
     if(!d) return;
     // 자동 등록 prefix만 정리 대상 (수동 거래는 보존)
@@ -15628,7 +15629,7 @@ async function _syncDailyReportSubToSubTxn(){
     const vehicles = DB.V || [];
     const newTxns = [];
 
-    _drCache.forEach(r => {
+    (_drCache || []).forEach(r => {
       // Private 운행 제외
       if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return;
       const rego = (r.Rego||'').trim();
@@ -15704,6 +15705,7 @@ async function _syncDailyReportSubToSubTxn(){
         });
         const j = await res.json();
         if(j.ok) {
+          if(!Array.isArray(_balSubTxns)) _balSubTxns = [];
           _balSubTxns.push({...txn, _rowIndex:j.row||j.rowIndex});
         }
       } catch(e2) { console.warn('[SUB Sync] DRSUB 등록 실패:', txn.Description, e2); }
@@ -15822,7 +15824,7 @@ function renderBalance(){
 // ── AGENCY BALANCE ── (인보이스 발행 건에 한해서만)
 function _agencyBalances(){
   const map = {};
-  _balAgencyTxns.forEach(t=>{
+  (_balAgencyTxns || []).forEach(t=>{
     // ★ 인보이스 연결 건 + 선수금/크레딧 입금 건 포함
     const invId = String(t.InvoiceID||'').trim();
     const txnType = String(t.Type||'').trim();
@@ -15909,7 +15911,7 @@ function _buildSubInvSuppressionIndex(){
   if(!_balSubTxns || !_balSubTxns.length) return;
 
   // SUBINV 자동 등록분 식별
-  _balSubTxns.forEach(t => {
+  (_balSubTxns || []).forEach(t => {
     const desc = String(t.Description||'');
     if(!desc.startsWith('SUBINV:')) return;
     const subCo = String(t.SubCompany||'').trim().toLowerCase();
@@ -16070,7 +16072,7 @@ function _subBalances(){
   // ★ SUBINV 우선 정책: LEDGER/DRSUB가 같은 SubCompany+기간의 SUBINV에 의해 가려진 경우 제외
   // ★ DRSUB 우선 정책: 같은 날짜+차량 운행이 LEDGER에도 있으면 DRSUB가 더 정확하므로 LEDGER 가림
   const drsubKeys = new Set();
-  _balSubTxns.forEach(t => {
+  (_balSubTxns || []).forEach(t => {
     const desc = String(t.Description||'');
     if(desc.startsWith('DRSUB:')){
       // DRSUB:date_rego_tour → 동일 날짜+차량 키 추출
@@ -16082,7 +16084,7 @@ function _subBalances(){
   // ★★ BillingEntity≠DC 운행의 날짜+차량 키 — 계산 제외용
   const _nonDCBilledKeys = new Set();
   if(Array.isArray(_drCache)){
-    _drCache.forEach(r => {
+    (_drCache || []).forEach(r => {
       const be = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
       if(!be || be === 'DC' || /DONG\s*CHOI/i.test(be)) return;
       const dateISO = parseToISO(r.Date||'');
@@ -16092,8 +16094,17 @@ function _subBalances(){
     });
   }
 
+  // ★★ Partner 회사명 — SubCompany 직접 매칭 (DR 정보 없어도 작동)
+  const _partnerCompanyNames = new Set();
+  try {
+    const list = (window.DCPartnerMode && window.DCPartnerMode.PARTNER_COMPANIES) || [];
+    list.forEach(p => {
+      if(p.id && p.id !== 'DC') _partnerCompanyNames.add(String(p.id).toUpperCase());
+    });
+  } catch(e){}
+
   const map = {};
-  _balSubTxns.forEach(t=>{
+  (_balSubTxns || []).forEach(t=>{
     if(_isSubLedgerSuppressed(t)) return;
     // LEDGER 거래가 같은 날짜+차량의 DRSUB에 의해 가려지는지 확인
     const desc = String(t.Description||'');
@@ -16139,7 +16150,7 @@ function _subBalances(){
   //   차주가 자기 직원에게 지급해야 할 금액
   if(typeof _balWageTxns !== 'undefined' && _balWageTxns){
     const dcOwner = (typeof DC_OWNERS !== 'undefined' && DC_OWNERS[0]) ? DC_OWNERS[0] : 'DONG CHOI PTY LTD';
-    _balWageTxns.forEach(tx => {
+    (_balWageTxns || []).forEach(tx => {
       if(tx.type !== 'DR') return;
       const payer = tx.payer || dcOwner;
       if(payer === dcOwner) return; // 자사 차량은 제외
@@ -16337,7 +16348,7 @@ function _wageBalances(){
   };
 
   const map = {};
-  _balWageTxns.forEach(t=>{
+  (_balWageTxns || []).forEach(t=>{
     const name = t.driver||'Unknown';
     if(!map[name]) map[name]={
       name, dr:0, cr:0, subDr:0, subPayers:{},
@@ -16592,7 +16603,7 @@ function _buildWeeklyData() {
   }
 
   // ① 여행사 수입 (Agency_Txn → DR: 청구액, 인보이스 연결 건)
-  _balAgencyTxns.forEach(t => {
+  (_balAgencyTxns || []).forEach(t => {
     const txnType = String(t.Type||'').trim();
     if (txnType !== 'invoice') return;
     const dr = Number(t.DR) || 0;
@@ -16616,7 +16627,7 @@ function _buildWeeklyData() {
   });
 
   // ② 서브 지출 (SUB_Txn → DR: 발생 비용)
-  _balSubTxns.forEach(t => {
+  (_balSubTxns || []).forEach(t => {
     const cat = String(t.Category||'').trim();
     if (cat === 'Wage') return; // 급여는 별도 처리
     const dr = Number(t.DR) || 0;
@@ -16634,7 +16645,7 @@ function _buildWeeklyData() {
   });
 
   // ③ 드라이버 지출 (DR: 발생 수당)
-  _balWageTxns.forEach(t => {
+  (_balWageTxns || []).forEach(t => {
     if (t.type !== 'DR') return;
     const amt = Number(t.amount) || 0;
     if (amt <= 0) return;
@@ -16770,7 +16781,7 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
   //    이 key에 해당하는 SUB_Txn 행은 subPayables에서 제외 (EG TRAVEL 등 자체 발행 운행)
   const _nonDCBilledDRSUB = new Set();
   if(Array.isArray(_drCache)){
-    _drCache.forEach(r => {
+    (_drCache || []).forEach(r => {
       const be = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
       if(!be || be === 'DC' || /DONG\s*CHOI/i.test(be)) return; // DC면 통과 (계산 대상)
       // 비-DC 운행 → DRSUB key 생성
@@ -16783,6 +16794,17 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
       _nonDCBilledDRSUB.add(`${dateISO}|${rego}`); // 짧은 key (DRSUB prefix 없는 경우 대비)
     });
   }
+
+  // ★★ Partner 회사 (BillingEntity 후보) — SubCompany명으로 직접 제외
+  //   DR의 BillingEntity 필드가 비어있어도, SUB_Txn의 SubCompany가 partner 회사명이면
+  //   인보이스 미발행분이므로 자동 등록된 DRSUB는 제외 (인보이스 발행분 SUBINV는 포함)
+  const _partnerCompanyNames = new Set();
+  try {
+    const list = (window.DCPartnerMode && window.DCPartnerMode.PARTNER_COMPANIES) || [];
+    list.forEach(p => {
+      if(p.id && p.id !== 'DC') _partnerCompanyNames.add(String(p.id).toUpperCase());
+    });
+  } catch(e){}
 
   (_balSubTxns || []).forEach(tx => {
     if(_isSubLedgerSuppressed(tx)) return; // SUBINV 우선 정책: 가림
@@ -16803,6 +16825,10 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
         // 전체 DRSUB key로도 체크
         if(_nonDCBilledDRSUB.has(desc.split('|')[0])) return;
       }
+      // ★★ SubCompany명 fallback — DR에 BillingEntity가 비어있어도 partner 회사명이면 제외
+      //   (자동 등록된 DRSUB만 제외, 사용자가 발행한 SUBINV는 별도 prefix라 통과)
+      const subCo = String(tx.SubCompany||'').trim().toUpperCase();
+      if(subCo && _partnerCompanyNames.has(subCo)) return;
     }
 
     const dr = Number(tx.DR) || 0;
@@ -17584,7 +17610,7 @@ function renderBalDetail(){
     //   1) SUBINV 우선: LEDGER/DRSUB가 같은 SubCompany+기간의 SUBINV에 가려지면 제외
     //   2) DRSUB 우선: 같은 날짜+차량의 LEDGER가 DRSUB에 가려지면 제외
     const _drsubKeysHere = new Set();
-    _balSubTxns.forEach(t => {
+    (_balSubTxns || []).forEach(t => {
       if((t.SubCompany||'') !== name) return;
       const desc = String(t.Description||'');
       if(desc.startsWith('DRSUB:')){
