@@ -16112,9 +16112,12 @@ function _wageBalances(){
       }
     } else {
       map[name].cr += Number(t.amount)||0;
-      // 주별 지급 매칭
+      // 주별 지급 매칭 — DR이 없는 주(사전지급)도 weekGroup 생성
       const wk = _normWeek(t.date);
-      if(wk && map[name].weekGroups[wk]){
+      if(wk){
+        if(!map[name].weekGroups[wk]){
+          map[name].weekGroups[wk] = { weekStart:wk, total:0, paid:0, count:0 };
+        }
         map[name].weekGroups[wk].paid += Number(t.amount)||0;
       }
     }
@@ -16220,17 +16223,20 @@ function renderBalWageList(){
       <div style="margin-top:8px;padding:8px;background:#eff6ff;border-left:3px solid #93c5fd;border-radius:6px;">
         <div style="font-size:10px;font-weight:700;color:#1e40af;margin-bottom:5px;">📅 주별 모아보기 (${weekGroups.length}주)</div>
         ${weekGroups.slice(0,12).map(w => {
-          const isPaid = w.remaining < 0.01;
+          const isPaid = Math.abs(w.remaining) < 0.01;
+          const isOverpaid = w.remaining < -0.01;
           const isPartial = w.paid > 0.01 && w.remaining > 0.01;
           let badge;
-          if(isPaid) badge = `<span style="background:#dcfce7;color:#166534;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;">✓ 지급완료</span>`;
+          if(isOverpaid) badge = `<span style="background:#fef3c7;color:#92400e;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;">⚠️ 잉여 $${Math.abs(w.remaining).toLocaleString()}</span>`;
+          else if(isPaid) badge = `<span style="background:#dcfce7;color:#166534;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;">✓ 지급완료</span>`;
           else if(isPartial) badge = `<span style="background:#fef3c7;color:#92400e;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;">부분</span>`;
           else badge = '';
           const amtStyle = isPaid ? 'opacity:.55;' : '';
-          const displayAmt = isPaid ? w.total : w.remaining;
-          const amtColor = isPaid ? 'var(--t3)' : (isPartial ? '#f59e0b' : 'var(--or)');
+          const displayAmt = isPaid ? w.total : Math.abs(w.remaining);
+          const amtColor = isOverpaid ? '#f59e0b' : (isPaid ? 'var(--t3)' : (isPartial ? '#f59e0b' : 'var(--or)'));
+          const countStr = w.count > 0 ? `(${w.count}건)` : `(지급만)`;
           return `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;font-size:10px;color:var(--t2);padding:3px 0;border-top:1px dashed #bfdbfe;">
-            <span style="flex:1;min-width:0;"><b style="color:${isPaid?'var(--t3)':'#1e40af'};">📅 ${_fmtWeekRange(w.weekStart)}</b> <span style="color:var(--t3);">(${w.count}건)</span> ${badge}</span>
+            <span style="flex:1;min-width:0;"><b style="color:${isPaid?'var(--t3)':'#1e40af'};">📅 ${_fmtWeekRange(w.weekStart)}</b> <span style="color:var(--t3);">${countStr}</span> ${badge}</span>
             <span style="font-family:var(--fn);font-weight:700;color:${amtColor};white-space:nowrap;${amtStyle}">$${displayAmt.toLocaleString('en',{minimumFractionDigits:2})}</span>
           </div>`;
         }).join('')}
@@ -17718,28 +17724,31 @@ function _quickAddPayment(type, name, balance){
       if(r.desc) weekMap[wk].descs.push(r.desc);
     });
     // 주별 지급액 (CR) — CR의 date 필드도 weekMon이지만, 안전을 위해 다시 정규화
+    //   DR 없는 주(사전지급/잘못 등록)도 weekMap에 추가 → 카드 합계와 일치 유지
     crRows.forEach(r => {
       const wk = _normWeek(r.date);
       if(!wk) return;
-      if(!weekMap[wk]){
-        // DR 없이 CR만 있는 주 (드물지만 사전지급 등) — 무시 (DR 발생 안 한 주 표시 안 함)
-        return;
-      }
+      if(!weekMap[wk]) weekMap[wk] = { weekStart:wk, total:0, paid:0, count:0, descs:[] };
       weekMap[wk].paid += Number(r.amount)||0;
     });
-    // 미지급만 추출
-    const unpaidWeeks = Object.values(weekMap)
+    // 모든 주 정리 (양수=미지급, 음수=잉여지급)
+    const allWeeks = Object.values(weekMap)
       .map(w => ({...w, remaining: roundMoney(w.total - w.paid), type:'week', invNum: w.weekStart}))
-      .filter(w => w.remaining > 0.01)
       .sort((a,b) => (a.weekStart||'').localeCompare(b.weekStart||''));
+    // 미지급만 (양수 remaining)
+    const unpaidWeeks = allWeeks.filter(w => w.remaining > 0.01);
+    // 잉여 지급 합계 (음수 remaining)
+    const overpaidSum = allWeeks.filter(w => w.remaining < -0.01)
+      .reduce((s,w)=>s+w.remaining, 0); // 음수 합
 
     // 진단 로그 (콘솔)
     console.log('[wage payment]', name, '— DR:', drRows.length, 'CR:', crRows.length,
-      '미지급 주:', unpaidWeeks.length,
+      '미지급 주:', unpaidWeeks.length, '잉여 지급:', overpaidSum.toFixed(2),
       'unpaid:', unpaidWeeks.map(w=>w.weekStart+'($'+w.remaining+')').join(', '));
 
     if(unpaidWeeks.length > 0){
-      _showWageSelectorModal(name, unpaidWeeks);
+      // 잉여 지급이 있으면 모달에 알림 표시
+      _showWageSelectorModal(name, unpaidWeeks, overpaidSum);
       return;
     }
     // 미지급 주 없으면 → fallthrough
@@ -17922,9 +17931,12 @@ function _showSubInvoiceSelectorModal(subName, items){
 // SUB 인보이스 지급과 동일한 UX 패턴
 // 주별 단위로 그룹화 + 체크박스 선택 + 일괄 지급
 // ─────────────────────────────────────────────────────
-function _showWageSelectorModal(driverName, weeks){
+function _showWageSelectorModal(driverName, weeks, overpaidSum){
   const sorted = weeks.slice().sort((a,b)=>(a.weekStart||'').localeCompare(b.weekStart||''));
   const totalRemaining = sorted.reduce((s,w)=>s+w.remaining, 0);
+  // 잉여 지급 차감 후 실제 카드 잔액과 일치하는 값
+  const overpaid = Math.abs(overpaidSum || 0);
+  const netRemaining = totalRemaining + (overpaidSum || 0); // overpaidSum은 음수
   const weekCount = sorted.length;
 
   const fmtWeek = (iso) => {
@@ -17941,9 +17953,12 @@ function _showWageSelectorModal(driverName, weeks){
   overlay.innerHTML = `
     <div style="background:var(--sf);border-radius:16px;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.25);">
       <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:4px;">💰 ${escH(driverName)} 급여 지급</div>
-      <div style="font-size:11px;color:var(--t3);margin-bottom:12px;">
-        📅 미지급 주 ${weekCount}건 · 합계 잔액 <b style="color:var(--or);">$${totalRemaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:${overpaid > 0.01 ? '6px' : '12px'};">
+        📅 미지급 주 ${weekCount}건 · 미지급 합계 <b style="color:var(--or);">$${totalRemaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
       </div>
+      ${overpaid > 0.01 ? `<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;padding:6px 10px;margin-bottom:12px;font-size:10px;color:#92400e;">
+        ⚠️ 이전 주에 잉여 지급 <b>$${overpaid.toLocaleString('en-AU',{minimumFractionDigits:2})}</b> 발생 — 카드 잔액 = 미지급 $${totalRemaining.toLocaleString('en-AU',{minimumFractionDigits:2})} - 잉여 $${overpaid.toLocaleString('en-AU',{minimumFractionDigits:2})} = <b>$${netRemaining.toLocaleString('en-AU',{minimumFractionDigits:2})}</b>
+      </div>` : ''}
       <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
         <button onclick="_wageSelectAll(true)" style="background:#f1f5f9;border:1px solid var(--bd);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">전체 선택</button>
         <button onclick="_wageSelectAll(false)" style="background:#f1f5f9;border:1px solid var(--bd);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">전체 해제</button>
