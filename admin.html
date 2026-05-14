@@ -15827,6 +15827,19 @@ function _subBalances(){
     }
   });
 
+  // ★★ BillingEntity≠DC 운행의 날짜+차량 키 — 계산 제외용
+  const _nonDCBilledKeys = new Set();
+  if(Array.isArray(_drCache)){
+    _drCache.forEach(r => {
+      const be = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
+      if(!be || be === 'DC' || /DONG\s*CHOI/i.test(be)) return;
+      const dateISO = parseToISO(r.Date||'');
+      const rego = String(r.Rego||'').trim();
+      if(!dateISO || !rego) return;
+      _nonDCBilledKeys.add(dateISO + '|' + rego);
+    });
+  }
+
   const map = {};
   _balSubTxns.forEach(t=>{
     if(_isSubLedgerSuppressed(t)) return;
@@ -15835,6 +15848,11 @@ function _subBalances(){
     if(desc.startsWith('LEDGER:')){
       const m = desc.match(/^LEDGER:(\d{4}-\d{2}-\d{2})_([^_]+)/);
       if(m && drsubKeys.has(m[1] + '|' + m[2])) return; // DRSUB 우선
+    }
+    // ★★ BillingEntity≠DC 운행의 DRSUB/LEDGER 제외
+    if(desc.startsWith('DRSUB:') || desc.startsWith('LEDGER:')){
+      const m = desc.match(/^(?:DRSUB|LEDGER):(\d{4}-\d{2}-\d{2})_([^_]+)/);
+      if(m && _nonDCBilledKeys.has(m[1] + '|' + m[2])) return; // 비-DC 발행 — 계산 제외
     }
     const name = t.SubCompany||'Unknown';
     const cat = t.Category||'Outsourcing';
@@ -16495,6 +16513,25 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     }
   });
 
+  // ★★ BillingEntity≠DC 운행의 DRSUB key 식별 — 계산 제외
+  //    DR 캐시에서 BillingEntity가 DC가 아닌 운행을 찾아 DRSUB key 생성
+  //    이 key에 해당하는 SUB_Txn 행은 subPayables에서 제외 (EG TRAVEL 등 자체 발행 운행)
+  const _nonDCBilledDRSUB = new Set();
+  if(Array.isArray(_drCache)){
+    _drCache.forEach(r => {
+      const be = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
+      if(!be || be === 'DC' || /DONG\s*CHOI/i.test(be)) return; // DC면 통과 (계산 대상)
+      // 비-DC 운행 → DRSUB key 생성
+      const dateISO = parseToISO(r.Date||'');
+      const rego = String(r.Rego||'').trim();
+      if(!dateISO || !rego) return;
+      const tc = typeof pickTourCode === 'function' ? pickTourCode(r) : (r.Tour_Code||'');
+      _nonDCBilledDRSUB.add(`DRSUB:${dateISO}_${rego}_${tc}`);
+      _nonDCBilledDRSUB.add(`DRSUB:${dateISO}_${rego}_`); // tourCode 없는 케이스
+      _nonDCBilledDRSUB.add(`${dateISO}|${rego}`); // 짧은 key (DRSUB prefix 없는 경우 대비)
+    });
+  }
+
   (_balSubTxns || []).forEach(tx => {
     if(_isSubLedgerSuppressed(tx)) return; // SUBINV 우선 정책: 가림
     // LEDGER가 같은 날짜+차량 DRSUB에 의해 가려지는지
@@ -16503,6 +16540,19 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
       const m = desc.match(/^LEDGER:(\d{4}-\d{2}-\d{2})_([^_]+)/);
       if(m && _drsubKeysCF.has(m[1] + '|' + m[2])) return;
     }
+
+    // ★★ BillingEntity≠DC 운행의 DRSUB/LEDGER 제외
+    //   해당 행의 날짜+차량이 비-DC 운행 set에 있으면 skip
+    if(desc.startsWith('DRSUB:') || desc.startsWith('LEDGER:')){
+      const m = desc.match(/^(?:DRSUB|LEDGER):(\d{4}-\d{2}-\d{2})_([^_]+)/);
+      if(m){
+        const shortKey = m[1] + '|' + m[2];
+        if(_nonDCBilledDRSUB.has(shortKey)) return; // 비-DC 발행 — 계산 제외
+        // 전체 DRSUB key로도 체크
+        if(_nonDCBilledDRSUB.has(desc.split('|')[0])) return;
+      }
+    }
+
     const dr = Number(tx.DR) || 0;
     if (dr <= 0) return;
 
