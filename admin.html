@@ -16043,6 +16043,29 @@ function renderBalSubList(){
 // ★ 자사 차량 운행분 (자사 지급) + SUB 차량 운행분 (차주 지급) 분리
 function _wageBalances(){
   const dcOwner = (typeof DC_OWNERS !== 'undefined' && DC_OWNERS[0]) ? DC_OWNERS[0] : 'DONG CHOI PTY LTD';
+  // 주 정규화 헬퍼 (모달과 동일 로직)
+  const _normWeek = (iso) => {
+    let isoStr = '';
+    if(iso instanceof Date){
+      isoStr = iso.getFullYear() + '-' + String(iso.getMonth()+1).padStart(2,'0') + '-' + String(iso.getDate()).padStart(2,'0');
+    } else {
+      isoStr = String(iso||'').slice(0,10);
+      if(/^\d{1,2}\/\d{1,2}\/\d{4}/.test(isoStr) && typeof parseToISO === 'function'){
+        isoStr = parseToISO(isoStr) || isoStr;
+      }
+    }
+    if(!isoStr) return '';
+    if(typeof getMondayOfDate === 'function'){
+      try { const wk = getMondayOfDate(isoStr); if(wk) return wk; } catch(e){}
+    }
+    const d = new Date(isoStr + 'T00:00:00');
+    if(isNaN(d.getTime())) return '';
+    const day = d.getDay();
+    const diff = (day === 0) ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  };
+
   const map = {};
   _balWageTxns.forEach(t=>{
     const name = t.driver||'Unknown';
@@ -16051,7 +16074,9 @@ function _wageBalances(){
       // ★ 차주 지급 확인 추적
       subPayerRows:{},      // payer → [{rowIndex, amount, subPaidOwner, subPaidDriver, ...}]
       subPaidOwnerSum:0,    // 차주가 지급했다고 확인된 합계
-      subPaidDriverSum:0    // 드라이버가 받았다고 확인된 합계
+      subPaidDriverSum:0,   // 드라이버가 받았다고 확인된 합계
+      // ★ 주별 자사 차량 운행 그룹 — 카드 펼친 모습 + 지급 처리에 사용
+      weekGroups: {}        // weekStart(ISO) → {weekStart, total, paid, count}
     };
     const txPayer = t.payer || dcOwner;
     if(t.type==='DR'){
@@ -16059,6 +16084,13 @@ function _wageBalances(){
       if(txPayer === dcOwner){
         // 자사 차량 운행 — 자사가 지급할 책임
         map[name].dr += amt;
+        // 주별 그룹화 (자사분만)
+        const wk = _normWeek(t.date);
+        if(wk){
+          if(!map[name].weekGroups[wk]) map[name].weekGroups[wk] = { weekStart:wk, total:0, paid:0, count:0 };
+          map[name].weekGroups[wk].total += amt;
+          map[name].weekGroups[wk].count++;
+        }
       } else {
         // SUB 차량 운행 — 차주가 자기 직원에게 직접 지급
         map[name].subDr += amt;
@@ -16080,9 +16112,20 @@ function _wageBalances(){
       }
     } else {
       map[name].cr += Number(t.amount)||0;
+      // 주별 지급 매칭
+      const wk = _normWeek(t.date);
+      if(wk && map[name].weekGroups[wk]){
+        map[name].weekGroups[wk].paid += Number(t.amount)||0;
+      }
     }
   });
-  return Object.values(map).map(a=>({...a, balance: a.dr - a.cr})).sort((a,b)=>b.balance-a.balance);
+  return Object.values(map).map(a=>{
+    // 주 그룹을 정렬된 배열로 변환
+    const weekGroupsArr = Object.values(a.weekGroups||{})
+      .map(w => ({...w, remaining: roundMoney(w.total - w.paid)}))
+      .sort((a,b)=>(b.weekStart||'').localeCompare(a.weekStart||'')); // 최신 주가 위로
+    return {...a, weekGroupsArr, balance: a.dr - a.cr};
+  }).sort((a,b)=>b.balance-a.balance);
 }
 
 function renderBalWageList(){
@@ -16163,6 +16206,37 @@ function renderBalWageList(){
         }).join('')}
       </div>` : '';
     const isDcOnly = !subList.length;
+
+    // ★ 주별 모아보기 — SUB 인보이스 그룹과 동일 패턴
+    const weekGroups = a.weekGroupsArr || [];
+    const _fmtWeekRange = (iso) => {
+      const d = new Date(iso+'T00:00:00');
+      if(isNaN(d.getTime())) return iso;
+      const end = new Date(d); end.setDate(end.getDate()+6);
+      const pad = n => String(n).padStart(2,'0');
+      return `${pad(d.getDate())}/${pad(d.getMonth()+1)}~${pad(end.getDate())}/${pad(end.getMonth()+1)}`;
+    };
+    const weeklyHtml = weekGroups.length > 0 ? `
+      <div style="margin-top:8px;padding:8px;background:#eff6ff;border-left:3px solid #93c5fd;border-radius:6px;">
+        <div style="font-size:10px;font-weight:700;color:#1e40af;margin-bottom:5px;">📅 주별 모아보기 (${weekGroups.length}주)</div>
+        ${weekGroups.slice(0,12).map(w => {
+          const isPaid = w.remaining < 0.01;
+          const isPartial = w.paid > 0.01 && w.remaining > 0.01;
+          let badge;
+          if(isPaid) badge = `<span style="background:#dcfce7;color:#166534;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;">✓ 지급완료</span>`;
+          else if(isPartial) badge = `<span style="background:#fef3c7;color:#92400e;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;">부분</span>`;
+          else badge = '';
+          const amtStyle = isPaid ? 'opacity:.55;' : '';
+          const displayAmt = isPaid ? w.total : w.remaining;
+          const amtColor = isPaid ? 'var(--t3)' : (isPartial ? '#f59e0b' : 'var(--or)');
+          return `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;font-size:10px;color:var(--t2);padding:3px 0;border-top:1px dashed #bfdbfe;">
+            <span style="flex:1;min-width:0;"><b style="color:${isPaid?'var(--t3)':'#1e40af'};">📅 ${_fmtWeekRange(w.weekStart)}</b> <span style="color:var(--t3);">(${w.count}건)</span> ${badge}</span>
+            <span style="font-family:var(--fn);font-weight:700;color:${amtColor};white-space:nowrap;${amtStyle}">$${displayAmt.toLocaleString('en',{minimumFractionDigits:2})}</span>
+          </div>`;
+        }).join('')}
+        ${weekGroups.length > 12 ? `<div style="font-size:9px;color:var(--t3);margin-top:4px;text-align:center;">+ ${weekGroups.length-12}주 더 (상세보기에서 확인)</div>` : ''}
+      </div>` : '';
+
     return `
     <div style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
@@ -16176,6 +16250,7 @@ function renderBalWageList(){
         </div>
         ${a.balance > 0.01 ? `<button onclick="event.stopPropagation();_quickAddPayment('wage','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:8px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;" title="\uC790\uC0AC \uAE09\uC5EC \uC9C0\uAE09">💰 \uC9C0\uAE09</button>` : ''}
       </div>
+      ${weeklyHtml}
       ${subBreakdownHtml}
     </div>`;
   }).join('');
