@@ -7057,3 +7057,125 @@ function clearDailyDraftServer(driverName) {
     return { ok: false, error: err.toString() };
   }
 }
+
+
+/**
+ * ─────────────────────────────────────────────────────────────────
+ *  Bulk Sync All Vehicle Current_KM (매시간 트리거)
+ * ─────────────────────────────────────────────────────────────────
+ *  목적: Pre_Departure / Daily_Report / End_of_Shift 시트를 스캔해서
+ *       각 차량(Rego)의 최신 KM을 찾아 M_Vehicles.Current_KM 컬럼에 반영.
+ *
+ *  트리거 등록: setupBulkSyncKMTrigger() 한 번만 실행
+ *  트리거 제거: removeBulkSyncKMTrigger()
+ *  수동 실행:   _bulkSyncAllVehicleCurrentKM()
+ * ─────────────────────────────────────────────────────────────────
+ */
+function _bulkSyncAllVehicleCurrentKM() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const vSheet = ss.getSheetByName('M_Vehicles');
+    if (!vSheet) {
+      Logger.log('❌ M_Vehicles 시트 없음');
+      return { ok: false, error: 'M_Vehicles not found' };
+    }
+
+    const lastRow = vSheet.getLastRow();
+    const lastCol = vSheet.getLastColumn();
+    if (lastRow < 2) {
+      Logger.log('M_Vehicles 데이터 없음');
+      return { ok: true, updated: 0, msg: 'no vehicles' };
+    }
+
+    const vHeaders = vSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const vRegoIdx = vHeaders.indexOf('Rego');
+    const vKMIdx = vHeaders.indexOf('Current_KM');
+    if (vRegoIdx < 0 || vKMIdx < 0) {
+      Logger.log('❌ M_Vehicles에 Rego/Current_KM 컬럼 없음');
+      return { ok: false, error: 'Rego or Current_KM column missing' };
+    }
+
+    // 1) 각 시트에서 Rego별 최대 KM 수집
+    const kmMap = {};
+    const scanForKM = (sheetName, kmFields) => {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) return;
+      const lr = sheet.getLastRow();
+      const lc = sheet.getLastColumn();
+      if (lr < 2 || lc < 1) return;
+      const data = sheet.getRange(1, 1, lr, lc).getValues();
+      const headers = data[0];
+      const regoIdx = headers.indexOf('Rego');
+      if (regoIdx < 0) return;
+      const colIdxs = kmFields.map(f => headers.indexOf(f)).filter(i => i >= 0);
+      if (colIdxs.length === 0) return;
+      for (let i = 1; i < data.length; i++) {
+        const row = data[i];
+        const rego = String(row[regoIdx] || '').trim();
+        if (!rego) continue;
+        colIdxs.forEach(ci => {
+          const v = parseFloat(row[ci]);
+          if (!isNaN(v) && v > 0) {
+            if (!kmMap[rego] || v > kmMap[rego]) kmMap[rego] = v;
+          }
+        });
+      }
+    };
+    scanForKM('Pre_Departure', ['Start_KM']);
+    scanForKM('Daily_Report',  ['KM_Start', 'KM_End']);
+    scanForKM('End_of_Shift',  ['Start_KM', 'End_KM']);
+
+    // 2) M_Vehicles 일괄 업데이트 (변동분만)
+    const vData = vSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const kmColValues = vSheet.getRange(2, vKMIdx + 1, lastRow - 1, 1).getValues();
+    let updated = 0;
+    const updates = []; // {row, newKM}
+
+    for (let i = 0; i < vData.length; i++) {
+      const rego = String(vData[i][vRegoIdx] || '').trim();
+      if (!rego) continue;
+      const latest = kmMap[rego];
+      if (latest == null) continue;
+      const cur = parseFloat(kmColValues[i][0]);
+      // 현재 값보다 새로 발견된 KM이 더 클 때만 업데이트
+      if (isNaN(cur) || latest > cur) {
+        updates.push({ row: i + 2, newKM: latest });
+      }
+    }
+
+    // 3) 일괄 setValue (개별 호출 최소화)
+    updates.forEach(u => {
+      vSheet.getRange(u.row, vKMIdx + 1).setValue(u.newKM);
+      updated++;
+    });
+
+    Logger.log('✅ Current_KM 동기화 완료: ' + updated + '대 업데이트 (전체 ' + vData.length + '대 중)');
+    return { ok: true, updated: updated, total: vData.length };
+  } catch (err) {
+    Logger.log('❌ _bulkSyncAllVehicleCurrentKM 실패: ' + err);
+    return { ok: false, error: err.toString() };
+  }
+}
+
+function setupBulkSyncKMTrigger() {
+  removeBulkSyncKMTrigger();
+  ScriptApp.newTrigger('_bulkSyncAllVehicleCurrentKM')
+    .timeBased()
+    .everyHours(1)
+    .create();
+  Logger.log('✅ Current_KM 자동 동기화 트리거 등록: 매시간');
+  return 'BulkSyncKM trigger created.';
+}
+
+function removeBulkSyncKMTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === '_bulkSyncAllVehicleCurrentKM') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  Logger.log('Removed ' + removed + ' bulkSyncKM trigger(s).');
+  return removed;
+}
