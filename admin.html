@@ -16119,7 +16119,21 @@ function _subBalances(){
       const m = desc.match(/^(?:DRSUB|LEDGER):(\d{4}-\d{2}-\d{2})_([^_]+)/);
       if(m && _nonDCBilledKeys.has(m[1] + '|' + m[2])) return; // 비-DC 발행 — 계산 제외
     }
-    const name = t.SubCompany||'Unknown';
+    // ★ SubCompany fallback chain — 잔액/주간요약 일관성
+    //   1) tx.SubCompany 직접
+    //   2) tx.Agency (Agency 컬럼이 있는 경우)
+    //   3) InvoiceNo로 인보이스 캐시 조회 (SUBINV 케이스)
+    //   4) 'Unknown'
+    let name = String(t.SubCompany||'').trim();
+    if(!name) name = String(t.Agency||'').trim();
+    if(!name){
+      const invNo = String(t.InvoiceNo||'').trim();
+      if(invNo && Array.isArray(_invHistoryCache)){
+        const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNo);
+        if(inv) name = String(inv.SubCompany||inv.Agency||'').trim();
+      }
+    }
+    if(!name) name = 'Unknown';
     const cat = t.Category||'Outsourcing';
     if(!map[name]) map[name]={name, dr:0, cr:0, wageDr:0, wageCr:0, driverWages:{}, tourCodeGroups:{}};
     if(cat==='Wage'){
@@ -16924,8 +16938,20 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     if (!subTourCode && typeof _extractSubTourCode === 'function') subTourCode = _extractSubTourCode(tx);
     if (!subGuide && typeof _extractSubGuide === 'function') subGuide = _extractSubGuide(tx);
 
+    // ★ SubCompany fallback — 잔액 탭 _subBalances와 동일 로직
+    let companyName = String(tx.SubCompany||'').trim();
+    if(!companyName) companyName = String(tx.Agency||'').trim();
+    if(!companyName){
+      const invNo = String(tx.InvoiceNo||'').trim();
+      if(invNo && Array.isArray(_invHistoryCache)){
+        const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNo);
+        if(inv) companyName = String(inv.SubCompany||inv.Agency||'').trim();
+      }
+    }
+    if(!companyName) companyName = 'Unknown';
+
     subPayables.push({
-      company: tx.SubCompany || tx.Agency || 'Unknown',
+      company: companyName,
       invoiceNo: tx.InvoiceNo || '',
       description: tx.Description || '',
       amount: dr,
