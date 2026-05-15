@@ -16950,6 +16950,15 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     }
     if(!companyName) companyName = 'Unknown';
 
+    // ★★ 잔액 탭과 동일한 Payout 제외 정책 적용
+    //   사용자가 잔액 탭에서 '✓ 정산완료' 등으로 처리한 투어코드는 주간 요약에서도 제외
+    //   _isTourPayoutExcluded: 자동 제외 (BillingEntity == SubCompany) + 수동 override 통합
+    if(subTourCode && typeof _isTourPayoutExcluded === 'function'){
+      try {
+        if(_isTourPayoutExcluded(subTourCode, companyName)) return;
+      } catch(e){}
+    }
+
     subPayables.push({
       company: companyName,
       invoiceNo: tx.InvoiceNo || '',
