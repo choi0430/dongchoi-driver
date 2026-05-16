@@ -216,10 +216,14 @@ const ADMIN_ONLY_ACTIONS = [
 ];
 
 // 관리자 전용 GET 액션
+// NOTE: get_invoices, get_roster, get_defect_reports는 드라이버 앱에서도
+// (본인 데이터 조회용으로) 호출하므로 ADMIN_ONLY에서 제외.
+// 추후 보안 강화 시 핸들러 내부에서 driver 토큰일 때 본인 데이터로 필터링하는
+// 패턴(effectiveDriver) 적용 권장.
 const ADMIN_ONLY_GET_ACTIONS = [
   'get_agency_txn', 'get_sub_txn', 'get_agency_balances',
-  'get_invoices', 'get_all_leave_requests', 'get_roster',
-  'get_ledger', 'get_defect_reports',
+  'get_all_leave_requests',
+  'get_ledger',
   'get_admin_bundle', 'get_audit_log',
   // ── 운행 일정 ──
   'get_schedule', 'get_schedule_stats'
