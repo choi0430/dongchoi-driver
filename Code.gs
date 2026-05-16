@@ -4156,14 +4156,34 @@ function sendInvoiceEmail(payload) {
     if (replyTo) options.replyTo = replyTo;
 
     // ★ PDF 첨부: docHtml 우선 (서버사이드 변환), base64는 폴백
+    var pdfAttached = false;
+    var pdfError = '';
     if (docHtml) {
-      var htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
-      var pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
-      options.attachments = [pdfBlob];
+      try {
+        var htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
+        var pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
+        // PDF blob이 실제로 유효한지 검증 (size > 0)
+        var pdfSize = pdfBlob.getBytes().length;
+        if (pdfSize > 0) {
+          options.attachments = [pdfBlob];
+          pdfAttached = true;
+        } else {
+          pdfError = 'PDF 변환 결과 크기 0';
+        }
+      } catch (pdfErr) {
+        pdfError = 'HTML→PDF 변환 실패: ' + pdfErr.toString();
+      }
     } else if (pdfBase64) {
-      var pdfBytes = Utilities.base64Decode(pdfBase64);
-      var pdfBlob2 = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
-      options.attachments = [pdfBlob2];
+      try {
+        var pdfBytes = Utilities.base64Decode(pdfBase64);
+        var pdfBlob2 = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
+        options.attachments = [pdfBlob2];
+        pdfAttached = true;
+      } catch (b64Err) {
+        pdfError = 'base64 PDF 디코드 실패: ' + b64Err.toString();
+      }
+    } else {
+      pdfError = 'docHtml/pdfBase64 둘 다 없음';
     }
 
     // GmailApp 우선 시도, 실패 시 MailApp 폴백
@@ -4184,9 +4204,9 @@ function sendInvoiceEmail(payload) {
 
     // 감사 로그
     appendAuditLog(payload._user, 'send_invoice_email', '—', '—',
-      `인보이스 이메일 발송 (PDF 첨부) → ${to} | ${subject}`);
+      `인보이스 이메일 발송 (PDF ${pdfAttached?'첨부':'미첨부: '+pdfError}) → ${to} | ${subject}`);
 
-    return { ok: true, to: to };
+    return { ok: true, to: to, pdfAttached: pdfAttached, pdfError: pdfError };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
