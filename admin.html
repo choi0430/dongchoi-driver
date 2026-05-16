@@ -4676,6 +4676,25 @@ function _otAmountToHours(otAmount, seats, agency){
   return Math.round((amt / rate) * 2) / 2;
 }
 
+// ★ OT 표시 문자열 — 30분 단위 청구 여행사는 'N×30MINS' 형식
+//   호주로 등 30분 단위 요율 ($15/30min): '4×30MINS ($60)' (4번 × 30분)
+//   일반 시간 단위: '2HR ($60)'
+function _formatOTDisplay(otAmount, seats, agency){
+  const amt = parseFloat(otAmount)||0;
+  if(amt <= 0) return '';
+  const cap = parseInt(seats)||21;
+  const _isHalfHourBilling = /호주로|hojuro/i.test(String(agency||''));
+  if(_isHalfHourBilling){
+    // 호주로: 30분당 $15(21~25석) 또는 $20(40+석) 단위
+    const halfHourRate = cap>=40 ? 20 : 15;
+    const units = halfHourRate > 0 ? Math.round(amt / halfHourRate) : 0;
+    return `${units}×30MINS ($${amt})`;
+  }
+  // 일반 시간 단위
+  const hours = _otAmountToHours(amt, seats, agency);
+  return `${hours}HR ($${amt})`;
+}
+
 // 슬롯과 매칭되는 DR 찾기 (있으면 OT, Time_Start, Time_End 등 사후 데이터 반환)
 function _schFindDRForSlot(date, slot, tour){
   if(!_schDRMatchIndex) return null;
@@ -4776,7 +4795,8 @@ async function showDRDiagnostics(tourId){
           diffs.push(`코스: 일정="${slotCourse}" → DR="${drCourse||'-'}"`);
         const ot = parseFloat(dr.OT||0);
         const otHours = _otAmountToHours(ot, dr.Seats, dr.Agency);
-        const otStr = ot > 0 ? ` · OT ${otHours}HR ($${ot})` : '';
+        const otDisplay = _formatOTDisplay(ot, dr.Seats, dr.Agency);
+        const otStr = otDisplay ? ` · OT ${otDisplay}` : '';
         const subTag = isSubMatched ? ' (외주, 자사 DR 제출)' : '';
         slotDiagnostics.push({
           date: d.date, slot: slotLabel, status: 'matched', icon: isSubMatched ? '🏢✅' : '✅',
@@ -5015,8 +5035,9 @@ function renderScheduleList(){
     let hasTrailer = false;
     let totalSlots = 0;
     let matchedSlots = 0;
-    let totalActualOT = 0;        // OT 시간 합 (HR)
+    let totalActualOT = 0;        // OT 시간 합 (HR) - 일반 여행사
     let totalActualOTAmount = 0;  // OT 금액 합 ($)
+    let totalActualOTHalfHourUnits = 0; // OT 30분 단위 횟수 - 호주로 등 30분 청구
     const today = _schToday();
     let pastUnmatchedCount = 0;
     days.forEach(d => {
@@ -5045,7 +5066,16 @@ function renderScheduleList(){
           matchedSlots++;
           const ot = parseFloat(dr.OT||0);
           if(ot > 0){
-            totalActualOT += _otAmountToHours(ot, dr.Seats, dr.Agency);
+            // 호주로 등 30분 단위 청구 여행사는 별도 추적
+            const _isHalfHour = /호주로|hojuro/i.test(String(dr.Agency||''));
+            if(_isHalfHour){
+              const cap = parseInt(dr.Seats)||21;
+              const halfHourRate = cap>=40 ? 20 : 15;
+              const units = halfHourRate > 0 ? Math.round(ot / halfHourRate) : 0;
+              totalActualOTHalfHourUnits += units;
+            } else {
+              totalActualOT += _otAmountToHours(ot, dr.Seats, dr.Agency);
+            }
             totalActualOTAmount += ot;
           }
         } else if(s.mode === 'sub'){
@@ -5078,10 +5108,16 @@ function renderScheduleList(){
     let drBadge = '';
     if(totalSlots > 0){
       const onclickDiag = `onclick="event.stopPropagation();showDRDiagnostics('${escH(r.TourID)}')"`;
+      // OT 표시 문자열 — 호주로(30분) + 일반(시간) 둘 다 있을 수 있음
+      let _otParts = [];
+      if(totalActualOTHalfHourUnits > 0) _otParts.push(`${totalActualOTHalfHourUnits}×30MINS`);
+      if(totalActualOT > 0) _otParts.push(`${totalActualOT}HR`);
+      const _otText = _otParts.length ? `${_otParts.join(' + ')} ($${totalActualOTAmount})` : '';
+      const hasOT = _otText !== '';
       if(matchedSlots === totalSlots){
-        drBadge = `<span ${onclickDiag} style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: DR 매칭 상세">▣ DR완료${totalActualOT>0?` · 실제 OT ${totalActualOT}HR ($${totalActualOTAmount})`:''}</span>`;
+        drBadge = `<span ${onclickDiag} style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: DR 매칭 상세">▣ DR완료${hasOT?` · 실제 OT ${_otText}`:''}</span>`;
       } else if(matchedSlots > 0){
-        drBadge = `<span ${onclickDiag} style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미매칭 슬롯 보기">▣ ${matchedSlots}/${totalSlots}${totalActualOT>0?` · ${totalActualOT}HR ($${totalActualOTAmount})`:''}</span>`;
+        drBadge = `<span ${onclickDiag} style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미매칭 슬롯 보기">▣ ${matchedSlots}/${totalSlots}${hasOT?` · ${_otText}`:''}</span>`;
       } else if(pastUnmatchedCount > 0){
         drBadge = `<span ${onclickDiag} style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미작성/불일치 진단">⚠ DR 미작성</span>`;
       }
@@ -5939,7 +5975,7 @@ function _smRebuildDays(){
       if(matchedDR){
         const ot = parseFloat(matchedDR.OT||0);
         const otHours = _otAmountToHours(ot, matchedDR.Seats, matchedDR.Agency);
-        drStatus = `<span class="sm-dr-badge ok">▣ DR 매칭됨${ot>0?` · 실제 OT ${otHours}HR ($${ot})`:' · OT 없음'}</span>`;
+        drStatus = `<span class="sm-dr-badge ok">▣ DR 매칭됨${ot>0?` · 실제 OT ${_formatOTDisplay(ot, dr.Seats, dr.Agency)}`:' · OT 없음'}</span>`;
       } else if(d.date < today && (d.slots[k].driver || d.slots[k].rego)){
         drStatus = `<span class="sm-dr-badge warn">⚠ DR 미작성/미매칭 — 차량+코스 일치 확인</span>`;
       }
@@ -8387,8 +8423,18 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   if(dr){
     const ot = parseFloat(dr.OT || 0);
     if(ot > 0) {
-      const otHours = _otAmountToHours(ot, dr.Seats, dr.Agency);
-      carExtras.push(`+${otHours}HR`);
+      const otDisplay = _formatOTDisplay(ot, dr.Seats, dr.Agency);
+      // 짧은 표시: 30분 단위는 "4×30M", 시간 단위는 "+4HR"
+      const _isHalfHour = /호주로|hojuro/i.test(String(dr.Agency||''));
+      if(_isHalfHour){
+        const cap = parseInt(dr.Seats)||21;
+        const halfHourRate = cap>=40 ? 20 : 15;
+        const units = halfHourRate > 0 ? Math.round(ot / halfHourRate) : 0;
+        carExtras.push(`+${units}×30M`);
+      } else {
+        const otHours = _otAmountToHours(ot, dr.Seats, dr.Agency);
+        carExtras.push(`+${otHours}HR`);
+      }
     }
     carExtras.push('▣');
   } else if(slot.driver || slot.rego) {
