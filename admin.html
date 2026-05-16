@@ -16826,152 +16826,38 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     });
   }
 
-  // ── 2. Sub Payables (FinishDate + 14 days in target week) ──
-  // CR(지급) 인덱스 — InvoiceNo 또는 SubCompany+Date 매칭
-  const subCR = {};
-  (_balSubTxns || []).forEach(tx => {
-    if (String(tx.Type || '').toUpperCase() === 'CR' || (Number(tx.CR) || 0) > 0) {
-      const key = (tx.SubCompany || '') + '|' + (tx.InvoiceNo || '');
-      subCR[key] = (subCR[key] || 0) + (Number(tx.CR) || 0);
-    }
-  });
-
-  // ★ DRSUB 우선 정책 인덱스 — 같은 날짜+차량 LEDGER 가림용
-  const _drsubKeysCF = new Set();
-  (_balSubTxns || []).forEach(t => {
-    const desc = String(t.Description||'');
-    if(desc.startsWith('DRSUB:')){
-      const m = desc.match(/^DRSUB:(\d{4}-\d{2}-\d{2})_([^_]+)/);
-      if(m) _drsubKeysCF.add(m[1] + '|' + m[2]);
-    }
-  });
-
-  // ★★ 시나리오 4 (BillingEntity≠DC + 차량 owner≠DC) DRSUB key 식별 — 계산 제외
-  //    시나리오 4 = EG가 인보이스 발행 + EG 차량 → DC 회계 무관 → 참고용만
-  //    시나리오 3 (EG 발행 + DC 차량) 은 통과 — 여행사 수금에서 처리
-  //    시나리오 2 (DC 발행 + EG 차량) 은 통과 — SUB 지급 정상
-  const _nonDCBilledDRSUB = new Set();
-  if(Array.isArray(_drCache) && Array.isArray(DB?.V)){
-    (_drCache || []).forEach(r => {
-      const be = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
-      // BillingEntity가 DC이거나 비어있으면 시나리오 1 또는 2 — 통과
-      if(!be || be === 'DC' || /DONG\s*CHOI/i.test(be)) return;
-
-      // 차량 owner 체크
-      const rego = String(r.Rego||'').trim();
-      const veh = DB.V.find(v => v.Rego === rego);
-      const owner = veh ? String(veh.Owner||'').trim() : '';
-      const isDCVehicle = !owner || DC_OWNERS.includes(owner);
-
-      // 시나리오 3: BillingEntity≠DC + DC 차량 → 여행사 수금으로 처리, subPayables 제외 안 함... 아니 잠깐
-      //   subPayables는 SUB 지급 예정 (DC가 차주에게 줄 돈)
-      //   시나리오 3은 DC 차량이라 SUB 지급 자체가 없음 → 자동 등록도 안 됨 → 여기 분기 무관
-      // 시나리오 4: BillingEntity≠DC + 외주 차량 → DC 회계 무관 → 제외 대상
-      if(isDCVehicle) return; // 시나리오 3 — 통과 (어차피 subPayables에 안 잡힘)
-
-      // 시나리오 4 → DRSUB key 생성해서 제외 대상으로 추가
-      const dateISO = parseToISO(r.Date||'');
-      if(!dateISO || !rego) return;
-      const tc = typeof pickTourCode === 'function' ? pickTourCode(r) : (r.Tour_Code||'');
-      _nonDCBilledDRSUB.add(`DRSUB:${dateISO}_${rego}_${tc}`);
-      _nonDCBilledDRSUB.add(`DRSUB:${dateISO}_${rego}_`);
-      _nonDCBilledDRSUB.add(`${dateISO}|${rego}`);
-    });
+  // ── 2. Sub Payables — 잔액 탭 _subBalances() 결과 직접 사용 ──
+  //   _subBalances는 SUBINV 우선/DRSUB 우선/자동 제외/수동 override 모두 적용한 결과 반환
+  //   tourGroups: [{ tourCode, count, dr, cr, balance, dueDate, excluded, ... }]
+  //   주간 요약은 그 중 dueDate가 이번 주에 속하는 그룹만 필터링
+  if(typeof _subBalances === 'function'){
+    try {
+      const bals = _subBalances() || [];
+      bals.forEach(b => {
+        if(!b || !Array.isArray(b.tourGroups)) return;
+        b.tourGroups.forEach(g => {
+          if(g.excluded) return; // 제외 처리된 항목 skip
+          if(g.balance <= 0.01) return; // 완납 항목 skip
+          const dueDate = g.dueDate || '';
+          if(!dueDate) return;
+          if(dueDate < filterStartS || dueDate > sunS) return;
+          subPayables.push({
+            company: b.name,
+            invoiceNo: '', // 그룹 단위라 단일 invoiceNo 없음
+            description: g.tourCode || '',
+            amount: g.dr,
+            paid: g.cr,
+            balance: g.balance,
+            isPaid: false,
+            dueDate: dueDate,
+            tourCode: g.tourCode || '',
+            guide: (g.guides && g.guides[0]) || '',
+            count: g.count
+          });
+        });
+      });
+    } catch(e){ console.warn('[CF] _subBalances:', e); }
   }
-
-
-  (_balSubTxns || []).forEach(tx => {
-    if(_isSubLedgerSuppressed(tx)) return; // SUBINV 우선 정책: 가림
-    // LEDGER가 같은 날짜+차량 DRSUB에 의해 가려지는지
-    const desc = String(tx.Description||'');
-    if(desc.startsWith('LEDGER:')){
-      const m = desc.match(/^LEDGER:(\d{4}-\d{2}-\d{2})_([^_]+)/);
-      if(m && _drsubKeysCF.has(m[1] + '|' + m[2])) return;
-    }
-
-    // ★★ BillingEntity≠DC 운행의 DRSUB/LEDGER 제외
-    //   해당 행의 날짜+차량이 비-DC 운행 set에 있으면 skip
-    //   (DC가 인보이스 발행하는 운행만 회계에 포함, 다른 회사 발행 인보이스 운행은 제외)
-    if(desc.startsWith('DRSUB:') || desc.startsWith('LEDGER:')){
-      const m = desc.match(/^(?:DRSUB|LEDGER):(\d{4}-\d{2}-\d{2})_([^_]+)/);
-      if(m){
-        const shortKey = m[1] + '|' + m[2];
-        if(_nonDCBilledDRSUB.has(shortKey)) return; // 비-DC 발행 — 계산 제외
-        if(_nonDCBilledDRSUB.has(desc.split('|')[0])) return;
-      }
-    }
-
-    const dr = Number(tx.DR) || 0;
-    if (dr <= 0) return;
-
-    // ★ DueDate 우선, 없으면 FinishDate + 14, 그래도 없으면 Date + 14
-    let dueISO = _tryParseDate(tx.DueDate);
-    if (!dueISO) {
-      let baseDate = _tryParseDate(tx.FinishDate);
-      if (!baseDate) baseDate = _tryParseDate(tx.Date);
-      if (baseDate) {
-        const dd = new Date(baseDate + 'T00:00:00');
-        dd.setDate(dd.getDate() + 14);
-        dueISO = _localISO(dd);
-      }
-    }
-    if (!dueISO) return;
-    if (dueISO < filterStartS || dueISO > sunS) return;
-
-    // 지급액 추적
-    const subKey = (tx.SubCompany || '') + '|' + (tx.InvoiceNo || '');
-    const subPaid = subCR[subKey] || 0;
-    const subBalance = roundMoney(dr - subPaid);
-
-    // Guide/TourCode — Field 우선 → 인보이스 캐시 fallback → Description/Remark 패턴 fallback
-    let subGuide = String(tx.Guide || '').trim();
-    let subTourCode = String(tx.TourCode || '').trim();
-    const subInvNum = String(tx.InvoiceNo || '').trim();
-    if ((!subGuide || !subTourCode) && subInvNum && Array.isArray(_invHistoryCache)) {
-      const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === subInvNum);
-      if (inv) {
-        if (!subGuide) subGuide = String(inv.Guide || '').trim();
-        if (!subTourCode) subTourCode = String(inv.TourCode || '').trim();
-      }
-    }
-    // ★ 인보이스 미발행 거래(LEDGER/DRSUB)는 Description/Remark에서 추출
-    if (!subTourCode && typeof _extractSubTourCode === 'function') subTourCode = _extractSubTourCode(tx);
-    if (!subGuide && typeof _extractSubGuide === 'function') subGuide = _extractSubGuide(tx);
-
-    // ★ SubCompany fallback — 잔액 탭 _subBalances와 동일 로직
-    let companyName = String(tx.SubCompany||'').trim();
-    if(!companyName) companyName = String(tx.Agency||'').trim();
-    if(!companyName){
-      const invNo = String(tx.InvoiceNo||'').trim();
-      if(invNo && Array.isArray(_invHistoryCache)){
-        const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNo);
-        if(inv) companyName = String(inv.SubCompany||inv.Agency||'').trim();
-      }
-    }
-    if(!companyName) companyName = 'Unknown';
-
-    // ★★ 잔액 탭과 동일한 Payout 제외 정책 적용
-    //   사용자가 잔액 탭에서 '✓ 정산완료' 등으로 처리한 투어코드는 주간 요약에서도 제외
-    //   _isTourPayoutExcluded: 자동 제외 (BillingEntity == SubCompany) + 수동 override 통합
-    if(subTourCode && typeof _isTourPayoutExcluded === 'function'){
-      try {
-        if(_isTourPayoutExcluded(subTourCode, companyName)) return;
-      } catch(e){}
-    }
-
-    subPayables.push({
-      company: companyName,
-      invoiceNo: tx.InvoiceNo || '',
-      description: tx.Description || '',
-      amount: dr,
-      paid: subPaid,
-      balance: subBalance,
-      isPaid: subBalance <= 0.01,
-      dueDate: dueISO,
-      tourCode: subTourCode,
-      guide: subGuide
-    });
-  });
 
   // ── 3. Driver Wages (work dates in target week) ──
   // ★ 자사가 직접 지급해야 할 드라이버 급여만 포함 (자사 차량 운행 DR)
