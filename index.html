@@ -3618,13 +3618,22 @@ function _onAuthFailure(reason){
   try {
     const loginScreen = document.getElementById('login-screen');
     const appScreen = document.getElementById('app');
-    if (loginScreen) loginScreen.style.display = '';
+    if (loginScreen) loginScreen.style.display = 'flex';
     if (appScreen) appScreen.style.display = 'none';
     const lastDrv = localStorage.getItem('dc_last_driver') || '';
     const name = (lastDrv.split('|')[0] || '').trim();
     if (name) { try { localStorage.removeItem('dc_session_' + name); } catch(e){} }
   } catch(e){}
-  const msg = reason === 'expired' ? '세션이 만료되었습니다. PIN을 다시 입력해주세요.' : '인증이 필요합니다. 다시 로그인해주세요.';
+  let msg;
+  if(reason === 'expired'){
+    msg = '세션이 만료되었습니다. PIN을 다시 입력해주세요.';
+  } else if(reason === 'forbidden' || reason === 'admin_only'){
+    msg = '권한이 없는 작업입니다. 다시 로그인해주세요.';
+  } else if(reason === 'no_token' || reason === 'unauthorized'){
+    msg = '인증이 만료되었습니다. PIN을 다시 입력해주세요.';
+  } else {
+    msg = '인증이 필요합니다. 다시 로그인해주세요.';
+  }
   try { if(typeof showToast==='function') showToast(msg,'error'); else alert(msg); } catch(e){ try{alert(msg);}catch(e2){} }
 }
 
@@ -3666,11 +3675,20 @@ function _onAuthFailure(reason){
           clone.text().then(txt => {
             try {
               const j = JSON.parse(txt);
-              if (j && j.authRequired) {
+              // ★ 인증/권한 실패 감지 — 다음 중 하나라도 해당하면 재로그인 안내
+              //   1) authRequired: true
+              //   2) error === 'unauthorized' (토큰 없음/만료)
+              //   3) error === 'forbidden' (admin-only 액션을 driver 토큰으로 호출 등)
+              const isAuthFail = j && (
+                j.authRequired === true ||
+                j.error === 'unauthorized' ||
+                j.error === 'forbidden'
+              );
+              if (isAuthFail) {
                 const body = (init && init.body) || '';
                 const isPublic = /"action"\s*:\s*"(login|ping|logout|get_login_names)"/.test(body)
                   || /action=(login|ping|logout|get_login_names)/.test(url);
-                if (!isPublic) _onAuthFailure(j.reason || 'unauthorized');
+                if (!isPublic) _onAuthFailure(j.reason || j.error || 'unauthorized');
               }
             } catch(e){}
           }).catch(()=>{});
@@ -5935,6 +5953,8 @@ async function saveMyInfo() {
   // GAS에 텍스트 데이터만 저장
   const gasData = {...localData};
   Object.keys(gasData).forEach(k => { if(k.startsWith('photoUrl_')) delete gasData[k]; });
+  let _saveOk = false;
+  let _saveErrMsg = '';
   try {
     const _res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST', headers: {'Content-Type':'text/plain'},
@@ -5947,6 +5967,7 @@ async function saveMyInfo() {
     const _json = await _res.json();
     // ★ 저장 결과 진단 — skipped 또는 missingColumns가 있으면 사용자에게 알림
     if(_json && _json.ok){
+      _saveOk = true;
       if(_json.skipped && _json.skipped.length > 0){
         console.warn('[saveMyInfo] 일부 필드 저장 안 됨:', _json.skipped);
       }
@@ -5955,16 +5976,32 @@ async function saveMyInfo() {
       }
     } else if(_json && !_json.ok){
       console.error('[saveMyInfo] 저장 실패:', _json);
-      showToast('⚠️ 저장 일부 실패: ' + (_json.msg || _json.error || 'unknown'));
+      _saveErrMsg = _json.msg || _json.error || _json.reason || 'unknown';
+      // forbidden/unauthorized는 interceptor가 자동 처리하므로 별도 토스트 생략
+      const _isAuthFail = (_json.error === 'forbidden' || _json.error === 'unauthorized' || _json.authRequired);
+      if(!_isAuthFail){
+        showToast('❌ 저장 실패: ' + _saveErrMsg);
+      }
+    } else {
+      _saveErrMsg = '서버 응답 없음';
+      console.error('[saveMyInfo] 빈 응답');
+      showToast('❌ 저장 실패: ' + _saveErrMsg);
     }
   } catch(e) {
+    _saveErrMsg = e?.message || String(e);
     console.error('[saveMyInfo] 네트워크 오류:', e);
+    showToast('❌ 저장 실패 (네트워크): ' + _saveErrMsg);
   }
 
-  updateMyInfoView(localData);
-  toggleMyInfoEdit();
-  _markBtnDone(_myinfoBtn, '✅ 저장 완료');
-  showToast('✅ 정보가 저장됐어요!');
+  // ★ 화면 갱신은 성공 시에만. 실패 시 편집 모드 유지해서 재시도 가능하도록
+  if(_saveOk){
+    updateMyInfoView(localData);
+    toggleMyInfoEdit();
+    _markBtnDone(_myinfoBtn, '✅ 저장 완료');
+    showToast('✅ 정보가 저장됐어요!');
+  } else {
+    _unlockSubmitBtn(_myinfoBtn);
+  }
 }
 
 /** Google Drive에서 사진 URL 로드 */
