@@ -201,7 +201,7 @@ const ADMIN_ONLY_ACTIONS = [
   'add_agency_txn', 'update_agency_txn', 'delete_agency_txn',
   'add_sub_txn', 'update_sub_txn', 'delete_sub_txn',
   'save_notices',
-  'update_driver_info',
+  // update_driver_info는 본인 정보 수정에 한해 드라이버도 허용 (doPost에서 driverName 강제)
   'update_defect_status',
   'review_leave_request', 'update_roster_cell',
   'save_hvis_booking', 'delete_hvis_booking',
@@ -1532,6 +1532,7 @@ function doPost(e) {
       _user = tokenValid.user;
       // driver 필드가 payload나 data에 있으면 토큰 소유자로 강제
       if (payload.driver) payload.driver = tokenValid.user;
+      if (payload.driverName) payload.driverName = tokenValid.user;
       if (payload.data && typeof payload.data === 'object' && payload.data.Driver) {
         payload.data.Driver = tokenValid.user;
       }
