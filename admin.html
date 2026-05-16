@@ -4662,37 +4662,29 @@ function _schBuildDRMatchIndex(){
 }
 
 // ★ OT 비용을 시간(HR)으로 환산 — DR 시트의 OT 필드는 금액(달러)이지 시간이 아님
-// 21~25석: $30/hr · 40석: $40/hr · 50석+도 $40/hr 규약
-// 호주로 OT는 절반 요율 ($15/hr for 21석)
+// 일반 여행사 (시간당 청구): 21~25석 $30/HR · 40석+ $40/HR
+//   → $60 OT = 2HR
+// 호주로(Tour Hojuro), Plus Australia (30분 단위 = UNIT 청구):
+//   - 21~25석: $15/UNIT  (40석+: $20/UNIT)
+//   - 1 UNIT = 0.5 HR (30분)
+//   → $60 OT = 4 UNITs × $15 = 4 × 0.5HR = 2HR
+//   ※ 이전 버전은 $15를 시간당 요율로 잘못 처리해 $60 → 4HR로 표시. 수정.
+// canonical 참조: line ~10324 인보이스 OT TA 계산
 function _otAmountToHours(otAmount, seats, agency){
   const amt = parseFloat(otAmount)||0;
   if(amt <= 0) return 0;
   const cap = parseInt(seats)||21;
   const baseRate = cap>=40 ? 40 : 30;
-  const _isHojuroOT = /호주로|hojuro/i.test(String(agency||''));
-  const rate = _isHojuroOT ? baseRate/2 : baseRate;
-  if(rate <= 0) return 0;
-  // 0.5시간 단위로 반올림 (드라이버 입력은 보통 30분 단위)
-  return Math.round((amt / rate) * 2) / 2;
-}
-
-// ★ OT 표시 문자열 — 30분 단위 청구 여행사는 'N×30MINS' 형식
-//   호주로 등 30분 단위 요율 ($15/30min): '4×30MINS ($60)' (4번 × 30분)
-//   일반 시간 단위: '2HR ($60)'
-function _formatOTDisplay(otAmount, seats, agency){
-  const amt = parseFloat(otAmount)||0;
-  if(amt <= 0) return '';
-  const cap = parseInt(seats)||21;
-  const _isHalfHourBilling = /호주로|hojuro/i.test(String(agency||''));
-  if(_isHalfHourBilling){
-    // 호주로: 30분당 $15(21~25석) 또는 $20(40+석) 단위
-    const halfHourRate = cap>=40 ? 20 : 15;
-    const units = halfHourRate > 0 ? Math.round(amt / halfHourRate) : 0;
-    return `${units}×30MINS ($${amt})`;
-  }
-  // 일반 시간 단위
-  const hours = _otAmountToHours(amt, seats, agency);
-  return `${hours}HR ($${amt})`;
+  if(baseRate <= 0) return 0;
+  const _isHojuroOT = /호주로|hojuro|plus\s*australia/i.test(String(agency||''));
+  // Hojuro/Plus Australia: amt를 30분 UNIT 수로 환산 후 × 0.5HR
+  //   units = amt / (baseRate/2),  hrs = units * 0.5
+  // 일반: 시간당 청구 → hrs = amt / baseRate
+  const hrs = _isHojuroOT
+    ? (amt / (baseRate/2)) * 0.5
+    : (amt / baseRate);
+  // 0.5HR 단위로 반올림 (드라이버 입력은 보통 30분 단위)
+  return Math.round(hrs * 2) / 2;
 }
 
 // 슬롯과 매칭되는 DR 찾기 (있으면 OT, Time_Start, Time_End 등 사후 데이터 반환)
@@ -4795,8 +4787,7 @@ async function showDRDiagnostics(tourId){
           diffs.push(`코스: 일정="${slotCourse}" → DR="${drCourse||'-'}"`);
         const ot = parseFloat(dr.OT||0);
         const otHours = _otAmountToHours(ot, dr.Seats, dr.Agency);
-        const otDisplay = _formatOTDisplay(ot, dr.Seats, dr.Agency);
-        const otStr = otDisplay ? ` · OT ${otDisplay}` : '';
+        const otStr = ot > 0 ? ` · OT ${otHours}HR ($${ot})` : '';
         const subTag = isSubMatched ? ' (외주, 자사 DR 제출)' : '';
         slotDiagnostics.push({
           date: d.date, slot: slotLabel, status: 'matched', icon: isSubMatched ? '🏢✅' : '✅',
@@ -5035,9 +5026,8 @@ function renderScheduleList(){
     let hasTrailer = false;
     let totalSlots = 0;
     let matchedSlots = 0;
-    let totalActualOT = 0;        // OT 시간 합 (HR) - 일반 여행사
+    let totalActualOT = 0;        // OT 시간 합 (HR)
     let totalActualOTAmount = 0;  // OT 금액 합 ($)
-    let totalActualOTHalfHourUnits = 0; // OT 30분 단위 횟수 - 호주로 등 30분 청구
     const today = _schToday();
     let pastUnmatchedCount = 0;
     days.forEach(d => {
@@ -5066,16 +5056,7 @@ function renderScheduleList(){
           matchedSlots++;
           const ot = parseFloat(dr.OT||0);
           if(ot > 0){
-            // 호주로 등 30분 단위 청구 여행사는 별도 추적
-            const _isHalfHour = /호주로|hojuro/i.test(String(dr.Agency||''));
-            if(_isHalfHour){
-              const cap = parseInt(dr.Seats)||21;
-              const halfHourRate = cap>=40 ? 20 : 15;
-              const units = halfHourRate > 0 ? Math.round(ot / halfHourRate) : 0;
-              totalActualOTHalfHourUnits += units;
-            } else {
-              totalActualOT += _otAmountToHours(ot, dr.Seats, dr.Agency);
-            }
+            totalActualOT += _otAmountToHours(ot, dr.Seats, dr.Agency);
             totalActualOTAmount += ot;
           }
         } else if(s.mode === 'sub'){
@@ -5108,16 +5089,10 @@ function renderScheduleList(){
     let drBadge = '';
     if(totalSlots > 0){
       const onclickDiag = `onclick="event.stopPropagation();showDRDiagnostics('${escH(r.TourID)}')"`;
-      // OT 표시 문자열 — 호주로(30분) + 일반(시간) 둘 다 있을 수 있음
-      let _otParts = [];
-      if(totalActualOTHalfHourUnits > 0) _otParts.push(`${totalActualOTHalfHourUnits}×30MINS`);
-      if(totalActualOT > 0) _otParts.push(`${totalActualOT}HR`);
-      const _otText = _otParts.length ? `${_otParts.join(' + ')} ($${totalActualOTAmount})` : '';
-      const hasOT = _otText !== '';
       if(matchedSlots === totalSlots){
-        drBadge = `<span ${onclickDiag} style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: DR 매칭 상세">▣ DR완료${hasOT?` · 실제 OT ${_otText}`:''}</span>`;
+        drBadge = `<span ${onclickDiag} style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: DR 매칭 상세">▣ DR완료${totalActualOT>0?` · 실제 OT ${totalActualOT}HR ($${totalActualOTAmount})`:''}</span>`;
       } else if(matchedSlots > 0){
-        drBadge = `<span ${onclickDiag} style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미매칭 슬롯 보기">▣ ${matchedSlots}/${totalSlots}${hasOT?` · ${_otText}`:''}</span>`;
+        drBadge = `<span ${onclickDiag} style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미매칭 슬롯 보기">▣ ${matchedSlots}/${totalSlots}${totalActualOT>0?` · ${totalActualOT}HR ($${totalActualOTAmount})`:''}</span>`;
       } else if(pastUnmatchedCount > 0){
         drBadge = `<span ${onclickDiag} style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:var(--fd);cursor:pointer;" title="클릭: 미작성/불일치 진단">⚠ DR 미작성</span>`;
       }
@@ -5975,7 +5950,7 @@ function _smRebuildDays(){
       if(matchedDR){
         const ot = parseFloat(matchedDR.OT||0);
         const otHours = _otAmountToHours(ot, matchedDR.Seats, matchedDR.Agency);
-        drStatus = `<span class="sm-dr-badge ok">▣ DR 매칭됨${ot>0?` · 실제 OT ${_formatOTDisplay(ot, dr.Seats, dr.Agency)}`:' · OT 없음'}</span>`;
+        drStatus = `<span class="sm-dr-badge ok">▣ DR 매칭됨${ot>0?` · 실제 OT ${otHours}HR ($${ot})`:' · OT 없음'}</span>`;
       } else if(d.date < today && (d.slots[k].driver || d.slots[k].rego)){
         drStatus = `<span class="sm-dr-badge warn">⚠ DR 미작성/미매칭 — 차량+코스 일치 확인</span>`;
       }
@@ -8423,18 +8398,8 @@ function _schRenderSlotRows(tour, day, slot, slotKey){
   if(dr){
     const ot = parseFloat(dr.OT || 0);
     if(ot > 0) {
-      const otDisplay = _formatOTDisplay(ot, dr.Seats, dr.Agency);
-      // 짧은 표시: 30분 단위는 "4×30M", 시간 단위는 "+4HR"
-      const _isHalfHour = /호주로|hojuro/i.test(String(dr.Agency||''));
-      if(_isHalfHour){
-        const cap = parseInt(dr.Seats)||21;
-        const halfHourRate = cap>=40 ? 20 : 15;
-        const units = halfHourRate > 0 ? Math.round(ot / halfHourRate) : 0;
-        carExtras.push(`+${units}×30M`);
-      } else {
-        const otHours = _otAmountToHours(ot, dr.Seats, dr.Agency);
-        carExtras.push(`+${otHours}HR`);
-      }
+      const otHours = _otAmountToHours(ot, dr.Seats, dr.Agency);
+      carExtras.push(`+${otHours}HR`);
     }
     carExtras.push('▣');
   } else if(slot.driver || slot.rego) {
@@ -9809,7 +9774,8 @@ function calcSubReport(r) {
   const otDR = parseFloat(r.OT)||0;
   const otRateTA = capNum>=50?160:capNum>=40?150:80;
   const otRateDR = capNum>=40?40:30;
-  const _isHojuroOT = /호주로|hojuro/i.test(agency);
+  // 호주로(Tour Hojuro), Plus Australia: 30분 UNIT 단위 청구 (1 UNIT = 0.5HR, $15/UNIT for 21~25S)
+  const _isHojuroOT = /호주로|hojuro|plus\s*australia/i.test(agency);
   const subOT = _isHojuroOT
     ? Math.round((otDR / (otRateDR/2)) * (otRateTA/2))
     : Math.round((otRateDR>0 ? otDR/otRateDR : 0) * otRateTA);
@@ -10353,10 +10319,12 @@ function calcAgencyTA(r){
   const htlTA = htl===0?0: capNum>=50?(htl===15?80:htl===30?160:htl*4): capNum>=40?(htl===15?75:htl===30?150:htl*4): (htl===10?40:htl===20?80:htl*4);
   const dstTA = dst===0?0: capNum>=50?(dst===40?160:dst*4): capNum>=40?(dst===40?150:Math.round(dst*3.75)): (dst===30?80:Math.round(dst*2.67));
 
-  // OT TA rate — 호주로(Tour Hojuro): 30분 단위, DR/TA 모두 시간당의 1/2
+  // OT TA rate — 호주로(Tour Hojuro), Plus Australia: 30분 UNIT 단위 청구
+  //   1 UNIT = 0.5HR (30분), 21~25S: $15/UNIT (DR) / $40/UNIT (TA)
+  //   예: $60 OT = 4 UNITs × $15 = 2HR (DR), TA = 4 × $40 = $160
   const otRateTA = capNum>=50?160:capNum>=40?150:80;
   const otRateDR = capNum>=40?40:30;
-  const _isHojuroOT = /호주로|hojuro/i.test(agency);
+  const _isHojuroOT = /호주로|hojuro|plus\s*australia/i.test(agency);
   const otHrs    = _isHojuroOT ? (ot / (otRateDR/2)) * 0.5 : (otRateDR>0 ? ot/otRateDR : 0);
   const otTA     = _isHojuroOT ? Math.round((ot / (otRateDR/2)) * (otRateTA/2)) : Math.round(otHrs * otRateTA);
 
@@ -20308,13 +20276,14 @@ function calcInvRow(r) {
   }
 
   // ── OT DR → TA 역산 ──
-  // 21/25S: DR $30/h → TA $80/h, 40S: DR $40/h → TA $150/h, 50S: DR $40/h → TA $160/h
-  // 호주로(Tour Hojuro): 30분 단위, DR/TA 모두 시간당의 1/2
+  // 21/25S: DR $30/HR → TA $80/HR, 40S: DR $40/HR → TA $150/HR, 50S: DR $40/HR → TA $160/HR
+  // 호주로(Tour Hojuro), Plus Australia: 30분 UNIT 단위 (1 UNIT = 0.5HR, DR/TA 모두 시간당의 1/2)
+  //   예: $60 OT = 4 UNITs × $15 = 2HR (DR), TA = 4 × $40 = $160
   const _otRateDR = seatNum>=40 ? 40 : 30;
   const _otRateTA = seatNum>=50 ? 160 : seatNum>=40 ? 150 : 80;
-  const _isHojuroOT = /호주로|hojuro/i.test(agency);
-  const _otHalfDR = _otRateDR / 2;  // 30분당 DR rate
-  const _otHalfTA = _otRateTA / 2;  // 30분당 TA rate
+  const _isHojuroOT = /호주로|hojuro|plus\s*australia/i.test(agency);
+  const _otHalfDR = _otRateDR / 2;  // 30분 UNIT당 DR rate
+  const _otHalfTA = _otRateTA / 2;  // 30분 UNIT당 TA rate
   const _otHrs = _isHojuroOT ? (otDR / _otHalfDR) * 0.5 : (_otRateDR>0 ? otDR/_otRateDR : 0);
   const ot = _isHojuroOT ? Math.round((otDR / _otHalfDR) * _otHalfTA) : Math.round(_otHrs * _otRateTA);
 
