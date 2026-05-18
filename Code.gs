@@ -2913,6 +2913,51 @@ function saveReport(sheetName, data) {
       }
     }
 
+    // ★★ Daily_Report: TourCode가 Schedule에 매칭되면 Billing_Entity를 강제로 일정 값으로 덮어쓰기
+    //   드라이버 앱 클라이언트 측 lock을 우회한 경우(개발자 도구 등)나
+    //   prefill 이후 사용자가 임의 변경한 경우 모두 방어
+    //   매칭 안 되면 (개인일정 등) 드라이버가 입력한 값 사용
+    if (sheetName === 'Daily_Report') {
+      try {
+        const tcRaw = String(data.Tour_Code || data.TourCode || '').trim();
+        if (tcRaw) {
+          const schSheet = ss.getSheetByName('Schedule');
+          if (schSheet) {
+            const sLastRow = schSheet.getLastRow();
+            if (sLastRow > 1) {
+              const sHeaders = schSheet.getRange(1, 1, 1, schSheet.getLastColumn()).getValues()[0];
+              const tcIdx = sHeaders.indexOf('TourCode');
+              const tidIdx = sHeaders.indexOf('TourID');
+              const beIdx = sHeaders.indexOf('BillingEntity');
+              if ((tcIdx >= 0 || tidIdx >= 0) && beIdx >= 0) {
+                const sData = schSheet.getRange(2, 1, sLastRow - 1, sHeaders.length).getValues();
+                const tcU = tcRaw.toUpperCase();
+                let scheduleBE = null;
+                for (let i = 0; i < sData.length; i++) {
+                  const r1 = tcIdx >= 0 ? String(sData[i][tcIdx]||'').trim().toUpperCase() : '';
+                  const r2 = tidIdx >= 0 ? String(sData[i][tidIdx]||'').trim().toUpperCase() : '';
+                  if (r1 === tcU || r2 === tcU) {
+                    scheduleBE = String(sData[i][beIdx] || '').trim() || 'DC';
+                    break;
+                  }
+                }
+                if (scheduleBE !== null) {
+                  const submittedBE = String(data.Billing_Entity || data.BillingEntity || '').trim();
+                  if (submittedBE && submittedBE.toUpperCase() !== scheduleBE.toUpperCase()) {
+                    Logger.log('[saveReport] BE override for TourCode ' + tcRaw +
+                              ': submitted="' + submittedBE + '" → schedule="' + scheduleBE + '" (driver=' + (data.Driver||'') + ')');
+                  }
+                  data.Billing_Entity = scheduleBE;
+                }
+              }
+            }
+          }
+        }
+      } catch(beErr) {
+        Logger.log('[saveReport] BE enforcement error (continuing with submitted value): ' + beErr);
+      }
+    }
+
     // ★ 실제 시트 헤더를 읽어서 매핑 (컬럼 순서 불일치 방지)
     const lastCol = sheet.getLastColumn();
     const actualHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : headers;
