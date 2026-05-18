@@ -26268,7 +26268,13 @@ async function saveWageEntry(){
         const e2=drvEntries.find(e=>e.date===date&&e.amount===amount&&!e._rowIndex);
         if(e2){ e2._rowIndex=json.row; saveWages(w2); }
       }
-      toast(json.ok?'✅ 추가 & 시트 저장':'⚠️ 추가됨 (시트 sync 실패)','ok');
+      // ★ GAS가 중복 감지로 새 row를 안 만들었으면 그 사실을 알림
+      if(json.duplicate){
+        console.warn('[saveWageEntry] GAS detected duplicate, reused row', json.row);
+        toast('⚠️ 동일 지급 중복 감지 — 기존 row 사용','warn');
+      } else {
+        toast(json.ok?'✅ 추가 & 시트 저장':'⚠️ 추가됨 (시트 sync 실패)','ok');
+      }
     }
     // ★ GAS 저장 성공 시에만 시트에서 재로드 (실패 시 로컬 데이터 보존)
     if(gasSaveOk) {
