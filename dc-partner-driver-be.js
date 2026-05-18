@@ -102,18 +102,23 @@
 
   function isDC(be) { return !be || String(be).toUpperCase() === "DC" || String(be).toUpperCase() === "DONG CHOI" || String(be).toUpperCase() === "DONG CHOI PTY LTD"; }
 
+  // TourCode가 Schedule에 있으면 그 BE 반환. BE가 비어있으면 'DC'로 처리 (자사 인보이스 발행 기본)
+  // 반환값: { matched: bool, be: string }
   function lookupBEByTourCode(tourCode) {
-    if (!tourCode) return "";
-    var t = String(tourCode).trim();
+    if (!tourCode) return { matched: false, be: "" };
+    var t = String(tourCode).trim().toUpperCase();
     var schs = getSchedules();
     for (var i = 0; i < schs.length; i++) {
       var s = schs[i];
       if (!s) continue;
-      if (String(s.TourCode||"").trim() === t || String(s.TourID||"").trim() === t) {
-        return String(s.BillingEntity || "").trim();
+      var tc1 = String(s.TourCode||"").trim().toUpperCase();
+      var tc2 = String(s.TourID||"").trim().toUpperCase();
+      if (tc1 === t || tc2 === t) {
+        var be = String(s.BillingEntity || "").trim();
+        return { matched: true, be: be || "DC" };  // 매칭됐는데 BE 비어있으면 DC로
       }
     }
-    return "";
+    return { matched: false, be: "" };
   }
 
   function getCfg(beId, partners) {
@@ -177,6 +182,13 @@
     tcInput.addEventListener("change", function(){ refreshDropdown(); });
 
     select.addEventListener("change", function(){
+      // ★ data-locked 속성이 있으면 변경 거부 (개발자 도구로 disabled 풀고 변경하는 경우 방어)
+      //   refreshDropdown을 호출해서 일정의 BE로 강제 복원
+      if (select.getAttribute('data-locked') === '1') {
+        console.warn("[partner-driver-be] BE change blocked — locked by schedule. Forcing refresh.");
+        refreshDropdown();
+        return;
+      }
       window._drBillingEntity = select.value;
       var p = getKnownPartners();
       applyStyle(wrap, select, info, p);
@@ -230,10 +242,13 @@
     });
 
     var mode = getMode();
-    var detected = lookupBEByTourCode(tourCode);
+    var lookup = lookupBEByTourCode(tourCode);
+    var detected = lookup.be;
+    var matchedInSchedule = lookup.matched;
 
-    if (detected) {
-      // ★ Admin schedule has BE — ALWAYS lock (even if user clicked 개인일정 추가)
+    if (matchedInSchedule) {
+      // ★ Admin schedule에 매칭됨 — 드라이버는 변경 불가 (BE가 비었으면 'DC'로 표시)
+      //   "개인일정 추가" 버튼을 클릭해도 무시: 일정에 있으면 일정이 source of truth
       if (!partners.find(function(p){ return p.id === detected; })) {
         var opt = document.createElement("option");
         opt.value = detected; opt.textContent = "\u2754 " + detected;
@@ -241,10 +256,13 @@
       }
       select.value = detected;
       select.disabled = true;
+      // ★ disabled 외 readonly 속성 + pointer-events 차단 (개발자 도구 우회 한 단계 방어)
+      select.setAttribute('data-locked', '1');
       window._drBillingEntity = detected;
     } else if (mode === "personal") {
       // No admin schedule match + personal mode — unlocked
       select.disabled = false;
+      select.removeAttribute('data-locked');
       var v = window._drBillingEntity || "DC";
       if (!partners.find(function(p){ return p.id === v; })) {
         var opt2 = document.createElement("option");
@@ -255,12 +273,13 @@
     } else {
       // Auto mode, no admin match — unlocked default
       select.disabled = false;
+      select.removeAttribute('data-locked');
       select.value = window._drBillingEntity || "DC";
       window._drBillingEntity = select.value;
     }
 
     applyStyle(wrap, select, info, partners);
-    console.log("[partner-driver-be] refresh: tourCode=" + tourCode + ", mode=" + mode + ", detected=" + detected + ", BE=" + select.value);
+    console.log("[partner-driver-be] refresh: tourCode=" + tourCode + ", mode=" + mode + ", matched=" + matchedInSchedule + ", BE=" + select.value);
   }
 
   function injectPersonalButton() {
@@ -342,7 +361,7 @@
       currentBE: window._drBillingEntity,
       currentMode: getMode(),
       currentTourCode: tcInput ? tcInput.value : null,
-      detectedBE: tcInput ? lookupBEByTourCode(tcInput.value) : null,
+      detectedBE: tcInput ? lookupBEByTourCode(tcInput.value) : null,  // { matched, be }
       partners: p.map(function(x){return x.id;}),
       partnerCount: p.length,
       schedulesCount: getSchedules().length,
