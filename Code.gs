@@ -218,9 +218,9 @@ const ADMIN_ONLY_ACTIONS = [
 // 관리자 전용 GET 액션
 const ADMIN_ONLY_GET_ACTIONS = [
   'get_agency_txn', 'get_sub_txn', 'get_agency_balances',
-  'get_invoices', 'get_all_leave_requests', 'get_roster',
+  'get_invoices', 'get_all_leave_requests',
   'get_ledger',
-  // get_defect_reports: 드라이버는 본인 것만 조회 가능 (case 핸들러에서 effectiveDriver 강제)
+  // get_defect_reports, get_roster: 드라이버는 본인 것만 조회 (case 핸들러에서 effectiveDriver 강제)
   'get_admin_bundle', 'get_audit_log',
   // ── 운행 일정 ──
   'get_schedule', 'get_schedule_stats'
@@ -1502,8 +1502,15 @@ function doGet(e) {
       case 'get_all_leave_requests':
         return cors(getAllLeaveRequests(e.parameter.filter));
 
-      case 'get_roster':
-        return cors(getRosterData(e.parameter.from, e.parameter.to));
+      case 'get_roster': {
+        // 드라이버 토큰이면 본인 행만 필터링하여 반환
+        const rosterRes = getRosterData(e.parameter.from, e.parameter.to);
+        if (rosterRes && rosterRes.ok && tokenValid.valid && tokenValid.role === 'driver') {
+          const me = effectiveDriver;
+          rosterRes.roster = (rosterRes.roster || []).filter(r => String(r.Driver || '') === me);
+        }
+        return cors(rosterRes);
+      }
 
       // ── Daily Report Draft (서버 백업) ──
       case 'get_daily_draft':
