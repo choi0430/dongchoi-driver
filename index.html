@@ -3675,25 +3675,20 @@ function _onAuthFailure(reason){
           clone.text().then(txt => {
             try {
               const j = JSON.parse(txt);
-              // ★ 인증 실패 감지 — 토큰이 무효/만료된 경우에만 재로그인 안내
-              //   1) authRequired: true (서버가 명시적으로 재인증 요구)
+              // ★ 인증/권한 실패 감지 — 다음 중 하나라도 해당하면 재로그인 안내
+              //   1) authRequired: true
               //   2) error === 'unauthorized' (토큰 없음/만료)
-              //
-              //   error === 'forbidden' 은 토큰은 유효하나 권한 부족이므로
-              //   자동 로그아웃하지 않음 (해당 호출만 실패하고 사용자는 계속 사용 가능).
-              //   드라이버가 admin-only 액션을 우연히 호출하더라도 튕김 방지.
+              //   3) error === 'forbidden' (admin-only 액션을 driver 토큰으로 호출 등)
               const isAuthFail = j && (
                 j.authRequired === true ||
-                j.error === 'unauthorized'
+                j.error === 'unauthorized' ||
+                j.error === 'forbidden'
               );
               if (isAuthFail) {
                 const body = (init && init.body) || '';
                 const isPublic = /"action"\s*:\s*"(login|ping|logout|get_login_names)"/.test(body)
                   || /action=(login|ping|logout|get_login_names)/.test(url);
                 if (!isPublic) _onAuthFailure(j.reason || j.error || 'unauthorized');
-              } else if (j && j.error === 'forbidden') {
-                // 권한 부족은 콘솔 경고만 — 사용자 세션은 유지
-                console.warn('[AUTH] forbidden (권한 부족, 세션 유지):', j.reason || '');
               }
             } catch(e){}
           }).catch(()=>{});
@@ -5982,13 +5977,9 @@ async function saveMyInfo() {
     } else if(_json && !_json.ok){
       console.error('[saveMyInfo] 저장 실패:', _json);
       _saveErrMsg = _json.msg || _json.error || _json.reason || 'unknown';
-      // unauthorized/authRequired는 interceptor가 로그아웃 처리하므로 토스트 생략
-      // forbidden은 더 이상 자동 로그아웃 안 함 → 여기서 명확히 안내해야 함
-      if(_json.error === 'unauthorized' || _json.authRequired){
-        // interceptor가 처리
-      } else if(_json.error === 'forbidden'){
-        showToast('❌ 저장 권한이 없습니다. 관리자에게 문의하세요.');
-      } else {
+      // forbidden/unauthorized는 interceptor가 자동 처리하므로 별도 토스트 생략
+      const _isAuthFail = (_json.error === 'forbidden' || _json.error === 'unauthorized' || _json.authRequired);
+      if(!_isAuthFail){
         showToast('❌ 저장 실패: ' + _saveErrMsg);
       }
     } else {
@@ -9321,7 +9312,13 @@ function applySchedulePrefill(){
   const pickup = document.getElementById('dr-pickup');
   if(pickup){
     let pickupVal = '';
-    if(slot.startPlace){
+    // ★ 우선순위:
+    //   1. startPlaceType === 'airport' → 항상 AIRPORT (사용자가 ✈공항 토글 명시 선택)
+    //   2. startPlace 값이 있고 공항 패턴이면 AIRPORT, 아니면 원래 값
+    //   3. startPlace 비어있고 flightIn 있는 morning 슬롯 → AIRPORT
+    if(slot.startPlaceType === 'airport'){
+      pickupVal = 'AIRPORT';
+    } else if(slot.startPlace){
       pickupVal = _isAirportPlace(slot.startPlaceType, slot.startPlace) ? 'AIRPORT' : slot.startPlace;
     } else if(data.flightIn && data.slotKey === 'morning'){
       // startPlace 비어있고 도착편(flightIn) 있는 morning 슬롯 → AIRPORT
@@ -9336,7 +9333,13 @@ function applySchedulePrefill(){
   const dropoff = document.getElementById('dr-dropoff');
   if(dropoff){
     let dropoffVal = '';
-    if(slot.endPlace){
+    // ★ 우선순위:
+    //   1. endPlaceType === 'airport' → 항상 AIRPORT (사용자가 ✈공항 토글 명시 선택)
+    //   2. endPlace 값이 있고 공항 패턴이면 AIRPORT, 아니면 원래 값
+    //   3. endPlace 비어있고 flightOut 있는 evening 슬롯 → AIRPORT
+    if(slot.endPlaceType === 'airport'){
+      dropoffVal = 'AIRPORT';
+    } else if(slot.endPlace){
       dropoffVal = _isAirportPlace(slot.endPlaceType, slot.endPlace) ? 'AIRPORT' : slot.endPlace;
     } else if(data.flightOut && data.slotKey === 'evening'){
       // endPlace 비어있고 출발편(flightOut) 있는 evening 슬롯 → AIRPORT
