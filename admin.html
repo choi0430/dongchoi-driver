@@ -24742,11 +24742,18 @@ function renderDR(){
     if(/AIRPORT|Sydney INTL|Sydney DOM/i.test(place||'')) return true;
     return false;
   };
+  // ★★ 1대1 매칭을 위한 상태 — 같은 renderDR 호출 안에서 공유
+  //   한 번 매칭된 slot은 다른 DR이 매칭할 수 없도록 추적
+  //   같은 날 동일 차량/드라이버로 2건의 운행이 있을 때 첫 DR이 첫 슬롯, 두 번째 DR이 두 번째 슬롯에 매칭되게 함
+  const _usedSlotKeys = new Set();
+  const _slotKey = (c) => `${c.tourId||''}|${c.date}|${c.slotKey}`;
+
   const _checkDRMismatch = (r) => {
     const isoDate = parseToISO(r.Date||'');
     if(!isoDate) return null;
     const drRego = String(r.Rego||'').trim().toUpperCase();
     const drDriver = _stripPfx(r.Driver);
+    const drTC = String(r.Tour_Code||'').trim().toUpperCase();
 
     // ★★ DR의 차량이 DC 책임 범위 밖이면 (SUB 자체 운영) 검증 자체 생략
     //   - DC 소유 또는 DC Accreditation 사용 차량만 일정/DR 매칭 검증
@@ -24761,8 +24768,15 @@ function renderDR(){
       // 차량 마스터에 등록 안 됨 — 일단 검증 진행 (외주 자체 운영일 수도, 신규 차량일 수도)
     }
 
-    const candidates = _scheduleSlotsForDate(isoDate);
-    if(!candidates.length) return { noSchedule: true };
+    const allCandidates = _scheduleSlotsForDate(isoDate);
+    if(!allCandidates.length) return { noSchedule: true };
+
+    // ★ 1대1 매칭: 이미 다른 DR과 매칭된 slot은 제외
+    const candidates = allCandidates.filter(c => !_usedSlotKeys.has(_slotKey(c)));
+    if(!candidates.length){
+      // 모든 슬롯이 이미 매칭됨 — 일정 수보다 DR이 많은 케이스
+      return { noMatch: true, candidates: allCandidates.length };
+    }
 
     // ★ 슬롯의 차량/드라이버 추출 — 자사/외주 모드 모두 지원
     //   자사 모드: slot.rego + slot.driver
@@ -24783,19 +24797,29 @@ function renderDR(){
       if(s.mode === 'sub') return fromSubDrv || fromDrv;
       return fromDrv || fromSubDrv;
     };
+    const _slotTC = (c) => String(c.tourCode||'').trim().toUpperCase();
 
-    // 매칭 시도 — 둘 다 일치 > 차량 일치 > 드라이버 일치 > 투어코드 일치
-    let matched = candidates.find(c =>
-      _slotRego(c) === drRego && _slotDriver(c) === drDriver
-    );
+    // ★ 매칭 우선순위 (재정렬):
+    //   1. TourCode 일치 (가장 unique한 키 — 같은 날 같은 차량 2건일 때 결정적)
+    //   2. TourCode + rego + driver (TC 우선이지만 안전망)
+    //   3. rego + driver 둘 다 일치
+    //   4. rego만 일치 (driver는 변경되었을 수 있음)
+    //   5. driver만 일치 (rego는 변경되었을 수 있음)
+    let matched = null;
+    if(drTC){
+      matched = candidates.find(c => _slotTC(c) === drTC);
+    }
+    if(!matched){
+      matched = candidates.find(c =>
+        _slotRego(c) === drRego && _slotDriver(c) === drDriver
+      );
+    }
     if(!matched) matched = candidates.find(c => _slotRego(c) === drRego);
     if(!matched) matched = candidates.find(c => _slotDriver(c) === drDriver);
-    // ★ 추가 fallback: 투어코드 일치 (rego/driver 다 못 매치한 경우 — 외주 차량 일정에서 자주 발생)
-    if(!matched && r.Tour_Code){
-      const drTC = String(r.Tour_Code).trim().toUpperCase();
-      matched = candidates.find(c => String(c.tourCode||'').trim().toUpperCase() === drTC);
-    }
-    if(!matched) return { noMatch: true, candidates: candidates.length };
+    if(!matched) return { noMatch: true, candidates: allCandidates.length };
+
+    // ★ 매칭된 slot을 used 집합에 기록 — 다음 DR이 같은 slot에 매칭 못 하도록
+    _usedSlotKeys.add(_slotKey(matched));
 
     const issues = [];
     const _norm = (v) => String(v||'').trim().toUpperCase();
