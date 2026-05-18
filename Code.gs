@@ -219,7 +219,8 @@ const ADMIN_ONLY_ACTIONS = [
 const ADMIN_ONLY_GET_ACTIONS = [
   'get_agency_txn', 'get_sub_txn', 'get_agency_balances',
   'get_invoices', 'get_all_leave_requests', 'get_roster',
-  'get_ledger', 'get_defect_reports',
+  'get_ledger',
+  // get_defect_reports: 드라이버는 본인 것만 조회 가능 (case 핸들러에서 effectiveDriver 강제)
   'get_admin_bundle', 'get_audit_log',
   // ── 운행 일정 ──
   'get_schedule', 'get_schedule_stats'
@@ -1474,7 +1475,11 @@ function doGet(e) {
         return cors(getSheetRows('SUB_Txn'));
 
       case 'get_defect_reports': {
-        const defDriver = e.parameter.driver || '';
+        // 드라이버 토큰이면 본인 것만 강제 조회 (effectiveDriver는 token user로 강제됨)
+        // 관리자 토큰이면 driver 파라미터 그대로 사용 (빈 값이면 전체)
+        const defDriver = (tokenValid.valid && tokenValid.role === 'driver')
+          ? effectiveDriver
+          : (e.parameter.driver || '');
         return cors(getDefectReports(defDriver));
       }
 
