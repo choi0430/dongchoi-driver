@@ -216,14 +216,10 @@ const ADMIN_ONLY_ACTIONS = [
 ];
 
 // 관리자 전용 GET 액션
-// NOTE: get_invoices, get_roster, get_defect_reports는 드라이버 앱에서도
-// (본인 데이터 조회용으로) 호출하므로 ADMIN_ONLY에서 제외.
-// 추후 보안 강화 시 핸들러 내부에서 driver 토큰일 때 본인 데이터로 필터링하는
-// 패턴(effectiveDriver) 적용 권장.
 const ADMIN_ONLY_GET_ACTIONS = [
   'get_agency_txn', 'get_sub_txn', 'get_agency_balances',
-  'get_all_leave_requests',
-  'get_ledger',
+  'get_invoices', 'get_all_leave_requests', 'get_roster',
+  'get_ledger', 'get_defect_reports',
   'get_admin_bundle', 'get_audit_log',
   // ── 운행 일정 ──
   'get_schedule', 'get_schedule_stats'
@@ -3354,14 +3350,44 @@ function addWage(data) {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, 'Wages');
 
-    const rowId = Date.now().toString();
+    const driver = String(data.Driver || '').trim();
+    const weekStart = String(data.WeekStart || '').trim();
+    const date = String(data.Date || '').trim();
     const amount = parseFloat(data.Amount) || 0;
 
+    // ★ 중복 클릭 방어: 같은 (Driver, WeekStart, Date, Amount)가 최근 10초 내에 추가됐으면 기존 row 반환
+    //   증상: 사용자 더블클릭 또는 비동기 race로 GAS에 동일 row가 2건 등록되는 버그
+    const headers = MASTER_HEADERS['Wages'];
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      const data2 = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+      const idIdx = headers.indexOf('RowID');
+      const drvIdx = headers.indexOf('Driver');
+      const wsIdx = headers.indexOf('WeekStart');
+      const dtIdx = headers.indexOf('Date');
+      const amtIdx = headers.indexOf('Amount');
+      const now = Date.now();
+      for (let i = data2.length - 1; i >= 0; i--) {  // 최근 row부터 역순 검사
+        const r = data2[i];
+        const rid = parseInt(r[idIdx]) || 0;
+        if (rid > 0 && (now - rid) > 10000) break;  // 10초 넘은 row까지만 본 후 break (이전 row는 더 오래됨)
+        const rDrv = String(r[drvIdx]||'').trim();
+        const rWs = String(r[wsIdx]||'').trim();
+        const rDt = String(r[dtIdx]||'').trim();
+        const rAmt = parseFloat(r[amtIdx]) || 0;
+        if (rDrv === driver && rWs === weekStart && rDt === date && Math.abs(rAmt - amount) < 0.01) {
+          Logger.log('[addWage] duplicate detected, skip insert: ' + driver + ' ' + date + ' $' + amount);
+          return {ok: true, row: i + 2, rowId: String(rid), duplicate: true};
+        }
+      }
+    }
+
+    const rowId = Date.now().toString();
     const newRow = [
       rowId,
-      data.Driver || '',
-      data.WeekStart || '',
-      data.Date || '',
+      driver,
+      weekStart,
+      date,
       amount,
       data.PayMethod || 'Cash',
       data.Notes || ''
@@ -3449,6 +3475,76 @@ function replaceWages(rows) {
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
+}
+
+/**
+ * 일회성 정리 — Wages 시트의 중복 row 제거
+ *
+ * 중복 판단 기준: 같은 (Driver, WeekStart, Date, Amount) 조합
+ *   - PayMethod / Notes는 다를 수 있어도 중복으로 봄 (사용자가 같은 지급을 두 번 입력했을 가능성)
+ *   - 첫 row(가장 오래된 RowID)는 유지, 나머지 삭제
+ *
+ * 사용법 (Apps Script 편집기에서 1회 실행):
+ *   cleanupDuplicateWages()  → 미리보기 (삭제 안 함)
+ *   cleanupDuplicateWages(true)  → 실제 삭제
+ */
+function cleanupDuplicateWages(execute) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('Wages');
+  if (!sheet) return {ok: false, msg: 'Wages sheet not found'};
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return {ok: true, msg: 'No data', duplicates: 0};
+
+  const headers = MASTER_HEADERS['Wages'];
+  const data = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+
+  const idIdx = headers.indexOf('RowID');
+  const drvIdx = headers.indexOf('Driver');
+  const wsIdx = headers.indexOf('WeekStart');
+  const dtIdx = headers.indexOf('Date');
+  const amtIdx = headers.indexOf('Amount');
+
+  // 키별로 첫 번째 row만 유지, 나머지는 삭제 대상
+  const seen = new Map();  // key → first row index (1-indexed sheet row)
+  const toDelete = [];     // [{rowIndex, driver, date, amount, rowId}]
+
+  for (let i = 0; i < data.length; i++) {
+    const r = data[i];
+    const sheetRow = i + 2;  // 1-indexed, header is row 1
+    const drv = String(r[drvIdx]||'').trim();
+    const ws = String(r[wsIdx]||'').trim();
+    const dt = String(r[dtIdx]||'').trim();
+    const amt = parseFloat(r[amtIdx]) || 0;
+    if (!drv || !dt) continue;  // 빈 row skip
+    const key = `${drv}|${ws}|${dt}|${amt.toFixed(2)}`;
+    if (seen.has(key)) {
+      toDelete.push({
+        sheetRow: sheetRow,
+        driver: drv,
+        date: dt,
+        amount: amt,
+        rowId: String(r[idIdx]||''),
+        firstAtRow: seen.get(key)
+      });
+    } else {
+      seen.set(key, sheetRow);
+    }
+  }
+
+  Logger.log('[cleanupDuplicateWages] Found ' + toDelete.length + ' duplicates out of ' + data.length + ' rows');
+  toDelete.forEach(d => Logger.log('  - row ' + d.sheetRow + ': ' + d.driver + ' ' + d.date + ' $' + d.amount + ' (first at row ' + d.firstAtRow + ')'));
+
+  if (!execute) {
+    return {ok: true, msg: 'PREVIEW MODE (no deletion). Call cleanupDuplicateWages(true) to execute.', duplicates: toDelete.length, details: toDelete};
+  }
+
+  // 실제 삭제 — 큰 row index부터 (작은 것부터 지우면 index가 밀림)
+  toDelete.sort((a, b) => b.sheetRow - a.sheetRow);
+  toDelete.forEach(d => sheet.deleteRow(d.sheetRow));
+
+  Logger.log('[cleanupDuplicateWages] Deleted ' + toDelete.length + ' duplicate rows');
+  return {ok: true, msg: 'Deleted ' + toDelete.length + ' duplicates', duplicates: toDelete.length};
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4156,34 +4252,14 @@ function sendInvoiceEmail(payload) {
     if (replyTo) options.replyTo = replyTo;
 
     // ★ PDF 첨부: docHtml 우선 (서버사이드 변환), base64는 폴백
-    var pdfAttached = false;
-    var pdfError = '';
     if (docHtml) {
-      try {
-        var htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
-        var pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
-        // PDF blob이 실제로 유효한지 검증 (size > 0)
-        var pdfSize = pdfBlob.getBytes().length;
-        if (pdfSize > 0) {
-          options.attachments = [pdfBlob];
-          pdfAttached = true;
-        } else {
-          pdfError = 'PDF 변환 결과 크기 0';
-        }
-      } catch (pdfErr) {
-        pdfError = 'HTML→PDF 변환 실패: ' + pdfErr.toString();
-      }
+      var htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
+      var pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
+      options.attachments = [pdfBlob];
     } else if (pdfBase64) {
-      try {
-        var pdfBytes = Utilities.base64Decode(pdfBase64);
-        var pdfBlob2 = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
-        options.attachments = [pdfBlob2];
-        pdfAttached = true;
-      } catch (b64Err) {
-        pdfError = 'base64 PDF 디코드 실패: ' + b64Err.toString();
-      }
-    } else {
-      pdfError = 'docHtml/pdfBase64 둘 다 없음';
+      var pdfBytes = Utilities.base64Decode(pdfBase64);
+      var pdfBlob2 = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
+      options.attachments = [pdfBlob2];
     }
 
     // GmailApp 우선 시도, 실패 시 MailApp 폴백
@@ -4204,9 +4280,9 @@ function sendInvoiceEmail(payload) {
 
     // 감사 로그
     appendAuditLog(payload._user, 'send_invoice_email', '—', '—',
-      `인보이스 이메일 발송 (PDF ${pdfAttached?'첨부':'미첨부: '+pdfError}) → ${to} | ${subject}`);
+      `인보이스 이메일 발송 (PDF 첨부) → ${to} | ${subject}`);
 
-    return { ok: true, to: to, pdfAttached: pdfAttached, pdfError: pdfError };
+    return { ok: true, to: to };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
