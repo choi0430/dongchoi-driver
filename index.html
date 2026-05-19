@@ -3405,17 +3405,41 @@ function _detectScheduleMismatch(){
   // 현재 활성 시프트의 차량(rego)
   const shift = activeShifts.find(s => s.id === editingShiftId);
   const drRego = shift ? String(shift.rego||'').trim().toUpperCase() : '';
+  // 현재 DR의 TourCode (사용자가 입력한 값)
+  const drTCRaw = document.getElementById('dr-tourcode')?.value?.trim() || '';
+  const drTC = drTCRaw.toUpperCase();
 
-  // 같은 날짜 일정 후보 (드라이버 기준)
+  // 같은 날짜 일정 후보
   const candidates = sch.filter(s => s.date === drDateISO);
   if(!candidates.length) return null; // 일정 없음 → 검증 불가
 
-  // 가장 가까운 일정 매칭 — Rego 일치 우선, 없으면 첫 번째
-  let matchedSchedule = candidates.find(s => String(s.slot?.rego||'').trim().toUpperCase() === drRego);
+  // ★ 슬롯의 rego 추출 — sub 모드면 subVehicleNote 우선
+  const _slotRego = (c) => {
+    const s = c.slot || {};
+    const fromSubVeh = String(s.subVehicleNote||'').trim().replace(/^[^\w\dA-Z]+/, '').toUpperCase();
+    const fromRego   = String(s.rego||'').trim().toUpperCase();
+    if(c.isSubMode || s.mode === 'sub') return fromSubVeh || fromRego;
+    return fromRego || fromSubVeh;
+  };
+  const _slotTC = (c) => String(c.tourCode||'').trim().toUpperCase();
+
+  // ★ 매칭 우선순위 (관리자 앱과 일관):
+  //   1. TourCode 일치 — 가장 unique한 키 (같은 날 차량 2번 운행하는 경우 결정적)
+  //   2. TourCode + Rego 둘 다 일치 (TC 우선이지만 안전망)
+  //   3. Rego만 일치
+  //   4. 첫 번째 후보 (마지막 fallback)
+  let matchedSchedule = null;
+  if(drTC){
+    matchedSchedule = candidates.find(c => _slotTC(c) === drTC);
+  }
+  if(!matchedSchedule && drRego){
+    matchedSchedule = candidates.find(c => _slotRego(c) === drRego);
+  }
   if(!matchedSchedule) matchedSchedule = candidates[0];
   if(!matchedSchedule) return null;
 
   const slot = matchedSchedule.slot || {};
+  const isSubSlot = (matchedSchedule.isSubMode || slot.mode === 'sub');
   const issues = [];
 
   // 정규화 헬퍼
@@ -3428,10 +3452,10 @@ function _detectScheduleMismatch(){
     return false;
   };
 
-  // 1. 차량 (Rego)
-  const expectedRego = _norm(slot.rego);
+  // 1. 차량 (Rego) — sub 모드면 subVehicleNote 기준
+  const expectedRego = _slotRego(matchedSchedule);
   if(expectedRego && drRego && expectedRego !== drRego){
-    issues.push({label:'🚐 차량 (Rego)', expected:slot.rego, actual:drRego});
+    issues.push({label:'🚐 차량 (Rego)', expected: isSubSlot ? (slot.subVehicleNote||slot.rego) : slot.rego, actual:drRego});
   }
 
   // 2. 여행사 (Agency)
@@ -3441,11 +3465,10 @@ function _detectScheduleMismatch(){
     issues.push({label:'🏢 여행사 (Agency)', expected:expectedAgency, actual:drAgency});
   }
 
-  // 3. 투어코드 (TourCode)
-  const drTC = document.getElementById('dr-tourcode')?.value || '';
+  // 3. 투어코드 (TourCode) — 위에서 선언한 drTC 재사용
   const expectedTC = String(matchedSchedule.tourCode||'').trim();
-  if(expectedTC && drTC && _norm(drTC) !== _norm(expectedTC)){
-    issues.push({label:'🎫 투어코드 (Tour Code)', expected:expectedTC, actual:drTC});
+  if(expectedTC && drTC && drTC !== _norm(expectedTC)){
+    issues.push({label:'🎫 투어코드 (Tour Code)', expected:expectedTC, actual:drTCRaw});
   }
 
   // 4. 인승 (Seats)
@@ -3467,7 +3490,9 @@ function _detectScheduleMismatch(){
     .replace(/^[\u{1F535}\u{1F6AB}]\s*/u, '')
     .replace(/^[\u{1F690}\u{1F68C}\u{1F699}\u{1F69B}\u{1F69C}]\s*/u, '')
     .trim();
-  const expectedDriver = _stripPrefix(slot.driver);
+  // 5. 드라이버 (Driver) — sub 모드면 subDriver 우선
+  const expectedDriverRaw = isSubSlot ? (slot.subDriver || slot.driver) : (slot.driver || slot.subDriver);
+  const expectedDriver = _stripPrefix(expectedDriverRaw);
   const drDriverName = (typeof currentDriver !== 'undefined' && currentDriver?.name) || '';
   if(expectedDriver && drDriverName && _norm(expectedDriver) !== _norm(drDriverName)){
     issues.push({label:'👤 드라이버 (Driver)', expected:expectedDriver, actual:drDriverName});
