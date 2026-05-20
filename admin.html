@@ -7400,8 +7400,11 @@ async function saveScheduleData(){
       await _autoRegisterSubDrivers();
     } catch(e){ _fail(); console.warn('서브 드라이버 자동 등록 오류:', e); }
 
-    closeScheduleModal();
-    await loadSchedule();
+    // ★ 저장 후 페이지 새로고침 — 모달/버튼 상태를 완전히 초기화하여
+    //   "✅ 완료"로 굳어진 저장 버튼 잔존 문제 방지.
+    //   재진입 시 Schedule 탭으로 자동 복귀하도록 해시 설정.
+    try { sessionStorage.setItem('dc_post_save_tab', 'psch'); } catch(e){}
+    setTimeout(() => { window.location.reload(); }, 600);
   }catch(e){ _fail();
     showErr('저장 실패: ' + e.message);
   }
@@ -28294,6 +28297,16 @@ async function loadAllFromSheets(){
     rWage();
     toast('✅ 데이터 로드 완료','ok');
     startAdminAutoSync();
+    // ★ 저장 후 새로고침으로 진입한 경우: 원래 탭(예: Schedule)으로 자동 복귀
+    try {
+      const _postSaveTab = sessionStorage.getItem('dc_post_save_tab');
+      if(_postSaveTab){
+        sessionStorage.removeItem('dc_post_save_tab');
+        if(_postSaveTab === 'psch' && typeof nv === 'function' && typeof initSchedule === 'function'){
+          setTimeout(() => { nv('psch','nsch'); initSchedule(); }, 100);
+        }
+      }
+    } catch(e){ console.warn('post-save tab restore failed:', e); }
     // ── 백그라운드 후속 작업 (UI 표시 후 실행) ──
     (async function bgPostLoad(){
       try { await loadRegoMaxKM(); rDash(); } catch(e) { console.warn('KM load failed', e); }
