@@ -3996,10 +3996,17 @@ async function saveMaintEntry(id){
   if(id){var ix=recs.findIndex(function(r){return r.id===id;});if(ix>=0)recs[ix]=entry;else recs.push(entry);}
   else recs.push(entry);
   setMaintRecordsCache(recs);
-  if(entry.km){var vi=DB.V.findIndex(function(v){return v.Rego===entry.rego;});if(vi>=0){if(entry.nextServiceKM)DB.V[vi].Next_Service_KM=entry.nextServiceKM;}}
+  // ★ 차량 마스터(DB.V) 동기 업데이트 — 정비 카드 & 대시보드 알림이 이 필드를 읽음
+  var vi=DB.V.findIndex(function(v){return v.Rego===entry.rego;});
+  if(vi>=0){
+    if(entry.nextServiceKM) DB.V[vi].Next_Service_KM=entry.nextServiceKM;
+    if(entry.km) DB.V[vi].Last_Service_KM=entry.km;
+  }
   document.getElementById('maint-modal-overlay').remove();
-  renderMaint();_done(); toast('Maintenance record saved','ok');
-  // 서버 저장
+  renderMaint();
+  try{ if(typeof rDash==='function') rDash(); }catch(e){}  // ★ 대시보드 알림 즉시 갱신
+  _done(); toast('Maintenance record saved','ok');
+  // 서버 저장 (백엔드에서 M_Vehicles.Next_Service_KM / Last_Service_KM 도 동기화됨)
   try {
     await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({action:'save_maint_record', data:{
