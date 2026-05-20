@@ -5331,6 +5331,58 @@ function saveMaintRecord(data) {
       const row = headers.map(h => data[h] !== undefined ? data[h] : '');
       sheet.appendRow(row);
     }
+
+    // ── M_Vehicles 동기화: 정비 기록 저장 시 Next_Service_KM / Last_Service_KM 자동 갱신 ──
+    // (정비 카드 / 대시보드 알림이 차량 마스터의 이 필드를 읽기 때문에 반드시 동기화 필요)
+    try {
+      const rego = data.Rego;
+      const nextKM = Number(data.NextServiceKM) || 0;
+      const lastKM = Number(data.KM) || 0;  // 정비 시점 KM = Last_Service_KM
+      if (rego && (nextKM > 0 || lastKM > 0)) {
+        const vSheet = ss.getSheetByName('M_Vehicles');
+        if (vSheet) {
+          const vLastRow = vSheet.getLastRow();
+          const vLastCol = vSheet.getLastColumn();
+          if (vLastRow >= 2) {
+            const vHeaders = vSheet.getRange(1, 1, 1, vLastCol).getValues()[0];
+            const regoCol = vHeaders.indexOf('Rego');
+            if (regoCol >= 0) {
+              // Next_Service_KM 컬럼이 없으면 자동 생성 (Last_Service_KM 다음 위치)
+              let nextSvcCol = vHeaders.indexOf('Next_Service_KM');
+              if (nextSvcCol < 0 && nextKM > 0) {
+                const lastSvcIdx = vHeaders.indexOf('Last_Service_KM');
+                if (lastSvcIdx >= 0) {
+                  vSheet.insertColumnAfter(lastSvcIdx + 1);
+                  vSheet.getRange(1, lastSvcIdx + 2).setValue('Next_Service_KM');
+                  nextSvcCol = lastSvcIdx + 1;
+                } else {
+                  vSheet.getRange(1, vLastCol + 1).setValue('Next_Service_KM');
+                  nextSvcCol = vLastCol;
+                }
+              }
+              const lastSvcCol = vHeaders.indexOf('Last_Service_KM');
+              // Rego 매칭 행 검색
+              const vRegos = vSheet.getRange(2, regoCol + 1, vLastRow - 1, 1).getValues();
+              for (let i = 0; i < vRegos.length; i++) {
+                if (String(vRegos[i][0]) === String(rego)) {
+                  if (nextKM > 0 && nextSvcCol >= 0) {
+                    vSheet.getRange(i + 2, nextSvcCol + 1).setValue(nextKM);
+                  }
+                  if (lastKM > 0 && lastSvcCol >= 0) {
+                    vSheet.getRange(i + 2, lastSvcCol + 1).setValue(lastKM);
+                  }
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e2) {
+      // M_Vehicles 동기화 실패는 본 저장에 영향 없도록 흡수 (로그만 남김)
+      Logger.log('saveMaintRecord: M_Vehicles sync skipped: ' + e2);
+    }
+
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.toString() };
