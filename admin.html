@@ -16064,19 +16064,21 @@ function _isSubLedgerSuppressed(t){
 //   2) Description 패턴: DRSUB:날짜_차량_투어코드 또는 LEDGER:날짜_차량_투어코드
 //   3) Remark에서 ' / '로 분리된 마지막 비-D/G 토큰
 function _extractSubTourCode(r){
+  // 1순위: TourCode 컬럼
   const tc = String(r.TourCode||'').trim();
   if(tc) return tc;
+  // 2순위: Description 패턴 매칭
+  //   DRSUB:date_rego_tour    — DR 거래 자동 등록
+  //   LEDGER:date_rego_tour   — Ledger 동기화
+  //   PAID_TC:tour            — TourCode 단위 부분/완납 지급 (CR 거래)
+  //   PAID:invoice            — InvoiceNo 단위 지급 (CR) → TC 없음 (InvoiceNo로 매칭됨)
   const desc = String(r.Description||'');
   const dm = desc.match(/^(?:DRSUB|LEDGER):\d{4}-\d{2}-\d{2}_[^_]+_(.+)$/);
   if(dm) return dm[1].trim();
-  const rem = String(r.Remark||'');
-  if(rem){
-    const parts = rem.split('/').map(s=>s.trim()).filter(Boolean);
-    const candidates = parts.filter(p => !/^[A-Z]:/.test(p) && !/^TV\d+$/.test(p));
-    if(candidates.length >= 2){
-      return candidates[candidates.length - 1];
-    }
-  }
+  const pm = desc.match(/^PAID_TC:(.+)$/);
+  if(pm) return pm[1].trim();
+  // ※ Remark 휴리스틱 fallback 제거 — "2026)" 같은 잘못된 라벨 생성 방지
+  //    실제 TourCode가 필요하면 TourCode 컬럼이나 Description으로 들어와야 함
   return '';
 }
 
@@ -17368,8 +17370,12 @@ function renderBalWeeklySummary() {
           tcItems.forEach(s => {
             // ★ 라벨 결정: 인보이스 번호 우선 → 없으면 투어코드 + 가이드 조합
             let lineLabel;
+            let _targetKindJS;  // 개별 지급 버튼이 selector 건너뛰고 직접 점프하기 위한 키
+            let _targetValJS;
             if (s.invoiceNo) {
               lineLabel = escH(s.invoiceNo);
+              _targetKindJS = 'invoice';
+              _targetValJS = String(s.invoiceNo).replace(/'/g,"\\'");
             } else {
               const parts = [];
               if (s.tourCode) parts.push('🏷 ' + s.tourCode);
@@ -17377,6 +17383,10 @@ function renderBalWeeklySummary() {
               lineLabel = parts.length
                 ? parts.map(p => '<span>' + escH(p) + '</span>').join(' <span style="color:var(--t3);">·</span> ')
                 : '\u2014';
+              if(s.tourCode){
+                _targetKindJS = 'tourcode';
+                _targetValJS = String(s.tourCode).replace(/'/g,"\\'");
+              }
             }
             // 가이드는 lineLabel에 이미 포함되었으면 메타 영역에서 제외
             const sMetaParts = [];
@@ -17392,10 +17402,14 @@ function renderBalWeeklySummary() {
               return;
             }
             const subBal = s.balance!==undefined?s.balance:s.amount;
+            // ★ 개별 항목 클릭 시 해당 항목으로 바로 지급 모달 진입 (selector 건너뜀)
+            const _btnTargetArg = _targetKindJS
+              ? `,{kind:'${_targetKindJS}',value:'${_targetValJS}'}`
+              : '';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:2px 0 2px 18px;font-size:10px;color:var(--t2);">';
             html += '<span style="flex:1;min-width:0;">' + lineLabel + (s.dueDate ? ' <span style="font-size:9px;color:var(--t3);">(Due: '+s.dueDate.slice(5)+')</span>' : '') + sMetaHtml + '</span>';
             html += '<span style="font-family:var(--fn);color:var(--or);white-space:nowrap;">' + $f(subBal) + '</span>';
-            html += `<button onclick="event.stopPropagation();_quickAddPayment('sub','${safeCo}',${subBal})" title="\uC774 \ud56d\ubaa9 \uc9c0\uae09" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:1px 5px;font-size:9px;font-weight:700;cursor:pointer;">\uD83D\uDCB0</button>`;
+            html += `<button onclick="event.stopPropagation();_quickAddPayment('sub','${safeCo}',${subBal}${_btnTargetArg})" title="\uC774 \ud56d\ubaa9 \uc9c0\uae09" style="background:#16a34a;color:white;border:none;border-radius:4px;padding:1px 5px;font-size:9px;font-weight:700;cursor:pointer;">\uD83D\uDCB0</button>`;
             html += '</div>';
           });
         });
@@ -17872,7 +17886,10 @@ function renderBalDetail(){
 
 // ── TRANSACTION MODAL (ADD/EDIT) ──
 // 빠른 지급/수금 — 모달 띄우고 회사명 + 잔액 자동 prefill
-function _quickAddPayment(type, name, balance){
+function _quickAddPayment(type, name, balance, targetKey){
+  // ★ targetKey: 개별 항목 직접 호출용 (선택사항)
+  //   { kind: 'invoice'|'tourcode', value: invoiceNumber|tourCode }
+  //   지정되면 해당 항목으로 바로 지급 모달 진입 (selector 생략)
   // ★ SUB 지급일 경우: 해당 회사의 미지급 인보이스/거래 자동 검색
   //   1순위: 발행된 SUB 인보이스 (Invoices 시트) — markSubInvPaid 통일 흐름
   //   2순위: SUB_Txn에 InvoiceNo 있는 미지급 DR — 같은 InvoiceNo로 그룹화
@@ -18023,6 +18040,46 @@ function _quickAddPayment(type, name, balance){
 
     // 통합 목록 — 인보이스 → 인보이스 거래 → TourCode 거래 순
     const allUnpaid = [...unpaidInvs, ...unpaidTxns, ...unpaidTCs];
+
+    // ★ targetKey가 지정되면 selector 우회 — 해당 항목으로 바로 점프
+    if(targetKey && targetKey.value){
+      const tkVal = String(targetKey.value).trim().toUpperCase();
+      let matched = null;
+      if(targetKey.kind === 'invoice'){
+        matched = allUnpaid.find(i =>
+          (i.type === 'invoice' || i.type === 'txn') &&
+          String(i.invNum||'').trim().toUpperCase() === tkVal
+        );
+      } else if(targetKey.kind === 'tourcode'){
+        matched = allUnpaid.find(i =>
+          i.type === 'tourcode' &&
+          String(i.tourCode||'').trim().toUpperCase() === tkVal
+        );
+        // fallback: invNum이 곧 tourCode 라벨인 케이스
+        if(!matched){
+          matched = allUnpaid.find(i =>
+            i.type === 'tourcode' &&
+            String(i.invNum||'').trim().toUpperCase() === tkVal
+          );
+        }
+      }
+      if(matched){
+        if(matched.type === 'invoice'){
+          if(typeof markSubInvPaid === 'function'){ markSubInvPaid(matched.invNum); return; }
+        } else if(matched.type === 'tourcode'){
+          if(typeof _showSubTourCodePaymentModal === 'function'){
+            _showSubTourCodePaymentModal(name, matched.invNum, matched);
+            return;
+          }
+        } else {
+          if(typeof _showSubTxnPaymentModal === 'function'){
+            _showSubTxnPaymentModal(name, matched.invNum, matched);
+            return;
+          }
+        }
+      }
+      // 매칭 실패 시 selector로 fallthrough (사용자가 직접 선택)
+    }
 
     if(allUnpaid.length > 0){
       _showSubInvoiceSelectorModal(name, allUnpaid);
