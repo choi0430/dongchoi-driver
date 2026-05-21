@@ -109,7 +109,11 @@ const MASTER_HEADERS = {
                  'TourPlan','Notes','Status','InvoiceID','Quote','BillingEntity','CreatedAt','UpdatedAt'],
   // 외주 지급 오버라이드 — BillingEntity 자동 판단 결과를 수동으로 뒤집을 때 사용
   // Action: 'INCLUDE' (강제 포함) | 'EXCLUDE' (강제 제외)
-  'PayoutOverrides': ['TourCode','SubCompany','Action','UpdatedAt','UpdatedBy']
+  'PayoutOverrides': ['TourCode','SubCompany','Action','UpdatedAt','UpdatedBy'],
+  // EG TRAVEL 자동 리포트 발송 이력 — 중복 발송 방지용 (특히 종료된 투어 섹션)
+  // ReportType: 'daily' | 'weekly' | 'manual'
+  // TourCodes: 이번 발송에 포함된 종료 투어코드 목록 (콤마 구분)
+  'EG_Report_Log': ['SentAt','ReportType','PeriodFrom','PeriodTo','Recipients','TourCodes','Subject','Status','Notes']
 };
 
 // ── Tab Colors ──
@@ -210,6 +214,8 @@ const ADMIN_ONLY_ACTIONS = [
   'save_company_profile',
   // ── 운행 일정 관리 (Schedule) ──
   'save_schedule', 'delete_schedule', 'update_schedule_status',
+  // ── EG TRAVEL 자동 리포트 발송 ──
+  'send_eg_daily_report', 'send_eg_weekly_report', 'setup_eg_report_triggers',
   // 관리자가 주로 쓰지만 드라이버도 가끔 필요할 수 있는 조회는 제외:
   // get_invoices, get_agency_txn, get_sub_txn 등은 일단 드라이버도 허용
   // 추후 엄격하게 할 수 있음
@@ -223,7 +229,9 @@ const ADMIN_ONLY_GET_ACTIONS = [
   // get_defect_reports, get_roster: 드라이버는 본인 것만 조회 (case 핸들러에서 effectiveDriver 강제)
   'get_admin_bundle', 'get_audit_log',
   // ── 운행 일정 ──
-  'get_schedule', 'get_schedule_stats'
+  'get_schedule', 'get_schedule_stats',
+  // ── EG 리포트 미리보기 ──
+  'preview_eg_report'
 ];
 
 function _getAuthSheet() {
@@ -1417,6 +1425,18 @@ function doGet(e) {
         return cors(getScheduleStats());
       }
 
+      // ── EG 리포트 미리보기 (HTML 반환) ──
+      case 'preview_eg_report': {
+        const reportType = e.parameter.type || 'daily'; // 'daily' | 'weekly'
+        const dateParam = e.parameter.date || '';
+        const fromParam = e.parameter.from || '';
+        const toParam = e.parameter.to || '';
+        if(reportType === 'weekly'){
+          return cors(sendEGWeeklyReport({ dryRun: true, from: fromParam, to: toParam }));
+        }
+        return cors(sendEGDailyReport({ dryRun: true, date: dateParam }));
+      }
+
       case 'get_driver_schedule': {
         // 드라이버에게 배정된 일정 조회 (드라이버 앱용 — 인증 불필요, 드라이버 식별만)
         const driver = e.parameter.driver || '';
@@ -1682,6 +1702,14 @@ function doPost(e) {
       // ── Invoice Email ──
       case 'send_invoice_email':
         return cors(sendInvoiceEmail({...payload, _user}));
+
+      // ── EG TRAVEL 자동 리포트 (수동 트리거 + 자동 트리거가 둘 다 호출) ──
+      case 'send_eg_daily_report':
+        return cors(sendEGDailyReport(payload || {}));
+      case 'send_eg_weekly_report':
+        return cors(sendEGWeeklyReport(payload || {}));
+      case 'setup_eg_report_triggers':
+        return cors(setupEGReportTriggers());
 
       // ── Invoices CRUD ──
       case 'save_invoice': {
@@ -7388,4 +7416,623 @@ function removeBulkSyncKMTrigger() {
   });
   Logger.log('Removed ' + removed + ' bulkSyncKM trigger(s).');
   return removed;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EG TRAVEL 자동 리포트 발송 모듈
+// ───────────────────────────────────────────────────────────────────────────
+// - 매일 06:00: 전날 EG 관련 DR 정리 + 종료된 투어코드 별도 섹션 (중복 방지)
+// - 매주 월요일 06:00: 지난주 EG 운행 요약 + 드라이버별 지급액
+// - 수신자: EG TRAVEL 등록 이메일 + Branden (안전장치)
+// - 발송 이력: EG_Report_Log 시트에 기록 (종료 투어 중복 발송 방지)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const EG_REPORT_KEYWORD = 'EG TRAVEL';     // 매칭 키워드 (대소문자 무시)
+const EG_REPORT_ADMIN_BCC = 'branden.dongchoi@gmail.com'; // 안전장치 — Branden에게 항상 BCC
+const EG_REPORT_DAILY_HOUR = 6;            // 매일 발송 시각 (시드니 06:00)
+const EG_REPORT_WEEKLY_HOUR = 6;           // 매주 월요일 06:00
+
+// ── 헬퍼: 한 행에서 EG TRAVEL 관련 키워드 매칭 ─────────────────────────────
+function _egRowMatches(row){
+  if(!row || typeof row !== 'object') return false;
+  const kw = EG_REPORT_KEYWORD.toLowerCase();
+  const fields = ['Tour_Agency','Agency','Billing_Entity','BillingEntity',
+                  'SubCompany','Client','Client_Name','Company','Payer','Owner',
+                  'AgencyName','Description','Remark','Remarks','Notes','Memo'];
+  for(let i=0; i<fields.length; i++){
+    const v = row[fields[i]];
+    if(v && String(v).toLowerCase().indexOf(kw) >= 0) return true;
+  }
+  return false;
+}
+
+// ── 날짜 헬퍼 ─────────────────────────────────────────────────────────────
+function _egToISO(dStr){
+  if(!dStr) return '';
+  if(dStr instanceof Date){
+    return Utilities.formatDate(dStr, 'Australia/Sydney', 'yyyy-MM-dd');
+  }
+  const s = String(dStr).trim();
+  // ISO already
+  let m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if(m) return m[1];
+  // dd/MM/yyyy
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+  // try parsing
+  try {
+    const d = new Date(s);
+    if(!isNaN(d.getTime())) return Utilities.formatDate(d, 'Australia/Sydney', 'yyyy-MM-dd');
+  } catch(e){}
+  return '';
+}
+function _egFmtDate(iso){
+  if(!iso) return '—';
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return m[3]+'/'+m[2]+'/'+m[1];
+  return String(iso);
+}
+function _egTodaySydney(){
+  return Utilities.formatDate(new Date(), 'Australia/Sydney', 'yyyy-MM-dd');
+}
+function _egYesterdaySydney(){
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return Utilities.formatDate(d, 'Australia/Sydney', 'yyyy-MM-dd');
+}
+function _egMondayOf(iso){
+  // ISO 날짜의 같은 주 월요일 ISO 반환 (호주식: 월요일 시작)
+  const d = new Date(iso + 'T00:00:00');
+  if(isNaN(d.getTime())) return iso;
+  const day = d.getDay(); // 0=일, 1=월
+  const diff = (day === 0) ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return Utilities.formatDate(d, 'Australia/Sydney', 'yyyy-MM-dd');
+}
+
+// ── 수신자 결정 ───────────────────────────────────────────────────────────
+function _egGetRecipients(){
+  // EG TRAVEL의 M_Clients 등록 이메일 + Branden 본인 (BCC)
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const cliSheet = ss.getSheetByName('M_Clients');
+  let toList = [];
+  let ccList = [];
+  if(cliSheet){
+    const data = cliSheet.getDataRange().getValues();
+    const headers = data[0].map(String);
+    const nameIdx = headers.indexOf('Name');
+    const emailIdx = headers.indexOf('Email');
+    const ccIdx = headers.indexOf('Email_CC');
+    for(let i=1; i<data.length; i++){
+      const name = String(data[i][nameIdx]||'').trim();
+      if(name.toUpperCase().indexOf(EG_REPORT_KEYWORD) >= 0){
+        const em = String(data[i][emailIdx]||'').trim();
+        const cc = String(data[i][ccIdx]||'').trim();
+        if(em) toList.push(em);
+        if(cc) ccList.push(cc);
+        break;
+      }
+    }
+  }
+  return {
+    to: toList.join(', '),
+    cc: ccList.join(', '),
+    bcc: EG_REPORT_ADMIN_BCC  // Branden 안전장치
+  };
+}
+
+// ── 이미 발송된 종료 투어코드 조회 (중복 방지) ────────────────────────────
+function _egGetAlreadySentTourCodes(){
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ensureSheet(ss, 'EG_Report_Log');
+  const data = sheet.getDataRange().getValues();
+  if(data.length < 2) return new Set();
+  const headers = data[0].map(String);
+  const tcIdx = headers.indexOf('TourCodes');
+  const statusIdx = headers.indexOf('Status');
+  const sent = new Set();
+  for(let i=1; i<data.length; i++){
+    const status = statusIdx >= 0 ? String(data[i][statusIdx]||'').trim().toUpperCase() : 'OK';
+    if(status === 'FAILED' || status === 'ERROR') continue;
+    const tcs = String(data[i][tcIdx]||'').trim();
+    if(!tcs) continue;
+    tcs.split(',').forEach(t => {
+      const tt = t.trim().toUpperCase();
+      if(tt) sent.add(tt);
+    });
+  }
+  return sent;
+}
+
+// ── 발송 이력 기록 ─────────────────────────────────────────────────────────
+function _egLogReportSent(reportType, periodFrom, periodTo, recipients, tourCodes, subject, status, notes){
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'EG_Report_Log');
+    sheet.appendRow([
+      Utilities.formatDate(new Date(), 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss'),
+      reportType, periodFrom||'', periodTo||'',
+      recipients||'', (tourCodes||[]).join(','),
+      subject||'', status||'OK', notes||''
+    ]);
+  } catch(e){
+    Logger.log('EG report log error: ' + e);
+  }
+}
+
+// ── 데이터 로더 ────────────────────────────────────────────────────────────
+function _egLoadDRs(fromISO, toISO){
+  // Daily_Report에서 fromISO~toISO 기간의 EG 관련 행만 추출
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('Daily_Report');
+  if(!sheet) return [];
+  const data = sheet.getDataRange().getValues();
+  if(data.length < 2) return [];
+  const headers = data[0].map(String);
+  const rows = [];
+  for(let i=1; i<data.length; i++){
+    const row = {};
+    headers.forEach((h, ci) => { row[h] = data[i][ci]; });
+    if(!_egRowMatches(row)) continue;
+    const iso = _egToISO(row.Date);
+    if(!iso) continue;
+    if(iso < fromISO || iso > toISO) continue;
+    row._iso = iso;
+    rows.push(row);
+  }
+  return rows;
+}
+
+function _egLoadSchedule(){
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('Schedule');
+  if(!sheet) return [];
+  const data = sheet.getDataRange().getValues();
+  if(data.length < 2) return [];
+  const headers = data[0].map(String);
+  const rows = [];
+  for(let i=1; i<data.length; i++){
+    const row = {};
+    headers.forEach((h, ci) => { row[h] = data[i][ci]; });
+    if(!_egRowMatches(row)) continue;
+    rows.push(row);
+  }
+  return rows;
+}
+
+// ── 종료된 투어코드 판정 ──────────────────────────────────────────────────
+// 다음 조건 중 하나라도 충족하면 종료:
+//   1) Schedule.EndDate < 오늘
+//   2) Schedule.Status === 'completed' || 'invoiced' || 'paid'
+//   3) 해당 TourCode의 모든 DR이 제출됐고 마지막 DR.Date < 오늘
+function _egFindCompletedTourCodes(todayISO){
+  const sched = _egLoadSchedule();
+  const drs = _egLoadDRs('2020-01-01', todayISO); // 모든 과거
+  const completed = [];
+  const _drByTC = {};
+  drs.forEach(r => {
+    const tc = String(r.Tour_Code || r.TourCode || '').trim().toUpperCase();
+    if(!tc) return;
+    if(!_drByTC[tc]) _drByTC[tc] = [];
+    _drByTC[tc].push(r);
+  });
+  sched.forEach(s => {
+    const tc = String(s.TourCode || '').trim().toUpperCase();
+    if(!tc) return;
+    const endISO = _egToISO(s.EndDate);
+    const status = String(s.Status || '').trim().toLowerCase();
+    let isDone = false;
+    let reason = '';
+    // 조건 1
+    if(endISO && endISO < todayISO){ isDone = true; reason = '일정 종료일 경과'; }
+    // 조건 2
+    if(!isDone && (status === 'completed' || status === 'invoiced' || status === 'paid')){
+      isDone = true; reason = '상태: ' + status;
+    }
+    // 조건 3
+    if(!isDone){
+      const tcDRs = _drByTC[tc] || [];
+      if(tcDRs.length > 0){
+        const lastDR = tcDRs.map(r=>r._iso).sort().reverse()[0];
+        if(lastDR && lastDR < todayISO){
+          isDone = true; reason = 'DR 마지막일 경과 (' + lastDR + ')';
+        }
+      }
+    }
+    if(isDone){
+      completed.push({
+        tourCode: tc,
+        agency: s.Agency || '',
+        startDate: _egToISO(s.StartDate),
+        endDate: endISO,
+        status: s.Status,
+        guide: s.Guide || '',
+        pax: s.Pax || '',
+        reason: reason,
+        drs: _drByTC[tc] || []
+      });
+    }
+  });
+  return completed;
+}
+
+// ── HTML 빌더 공통 스타일 ─────────────────────────────────────────────────
+function _egCommonStyle(){
+  return `
+    <style>
+      body{font-family:Arial,'Malgun Gothic',sans-serif;color:#1f2937;margin:0;padding:20px;font-size:11pt;line-height:1.4;}
+      .hdr{border-bottom:3px solid #7c3aed;padding-bottom:12px;margin-bottom:20px;}
+      .hdr h1{margin:0 0 4px;font-size:20pt;color:#7c3aed;}
+      .hdr .sub{color:#6b7280;font-size:10pt;}
+      .sec-title{font-size:14pt;font-weight:bold;color:#1f2937;background:#f3f4f6;
+                 padding:8px 12px;border-left:4px solid #7c3aed;margin:20px 0 10px;}
+      .meta{display:flex;justify-content:space-between;background:#faf5ff;border:1px solid #e9d5ff;
+            border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:10pt;}
+      table{border-collapse:collapse;width:100%;font-size:10pt;margin-bottom:14px;}
+      th{background:#7c3aed;color:white;padding:8px 6px;text-align:left;font-weight:600;}
+      td{padding:7px 6px;border-bottom:1px solid #e5e7eb;}
+      tr:nth-child(even) td{background:#fafafa;}
+      .num{text-align:right;font-family:Consolas,monospace;}
+      .grp-hdr{background:#ede9fe !important;font-weight:bold;color:#5b21b6;padding:8px 10px;}
+      .summary-box{background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:12px 16px;margin:10px 0;}
+      .summary-row{display:flex;justify-content:space-between;padding:4px 0;}
+      .summary-row.tot{border-top:2px solid #16a34a;margin-top:6px;padding-top:8px;font-weight:bold;}
+      .ftr{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;
+           color:#6b7280;font-size:9pt;text-align:center;}
+      .tc-badge{display:inline-block;background:#ede9fe;color:#5b21b6;padding:2px 8px;
+                border-radius:4px;font-weight:bold;font-size:10pt;}
+      .driver-grp{margin:14px 0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;}
+      .driver-grp .name{background:#1f2937;color:white;padding:8px 12px;font-weight:bold;}
+      .empty{text-align:center;padding:30px;color:#9ca3af;font-style:italic;}
+    </style>
+  `;
+}
+
+// ── 일일 리포트 HTML 빌더 ─────────────────────────────────────────────────
+// 섹션 1: 전날 DR (드라이버별 그룹)
+// 섹션 2: 종료된 투어코드 (이전 발송 제외 = 새로 종료된 것만)
+function _egBuildDailyReportHTML(targetDateISO, drs, newlyCompletedTours){
+  const drsByDriver = {};
+  drs.forEach(r => {
+    const d = String(r.Driver || 'Unknown').trim();
+    if(!drsByDriver[d]) drsByDriver[d] = [];
+    drsByDriver[d].push(r);
+  });
+  const totalAmount = drs.reduce((s,r)=>s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
+  const tcCount = new Set(drs.map(r=>String(r.Tour_Code||r.TourCode||'').trim()).filter(Boolean)).size;
+
+  let html = `<html><head><meta charset="UTF-8">${_egCommonStyle()}</head><body>`;
+  html += `<div class="hdr"><h1>📋 EG TRAVEL 일일 운행 리포트</h1>
+            <div class="sub">대상일: ${_egFmtDate(targetDateISO)} · 발행: ${_egFmtDate(_egTodaySydney())}</div></div>`;
+
+  // 메타
+  html += `<div class="meta">
+    <div><b>운행 건수:</b> ${drs.length}건</div>
+    <div><b>투어코드:</b> ${tcCount}개</div>
+    <div><b>총 금액:</b> $${totalAmount.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+  </div>`;
+
+  // 섹션 1: 드라이버별 전일 운행
+  html += `<div class="sec-title">🚗 전일 운행 (드라이버별)</div>`;
+  if(drs.length === 0){
+    html += '<div class="empty">해당 일자에 EG TRAVEL 관련 운행 기록이 없습니다.</div>';
+  } else {
+    Object.keys(drsByDriver).sort().forEach(driver => {
+      const list = drsByDriver[driver];
+      const subtotal = list.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
+      html += `<div class="driver-grp">
+        <div class="name">👤 ${_egEsc(driver)} · ${list.length}건 · $${subtotal.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+        <table>
+          <tr><th>날짜</th><th>투어코드</th><th>차량</th><th>가이드</th><th>코스</th>
+              <th>시작</th><th>종료</th><th class="num">금액</th></tr>`;
+      list.sort((a,b)=>(a._iso||'').localeCompare(b._iso||'')).forEach(r => {
+        html += `<tr>
+          <td>${_egFmtDate(r._iso)}</td>
+          <td><span class="tc-badge">${_egEsc(r.Tour_Code||r.TourCode||'')}</span></td>
+          <td>${_egEsc(r.Rego||'')}</td>
+          <td>${_egEsc(r.Guide||'')}</td>
+          <td>${_egEsc(r.Attraction||r.Course||'')}</td>
+          <td>${_egEsc(r.Start_Time||r.StartTime||'')}</td>
+          <td>${_egEsc(r.End_Time||r.EndTime||'')}</td>
+          <td class="num">$${(Number(r.DR_Cost||r.Total||0)||0).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        </tr>`;
+      });
+      html += `</table></div>`;
+    });
+  }
+
+  // 섹션 2: 새로 종료된 투어코드
+  html += `<div class="sec-title">✅ 새로 종료된 투어코드</div>`;
+  if(newlyCompletedTours.length === 0){
+    html += '<div class="empty">새로 종료된 투어가 없습니다.</div>';
+  } else {
+    html += `<table>
+      <tr><th>TourCode</th><th>여행사</th><th>기간</th><th>가이드</th><th>Pax</th><th>DR</th><th>종료사유</th></tr>`;
+    newlyCompletedTours.forEach(t => {
+      html += `<tr>
+        <td><span class="tc-badge">${_egEsc(t.tourCode)}</span></td>
+        <td>${_egEsc(t.agency)}</td>
+        <td>${_egFmtDate(t.startDate)} ~ ${_egFmtDate(t.endDate)}</td>
+        <td>${_egEsc(t.guide)}</td>
+        <td class="num">${_egEsc(t.pax)}</td>
+        <td class="num">${t.drs.length}건</td>
+        <td>${_egEsc(t.reason)}</td>
+      </tr>`;
+    });
+    html += `</table>`;
+  }
+
+  html += `<div class="ftr">Dong Choi Pty Ltd · 자동 생성 리포트 · 문의: ${EG_REPORT_ADMIN_BCC}</div>`;
+  html += '</body></html>';
+  return html;
+}
+
+// ── 주간 리포트 HTML 빌더 ─────────────────────────────────────────────────
+// 1) 운행 통계, 2) 운행 상세 테이블, 3) 드라이버별 지급액
+function _egBuildWeeklyReportHTML(monISO, sunISO, drs){
+  const totalAmount = drs.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
+  const tcSet = new Set();
+  const drvCount = {};
+  const vehCount = {};
+  const driverWage = {}; // 드라이버별 지급액 (Driver_Cost 또는 DR_Cost)
+  drs.forEach(r => {
+    const tc = String(r.Tour_Code||r.TourCode||'').trim();
+    if(tc) tcSet.add(tc);
+    const drv = String(r.Driver||'').trim() || 'Unknown';
+    drvCount[drv] = (drvCount[drv]||0) + 1;
+    const veh = String(r.Rego||'').trim() || '?';
+    vehCount[veh] = (vehCount[veh]||0) + 1;
+    // 드라이버 지급액 — Driver_Cost 우선, 없으면 0 (자체 계산 안 함)
+    const wage = Number(r.Driver_Cost||r.DriverCost||0) || 0;
+    driverWage[drv] = (driverWage[drv]||0) + wage;
+  });
+
+  let html = `<html><head><meta charset="UTF-8">${_egCommonStyle()}</head><body>`;
+  html += `<div class="hdr"><h1>📊 EG TRAVEL 주간 운행 요약</h1>
+            <div class="sub">기간: ${_egFmtDate(monISO)} ~ ${_egFmtDate(sunISO)} · 발행: ${_egFmtDate(_egTodaySydney())}</div></div>`;
+
+  // 통계 박스
+  html += `<div class="summary-box">
+    <div class="summary-row"><span>📋 운행 건수</span><b>${drs.length}건</b></div>
+    <div class="summary-row"><span>🎫 투어코드 수</span><b>${tcSet.size}개</b></div>
+    <div class="summary-row"><span>👤 드라이버 수</span><b>${Object.keys(drvCount).length}명</b></div>
+    <div class="summary-row"><span>🚐 차량 수</span><b>${Object.keys(vehCount).length}대</b></div>
+    <div class="summary-row tot"><span>💰 운행 합계 (DR 비용)</span>
+      <b>$${totalAmount.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</b></div>
+  </div>`;
+
+  // 운행 상세 테이블
+  html += `<div class="sec-title">📋 운행 상세</div>`;
+  if(drs.length === 0){
+    html += '<div class="empty">이번 주 EG TRAVEL 관련 운행 기록이 없습니다.</div>';
+  } else {
+    html += `<table>
+      <tr><th>날짜</th><th>TourCode</th><th>차량</th><th>드라이버</th><th>가이드</th>
+          <th>코스</th><th class="num">금액</th></tr>`;
+    drs.slice().sort((a,b)=>(a._iso||'').localeCompare(b._iso||'')).forEach(r => {
+      html += `<tr>
+        <td>${_egFmtDate(r._iso)}</td>
+        <td><span class="tc-badge">${_egEsc(r.Tour_Code||r.TourCode||'')}</span></td>
+        <td>${_egEsc(r.Rego||'')}</td>
+        <td>${_egEsc(r.Driver||'')}</td>
+        <td>${_egEsc(r.Guide||'')}</td>
+        <td>${_egEsc(r.Attraction||r.Course||'')}</td>
+        <td class="num">$${(Number(r.DR_Cost||r.Total||0)||0).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      </tr>`;
+    });
+    html += `</table>`;
+  }
+
+  // 드라이버별 지급액 섹션
+  html += `<div class="sec-title">💵 드라이버별 지급액 (이번 주)</div>`;
+  const wagedDrivers = Object.entries(driverWage).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  if(wagedDrivers.length === 0){
+    html += '<div class="empty">드라이버 지급액 데이터가 없습니다. (Daily Report의 Driver_Cost 컬럼 확인 필요)</div>';
+  } else {
+    const totWage = wagedDrivers.reduce((s,[,v])=>s+v, 0);
+    html += `<table>
+      <tr><th>드라이버</th><th class="num">운행 건수</th><th class="num">지급액</th></tr>`;
+    wagedDrivers.forEach(([drv, wage]) => {
+      html += `<tr>
+        <td>${_egEsc(drv)}</td>
+        <td class="num">${drvCount[drv]||0}건</td>
+        <td class="num">$${wage.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      </tr>`;
+    });
+    html += `<tr><td><b>합계</b></td><td></td>
+      <td class="num"><b>$${totWage.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</b></td></tr>`;
+    html += `</table>`;
+  }
+
+  html += `<div class="ftr">Dong Choi Pty Ltd · 자동 생성 리포트 · 문의: ${EG_REPORT_ADMIN_BCC}</div>`;
+  html += '</body></html>';
+  return html;
+}
+
+function _egEsc(s){
+  if(s === null || s === undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── 발송 (공통) — HTML을 PDF로 첨부하여 Gmail로 발송 ──────────────────────
+function _egSendEmailWithPDF(subject, bodyText, docHtml, pdfName, recipients){
+  if(!recipients || !recipients.to){
+    return { ok: false, error: 'no_recipient', message: 'EG TRAVEL 이메일이 M_Clients에 등록되지 않음' };
+  }
+  try {
+    const htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'report.html');
+    const pdfBlob = htmlBlob.getAs('application/pdf').setName(pdfName);
+    const options = {
+      name: 'Dong Choi Pty Ltd',
+      attachments: [pdfBlob],
+      bcc: recipients.bcc || EG_REPORT_ADMIN_BCC
+    };
+    if(recipients.cc) options.cc = recipients.cc;
+    GmailApp.sendEmail(recipients.to, subject, bodyText, options);
+    return { ok: true };
+  } catch(err){
+    Logger.log('EG send email error: ' + err);
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ── 메인: 일일 리포트 발송 ────────────────────────────────────────────────
+function sendEGDailyReport(opts){
+  opts = opts || {};
+  const dryRun = !!opts.dryRun;
+  const targetDate = opts.date || _egYesterdaySydney(); // 기본: 전날
+  const todayISO = _egTodaySydney();
+
+  try {
+    // 1. 전날 DR 로드
+    const drs = _egLoadDRs(targetDate, targetDate);
+
+    // 2. 새로 종료된 투어코드 (이미 발송 이력에 있는 것 제외)
+    const allCompleted = _egFindCompletedTourCodes(todayISO);
+    const alreadySent = _egGetAlreadySentTourCodes();
+    const newCompleted = allCompleted.filter(t => !alreadySent.has(t.tourCode.toUpperCase()));
+
+    // 3. 데이터가 둘 다 비어있으면 skip (이메일 폭탄 방지)
+    if(drs.length === 0 && newCompleted.length === 0){
+      Logger.log('[EG Daily] skip — 전날 DR 0건 & 새 종료투어 0건');
+      return { ok: true, skipped: true, reason: 'no_data' };
+    }
+
+    // 4. HTML 빌드
+    const html = _egBuildDailyReportHTML(targetDate, drs, newCompleted);
+    const pdfName = 'EG_Daily_Report_' + targetDate + '.pdf';
+    const subject = `[EG TRAVEL] 일일 운행 리포트 ${_egFmtDate(targetDate)} — DR ${drs.length}건, 종료 투어 ${newCompleted.length}개`;
+    const body = `안녕하세요,\n\n` +
+      `${_egFmtDate(targetDate)} EG TRAVEL 관련 운행 리포트를 첨부합니다.\n\n` +
+      `· 전일 운행 건수: ${drs.length}건\n` +
+      `· 새로 종료된 투어: ${newCompleted.length}개\n\n` +
+      `상세 내용은 첨부 PDF를 확인해주세요.\n\n` +
+      `Kind regards,\nDong Choi Pty Ltd`;
+
+    if(dryRun){
+      return { ok: true, dryRun: true, html: html, subject: subject,
+               drCount: drs.length, completedCount: newCompleted.length };
+    }
+
+    // 5. 발송
+    const recipients = _egGetRecipients();
+    const sendResult = _egSendEmailWithPDF(subject, body, html, pdfName, recipients);
+
+    // 6. 이력 기록
+    const tcCodes = newCompleted.map(t => t.tourCode);
+    _egLogReportSent(
+      'daily', targetDate, targetDate,
+      recipients.to + (recipients.cc?' (cc:'+recipients.cc+')':''),
+      tcCodes, subject,
+      sendResult.ok ? 'OK' : 'FAILED',
+      sendResult.ok ? `DR ${drs.length}건 / 종료투어 ${newCompleted.length}개` : sendResult.error
+    );
+
+    return {
+      ok: sendResult.ok, error: sendResult.error,
+      drCount: drs.length, completedCount: newCompleted.length,
+      recipients: recipients
+    };
+  } catch(err){
+    Logger.log('sendEGDailyReport error: ' + err);
+    _egLogReportSent('daily', targetDate, targetDate, '', [], '', 'ERROR', err.toString());
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ── 메인: 주간 리포트 발송 ────────────────────────────────────────────────
+function sendEGWeeklyReport(opts){
+  opts = opts || {};
+  const dryRun = !!opts.dryRun;
+  // 기본: 지난주 월~일 (오늘이 월요일이면 지난주 월~일)
+  const todayISO = _egTodaySydney();
+  const todayMon = _egMondayOf(todayISO);
+  const lastMonD = new Date(todayMon + 'T00:00:00');
+  lastMonD.setDate(lastMonD.getDate() - 7);
+  const lastMonISO = Utilities.formatDate(lastMonD, 'Australia/Sydney', 'yyyy-MM-dd');
+  const lastSunD = new Date(lastMonISO + 'T00:00:00');
+  lastSunD.setDate(lastSunD.getDate() + 6);
+  const lastSunISO = Utilities.formatDate(lastSunD, 'Australia/Sydney', 'yyyy-MM-dd');
+
+  const fromISO = opts.from || lastMonISO;
+  const toISO = opts.to || lastSunISO;
+
+  try {
+    const drs = _egLoadDRs(fromISO, toISO);
+    if(drs.length === 0 && !opts.forceEmpty){
+      Logger.log('[EG Weekly] skip — 운행 0건');
+      return { ok: true, skipped: true, reason: 'no_data' };
+    }
+
+    const html = _egBuildWeeklyReportHTML(fromISO, toISO, drs);
+    const pdfName = 'EG_Weekly_Report_' + fromISO + '_to_' + toISO + '.pdf';
+    const totAmt = drs.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
+    const subject = `[EG TRAVEL] 주간 운행 요약 ${_egFmtDate(fromISO)}~${_egFmtDate(toISO)} — ${drs.length}건, $${totAmt.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+    const body = `안녕하세요,\n\n` +
+      `${_egFmtDate(fromISO)} ~ ${_egFmtDate(toISO)} EG TRAVEL 주간 운행 요약을 첨부합니다.\n\n` +
+      `· 총 운행 건수: ${drs.length}건\n` +
+      `· 합계: $${totAmt.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n\n` +
+      `드라이버별 지급액 정보는 첨부 PDF의 마지막 섹션을 참고하세요.\n\n` +
+      `Kind regards,\nDong Choi Pty Ltd`;
+
+    if(dryRun){
+      return { ok: true, dryRun: true, html: html, subject: subject, drCount: drs.length };
+    }
+
+    const recipients = _egGetRecipients();
+    const sendResult = _egSendEmailWithPDF(subject, body, html, pdfName, recipients);
+
+    _egLogReportSent(
+      'weekly', fromISO, toISO,
+      recipients.to + (recipients.cc?' (cc:'+recipients.cc+')':''),
+      [], subject,
+      sendResult.ok ? 'OK' : 'FAILED',
+      sendResult.ok ? `DR ${drs.length}건 · $${totAmt.toFixed(2)}` : sendResult.error
+    );
+
+    return { ok: sendResult.ok, error: sendResult.error,
+             drCount: drs.length, totalAmount: totAmt, recipients: recipients };
+  } catch(err){
+    Logger.log('sendEGWeeklyReport error: ' + err);
+    _egLogReportSent('weekly', fromISO, toISO, '', [], '', 'ERROR', err.toString());
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ── 트리거 설정 (한 번만 실행) ────────────────────────────────────────────
+function setupEGReportTriggers(){
+  // 기존 EG 리포트 트리거 제거
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
+  triggers.forEach(t => {
+    const fn = t.getHandlerFunction();
+    if(fn === 'sendEGDailyReport' || fn === 'sendEGWeeklyReport'){
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  // 매일 06:00 (시드니)
+  ScriptApp.newTrigger('sendEGDailyReport')
+    .timeBased().atHour(EG_REPORT_DAILY_HOUR).everyDays(1)
+    .inTimezone('Australia/Sydney').create();
+  // 매주 월요일 06:00
+  ScriptApp.newTrigger('sendEGWeeklyReport')
+    .timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(EG_REPORT_WEEKLY_HOUR)
+    .inTimezone('Australia/Sydney').create();
+  return { ok: true, removed: removed, created: 2,
+           message: '매일 06:00 일일 리포트, 매주 월요일 06:00 주간 리포트 트리거 설정됨' };
+}
+
+// ── 트리거 제거 (필요 시) ─────────────────────────────────────────────────
+function removeEGReportTriggers(){
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
+  triggers.forEach(t => {
+    const fn = t.getHandlerFunction();
+    if(fn === 'sendEGDailyReport' || fn === 'sendEGWeeklyReport'){
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  return { ok: true, removed: removed };
 }
