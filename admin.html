@@ -311,23 +311,18 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
   // 관리자 이름 목록 (현재 Branden만 관리자)
   var ADMIN_NAMES = ['Branden Choi', 'Branden', '최동철', 'Dong Cheol Choi'];
-  // EG TRAVEL 뷰어 이름 (admin 권한이지만 EG 관련 데이터만 보임 — Code.gs의 EG_VIEWER_NAMES와 동기 유지)
-  var EG_VIEWER_NAMES = ['Sung Hun Yoo', 'SUNG HUN YOO', '유성훈'];
 
   function _buildLoginSelect(){
     var sel = document.getElementById('la');
     sel.innerHTML = '<option value="">-- 계정 선택 --</option>';
-    // 관리자 + EG 뷰어 계정 표시
+    // 관리자 계정만 필터링
     window._loginDrivers.forEach(function(d){
       var nameKr = d.Name_KR || d.Name_EN || '';
       var nameEn = d.Name_EN || '';
       var isAdmin = ADMIN_NAMES.some(function(an){ return nameKr.indexOf(an)>=0 || nameEn.indexOf(an)>=0; });
-      var isEGViewer = !isAdmin && EG_VIEWER_NAMES.some(function(vn){ return nameKr.indexOf(vn)>=0 || nameEn.indexOf(vn)>=0; });
-      if(!isAdmin && !isEGViewer) return;
+      if(!isAdmin) return;
       var initials = d.Initials || (nameEn.trim().split(' ').filter(Boolean).map(function(w){return w[0];}).join('').toUpperCase().slice(0,2)) || '??';
-      // 표시 라벨: EG 뷰어는 뱃지 추가 — 운영자가 일반 admin과 구분 가능
-      var roleLabel = isEGViewer ? ' 🔒 [EG TRAVEL 뷰어]' : '';
-      var display = nameKr + (nameEn ? ' (' + nameEn + ')' : '') + roleLabel;
+      var display = nameKr + (nameEn ? ' (' + nameEn + ')' : '');
       var val = nameKr + '|' + initials + '|' + nameEn;
       var opt = document.createElement('option');
       opt.value = val;
@@ -401,7 +396,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
         }
         return;
       }
-      if(json.role !== 'admin' && json.role !== 'viewer-eg'){
+      if(json.role !== 'admin'){
         _pin=''; _upDots();
         if(status) status.textContent = '';
         alert('관리자 권한이 없습니다.');
@@ -2845,9 +2840,9 @@ function autoRestoreAdminSession(){
   const expStr = localStorage.getItem('dc_token_exp');
   const role = localStorage.getItem('dc_token_role');
   if(!acct || !token) return;
-  // ★ role이 admin 또는 viewer-eg가 아니면 거부 (driver 토큰으로 관리자 앱 진입 차단)
-  if(role && role !== 'admin' && role !== 'viewer-eg'){
-    console.warn('[autoRestoreAdminSession] non-admin/non-viewer role 차단:', role);
+  // ★ role이 admin이 아니면 거부 (driver 토큰으로 관리자 앱 진입 차단)
+  if(role && role !== 'admin'){
+    console.warn('[autoRestoreAdminSession] non-admin role 차단:', role);
     clearAuthToken();
     localStorage.removeItem('dc_admin_session');
     return;
@@ -4982,8 +4977,6 @@ async function loadSchedule(){
     const json = await res.json();
     if(!json.ok) throw new Error(json.error || '조회 실패');
     _schCache = json.rows || [];
-    // ★ EG 뷰어 모드: 필터 재적용
-    try { if(typeof applyEGViewerFilter === 'function') applyEGViewerFilter(); } catch(e){}
     // ★ 일정 데이터 갱신 시 글로벌 트랙 맵 무효화 — 새 TourCode 추가/이동 반영
     _schGroupTrackMap = {};
     _schGroupTrackOccupancy = {};
@@ -9690,197 +9683,6 @@ const DC_OWNERS = ['DONG CHOI PTY LTD', null, ''];
 const DC_ACCREDITATION_NAME = 'DONG CHOI PTY LTD';
 
 // ═══════════════════════════════════════════════════════════════
-// EG TRAVEL 뷰어 모드 (viewer-eg role)
-// ───────────────────────────────────────────────────────────────
-// SUNG HUN YOO 등 EG 관계자가 관리자 앱에 로그인할 때 활성화.
-// EG TRAVEL 관련 운행/일정/인보이스/잔액만 보이도록 필터링하고,
-// 모든 쓰기 동작을 차단(읽기 전용).
-//
-// ⚠️ 보안 한계: 이건 프론트엔드 필터링만 적용. 백엔드 API는 admin 데이터
-//    전체를 반환하므로, F12 개발자도구를 사용하면 우회 가능.
-//    신뢰할 수 있는 사람에게만 PIN 부여할 것.
-// ═══════════════════════════════════════════════════════════════
-const EG_KEYWORD = 'EG TRAVEL';  // 매칭 키워드 (대소문자 무시)
-
-function isEGViewer(){
-  try { return localStorage.getItem('dc_token_role') === 'viewer-eg'; }
-  catch(e){ return false; }
-}
-
-// 어떤 필드든 'EG TRAVEL'이 들어가면 매칭 — DR/Schedule/Invoice/SUB_Txn 통합
-// 매칭 대상 컬럼들 (모든 데이터 종류에서 가능한 모든 회사명 필드)
-const _EG_MATCH_FIELDS = [
-  'Tour_Agency', 'TourAgency', 'Agency',
-  'Billing_Entity', 'BillingEntity',
-  'SubCompany', 'Sub_Company',
-  'Client', 'Client_Name', 'ClientName',
-  'Company', 'Payer', 'Owner',
-  'AgencyName', 'Agency_Name'
-];
-function _hasEGInRow(row){
-  if(!row || typeof row !== 'object') return false;
-  const kw = EG_KEYWORD.toLowerCase();
-  for(let i = 0; i < _EG_MATCH_FIELDS.length; i++){
-    const v = row[_EG_MATCH_FIELDS[i]];
-    if(v && String(v).toLowerCase().indexOf(kw) >= 0) return true;
-  }
-  // Description / Remark / Notes 같은 자유 텍스트도 검색 (안전망)
-  const textFields = ['Description', 'Remark', 'Notes', 'Note', 'Memo'];
-  for(let i = 0; i < textFields.length; i++){
-    const v = row[textFields[i]];
-    if(v && String(v).toLowerCase().indexOf(kw) >= 0) return true;
-  }
-  return false;
-}
-
-// 데이터 로드 직후 호출 — 모든 캐시를 EG TRAVEL 관련 행만 남기도록 필터링
-function applyEGViewerFilter(){
-  if(!isEGViewer()) return;
-  try {
-    // DR 캐시
-    if(typeof _drCache !== 'undefined' && Array.isArray(_drCache)){
-      const before = _drCache.length;
-      _drCache = _drCache.filter(_hasEGInRow);
-      console.log('[EG-Viewer] DR cache:', before, '→', _drCache.length);
-    }
-    // Schedule 캐시
-    if(typeof _schCache !== 'undefined' && Array.isArray(_schCache)){
-      const before = _schCache.length;
-      _schCache = _schCache.filter(_hasEGInRow);
-      console.log('[EG-Viewer] Schedule cache:', before, '→', _schCache.length);
-    }
-    // Invoice 이력
-    if(typeof _invHistoryCache !== 'undefined' && Array.isArray(_invHistoryCache)){
-      const before = _invHistoryCache.length;
-      _invHistoryCache = _invHistoryCache.filter(_hasEGInRow);
-      console.log('[EG-Viewer] Invoice cache:', before, '→', _invHistoryCache.length);
-    }
-    // Agency_Txn (여행사 거래)
-    if(typeof _balAgencyTxns !== 'undefined' && Array.isArray(_balAgencyTxns)){
-      const before = _balAgencyTxns.length;
-      _balAgencyTxns = _balAgencyTxns.filter(_hasEGInRow);
-      console.log('[EG-Viewer] Agency txns:', before, '→', _balAgencyTxns.length);
-    }
-    // SUB_Txn (서브 거래)
-    if(typeof _balSubTxns !== 'undefined' && Array.isArray(_balSubTxns)){
-      const before = _balSubTxns.length;
-      _balSubTxns = _balSubTxns.filter(_hasEGInRow);
-      console.log('[EG-Viewer] SUB txns:', before, '→', _balSubTxns.length);
-    }
-    // Wage 거래도 EG 관련만 (드라이버 급여는 보이지만 EG 운행 건만)
-    if(typeof _balWageTxns !== 'undefined' && Array.isArray(_balWageTxns)){
-      const before = _balWageTxns.length;
-      _balWageTxns = _balWageTxns.filter(_hasEGInRow);
-      console.log('[EG-Viewer] Wage txns:', before, '→', _balWageTxns.length);
-    }
-    // 마스터 데이터 (M_Clients): EG TRAVEL 만 남김 — 다른 여행사 노출 방지
-    if(typeof DB !== 'undefined' && DB && Array.isArray(DB.C)){
-      const before = DB.C.length;
-      DB.C = DB.C.filter(c => {
-        const name = String(c.Name||'').toLowerCase();
-        return name.indexOf(EG_KEYWORD.toLowerCase()) >= 0;
-      });
-      console.log('[EG-Viewer] Clients (M_C):', before, '→', DB.C.length);
-    }
-  } catch(e){ console.error('[EG-Viewer] filter error', e); }
-}
-
-// 허용된 메뉴만 표시 — 나머지는 숨김
-const EG_VIEWER_ALLOWED_TABS = new Set(['ndash', 'nsch', 'ndr', 'nbal', 'ninv', 'nshift']);
-function applyEGViewerMenuRestriction(){
-  if(!isEGViewer()) return;
-  try {
-    document.querySelectorAll('.ni').forEach(el => {
-      const id = el.id || '';
-      if(id && !EG_VIEWER_ALLOWED_TABS.has(id)){
-        el.style.display = 'none';
-      }
-    });
-  } catch(e){ console.error('[EG-Viewer] menu restriction error', e); }
-}
-
-// 읽기 전용 적용 — 모든 쓰기성 fetch를 차단 + UI 버튼 숨김
-function applyEGViewerReadOnly(){
-  if(!isEGViewer()) return;
-  try {
-    // 1) fetch 가로채기 — POST + 쓰기 액션 차단
-    if(!window._egViewerFetchPatched){
-      const _origFetch = window.fetch.bind(window);
-      const _WRITE_ACTIONS = /\b(save|add|update|delete|create|remove|edit|put|post|insert|modify|set_|mark|approve|reject|issue|cancel|void|register|upload|sync)/i;
-      window.fetch = function(url, opts){
-        try {
-          // Login/ping/get_* 등 읽기는 통과
-          let body = '';
-          if(opts && opts.body) body = String(opts.body);
-          const u = String(url||'');
-          const isWrite = (opts && (opts.method||'').toUpperCase() === 'POST') &&
-                          _WRITE_ACTIONS.test(body) &&
-                          !/\"action\"\s*:\s*\"(login|logout|ping|get_login_names)\"/.test(body);
-          if(isWrite){
-            console.warn('[EG-Viewer] 쓰기 차단:', body.slice(0,120));
-            if(typeof toast === 'function') toast('읽기 전용 계정입니다','er');
-            return Promise.resolve(new Response(
-              JSON.stringify({ok:false, error:'read_only', reason:'EG viewer mode'}),
-              {status:403, headers:{'Content-Type':'application/json'}}
-            ));
-          }
-        } catch(e){}
-        return _origFetch(url, opts);
-      };
-      window._egViewerFetchPatched = true;
-    }
-    // 2) UI 버튼 숨김 — onclick에 save/add/delete/edit 같은 단어가 들어간 버튼
-    //    이건 가벼운 정리용 (실제 차단은 fetch 가로채기가 함)
-    const _hideWritePatterns = /\b(save|saveAdd|delete|del|del_|remove|add_|create|edit|update|issue|cancel|approve|reject|register|upload|markPaid|mark_paid)/i;
-    document.querySelectorAll('button[onclick], .btn[onclick], [onclick]').forEach(el => {
-      const oc = el.getAttribute('onclick') || '';
-      if(_hideWritePatterns.test(oc)){
-        el.style.display = 'none';
-      }
-    });
-    // 3) input/select/textarea 읽기 전용으로
-    document.querySelectorAll('input, select, textarea').forEach(el => {
-      // 검색/필터용은 살림 (search, filter, query 클래스/id)
-      const idCls = (el.id || '') + ' ' + (el.className || '');
-      if(/search|filter|query|sel|tab/i.test(idCls)) return;
-      // 그 외엔 비활성화
-      try {
-        if(el.tagName === 'SELECT') el.disabled = true;
-        else el.readOnly = true;
-      } catch(e){}
-    });
-  } catch(e){ console.error('[EG-Viewer] read-only error', e); }
-}
-
-// 화면 상단에 EG 뷰어 모드 배너 표시
-function showEGViewerBanner(){
-  if(!isEGViewer()) return;
-  if(document.getElementById('eg-viewer-banner')) return;
-  const banner = document.createElement('div');
-  banner.id = 'eg-viewer-banner';
-  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,#7c3aed,#a855f7);color:white;text-align:center;padding:5px 10px;font-size:11px;font-weight:700;letter-spacing:0.3px;box-shadow:0 2px 8px rgba(124,58,237,.3);';
-  banner.innerHTML = '🔒 EG TRAVEL 전용 뷰어 모드 · 읽기 전용 · EG TRAVEL 관련 항목만 표시됩니다';
-  document.body.appendChild(banner);
-  // 본문이 배너에 가리지 않도록 상단 패딩
-  try { document.body.style.paddingTop = '28px'; } catch(e){}
-}
-
-// 진입점: 데이터 로드 완료 후 호출 — 필터 + UI 제한 + 배너
-function initEGViewerMode(){
-  if(!isEGViewer()) return;
-  applyEGViewerFilter();
-  applyEGViewerMenuRestriction();
-  showEGViewerBanner();
-  // 읽기 전용 적용은 DOM 렌더 후로 약간 지연 (탭별 화면 그려진 후)
-  setTimeout(() => {
-    applyEGViewerReadOnly();
-    // 메뉴 클릭 후 렌더된 버튼들에도 적용되도록 주기적 재실행
-    setInterval(applyEGViewerReadOnly, 2000);
-  }, 500);
-}
-
-
-// ═══════════════════════════════════════════════════════════════
 // 여행사별 Payment Terms (인보이스 결제 기한 — 일 단위)
 // M_Clients 시트의 Payment_Terms 컬럼에서 가져옴 (기본값 14일)
 // ═══════════════════════════════════════════════════════════════
@@ -11227,8 +11029,6 @@ async function onSettleTourCodeSearch(){
         const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
         const json = await res.json();
         _drCache = json.rows || [];
-        // ★ EG 뷰어 모드: 필터 재적용
-        try { if(typeof applyEGViewerFilter === 'function') applyEGViewerFilter(); } catch(e){}
       } catch(e){
         toast('❌ 데이터 로드 실패','er');
         return;
@@ -12846,8 +12646,6 @@ async function onSdpTourCodeSearch(){
         const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report');
         const json = await res.json();
         _drCache = json.rows || [];
-        // ★ EG 뷰어 모드: 필터 재적용
-        try { if(typeof applyEGViewerFilter === 'function') applyEGViewerFilter(); } catch(e){}
       } catch(e){
         toast('❌ 데이터 로드 실패','er');
         return;
@@ -15121,8 +14919,6 @@ async function syncBalanceData(force){
     // ★ 자동 정합성 검사: 급여 탭 vs 잔액 탭 불일치 감지 → 콘솔 경고
     try { _wageConsistencyCheck(); } catch(e) { console.warn('wage consistency check:', e); }
     _balLoaded = true;
-    // ★ EG 뷰어 모드: Balance/SUB/Agency 데이터 새로 로드됐으므로 필터 재적용
-    try { if(typeof applyEGViewerFilter === 'function') applyEGViewerFilter(); } catch(e){}
     if(force) toast('잔액 데이터 동기화 완료','ok');
   } catch(e){
     console.warn('Balance sync 실패:', e);
@@ -24871,13 +24667,6 @@ async function loadDR(force=false){
       _drCacheTime = Date.now();
       // _reportsCache도 동기화 (급여 계산용)
       _reportsCache = _drCache.map(r=>({ ...r, _isoDate: parseToISO(r.Date||'') }));
-      // ★ EG 뷰어 모드: DR / reports 캐시 필터링
-      try {
-        if(typeof applyEGViewerFilter === 'function') applyEGViewerFilter();
-        if(typeof isEGViewer === 'function' && isEGViewer() && Array.isArray(_reportsCache)){
-          _reportsCache = _reportsCache.filter(_hasEGInRow);
-        }
-      } catch(e){}
     } else {
       throw new Error(json.msg || json.error || '데이터를 받을 수 없습니다');
     }
@@ -28560,15 +28349,11 @@ async function loadAllFromSheets(){
       const _mm = String(_d.getMinutes()).padStart(2,'0');
       _syncEl.textContent = '✅ Last Sync (마지막 동기화): ' + _hh + ':' + _mm;
     }
-    // ★ EG 뷰어 모드: 렌더 호출 전에 캐시 필터링 (렌더가 필터된 데이터를 보도록)
-    try { if(typeof applyEGViewerFilter === 'function') applyEGViewerFilter(); } catch(e){ console.warn('EG viewer filter error', e); }
     // ★ 핫픽스: 후속 호출들 모두 백그라운드 (UI 차단 방지)
     rDash();
     rWage();
     toast('✅ 데이터 로드 완료','ok');
     startAdminAutoSync();
-    // ★ EG 뷰어 모드 UI 제한 (메뉴 숨김, 배너, 읽기 전용)
-    try { if(typeof initEGViewerMode === 'function') initEGViewerMode(); } catch(e){ console.warn('EG viewer mode init error', e); }
     // ★ 저장 후 새로고침으로 진입한 경우: 원래 탭(예: Schedule)으로 자동 복귀
     try {
       const _postSaveTab = sessionStorage.getItem('dc_post_save_tab');
