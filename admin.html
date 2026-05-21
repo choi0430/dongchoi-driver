@@ -1650,6 +1650,91 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 </div>
 
 <!-- NOTICES MANAGEMENT PAGE -->
+<!-- ═══ EG TRAVEL 자동 리포트 발송 ═══ -->
+<div class="pg" id="pegrep">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">📤 EG TRAVEL 리포트 발송</div><div class="ssb">EG 관련 운행 정보를 PDF로 생성하여 자동/수동 발송</div></div>
+  </div>
+  <div style="padding:10px 14px 80px;">
+
+    <!-- 자동 발송 상태 카드 -->
+    <div style="background:linear-gradient(135deg,#faf5ff 0%,#f3e8ff 100%);border:1px solid #c4b5fd;border-radius:12px;padding:14px 18px;margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#5b21b6;">⏰ 자동 발송 스케줄</div>
+          <div style="font-size:11px;color:var(--t2);margin-top:4px;">
+            · 매일 06:00 — 전일 운행 리포트 + 종료된 투어코드<br>
+            · 매주 월요일 06:00 — 지난주 운행 요약 + 드라이버 지급액
+          </div>
+        </div>
+        <button onclick="setupEGTriggers()" class="btn" style="background:#7c3aed;color:white;font-weight:700;padding:8px 14px;border-radius:8px;font-size:11px;">⚙️ 자동 트리거 설정</button>
+      </div>
+    </div>
+
+    <!-- 수신자 정보 -->
+    <div style="background:var(--sf2);border:1px solid var(--b1);border-radius:10px;padding:12px 16px;margin-bottom:14px;">
+      <div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:6px;">📧 수신자</div>
+      <div id="eg-recipients-info" style="font-size:11px;color:var(--t2);">로딩 중...</div>
+      <div style="font-size:10px;color:var(--t3);margin-top:6px;">※ M_Clients 시트의 EG TRAVEL 이메일 자동 사용 + Branden(BCC) 안전장치</div>
+    </div>
+
+    <!-- 일일 리포트 섹션 -->
+    <div style="background:white;border:2px solid #c4b5fd;border-radius:12px;padding:16px;margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div>
+          <div style="font-size:14px;font-weight:800;color:#5b21b6;">📋 일일 운행 리포트</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:2px;">선택한 날짜의 EG 관련 DR + 새로 종료된 투어코드</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <label style="font-size:11px;font-weight:600;">대상일:</label>
+        <input type="date" id="eg-daily-date" style="padding:6px 10px;border:1.5px solid var(--bd);border-radius:6px;font-size:11px;">
+        <button onclick="previewEGDaily()" class="btn" style="background:var(--ac);color:white;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;">👁️ 미리보기</button>
+        <button onclick="sendEGDailyNow()" class="btn" style="background:#16a34a;color:white;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;">📧 지금 발송</button>
+      </div>
+    </div>
+
+    <!-- 주간 리포트 섹션 -->
+    <div style="background:white;border:2px solid #86efac;border-radius:12px;padding:16px;margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div>
+          <div style="font-size:14px;font-weight:800;color:#15803d;">📊 주간 운행 요약</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:2px;">기간의 EG 운행 통계 + 상세 + 드라이버별 지급액</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <label style="font-size:11px;font-weight:600;">기간:</label>
+        <input type="date" id="eg-weekly-from" style="padding:6px 10px;border:1.5px solid var(--bd);border-radius:6px;font-size:11px;">
+        <span>~</span>
+        <input type="date" id="eg-weekly-to" style="padding:6px 10px;border:1.5px solid var(--bd);border-radius:6px;font-size:11px;">
+        <button onclick="setEGWeekPreset('last')" class="btn bgh" style="padding:6px 10px;border-radius:6px;font-size:10px;">지난주</button>
+        <button onclick="setEGWeekPreset('this')" class="btn bgh" style="padding:6px 10px;border-radius:6px;font-size:10px;">이번주</button>
+        <button onclick="previewEGWeekly()" class="btn" style="background:var(--ac);color:white;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;">👁️ 미리보기</button>
+        <button onclick="sendEGWeeklyNow()" class="btn" style="background:#16a34a;color:white;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;">📧 지금 발송</button>
+      </div>
+    </div>
+
+    <!-- 미리보기 영역 -->
+    <div id="eg-preview-container" style="display:none;background:white;border:1px solid var(--b1);border-radius:10px;padding:14px;margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="font-size:13px;font-weight:700;color:var(--t1);">👁️ 미리보기</div>
+        <button onclick="document.getElementById('eg-preview-container').style.display='none'" class="btn bgh" style="padding:4px 10px;border-radius:6px;font-size:10px;">닫기 ✕</button>
+      </div>
+      <iframe id="eg-preview-iframe" style="width:100%;height:600px;border:1px solid var(--b1);border-radius:6px;background:white;"></iframe>
+    </div>
+
+    <!-- 발송 이력 -->
+    <div style="background:var(--sf2);border:1px solid var(--b1);border-radius:10px;padding:12px 16px;margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="font-size:12px;font-weight:700;color:var(--t1);">📜 최근 발송 이력</div>
+        <button onclick="loadEGReportLog()" class="btn bgh" style="padding:4px 10px;border-radius:6px;font-size:10px;">🔄 새로고침</button>
+      </div>
+      <div id="eg-report-log" style="font-size:11px;color:var(--t2);">로드하려면 새로고침 버튼을 눌러주세요.</div>
+    </div>
+
+  </div>
+</div>
+
 <!-- ═══ INCIDENT REPORTS (사고 보고 관리 — BOAS SMS Element 7) ═══ -->
 <div class="pg" id="pinc">
   <div class="shd" style="padding-top:8px">
@@ -2499,6 +2584,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="ni" id="nquo" onclick="nv('pquo','nquo');initQuotation()"><div class="nie">📑</div><div class="nil">Quotation (견적서)</div><span class="tab-badge" id="badge-nquo"></span></div>
   </div>
   <div class="bnav-group">
+    <div class="ni" id="negrep" onclick="nv('pegrep','negrep');initEGReport()"><div class="nie">📤</div><div class="nil">EG 리포트</div><span class="tab-badge" id="badge-negrep"></span></div>
     <div class="ni" id="ninc" onclick="nv('pinc','ninc');loadAdminIncidents()"><div class="nie">🚨</div><div class="nil">사고보고</div><span class="tab-badge" id="badge-ninc"></span></div>
     <div class="ni" id="nsms" onclick="nv('psms','nsms');renderSMSChecklist()"><div class="nie">📋</div><div class="nil">SMS</div><span class="tab-badge" id="badge-nsms"></span></div>
     <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div><span class="tab-badge" id="badge-nnotice"></span></div>
@@ -31367,6 +31453,210 @@ async function toggleSubPaymentSingle(rowIndex, type, confirmed){
   } catch(err){
     console.error('[toggleSubPaymentSingle]', err);
     alert('네트워크 오류: ' + err.message);
+  }
+}
+
+// ═══════════════════════════════════════
+// ═══════════════════════════════════════
+// EG TRAVEL 자동 리포트 발송 (수동 트리거 + 미리보기)
+// ═══════════════════════════════════════
+async function initEGReport(){
+  // 기본 날짜: 어제 / 지난주
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const yesterdayISO = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  const dailyInput = document.getElementById('eg-daily-date');
+  if(dailyInput && !dailyInput.value) dailyInput.value = yesterdayISO;
+  setEGWeekPreset('last');
+  // 수신자 정보 표시
+  _renderEGRecipientsInfo();
+  // 최근 발송 이력
+  loadEGReportLog();
+}
+
+function _renderEGRecipientsInfo(){
+  const infoEl = document.getElementById('eg-recipients-info');
+  if(!infoEl) return;
+  try {
+    // M_Clients에서 EG TRAVEL 검색
+    const egClient = (DB.C || []).find(c => String(c.Name||'').toUpperCase().indexOf('EG TRAVEL') >= 0);
+    if(!egClient){
+      infoEl.innerHTML = '<span style="color:var(--rd);">⚠️ M_Clients에 EG TRAVEL이 등록되지 않았습니다.</span>';
+      return;
+    }
+    const to = String(egClient.Email||'').trim();
+    const cc = String(egClient.Email_CC||'').trim();
+    let html = '';
+    html += '<div><b>📧 To:</b> ' + (to ? escH(to) : '<span style="color:var(--rd);">(이메일 없음)</span>') + '</div>';
+    if(cc) html += '<div><b>📋 CC:</b> ' + escH(cc) + '</div>';
+    html += '<div><b>🔒 BCC:</b> branden.dongchoi@gmail.com <span style="color:var(--t3);">(자동, 안전장치)</span></div>';
+    infoEl.innerHTML = html;
+  } catch(e){
+    infoEl.innerHTML = '<span style="color:var(--rd);">로드 실패: ' + escH(e.message) + '</span>';
+  }
+}
+
+function setEGWeekPreset(which){
+  // 'this' = 이번주 월~일, 'last' = 지난주 월~일
+  const today = new Date();
+  const day = today.getDay(); // 0=일
+  const monDiff = (day === 0) ? -6 : 1 - day;
+  const monThis = new Date(today);
+  monThis.setDate(today.getDate() + monDiff);
+  let mon, sun;
+  if(which === 'last'){
+    mon = new Date(monThis); mon.setDate(monThis.getDate() - 7);
+    sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  } else {
+    mon = monThis;
+    sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  }
+  const iso = (d) => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  const fromEl = document.getElementById('eg-weekly-from');
+  const toEl = document.getElementById('eg-weekly-to');
+  if(fromEl) fromEl.value = iso(mon);
+  if(toEl) toEl.value = iso(sun);
+}
+
+async function previewEGDaily(){
+  const date = document.getElementById('eg-daily-date')?.value;
+  if(!date){ toast('대상일을 선택하세요','er'); return; }
+  toast('미리보기 생성 중...','in');
+  try {
+    const url = APPS_SCRIPT_URL + '?action=preview_eg_report&type=daily&date=' + encodeURIComponent(date);
+    const res = await fetch(url);
+    const j = await res.json();
+    if(!j.ok){ toast('미리보기 실패: ' + (j.error||'알 수 없음'),'er'); return; }
+    _showEGPreview(j.html, j.subject);
+    toast('미리보기 완료 · DR ' + (j.drCount||0) + '건 / 종료투어 ' + (j.completedCount||0) + '개','ok');
+  } catch(e){
+    toast('미리보기 오류: ' + e.message,'er');
+  }
+}
+
+async function previewEGWeekly(){
+  const from = document.getElementById('eg-weekly-from')?.value;
+  const to = document.getElementById('eg-weekly-to')?.value;
+  if(!from || !to){ toast('기간을 선택하세요','er'); return; }
+  toast('미리보기 생성 중...','in');
+  try {
+    const url = APPS_SCRIPT_URL + '?action=preview_eg_report&type=weekly&from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to);
+    const res = await fetch(url);
+    const j = await res.json();
+    if(!j.ok){ toast('미리보기 실패: ' + (j.error||'알 수 없음'),'er'); return; }
+    _showEGPreview(j.html, j.subject);
+    toast('미리보기 완료 · 운행 ' + (j.drCount||0) + '건','ok');
+  } catch(e){
+    toast('미리보기 오류: ' + e.message,'er');
+  }
+}
+
+function _showEGPreview(html, subject){
+  const container = document.getElementById('eg-preview-container');
+  const iframe = document.getElementById('eg-preview-iframe');
+  if(!container || !iframe) return;
+  container.style.display = 'block';
+  iframe.srcdoc = html || '<p>미리보기 데이터 없음</p>';
+  container.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+async function sendEGDailyNow(){
+  const date = document.getElementById('eg-daily-date')?.value;
+  if(!date){ toast('대상일을 선택하세요','er'); return; }
+  if(!confirm('정말로 ' + date + ' 일자 EG 리포트를 발송하시겠습니까?\n수신자: EG TRAVEL + Branden(BCC)')) return;
+  toast('발송 중... (PDF 생성)','in');
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'send_eg_daily_report', date: date, _user: getAdminUser() })
+    });
+    const j = await res.json();
+    if(!j.ok){ toast('발송 실패: ' + (j.error||'알 수 없음'),'er'); return; }
+    if(j.skipped){
+      toast('발송 skip — 전날 DR 0건 & 종료투어 0개','ok');
+      return;
+    }
+    toast('✅ 발송 완료 · DR ' + (j.drCount||0) + '건 / 종료투어 ' + (j.completedCount||0) + '개','ok');
+    setTimeout(loadEGReportLog, 1500);
+  } catch(e){
+    toast('발송 오류: ' + e.message,'er');
+  }
+}
+
+async function sendEGWeeklyNow(){
+  const from = document.getElementById('eg-weekly-from')?.value;
+  const to = document.getElementById('eg-weekly-to')?.value;
+  if(!from || !to){ toast('기간을 선택하세요','er'); return; }
+  if(!confirm('정말로 ' + from + ' ~ ' + to + ' 주간 EG 리포트를 발송하시겠습니까?')) return;
+  toast('발송 중... (PDF 생성)','in');
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'send_eg_weekly_report', from: from, to: to, _user: getAdminUser() })
+    });
+    const j = await res.json();
+    if(!j.ok){ toast('발송 실패: ' + (j.error||'알 수 없음'),'er'); return; }
+    if(j.skipped){
+      toast('발송 skip — 운행 0건','ok');
+      return;
+    }
+    toast('✅ 발송 완료 · 운행 ' + (j.drCount||0) + '건 · $' + (j.totalAmount||0).toLocaleString('en-AU',{minimumFractionDigits:2}),'ok');
+    setTimeout(loadEGReportLog, 1500);
+  } catch(e){
+    toast('발송 오류: ' + e.message,'er');
+  }
+}
+
+async function setupEGTriggers(){
+  if(!confirm('자동 트리거를 설정합니다:\n· 매일 06:00 일일 리포트\n· 매주 월요일 06:00 주간 리포트\n\n기존 EG 트리거가 있으면 교체됩니다.')) return;
+  toast('트리거 설정 중...','in');
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'setup_eg_report_triggers', _user: getAdminUser() })
+    });
+    const j = await res.json();
+    if(!j.ok){ toast('트리거 설정 실패: ' + (j.error||'알 수 없음'),'er'); return; }
+    toast('✅ ' + (j.message || '트리거 설정 완료'),'ok');
+  } catch(e){
+    toast('트리거 설정 오류: ' + e.message,'er');
+  }
+}
+
+async function loadEGReportLog(){
+  const logEl = document.getElementById('eg-report-log');
+  if(!logEl) return;
+  logEl.innerHTML = '<div style="color:var(--t3);">로딩 중...</div>';
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_master&name=EG_Report_Log');
+    const j = await res.json();
+    if(!j.ok || !j.rows || j.rows.length === 0){
+      logEl.innerHTML = '<div style="color:var(--t3);">발송 이력이 없습니다.</div>';
+      return;
+    }
+    // 최근 10건만, 역순
+    const rows = j.rows.slice(-10).reverse();
+    let html = '<table style="width:100%;font-size:10px;border-collapse:collapse;">';
+    html += '<tr style="background:#ede9fe;color:#5b21b6;"><th style="padding:6px;text-align:left;">발송시각</th><th style="padding:6px;">유형</th><th style="padding:6px;text-align:left;">기간</th><th style="padding:6px;text-align:left;">수신자</th><th style="padding:6px;">상태</th><th style="padding:6px;text-align:left;">메모</th></tr>';
+    rows.forEach(r => {
+      const status = String(r.Status||'').toUpperCase();
+      const statusColor = status === 'OK' ? 'var(--gn)' : 'var(--rd)';
+      html += '<tr style="border-bottom:1px solid var(--b1);">';
+      html += '<td style="padding:5px;">' + escH(r.SentAt||'') + '</td>';
+      html += '<td style="padding:5px;text-align:center;">' + escH(r.ReportType||'') + '</td>';
+      html += '<td style="padding:5px;">' + escH((r.PeriodFrom||'') + (r.PeriodTo && r.PeriodTo !== r.PeriodFrom ? ' ~ ' + r.PeriodTo : '')) + '</td>';
+      html += '<td style="padding:5px;font-size:9px;color:var(--t3);">' + escH(r.Recipients||'').slice(0,40) + (String(r.Recipients||'').length > 40 ? '...' : '') + '</td>';
+      html += '<td style="padding:5px;text-align:center;color:' + statusColor + ';font-weight:700;">' + escH(status) + '</td>';
+      html += '<td style="padding:5px;font-size:9px;color:var(--t3);">' + escH(r.Notes||'') + '</td>';
+      html += '</tr>';
+    });
+    html += '</table>';
+    logEl.innerHTML = html;
+  } catch(e){
+    logEl.innerHTML = '<div style="color:var(--rd);">로드 실패: ' + escH(e.message) + '</div>';
   }
 }
 
