@@ -7762,8 +7762,8 @@ function _egCommonStyle(){
 function _egTripCardHTML(r){
   const drCost = Number(r.DR_Cost || r.Total || 0) || 0;
   const nightOwn = Number(r.Night_Owner || 0) || 0;
-  const tS = String(r.Time_Start || r.Start_Time || '').trim();
-  const tE = String(r.Time_End || r.End_Time || '').trim();
+  const tS = _egFmtTime(r.Time_Start || r.Start_Time);
+  const tE = _egFmtTime(r.Time_End || r.End_Time);
   const timeStr = tS ? (tS + (tE ? ' ~ ' + tE : '')) : '';
   const kmS = String(r.KM_Start || r.Start_KM || '').trim();
   const kmE = String(r.KM_End || r.End_KM || '').trim();
@@ -7890,8 +7890,8 @@ function _egTourCompletionCardHTML(t){
       const rego = r.Rego || '';
       const driver = r.Driver || '';
       const attraction = r.Attraction || r.Course || '';
-      const tS = String(r.Time_Start || r.Start_Time || '').trim();
-      const tE = String(r.Time_End || r.End_Time || '').trim();
+      const tS = _egFmtTime(r.Time_Start || r.Start_Time);
+      const tE = _egFmtTime(r.Time_End || r.End_Time);
       const timeStr = tS ? (tS + (tE ? '~' + tE : '')) : '';
       html += '<div class="dr-row">';
       html += '<div class="dt">' + _egFmtDate(r._iso) + '</div>';
@@ -8071,6 +8071,25 @@ function _egBuildWeeklyReportHTML(monISO, sunISO, drs){
 function _egEsc(s){
   if(s === null || s === undefined) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── 시간 정규화 (HH:MM) ─────────────────────────────────────────────────
+// Google Sheets는 시간 셀("08:30")을 Date 객체(1899-12-30T08:30:00)로 반환하므로
+// String() 변환 시 "Sat Dec 30 1899 08:30:00 GMT+1000" 같이 깨짐.
+// 이 헬퍼는 Date 객체에서 HH:MM만 추출하고, 이미 문자열이면 그대로 정리.
+function _egFmtTime(v){
+  if(v === null || v === undefined || v === '') return '';
+  // Date 객체 — Sydney 타임존 기준 HH:MM 추출
+  if(v instanceof Date && !isNaN(v.getTime())){
+    return Utilities.formatDate(v, 'Australia/Sydney', 'HH:mm');
+  }
+  const s = String(v).trim();
+  if(!s) return '';
+  // Sheets에서 종종 "Sat Dec 30 1899 08:30:00 GMT+1000" 형태로 들어옴
+  const m1 = s.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
+  if(m1) return m1[1].padStart(2,'0') + ':' + m1[2];
+  // 이미 정상 "08:30" 또는 "8:30"
+  return s;
 }
 
 // ── 발송 (공통) — HTML을 PDF로 첨부하여 Gmail로 발송 ──────────────────────
