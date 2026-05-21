@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SUB 진단 — EG TRAVEL</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif;
+    background: #f3f4f6;
+    margin: 0;
+    padding: 12px;
+    color: #1f2937;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; color: #4f46e5; }
+  .sub { color: #6b7280; font-size: 12px; margin-bottom: 16px; }
+
+  .controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .controls input {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .controls button {
+    padding: 10px 16px;
+    background: #4f46e5;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .controls button:disabled { background: #9ca3af; }
+
+  .status {
+    background: white;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    border: 1px solid #e5e7eb;
+    font-size: 13px;
+  }
+  .status .row { display: flex; justify-content: space-between; padding: 2px 0; }
+  .status .ok { color: #059669; font-weight: 600; }
+  .status .err { color: #dc2626; font-weight: 600; }
+
+  .card {
+    background: white;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .card h2 {
+    font-size: 15px;
+    margin: 0 0 8px;
+    color: #1f2937;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .card .date { font-size: 13px; color: #6b7280; font-weight: 500; }
+  .card .recorded {
+    font-size: 18px;
+    font-weight: 700;
+    color: #4f46e5;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+  .badge.match { background: #d1fae5; color: #065f46; }
+  .badge.diff  { background: #fee2e2; color: #991b1b; }
+  .badge.warn  { background: #fef3c7; color: #92400e; }
+
+  .meta {
+    background: #f9fafb;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    margin-bottom: 8px;
+    color: #4b5563;
+  }
+  .meta .k { color: #6b7280; }
+
+  table.breakdown {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table.breakdown td {
+    padding: 6px 4px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  table.breakdown td.lbl { color: #6b7280; }
+  table.breakdown td.val { text-align: right; font-variant-numeric: tabular-nums; }
+  table.breakdown tr.total td {
+    font-weight: 700;
+    border-top: 2px solid #1f2937;
+    border-bottom: none;
+    padding-top: 8px;
+    color: #1f2937;
+  }
+  table.breakdown td.diff-cell { color: #dc2626; font-weight: 600; }
+
+  .raw-toggle {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #6366f1;
+    cursor: pointer;
+    user-select: none;
+  }
+  .raw-data {
+    display: none;
+    margin-top: 8px;
+    background: #1f2937;
+    color: #d1d5db;
+    border-radius: 6px;
+    padding: 10px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .raw-data.show { display: block; }
+
+  .summary {
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .summary h3 { font-size: 14px; margin: 0 0 6px; color: #3730a3; }
+  .summary p { margin: 4px 0; font-size: 13px; }
+
+  .empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: #9ca3af;
+    background: white;
+    border-radius: 12px;
+  }
+</style>
+</head>
+<body>
+
+<h1>🔍 SUB 거래 진단</h1>
+<div class="sub">SUB_Txn 기록값 vs. calcSubReport 재계산 비교</div>
+
+<div class="controls">
+  <input type="text" id="company" value="EG TRAVEL" placeholder="SubCompany (예: EG TRAVEL)">
+  <button id="runBtn" onclick="run()">진단 실행</button>
+</div>
+
+<div id="status" class="status" style="display:none"></div>
+
+<div id="summary" class="summary" style="display:none"></div>
+
+<div id="results"></div>
+
+<script>
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
+
+// ── calcSubReport 핵심 로직 그대로 복제 ──
+const DC_OWNERS = ['Dong Choi','Dong Choi Pty Ltd','동초이','DC'];
+
+function _hotelDRtoTA(dr, sn){
+  if(!dr || dr===0) return 0;
+  if(sn>=50) return dr===15?80:dr===30?160:dr*4;
+  if(sn>=40) return dr===15?75:dr===30?150:dr*4;
+  return dr===10?40:dr===20?80:dr*4;
+}
+function _distDRtoTA(dr, sn){
+  if(!dr || dr===0) return 0;
+  if(sn>=50) return dr===40?160:dr*4;
+  if(sn>=40) return dr===40?150:Math.round(dr*3.75);
+  return dr===30?80:Math.round(dr*2.67);
+}
+function _trailerDRtoTA(dr, sn){
+  if(!dr || dr===0) return 0;
+  if(sn>=40) return 0;
+  return dr===30?80:Math.round(dr*2.67);
+}
+
+function fmt(n){
+  if(n===null||n===undefined||n==='') return '$0';
+  const v = Number(n)||0;
+  return '$' + v.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2});
+}
+
+function setStatus(html){
+  const el = document.getElementById('status');
+  el.style.display = 'block';
+  el.innerHTML = html;
+}
+function addStatus(label, value, cls){
+  const el = document.getElementById('status');
+  el.insertAdjacentHTML('beforeend',
+    '<div class="row"><span>'+label+'</span><span class="'+(cls||'')+'">'+value+'</span></div>');
+}
+
+async function fetchJson(action, params){
+  const qs = new URLSearchParams({action, ...(params||{})});
+  const r = await fetch(APPS_SCRIPT_URL+'?'+qs.toString());
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  return r.json();
+}
+
+let _vehicles = [], _drRows = [], _subTxns = [], _priceSub = {}, _subRates = {};
+
+async function loadAll(){
+  setStatus('');
+  addStatus('1. SUB_Txn 로드', '...');
+  const subRes = await fetchJson('get_sub_txn');
+  _subTxns = (subRes.rows||subRes||[]);
+  // ensure array
+  if(!Array.isArray(_subTxns)) _subTxns = [];
+  addStatus('   SUB_Txn 행 수', _subTxns.length+'건', 'ok');
+
+  addStatus('2. Daily_Report 로드', '...');
+  const drRes = await fetchJson('get_reports', {sheet:'Daily_Report'});
+  _drRows = (drRes.rows||drRes||[]);
+  if(!Array.isArray(_drRows)) _drRows = [];
+  addStatus('   DR 행 수', _drRows.length+'건', 'ok');
+
+  addStatus('3. M_PriceSub 로드', '...');
+  const psRes = await fetchJson('get_price_sub');
+  const psRows = (psRes.rows||[]);
+  _priceSub = {};
+  psRows.forEach(r=>{
+    if(!r.SubCo||!r.Course) return;
+    if(!_priceSub[r.SubCo]) _priceSub[r.SubCo]={};
+    _priceSub[r.SubCo][r.Course]={
+      '21':{rate:Number(r.seats_21_rate)||0},
+      '25':{rate:Number(r.seats_25_rate)||0},
+      '40':{rate:Number(r.seats_40_rate)||0},
+      '50':{rate:Number(r.seats_50_rate)||0}
+    };
+  });
+  addStatus('   M_PriceSub 회사 수', Object.keys(_priceSub).length+'개', 'ok');
+
+  addStatus('4. Sub_Rates 로드', '...');
+  try {
+    const srRes = await fetchJson('get_sub_rates');
+    const srRows = (srRes.rows||[]);
+    _subRates = {};
+    srRows.forEach(r=>{
+      const key = r.SubCo || r.Rego || '';
+      if(!key||!r.Tour) return;
+      if(!_subRates[key]) _subRates[key]={};
+      _subRates[key][r.Tour]={'21':Number(r.seats_21)||0,'25':Number(r.seats_25)||0,'40':Number(r.seats_40)||0,'50':Number(r.seats_50)||0};
+    });
+    addStatus('   Sub_Rates 회사 수', Object.keys(_subRates).length+'개', 'ok');
+  } catch(e) {
+    addStatus('   Sub_Rates', '없음 (선택사항)', 'warn');
+  }
+
+  addStatus('5. M_Vehicles 로드', '...');
+  const vRes = await fetchJson('get_master', {sheet:'M_Vehicles'});
+  _vehicles = (vRes.rows||[]);
+  addStatus('   차량 수', _vehicles.length+'대', 'ok');
+}
+
+function findVehicle(rego){
+  return _vehicles.find(v => (v.Rego||'').trim() === (rego||'').trim());
+}
+
+function pickTourCode(r){
+  return (r.Tour_Code || r.TourCode || r.tour_code || '').trim();
+}
+
+function parseToISO(s){
+  if(!s) return '';
+  s = String(s).trim();
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+  return '';
+}
+
+function findDR(dateISO, rego, tourCode){
+  return _drRows.find(r => {
+    if(parseToISO(r.Date||'') !== dateISO) return false;
+    if((r.Rego||'').trim() !== rego) return false;
+    const tc = pickTourCode(r);
+    if(tourCode && tc !== tourCode) return false;
+    return true;
+  });
+}
+
+// calcSubReport 재현 (BillingEntity 분기 포함)
+function recomputeSubCost(dr){
+  if(!dr) return null;
+  const rego = (dr.Rego||'').trim();
+  const veh = findVehicle(rego);
+  const owner = (veh?.Owner||'').trim();
+  const isSub = !!rego && !!veh && !DC_OWNERS.includes(owner);
+  const capNum = parseInt((dr.Seats||'25').replace(/[^0-9]/g,''))||25;
+  const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
+  const attraction = (dr.Attraction||'').trim();
+  const agency = (dr.Agency||'').trim();
+
+  const billingEntity = String(dr.Billing_Entity||dr.BillingEntity||'').trim().toUpperCase();
+  const _isBEDC = !billingEntity || billingEntity === 'DC' || /DONG\s*CHOI/i.test(billingEntity);
+
+  const psRate = _priceSub[owner]?.[attraction]?.[capKey]?.rate || 0;
+  const subBase = parseFloat(_subRates[owner]?.[attraction]?.[capKey]) || psRate;
+
+  const hotelDR = parseFloat(dr.Hotel_Surcharge)||0;
+  const distDR  = parseFloat(dr.Dist_Surcharge)||0;
+  const trailerDR_raw = parseFloat(dr.Trailer)||0;
+  const hotelSub = _hotelDRtoTA(hotelDR, capNum);
+  const distSub  = _distDRtoTA(distDR, capNum);
+  const trailerSub = _trailerDRtoTA(trailerDR_raw, capNum);
+
+  const otDR = parseFloat(dr.OT)||0;
+  const otRateTA = capNum>=50?160:capNum>=40?150:80;
+  const otRateDR = capNum>=40?40:30;
+  const _isHojuroOT = /호주로|hojuro|plus\s*australia/i.test(agency);
+  const subOT = _isHojuroOT
+    ? Math.round((otDR / (otRateDR/2)) * (otRateTA/2))
+    : Math.round((otRateDR>0 ? otDR/otRateDR : 0) * otRateTA);
+
+  const subTotal = subBase + hotelSub + distSub + trailerSub + subOT;
+
+  return {
+    isSub, owner, capNum, capKey, attraction, agency,
+    billingEntity, isBEDC: _isBEDC,
+    subBase, psRate, subRatesRate: _subRates[owner]?.[attraction]?.[capKey] || 0,
+    hotelDR, distDR, trailerDR_raw, otDR,
+    hotelSub, distSub, trailerSub, subOT,
+    subTotal,
+    nightOwner: parseFloat(dr.Night_Owner)||0
+  };
+}
+
+function diffBadge(recorded, computed){
+  const r = Number(recorded)||0;
+  const c = Number(computed)||0;
+  if(Math.abs(r-c) < 0.01) return '<span class="badge match">✓ 일치</span>';
+  return '<span class="badge diff">⚠ 차이 '+fmt(r-c)+'</span>';
+}
+
+function renderTxnCard(txn){
+  // Description 파싱: DRSUB:YYYY-MM-DD_REGO_TOURCODE
+  const desc = String(txn.Description||'');
+  const m = desc.match(/^DRSUB:(\d{4}-\d{2}-\d{2})_([^_]+)_(.+?)(?:\|.*)?$/);
+  if(!m){
+    return '<div class="card"><h2>비-DRSUB 거래</h2><div class="meta">'+desc+'<br>DR: '+fmt(txn.DR)+'</div></div>';
+  }
+  const [_, dateISO, rego, tourCode] = m;
+  const recordedDR = Number(txn.DR)||0;
+
+  const dr = findDR(dateISO, rego, tourCode);
+
+  let html = '<div class="card">';
+  html += '<h2><span>'+dateISO.slice(5)+' · '+rego+'</span><span class="recorded">'+fmt(recordedDR)+'</span></h2>';
+  html += '<div class="meta"><span class="k">TourCode:</span> '+tourCode+'<br>';
+  html += '<span class="k">Remark:</span> '+(txn.Remark||'(없음)')+'</div>';
+
+  if(!dr){
+    html += '<div style="color:#dc2626;padding:8px;background:#fef2f2;border-radius:6px;font-size:12px">⚠ 일치하는 Daily_Report 행을 찾지 못함 (날짜+Rego+TourCode 조합으로 검색)</div>';
+    html += '</div>';
+    return html;
+  }
+
+  const calc = recomputeSubCost(dr);
+
+  // BillingEntity 경고
+  if(!calc.isBEDC){
+    html += '<div style="color:#92400e;padding:8px;background:#fef3c7;border-radius:6px;font-size:12px;margin-bottom:8px">⚠ BillingEntity = '+calc.billingEntity+' → 원래는 DRSUB 자동등록 대상이 아님. 과거 잔존 데이터일 수 있음.</div>';
+  }
+
+  html += '<table class="breakdown">';
+  html += '<tr><td class="lbl">Attraction</td><td class="val">'+calc.attraction+'</td></tr>';
+  html += '<tr><td class="lbl">Owner / Seats</td><td class="val">'+calc.owner+' · '+calc.capNum+'S ('+calc.capKey+')</td></tr>';
+  html += '<tr><td class="lbl">Agency</td><td class="val">'+calc.agency+'</td></tr>';
+  html += '<tr><td colspan="2" style="padding-top:8px;color:#6366f1;font-weight:600;border-top:1px dashed #d1d5db">▼ subBase 단가 조회</td></tr>';
+  html += '<tr><td class="lbl">M_PriceSub rate</td><td class="val">'+fmt(calc.psRate)+'</td></tr>';
+  html += '<tr><td class="lbl">Sub_Rates rate</td><td class="val">'+fmt(calc.subRatesRate)+'</td></tr>';
+  html += '<tr><td class="lbl"><b>채택 subBase</b></td><td class="val"><b>'+fmt(calc.subBase)+'</b></td></tr>';
+
+  html += '<tr><td colspan="2" style="padding-top:8px;color:#6366f1;font-weight:600;border-top:1px dashed #d1d5db">▼ 서차지 (DR 원본 → SUB 변환)</td></tr>';
+  html += '<tr><td class="lbl">Hotel DR '+fmt(calc.hotelDR)+'</td><td class="val">→ SUB '+fmt(calc.hotelSub)+'</td></tr>';
+  html += '<tr><td class="lbl">Dist DR '+fmt(calc.distDR)+'</td><td class="val">→ SUB '+fmt(calc.distSub)+'</td></tr>';
+  html += '<tr><td class="lbl">Trailer DR '+fmt(calc.trailerDR_raw)+'</td><td class="val">→ SUB '+fmt(calc.trailerSub)+'</td></tr>';
+  html += '<tr><td class="lbl">OT DR '+fmt(calc.otDR)+'</td><td class="val">→ SUB '+fmt(calc.subOT)+'</td></tr>';
+
+  html += '<tr class="total"><td>재계산 합계</td><td class="val">'+fmt(calc.subTotal)+'</td></tr>';
+  html += '<tr><td class="lbl">기록된 DR</td><td class="val">'+fmt(recordedDR)+'</td></tr>';
+
+  const diff = recordedDR - calc.subTotal;
+  if(Math.abs(diff) < 0.01){
+    html += '<tr><td colspan="2" style="text-align:center;padding-top:8px"><span class="badge match">✓ 완전 일치</span></td></tr>';
+  } else {
+    html += '<tr><td class="lbl">차이</td><td class="val diff-cell">'+(diff>0?'+':'')+fmt(diff)+'</td></tr>';
+  }
+
+  // Raw data toggle
+  const rawId = 'raw_'+Math.random().toString(36).slice(2,8);
+  html += '<div class="raw-toggle" onclick="document.getElementById(\''+rawId+'\').classList.toggle(\'show\')">▸ 원본 DR 데이터 보기/숨기기</div>';
+  html += '<div class="raw-data" id="'+rawId+'">'+JSON.stringify({
+    Date: dr.Date, Rego: dr.Rego, Attraction: dr.Attraction,
+    Tour_Code: dr.Tour_Code || dr.TourCode,
+    Agency: dr.Agency, Driver: dr.Driver, Guide: dr.Guide,
+    Seats: dr.Seats,
+    OT: dr.OT, Hotel_Surcharge: dr.Hotel_Surcharge,
+    Dist_Surcharge: dr.Dist_Surcharge, Trailer: dr.Trailer,
+    Night_Owner: dr.Night_Owner,
+    DR_Cost: dr.DR_Cost, SVC_Charge: dr.SVC_Charge,
+    Billing_Entity: dr.Billing_Entity || dr.BillingEntity,
+    Private: dr.Private
+  }, null, 2)+'</div>';
+
+  html += '</table></div>';
+  return html;
+}
+
+async function run(){
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  btn.textContent = '로딩중...';
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('summary').style.display = 'none';
+
+  try {
+    await loadAll();
+
+    const company = document.getElementById('company').value.trim().toUpperCase();
+    const matching = _subTxns.filter(t =>
+      String(t.SubCompany||'').trim().toUpperCase() === company &&
+      String(t.Description||'').startsWith('DRSUB:')
+    );
+
+    addStatus('6. '+company+' DRSUB 행', matching.length+'건', matching.length?'ok':'err');
+
+    if(matching.length === 0){
+      document.getElementById('results').innerHTML =
+        '<div class="empty">'+company+'의 DRSUB 거래를 찾지 못했습니다.<br>회사명 정확히 입력했는지 확인해주세요.</div>';
+      return;
+    }
+
+    // 날짜 순 정렬
+    matching.sort((a,b)=>{
+      const da = (a.Date||'').toString();
+      const db = (b.Date||'').toString();
+      return da.localeCompare(db);
+    });
+
+    let totalRecorded = 0, totalComputed = 0, mismatches = 0;
+    let html = '';
+    matching.forEach(txn => {
+      const desc = String(txn.Description||'');
+      const m = desc.match(/^DRSUB:(\d{4}-\d{2}-\d{2})_([^_]+)_(.+?)(?:\|.*)?$/);
+      if(m){
+        const dr = findDR(m[1], m[2], m[3]);
+        if(dr){
+          const calc = recomputeSubCost(dr);
+          totalComputed += calc.subTotal;
+          if(Math.abs((Number(txn.DR)||0) - calc.subTotal) >= 0.01) mismatches++;
+        }
+      }
+      totalRecorded += (Number(txn.DR)||0);
+      html += renderTxnCard(txn);
+    });
+
+    // 요약
+    const summaryEl = document.getElementById('summary');
+    summaryEl.style.display = 'block';
+    summaryEl.innerHTML =
+      '<h3>📊 '+company+' 진단 요약</h3>'+
+      '<p><b>총 DRSUB 행 수:</b> '+matching.length+'건</p>'+
+      '<p><b>기록된 DR 합계:</b> '+fmt(totalRecorded)+'</p>'+
+      '<p><b>재계산 합계:</b> '+fmt(totalComputed)+'</p>'+
+      '<p><b>불일치 건수:</b> <span style="color:'+(mismatches?'#dc2626':'#059669')+';font-weight:700">'+
+      mismatches+'건</span></p>';
+
+    document.getElementById('results').innerHTML = html;
+  } catch(e) {
+    addStatus('오류', e.message, 'err');
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '진단 실행';
+  }
+}
+
+// 자동 실행
+window.addEventListener('DOMContentLoaded', () => {
+  setTimeout(run, 300);
+});
+</script>
+
+</body>
+</html>
