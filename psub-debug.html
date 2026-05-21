@@ -477,8 +477,61 @@ async function run(){
     addStatus('6. '+company+' DRSUB 행', matching.length+'건', matching.length?'ok':'err');
 
     if(matching.length === 0){
-      document.getElementById('results').innerHTML =
-        '<div class="empty">'+company+'의 DRSUB 거래를 찾지 못했습니다.<br>회사명 정확히 입력했는지 확인해주세요.</div>';
+      // 진단 정보 — 어떤 SubCompany 들이 있는지, prefix 통계
+      const companies = {};
+      const prefixes = {};
+      _subTxns.forEach(t => {
+        const c = String(t.SubCompany||'').trim();
+        companies[c] = (companies[c]||0) + 1;
+        const desc = String(t.Description||'');
+        const pfx = desc.split(':')[0] + ':';
+        prefixes[pfx] = (prefixes[pfx]||0) + 1;
+      });
+      // 회사명에 입력값 일부가 들어간 항목 검색 (부분 매칭)
+      const partial = _subTxns.filter(t =>
+        String(t.SubCompany||'').toUpperCase().includes(company)
+      );
+      // 부분 매칭된 행의 Description prefix
+      const partialPrefixes = {};
+      partial.forEach(t => {
+        const desc = String(t.Description||'');
+        const pfx = desc.split(':')[0] + ':';
+        partialPrefixes[pfx] = (partialPrefixes[pfx]||0) + 1;
+      });
+
+      let diag = '<div class="empty" style="text-align:left">';
+      diag += '<div style="color:#dc2626;font-weight:600;margin-bottom:12px">⚠ "'+company+'" 정확 매칭 + DRSUB: prefix 거래 0건</div>';
+
+      diag += '<div style="margin-bottom:14px"><b>📋 SUB_Txn의 모든 SubCompany ('+Object.keys(companies).length+'개):</b><br>';
+      Object.entries(companies).sort((a,b)=>b[1]-a[1]).forEach(([c,n])=>{
+        const hit = c.toUpperCase() === company ? '✓' : (c.toUpperCase().includes(company) ? '~' : '');
+        diag += '<div style="font-size:12px;padding:2px 0;color:#374151">'+(hit?'<b style="color:#dc2626">'+hit+'</b> ':'')+
+                '"'+c+'" — '+n+'건</div>';
+      });
+      diag += '</div>';
+
+      diag += '<div style="margin-bottom:14px"><b>📋 Description prefix 통계 (전체):</b><br>';
+      Object.entries(prefixes).sort((a,b)=>b[1]-a[1]).forEach(([p,n])=>{
+        diag += '<div style="font-size:12px;padding:2px 0;color:#374151">"'+p+'" — '+n+'건</div>';
+      });
+      diag += '</div>';
+
+      if(partial.length > 0){
+        diag += '<div style="margin-bottom:14px"><b>🔍 "'+company+'" 부분 매칭 행의 prefix ('+partial.length+'건):</b><br>';
+        Object.entries(partialPrefixes).sort((a,b)=>b[1]-a[1]).forEach(([p,n])=>{
+          diag += '<div style="font-size:12px;padding:2px 0;color:#374151">"'+p+'" — '+n+'건</div>';
+        });
+        // 처음 3건 샘플
+        diag += '<div style="margin-top:8px;font-size:11px;color:#6b7280"><b>샘플 3건:</b></div>';
+        partial.slice(0,3).forEach(t => {
+          diag += '<div style="font-size:11px;padding:4px;background:#f9fafb;margin:4px 0;border-radius:4px;color:#374151;word-break:break-all">'+
+                  'SubCompany: "'+t.SubCompany+'"<br>Description: "'+(t.Description||'').slice(0,80)+'"<br>DR: '+fmt(t.DR)+'</div>';
+        });
+        diag += '</div>';
+      }
+
+      diag += '</div>';
+      document.getElementById('results').innerHTML = diag;
       return;
     }
 
