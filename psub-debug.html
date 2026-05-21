@@ -218,11 +218,22 @@ function addStatus(label, value, cls){
     '<div class="row"><span>'+label+'</span><span class="'+(cls||'')+'">'+value+'</span></div>');
 }
 
+function getAuthToken(){
+  try { return localStorage.getItem('dc_token') || ''; } catch(e){ return ''; }
+}
+
 async function fetchJson(action, params){
-  const qs = new URLSearchParams({action, ...(params||{})});
+  const token = getAuthToken();
+  const p = {action, ...(params||{})};
+  if(token) p.token = token;
+  const qs = new URLSearchParams(p);
   const r = await fetch(APPS_SCRIPT_URL+'?'+qs.toString());
   if(!r.ok) throw new Error('HTTP '+r.status);
-  return r.json();
+  const j = await r.json();
+  if(j && j.authRequired){
+    throw new Error('인증 만료 — admin.html에서 다시 로그인하세요');
+  }
+  return j;
 }
 
 let _vehicles = [], _drRows = [], _subTxns = [], _priceSub = {}, _subRates = {};
@@ -441,6 +452,18 @@ async function run(){
   btn.textContent = '로딩중...';
   document.getElementById('results').innerHTML = '';
   document.getElementById('summary').style.display = 'none';
+
+  // 토큰 체크
+  const token = getAuthToken();
+  if(!token){
+    setStatus('');
+    addStatus('인증 토큰', '없음 (먼저 admin.html에서 로그인 필요)', 'err');
+    document.getElementById('results').innerHTML =
+      '<div class="empty">⚠ admin.html에서 로그인 후 다시 이 페이지를 새로고침하세요.<br><br>같은 브라우저의 같은 도메인이라 localStorage가 공유됩니다.</div>';
+    btn.disabled = false;
+    btn.textContent = '진단 실행';
+    return;
+  }
 
   try {
     await loadAll();
