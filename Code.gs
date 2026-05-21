@@ -159,11 +159,6 @@ function cors(data) {
 // 관리자 계정 이름 (M_Drivers의 Name_KR 또는 Name_EN와 일치)
 const ADMIN_NAMES = ['Branden Choi', 'Branden', '최동철', 'Dong Cheol Choi'];
 
-// EG TRAVEL 관련 데이터만 볼 수 있는 뷰어 (admin 권한이지만 EG TRAVEL 관련 건만 보임 — 프론트엔드 필터링)
-// ⚠️ 주의: 현재는 프론트엔드 필터링만 적용. 백엔드 API는 admin 전체 데이터 반환하므로
-//   F12 개발자도구로 우회 가능. 신뢰할 수 있는 사용자에게만 부여할 것.
-const EG_VIEWER_NAMES = ['Sung Hun Yoo', 'SUNG HUN YOO', '유성훈'];
-
 const TOKEN_TTL_DRIVER_MS = 7 * 24 * 60 * 60 * 1000;   // 7일
 const TOKEN_TTL_ADMIN_MS  = 1 * 24 * 60 * 60 * 1000;   // 24시간
 
@@ -432,14 +427,10 @@ function _loginAction(payload) {
       }
     }
 
-    // 관리자 / EG 뷰어 / 드라이버 판정
+    // 관리자 여부 판정
     const isAdmin = ADMIN_NAMES.some(n => matched.nameKr.indexOf(n) >= 0 || matched.nameEn.indexOf(n) >= 0);
-    const isEGViewer = !isAdmin && EG_VIEWER_NAMES.some(n =>
-      matched.nameKr.indexOf(n) >= 0 || matched.nameEn.indexOf(n) >= 0
-    );
-    const role = isAdmin ? 'admin' : (isEGViewer ? 'viewer-eg' : 'driver');
-    // EG 뷰어는 관리자 앱을 사용하므로 admin TTL 적용
-    const ttl = (isAdmin || isEGViewer) ? TOKEN_TTL_ADMIN_MS : TOKEN_TTL_DRIVER_MS;
+    const role = isAdmin ? 'admin' : 'driver';
+    const ttl = isAdmin ? TOKEN_TTL_ADMIN_MS : TOKEN_TTL_DRIVER_MS;
     const now = new Date();
     const exp = new Date(now.getTime() + ttl);
 
