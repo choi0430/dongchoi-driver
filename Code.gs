@@ -7668,7 +7668,7 @@ function _egCommonStyle(){
                  padding:8px 12px;border-left:4px solid #7c3aed;margin:18px 0 10px;}
       .meta{display:table;width:100%;background:#faf5ff;border:1px solid #e9d5ff;
             border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:10pt;}
-      .meta div{display:table-cell;width:33%;text-align:center;}
+      .meta div{display:table-cell;width:25%;text-align:center;padding:0 6px;}
       .meta div + div{border-left:1px solid #e9d5ff;}
       .tc-badge{display:inline-block;background:#ede9fe;color:#5b21b6;padding:1px 7px;
                 border-radius:4px;font-weight:bold;font-size:9.5pt;}
@@ -7730,16 +7730,19 @@ function _egCommonStyle(){
       .tour-card .dr-row{display:table;width:100%;font-size:9.5pt;padding:5px 0;
                          border-bottom:1px solid #f3f4f6;}
       .tour-card .dr-row > div{display:table-cell;padding:0 4px;}
-      .tour-card .dr-row .dt{width:90px;color:#6b7280;}
+      .tour-card .dr-row .dt{width:80px;color:#6b7280;}
       .tour-card .dr-row .info{color:#1f2937;}
-      .tour-card .dr-row .amt{text-align:right;width:90px;font-weight:700;color:#16a34a;
+      .tour-card .dr-row .amt{text-align:right;width:95px;font-weight:700;color:#7c3aed;
                               font-family:Consolas,monospace;}
+      .tour-card .dr-row .amt-dr{text-align:right;width:80px;font-weight:700;color:#16a34a;
+                                  font-family:Consolas,monospace;}
       .tour-card .totals{margin-top:8px;padding-top:8px;border-top:2px solid #e5e7eb;
-                         background:#f9fafb;padding:8px 12px;margin:8px -14px -10px;
+                         background:#f9fafb;padding:10px 14px;margin:8px -14px -10px;
                          display:table;width:calc(100% + 28px);}
-      .tour-card .totals > div{display:table-cell;}
-      .tour-card .totals .label{font-size:10pt;font-weight:700;color:#5b21b6;}
-      .tour-card .totals .val{text-align:right;font-size:13pt;font-weight:800;color:#16a34a;}
+      .tour-card .totals > div{display:table-cell;vertical-align:middle;}
+      .tour-card .totals .label{font-size:10.5pt;font-weight:700;color:#5b21b6;line-height:1.4;}
+      .tour-card .totals .val{text-align:right;font-size:9pt;color:#6b7280;width:140px;line-height:1.3;}
+      .tour-card .totals .val-ta{text-align:right;font-size:9pt;color:#6b7280;width:140px;line-height:1.3;border-right:1px solid #e5e7eb;padding-right:12px;}
 
       .ftr{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;
            color:#6b7280;font-size:8.5pt;text-align:center;}
@@ -7761,6 +7764,7 @@ function _egCommonStyle(){
 // ── 운행 카드 빌더 (관리자 급여 탭 _reportRow 스타일 — 정적 PDF에 맞게 펼친 형태) ──
 function _egTripCardHTML(r){
   const drCost = Number(r.DR_Cost || r.Total || 0) || 0;
+  const taAmount = _egCalcAgencyTA(r);  // M_PriceClient 기반 실시간 계산
   const nightOwn = Number(r.Night_Owner || 0) || 0;
   const tS = _egFmtTime(r.Time_Start || r.Start_Time);
   const tE = _egFmtTime(r.Time_End || r.End_Time);
@@ -7822,7 +7826,13 @@ function _egTripCardHTML(r){
   if(guide || tc) html += '<div class="meta-line">👤 ' + _egEsc(guide) + (tc ? ' · <span class="tc-badge">' + _egEsc(tc) + '</span>' : '') + '</div>';
   html += '</div>';
   html += '<div class="amt">';
-  html += '<div class="amount' + (drCost < 0 ? ' neg' : '') + '">' + _fmtAmt(drCost) + '</div>';
+  // EG 인보이스 발행 금액 (TA) — 위에 큰 글씨로
+  if(taAmount > 0){
+    html += '<div style="font-size:8.5pt;color:#6b7280;margin-bottom:2px;">EG 인보이스</div>';
+    html += '<div style="font-size:13pt;font-weight:800;color:#7c3aed;">$' + taAmount.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>';
+    html += '<div style="font-size:8pt;color:#9ca3af;margin-top:4px;border-top:1px solid #e5e7eb;padding-top:4px;">드라이버 지급액</div>';
+  }
+  html += '<div class="amount' + (drCost < 0 ? ' neg' : '') + '" style="' + (taAmount > 0 ? 'font-size:11pt;' : '') + '">' + _fmtAmt(drCost) + '</div>';
   if(nightOwn > 0){
     html += '<div class="night-own' + (isSub ? ' sub' : '') + '">';
     html += (isSub ? '차주 납입' : '회사 납입') + ' -$' + nightOwn.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2});
@@ -7848,7 +7858,8 @@ function _egTripCardHTML(r){
 function _egTourCompletionCardHTML(t){
   // t = {tourCode, agency, startDate, endDate, status, guide, pax, reason, drs}
   const drs = (t.drs || []).slice().sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
-  const totalAmount = drs.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
+  const totalDR = drs.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
+  const totalTA = drs.reduce((s,r) => s + _egCalcAgencyTA(r), 0);
   const days = drs.length > 0
     ? (function(){
         const isos = drs.map(r=>r._iso).filter(Boolean).sort();
@@ -7885,8 +7896,16 @@ function _egTourCompletionCardHTML(t){
 
   if(drs.length > 0){
     html += '<div class="dr-list">';
+    // 컬럼 헤더
+    html += '<div class="dr-row" style="background:#f3f4f6;font-weight:700;font-size:8.5pt;">';
+    html += '<div class="dt">날짜</div>';
+    html += '<div class="info">차량 · 드라이버 · 코스 · 시간</div>';
+    html += '<div class="amt" style="color:#7c3aed;">EG 인보이스</div>';
+    html += '<div class="amt-dr" style="color:#16a34a;">드라이버</div>';
+    html += '</div>';
     drs.forEach(r => {
-      const amt = Number(r.DR_Cost || r.Total || 0) || 0;
+      const dr = Number(r.DR_Cost || r.Total || 0) || 0;
+      const ta = _egCalcAgencyTA(r);
       const rego = r.Rego || '';
       const driver = r.Driver || '';
       const attraction = r.Attraction || r.Course || '';
@@ -7898,7 +7917,8 @@ function _egTourCompletionCardHTML(t){
       html += '<div class="info"><b>' + _egEsc(rego) + '</b> · ' + _egEsc(driver) +
               (attraction ? ' · ' + _egEsc(attraction) : '') +
               (timeStr ? ' <span style="color:#4f46e5;">' + _egEsc(timeStr) + '</span>' : '') + '</div>';
-      html += '<div class="amt">$' + amt.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>';
+      html += '<div class="amt">$' + ta.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>';
+      html += '<div class="amt-dr">$' + dr.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>';
       html += '</div>';
     });
     html += '</div>';
@@ -7906,10 +7926,11 @@ function _egTourCompletionCardHTML(t){
     html += '<div class="empty" style="padding:14px;">이 투어코드에는 DR 기록이 없습니다.</div>';
   }
 
-  // 합계
+  // 합계 (EG 인보이스 + 드라이버 둘 다)
   html += '<div class="totals">';
-  html += '<div class="label">💰 투어 합계 (DR ' + drs.length + '건)</div>';
-  html += '<div class="val">$' + totalAmount.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>';
+  html += '<div class="label">💰 투어 합계<br><span style="font-size:8.5pt;color:#9ca3af;font-weight:400;">DR ' + drs.length + '건</span></div>';
+  html += '<div class="val-ta">EG 인보이스<br><span style="font-size:13pt;color:#7c3aed;font-weight:800;">$' + totalTA.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>';
+  html += '<div class="val">드라이버<br><span style="font-size:13pt;color:#16a34a;font-weight:800;">$' + totalDR.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>';
   html += '</div>';
 
   html += '</div>'; // body
@@ -7919,24 +7940,27 @@ function _egTourCompletionCardHTML(t){
 
 // ── 일일 리포트 HTML 빌더 (재작성 — 카드 스타일) ─────────────────────────
 function _egBuildDailyReportHTML(targetDateISO, drs, newlyCompletedTours){
+  _egResetTACache();  // 매 요청 신선한 M_PriceClient 캐시
   const drsByDriver = {};
   drs.forEach(r => {
     const d = String(r.Driver || 'Unknown').trim();
     if(!drsByDriver[d]) drsByDriver[d] = [];
     drsByDriver[d].push(r);
   });
-  const totalAmount = drs.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
+  const totalDR = drs.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
+  const totalTA = drs.reduce((s,r) => s + _egCalcAgencyTA(r), 0);
   const tcCount = new Set(drs.map(r => String(r.Tour_Code||r.TourCode||'').trim()).filter(Boolean)).size;
 
   let html = '<html><head><meta charset="UTF-8">' + _egCommonStyle() + '</head><body>';
   html += '<div class="hdr"><h1>📋 EG TRAVEL 일일 운행 리포트</h1>';
   html += '<div class="sub">대상일: <b>' + _egFmtDate(targetDateISO) + '</b> · 발행: ' + _egFmtDate(_egTodaySydney()) + '</div></div>';
 
-  // 메타 박스
+  // 메타 박스 — 4컬럼
   html += '<div class="meta">';
   html += '<div><div style="font-size:9pt;color:#6b7280;">운행 건수</div><div style="font-size:14pt;font-weight:bold;color:#1f2937;">' + drs.length + '건</div></div>';
   html += '<div><div style="font-size:9pt;color:#6b7280;">투어코드</div><div style="font-size:14pt;font-weight:bold;color:#5b21b6;">' + tcCount + '개</div></div>';
-  html += '<div><div style="font-size:9pt;color:#6b7280;">총 금액</div><div style="font-size:14pt;font-weight:bold;color:#16a34a;">$' + totalAmount.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div></div>';
+  html += '<div><div style="font-size:9pt;color:#6b7280;">EG 인보이스 발행액</div><div style="font-size:14pt;font-weight:bold;color:#7c3aed;">$' + totalTA.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div></div>';
+  html += '<div><div style="font-size:9pt;color:#6b7280;">드라이버 지급액</div><div style="font-size:14pt;font-weight:bold;color:#16a34a;">$' + totalDR.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div></div>';
   html += '</div>';
 
   // 섹션 1: 드라이버별 전일 운행 (카드 스타일)
@@ -7945,17 +7969,25 @@ function _egBuildDailyReportHTML(targetDateISO, drs, newlyCompletedTours){
     html += '<div class="empty">해당 일자에 EG TRAVEL 관련 운행 기록이 없습니다.</div>';
   } else {
     const driverOrder = Object.keys(drsByDriver).sort((a,b) => {
-      const at = drsByDriver[a].reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0),0);
-      const bt = drsByDriver[b].reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0),0);
+      const at = drsByDriver[a].reduce((s,r)=>s+_egCalcAgencyTA(r),0);
+      const bt = drsByDriver[b].reduce((s,r)=>s+_egCalcAgencyTA(r),0);
       return bt - at;
     });
     driverOrder.forEach(driver => {
       const list = drsByDriver[driver];
-      const subtotal = list.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
+      const subDR = list.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
+      const subTA = list.reduce((s,r) => s + _egCalcAgencyTA(r), 0);
       html += '<div class="driver-grp">';
       html += '<div class="hdr-bar">';
       html += '<div>👤 ' + _egEsc(driver) + ' · ' + list.length + '건</div>';
-      html += '<div class="right">$' + subtotal.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>';
+      html += '<div class="right">';
+      if(subTA > 0){
+        html += '<span style="color:#c4b5fd;font-size:10pt;font-weight:600;">EG: $' + subTA.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</span>';
+        html += '<span style="color:#fbbf24;margin-left:14px;">드라이버: $' + subDR.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</span>';
+      } else {
+        html += '$' + subDR.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2});
+      }
+      html += '</div>';
       html += '</div>';
       // 시간순 정렬
       list.sort((a,b) => {
@@ -7989,11 +8021,13 @@ function _egBuildDailyReportHTML(targetDateISO, drs, newlyCompletedTours){
 // ── 주간 리포트 HTML 빌더 ─────────────────────────────────────────────────
 // 1) 운행 통계, 2) 운행 상세 테이블, 3) 드라이버별 지급액
 function _egBuildWeeklyReportHTML(monISO, sunISO, drs){
-  const totalAmount = drs.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
+  _egResetTACache();
+  const totalDR = drs.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
+  const totalTA = drs.reduce((s,r)=>s+_egCalcAgencyTA(r), 0);
   const tcSet = new Set();
   const drvCount = {};
   const vehCount = {};
-  const driverWage = {}; // 드라이버별 지급액 (Driver_Cost 또는 DR_Cost)
+  const driverWage = {};   // 드라이버별 DR_Cost 합계 (실제 지급해야 할 금액)
   drs.forEach(r => {
     const tc = String(r.Tour_Code||r.TourCode||'').trim();
     if(tc) tcSet.add(tc);
@@ -8001,8 +8035,7 @@ function _egBuildWeeklyReportHTML(monISO, sunISO, drs){
     drvCount[drv] = (drvCount[drv]||0) + 1;
     const veh = String(r.Rego||'').trim() || '?';
     vehCount[veh] = (vehCount[veh]||0) + 1;
-    // 드라이버 지급액 — Driver_Cost 우선, 없으면 0 (자체 계산 안 함)
-    const wage = Number(r.Driver_Cost||r.DriverCost||0) || 0;
+    const wage = Number(r.DR_Cost||r.Total||0) || 0;
     driverWage[drv] = (driverWage[drv]||0) + wage;
   });
 
@@ -8010,25 +8043,29 @@ function _egBuildWeeklyReportHTML(monISO, sunISO, drs){
   html += `<div class="hdr"><h1>📊 EG TRAVEL 주간 운행 요약</h1>
             <div class="sub">기간: ${_egFmtDate(monISO)} ~ ${_egFmtDate(sunISO)} · 발행: ${_egFmtDate(_egTodaySydney())}</div></div>`;
 
-  // 통계 박스
+  // 통계 박스 (두 합계 모두)
   html += `<div class="summary-box">
-    <div class="summary-row"><span>📋 운행 건수</span><b>${drs.length}건</b></div>
-    <div class="summary-row"><span>🎫 투어코드 수</span><b>${tcSet.size}개</b></div>
-    <div class="summary-row"><span>👤 드라이버 수</span><b>${Object.keys(drvCount).length}명</b></div>
-    <div class="summary-row"><span>🚐 차량 수</span><b>${Object.keys(vehCount).length}대</b></div>
-    <div class="summary-row tot"><span>💰 운행 합계 (DR 비용)</span>
-      <b>$${totalAmount.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</b></div>
+    <div class="summary-row"><div>📋 운행 건수</div><div>${drs.length}건</div></div>
+    <div class="summary-row"><div>🎫 투어코드 수</div><div>${tcSet.size}개</div></div>
+    <div class="summary-row"><div>👤 드라이버 수</div><div>${Object.keys(drvCount).length}명</div></div>
+    <div class="summary-row"><div>🚐 차량 수</div><div>${Object.keys(vehCount).length}대</div></div>
+    <div class="summary-row tot"><div style="color:#7c3aed;">💜 EG 인보이스 발행액</div>
+      <div style="color:#7c3aed;font-size:13pt;">$${totalTA.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
+    <div class="summary-row tot"><div style="color:#16a34a;">💵 드라이버 지급액 합계</div>
+      <div style="color:#16a34a;font-size:13pt;">$${totalDR.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
   </div>`;
 
-  // 운행 상세 테이블
+  // 운행 상세 테이블 — EG/드라이버 컬럼 둘 다
   html += `<div class="sec-title">📋 운행 상세</div>`;
   if(drs.length === 0){
     html += '<div class="empty">이번 주 EG TRAVEL 관련 운행 기록이 없습니다.</div>';
   } else {
     html += `<table>
       <tr><th>날짜</th><th>TourCode</th><th>차량</th><th>드라이버</th><th>가이드</th>
-          <th>코스</th><th class="num">금액</th></tr>`;
+          <th>코스</th><th class="num">EG 인보이스</th><th class="num">드라이버</th></tr>`;
     drs.slice().sort((a,b)=>(a._iso||'').localeCompare(b._iso||'')).forEach(r => {
+      const ta = _egCalcAgencyTA(r);
+      const dr = Number(r.DR_Cost||r.Total||0)||0;
       html += `<tr>
         <td>${_egFmtDate(r._iso)}</td>
         <td><span class="tc-badge">${_egEsc(r.Tour_Code||r.TourCode||'')}</span></td>
@@ -8036,17 +8073,18 @@ function _egBuildWeeklyReportHTML(monISO, sunISO, drs){
         <td>${_egEsc(r.Driver||'')}</td>
         <td>${_egEsc(r.Guide||'')}</td>
         <td>${_egEsc(r.Attraction||r.Course||'')}</td>
-        <td class="num">$${(Number(r.DR_Cost||r.Total||0)||0).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        <td class="num" style="color:#7c3aed;font-weight:700;">$${ta.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        <td class="num" style="color:#16a34a;font-weight:700;">$${dr.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       </tr>`;
     });
     html += `</table>`;
   }
 
-  // 드라이버별 지급액 섹션
+  // 드라이버별 지급액 섹션 — DR_Cost 기준
   html += `<div class="sec-title">💵 드라이버별 지급액 (이번 주)</div>`;
   const wagedDrivers = Object.entries(driverWage).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
   if(wagedDrivers.length === 0){
-    html += '<div class="empty">드라이버 지급액 데이터가 없습니다. (Daily Report의 Driver_Cost 컬럼 확인 필요)</div>';
+    html += '<div class="empty">이번 주 EG 관련 드라이버 지급액이 없습니다.</div>';
   } else {
     const totWage = wagedDrivers.reduce((s,[,v])=>s+v, 0);
     html += `<table>
@@ -8055,11 +8093,13 @@ function _egBuildWeeklyReportHTML(monISO, sunISO, drs){
       html += `<tr>
         <td>${_egEsc(drv)}</td>
         <td class="num">${drvCount[drv]||0}건</td>
-        <td class="num">$${wage.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        <td class="num" style="color:#16a34a;font-weight:700;">$${wage.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       </tr>`;
     });
-    html += `<tr><td><b>합계</b></td><td></td>
-      <td class="num"><b>$${totWage.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</b></td></tr>`;
+    html += `<tr style="background:#f0fdf4;">
+      <td><b>합계</b></td><td></td>
+      <td class="num" style="color:#16a34a;font-weight:800;font-size:11pt;">$${totWage.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+    </tr>`;
     html += `</table>`;
   }
 
@@ -8091,6 +8131,155 @@ function _egFmtTime(v){
   // 이미 정상 "08:30" 또는 "8:30"
   return s;
 }
+
+// ─── M_PriceClient 기반 TA(여행사 청구) 계산 ──────────────────────────────
+// admin.html의 calcAgencyTA 로직을 GAS로 이식.
+// 사용 시점에 M_PriceClient 시트를 1회 로드하여 메모리 캐시 (요청당)
+let _egPriceClientCache = null;
+function _egLoadPriceClient(){
+  if(_egPriceClientCache !== null) return _egPriceClientCache;
+  _egPriceClientCache = {};
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('M_PriceClient');
+    if(!sheet) return _egPriceClientCache;
+    const data = sheet.getDataRange().getValues();
+    if(data.length < 2) return _egPriceClientCache;
+    const headers = data[0].map(String);
+    const agIdx = headers.indexOf('Agency');
+    const courseIdx = headers.indexOf('Course');
+    const mhIdx = headers.indexOf('max_hours');
+    // 좌석별 rate / ot 컬럼
+    const seatCols = {};
+    ['21','25','40','50'].forEach(s => {
+      seatCols[s] = {
+        rate: headers.indexOf('seats_' + s + '_rate'),
+        ot: headers.indexOf('seats_' + s + '_ot')
+      };
+    });
+    for(let i=1; i<data.length; i++){
+      const row = data[i];
+      const ag = String(row[agIdx]||'').trim();
+      const course = String(row[courseIdx]||'').trim();
+      if(!ag || !course) continue;
+      if(!_egPriceClientCache[ag]) _egPriceClientCache[ag] = {};
+      const entry = { max_hours: Number(row[mhIdx])||0 };
+      ['21','25','40','50'].forEach(s => {
+        entry[s] = {
+          rate: Number(row[seatCols[s].rate])||0,
+          ot:   Number(row[seatCols[s].ot])||0
+        };
+      });
+      _egPriceClientCache[ag][course] = entry;
+    }
+  } catch(e){
+    Logger.log('_egLoadPriceClient error: ' + e);
+  }
+  return _egPriceClientCache;
+}
+
+// 좌석별 트레일러 DR→TA 변환 (admin.html _trailerDRtoTA 이식)
+function _egTrailerDRtoTA(dr, sn){
+  if(!dr || dr === 0) return 0;
+  if(sn >= 40) return 0;  // 40/50석은 트레일러 TA 0
+  return dr === 30 ? 80 : Math.round(dr * 2.67);
+}
+
+// 여행사 TA 청구금액 계산 — admin.html calcAgencyTA 전체 로직 이식
+function _egCalcAgencyTA(r){
+  const PC = _egLoadPriceClient();
+  const agency = String(r.Agency||r.agency||'').trim();
+  const attraction = String(r.Attraction||r.tour||'').trim();
+  const seatsRaw = String(r.Seats||r.seats||'').replace('S','').trim();
+  const capNum = parseInt(seatsRaw)||25;
+  const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
+  const isLarge = capNum>=40;
+  const svc = Number(r.SVC_Charge)||0;
+
+  // 1) M_PriceClient base rate 조회 (대소문자 무시 fallback)
+  const agPC = PC[agency];
+  function _findCourse(pc, cn){
+    if(!pc || !cn) return null;
+    if(pc[cn]) return pc[cn];
+    const lc = cn.toLowerCase();
+    const keys = Object.keys(pc);
+    for(let i=0; i<keys.length; i++){
+      if(keys[i].toLowerCase() === lc) return pc[keys[i]];
+    }
+    return null;
+  }
+  const ce = agPC ? _findCourse(agPC, attraction) : null;
+  let taBase = 0;
+  if(ce){ const sd = ce[capKey] || ce['21']; taBase = Number(sd && sd.rate) || 0; }
+  if(taBase === 0) taBase = svc;
+
+  // 2) 서차지 DR→TA 역산
+  const htl = Number(r.Hotel_Surcharge||r.hotel||0);
+  const dst = Number(r.Dist_Surcharge||r.dist||0);
+  const ot  = Number(r.OT||r.ot||0);
+  const erl = Number(r.Early||0);
+  const toll= Number(r.Toll||0);
+
+  const htlTA = htl===0?0:
+    capNum>=50?(htl===15?80:htl===30?160:htl*4):
+    capNum>=40?(htl===15?75:htl===30?150:htl*4):
+    (htl===10?40:htl===20?80:htl*4);
+  const dstTA = dst===0?0:
+    capNum>=50?(dst===40?160:dst*4):
+    capNum>=40?(dst===40?150:Math.round(dst*3.75)):
+    (dst===30?80:Math.round(dst*2.67));
+
+  // OT TA — Tour Hojuro / Plus Australia 21/25S: 30분 UNIT 단위
+  const otRateTA = capNum>=50?160:capNum>=40?150:80;
+  const otRateDR = capNum>=40?40:30;
+  const isHojuroOT = /호주로|hojuro|plus\s*australia/i.test(agency);
+  const otHrs = isHojuroOT ? (ot / (otRateDR/2)) * 0.5 : (otRateDR>0 ? ot/otRateDR : 0);
+  const otTA = isHojuroOT
+    ? Math.round((ot / (otRateDR/2)) * (otRateTA/2))
+    : Math.round(otHrs * otRateTA);
+
+  // Early TA
+  let erlTA = 0;
+  if(erl > 0){
+    const isHojuroEarly = /호주로|hojuro|plus\s*australia/i.test(agency);
+    if(isHojuroEarly && capNum < 40){
+      erlTA = 80;
+    } else {
+      let atE = agPC ? _findCourse(agPC, 'Airport Transfer') : null;
+      if(!atE){
+        const allAgs = Object.keys(PC);
+        for(let i=0; i<allAgs.length; i++){
+          atE = _findCourse(PC[allAgs[i]], 'Airport Transfer');
+          if(atE) break;
+        }
+      }
+      if(atE){
+        const sd2 = atE[capKey] || atE['21'];
+        erlTA = Math.round((Number(sd2 && sd2.rate)||0) * 0.3);
+      }
+    }
+  }
+
+  // Parking (공항 픽업) — Tour Hojuro / Plus Australia 21/25S 제외
+  const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
+  const isHojuro = /호주로|hojuro|plus\s*australia/i.test(agency);
+  const pickup = String(r.Pickup||'');
+  const parking = (apPat.test(pickup) && !(isHojuro && !isLarge))
+    ? (isLarge ? 40 : 30)
+    : 0;
+
+  // Toll (대형 버스만 TA에 포함)
+  const tollTA = isLarge ? toll : 0;
+
+  // Trailer
+  const trl = Number(r.Trailer||0);
+  const trlTA = _egTrailerDRtoTA(trl, capNum);
+
+  return taBase + otTA + htlTA + dstTA + erlTA + parking + tollTA + trlTA;
+}
+
+// 캐시 무효화 (매 요청 시작 시 호출 — M_PriceClient 변경 반영)
+function _egResetTACache(){ _egPriceClientCache = null; }
 
 // ── 발송 (공통) — HTML을 PDF로 첨부하여 Gmail로 발송 ──────────────────────
 function _egSendEmailWithPDF(subject, bodyText, docHtml, pdfName, recipients){
@@ -8204,13 +8393,16 @@ function sendEGWeeklyReport(opts){
 
     const html = _egBuildWeeklyReportHTML(fromISO, toISO, drs);
     const pdfName = 'EG_Weekly_Report_' + fromISO + '_to_' + toISO + '.pdf';
-    const totAmt = drs.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
-    const subject = `[EG TRAVEL] 주간 운행 요약 ${_egFmtDate(fromISO)}~${_egFmtDate(toISO)} — ${drs.length}건, $${totAmt.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+    _egResetTACache();
+    const totDR = drs.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
+    const totTA = drs.reduce((s,r)=>s+_egCalcAgencyTA(r), 0);
+    const subject = `[EG TRAVEL] 주간 운행 요약 ${_egFmtDate(fromISO)}~${_egFmtDate(toISO)} — ${drs.length}건, EG $${totTA.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
     const body = `안녕하세요,\n\n` +
       `${_egFmtDate(fromISO)} ~ ${_egFmtDate(toISO)} EG TRAVEL 주간 운행 요약을 첨부합니다.\n\n` +
       `· 총 운행 건수: ${drs.length}건\n` +
-      `· 합계: $${totAmt.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n\n` +
-      `드라이버별 지급액 정보는 첨부 PDF의 마지막 섹션을 참고하세요.\n\n` +
+      `· EG 인보이스 발행액: $${totTA.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` +
+      `· 드라이버 지급액: $${totDR.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n\n` +
+      `상세 운행 내역과 드라이버별 지급액은 첨부 PDF를 참고하세요.\n\n` +
       `Kind regards,\nDong Choi Pty Ltd`;
 
     if(dryRun){
@@ -8225,11 +8417,11 @@ function sendEGWeeklyReport(opts){
       recipients.to + (recipients.cc?' (cc:'+recipients.cc+')':''),
       [], subject,
       sendResult.ok ? 'OK' : 'FAILED',
-      sendResult.ok ? `DR ${drs.length}건 · $${totAmt.toFixed(2)}` : sendResult.error
+      sendResult.ok ? `DR ${drs.length}건 · EG $${totTA.toFixed(2)} / 드라이버 $${totDR.toFixed(2)}` : sendResult.error
     );
 
     return { ok: sendResult.ok, error: sendResult.error,
-             drCount: drs.length, totalAmount: totAmt, recipients: recipients };
+             drCount: drs.length, totalAmount: totTA, driverTotal: totDR, recipients: recipients };
   } catch(err){
     Logger.log('sendEGWeeklyReport error: ' + err);
     _egLogReportSent('weekly', fromISO, toISO, '', [], '', 'ERROR', err.toString());
