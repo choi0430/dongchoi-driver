@@ -120,6 +120,20 @@
   }
   table.breakdown td.diff-cell { color: #dc2626; font-weight: 600; }
 
+  .fix-btn {
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: #dc2626;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    font-size: 13px;
+  }
+  .fix-btn:disabled { background: #9ca3af; cursor: wait; }
+
   .raw-toggle {
     margin-top: 10px;
     font-size: 12px;
@@ -237,6 +251,98 @@ async function fetchJson(action, params){
 }
 
 let _vehicles = [], _drRows = [], _subTxns = [], _priceSub = {}, _subRates = {};
+let _fixCandidates = {};  // idx → {rowIndex, txn, expectedDR, currentDR, diff, label}
+
+async function _applyFix(rowIndex, newDR, txn){
+  // SUB_Txn 행 업데이트: DR 값만 변경, 다른 필드는 기존값 보존
+  const data = {
+    SubCompany: txn.SubCompany || '',
+    Category: txn.Category || 'Outsourcing',
+    Date: txn.Date || '',
+    FinishDate: txn.FinishDate || txn.Date || '',
+    InvoiceNo: txn.InvoiceNo || '',
+    TourCode: txn.TourCode || '',
+    Description: txn.Description || '',
+    DR: newDR,
+    CR: Number(txn.CR)||0,
+    Remark: txn.Remark || ''
+  };
+  const token = getAuthToken();
+  const body = JSON.stringify({action:'update_sub_txn', rowIndex, data, token, _user: localStorage.getItem('dc_admin_session')||'admin'});
+  const res = await fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: {'Content-Type':'text/plain'},
+    body
+  });
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const j = await res.json();
+  if(!j.ok) throw new Error(j.error || 'update failed');
+  return j;
+}
+
+async function fixOne(idx){
+  const c = _fixCandidates[idx];
+  if(!c){ alert('수정 후보를 찾을 수 없습니다'); return; }
+  const ok = confirm(
+    '다음 행을 정정하시겠습니까?\n\n'+
+    c.label+'\n\n'+
+    '현재 DR: $'+c.currentDR.toLocaleString()+'\n'+
+    '재계산 DR: $'+c.expectedDR.toLocaleString()+'\n'+
+    '차이: '+(c.diff>0?'+':'')+'$'+c.diff.toLocaleString()+'\n\n'+
+    '시트 행 #'+c.rowIndex+' 의 DR 컬럼만 변경됩니다.'
+  );
+  if(!ok) return;
+  const card = document.getElementById('card_'+idx);
+  const btn = card ? card.querySelector('.fix-btn') : null;
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 처리 중...'; }
+  try {
+    await _applyFix(c.rowIndex, c.expectedDR, c.txn);
+    if(btn){ btn.textContent = '✅ 정정 완료'; btn.style.background = '#10b981'; }
+    if(card){ card.style.outline = '3px solid #10b981'; }
+  } catch(e){
+    alert('실패: '+e.message);
+    if(btn){ btn.disabled = false; btn.textContent = '✏️ 다시 시도'; }
+  }
+}
+
+async function fixAll(){
+  const targets = Object.values(_fixCandidates).filter(c =>
+    c.rowIndex && Math.abs(c.diff) >= 0.01
+  );
+  if(targets.length === 0){ alert('정정할 행이 없습니다'); return; }
+
+  // 미리보기
+  let preview = '다음 '+targets.length+'건을 정정합니다:\n\n';
+  let totalDelta = 0;
+  targets.slice(0, 15).forEach(c => {
+    preview += '• '+c.label+': $'+c.currentDR.toLocaleString()+' → $'+c.expectedDR.toLocaleString()+
+               ' ('+(c.diff>0?'-':'+')+'$'+Math.abs(c.diff).toLocaleString()+')\n';
+    totalDelta += (c.expectedDR - c.currentDR);
+  });
+  if(targets.length > 15) preview += '... 외 '+(targets.length-15)+'건\n';
+  targets.slice(15).forEach(c => totalDelta += (c.expectedDR - c.currentDR));
+  preview += '\n총 변동: '+(totalDelta>=0?'+':'')+'$'+totalDelta.toLocaleString()+'\n\n';
+  preview += '계속 하시겠습니까?';
+
+  if(!confirm(preview)) return;
+
+  const btn = document.getElementById('fixAllBtn');
+  btn.disabled = true;
+  let done = 0, failed = 0;
+  for(const c of targets){
+    btn.textContent = '⏳ '+(done+failed+1)+'/'+targets.length+' 처리 중...';
+    try {
+      await _applyFix(c.rowIndex, c.expectedDR, c.txn);
+      done++;
+    } catch(e){
+      console.error('fix failed for row', c.rowIndex, e);
+      failed++;
+    }
+  }
+  btn.textContent = '✅ 완료: 성공 '+done+' / 실패 '+failed;
+  btn.style.background = '#10b981';
+  alert('정정 완료\n성공: '+done+'건\n실패: '+failed+'건\n\n페이지를 새로고침하면 최신 상태를 다시 확인할 수 있습니다.');
+}
 
 async function loadAll(){
   setStatus('');
@@ -371,19 +477,19 @@ function diffBadge(recorded, computed){
   return '<span class="badge diff">⚠ 차이 '+fmt(r-c)+'</span>';
 }
 
-function renderTxnCard(txn){
+function renderTxnCard(txn, idx){
   // Description 파싱: DRSUB:YYYY-MM-DD_REGO_TOURCODE
   const desc = String(txn.Description||'');
   const m = desc.match(/^DRSUB:(\d{4}-\d{2}-\d{2})_([^_]+)_(.+?)(?:\|.*)?$/);
   if(!m){
-    return '<div class="card"><h2>비-DRSUB 거래</h2><div class="meta">'+desc+'<br>DR: '+fmt(txn.DR)+'</div></div>';
+    return {html:'<div class="card"><h2>비-DRSUB 거래</h2><div class="meta">'+desc+'<br>DR: '+fmt(txn.DR)+'</div></div>', diff:0};
   }
   const [_, dateISO, rego, tourCode] = m;
   const recordedDR = Number(txn.DR)||0;
 
   const dr = findDR(dateISO, rego, tourCode);
 
-  let html = '<div class="card">';
+  let html = '<div class="card" id="card_'+idx+'">';
   html += '<h2><span>'+dateISO.slice(5)+' · '+rego+'</span><span class="recorded">'+fmt(recordedDR)+'</span></h2>';
   html += '<div class="meta"><span class="k">TourCode:</span> '+tourCode+'<br>';
   html += '<span class="k">Remark:</span> '+(txn.Remark||'(없음)')+'</div>';
@@ -391,10 +497,12 @@ function renderTxnCard(txn){
   if(!dr){
     html += '<div style="color:#dc2626;padding:8px;background:#fef2f2;border-radius:6px;font-size:12px">⚠ 일치하는 Daily_Report 행을 찾지 못함 (날짜+Rego+TourCode 조합으로 검색)</div>';
     html += '</div>';
-    return html;
+    return {html, diff:0};
   }
 
   const calc = recomputeSubCost(dr);
+  const diff = recordedDR - calc.subTotal;
+  const hasDiff = Math.abs(diff) >= 0.01;
 
   // BillingEntity 경고
   if(!calc.isBEDC){
@@ -419,17 +527,24 @@ function renderTxnCard(txn){
   html += '<tr class="total"><td>재계산 합계</td><td class="val">'+fmt(calc.subTotal)+'</td></tr>';
   html += '<tr><td class="lbl">기록된 DR</td><td class="val">'+fmt(recordedDR)+'</td></tr>';
 
-  const diff = recordedDR - calc.subTotal;
-  if(Math.abs(diff) < 0.01){
+  if(!hasDiff){
     html += '<tr><td colspan="2" style="text-align:center;padding-top:8px"><span class="badge match">✓ 완전 일치</span></td></tr>';
   } else {
     html += '<tr><td class="lbl">차이</td><td class="val diff-cell">'+(diff>0?'+':'')+fmt(diff)+'</td></tr>';
   }
+  html += '</table>';
+
+  // 정정 버튼 (차이가 있고 _rowIndex 가 있을 때만)
+  if(hasDiff && txn._rowIndex){
+    html += '<button class="fix-btn" onclick="fixOne('+idx+')">'+
+            '✏️ 이 행을 $'+calc.subTotal.toLocaleString()+'로 정정</button>';
+  }
 
   // Raw data toggle
-  const rawId = 'raw_'+Math.random().toString(36).slice(2,8);
+  const rawId = 'raw_'+idx;
   html += '<div class="raw-toggle" onclick="document.getElementById(\''+rawId+'\').classList.toggle(\'show\')">▸ 원본 DR 데이터 보기/숨기기</div>';
   html += '<div class="raw-data" id="'+rawId+'">'+JSON.stringify({
+    _rowIndex: txn._rowIndex,
     Date: dr.Date, Rego: dr.Rego, Attraction: dr.Attraction,
     Tour_Code: dr.Tour_Code || dr.TourCode,
     Agency: dr.Agency, Driver: dr.Driver, Guide: dr.Guide,
@@ -442,8 +557,19 @@ function renderTxnCard(txn){
     Private: dr.Private
   }, null, 2)+'</div>';
 
-  html += '</table></div>';
-  return html;
+  html += '</div>';
+
+  // 정정에 필요한 정보 저장
+  _fixCandidates[idx] = {
+    rowIndex: txn._rowIndex,
+    txn: txn,
+    expectedDR: calc.subTotal,
+    currentDR: recordedDR,
+    diff: diff,
+    label: dateISO.slice(5)+' '+calc.attraction+' ('+calc.owner+')'
+  };
+
+  return {html, diff};
 }
 
 async function run(){
@@ -551,33 +677,40 @@ async function run(){
       return da.localeCompare(db);
     });
 
+    _fixCandidates = {};  // 리셋
     let totalRecorded = 0, totalComputed = 0, mismatches = 0;
     let html = '';
-    matching.forEach(txn => {
-      const desc = String(txn.Description||'');
-      const m = desc.match(/^DRSUB:(\d{4}-\d{2}-\d{2})_([^_]+)_(.+?)(?:\|.*)?$/);
-      if(m){
-        const dr = findDR(m[1], m[2], m[3]);
-        if(dr){
-          const calc = recomputeSubCost(dr);
-          totalComputed += calc.subTotal;
-          if(Math.abs((Number(txn.DR)||0) - calc.subTotal) >= 0.01) mismatches++;
-        }
+    matching.forEach((txn, i) => {
+      const result = renderTxnCard(txn, i);
+      html += result.html;
+      const c = _fixCandidates[i];
+      if(c){
+        totalRecorded += c.currentDR;
+        totalComputed += c.expectedDR;
+        if(Math.abs(c.diff) >= 0.01) mismatches++;
+      } else {
+        totalRecorded += (Number(txn.DR)||0);
       }
-      totalRecorded += (Number(txn.DR)||0);
-      html += renderTxnCard(txn);
     });
 
-    // 요약
+    // 요약 + 일괄 정정 버튼
     const summaryEl = document.getElementById('summary');
     summaryEl.style.display = 'block';
-    summaryEl.innerHTML =
+    let summaryHtml =
       '<h3>📊 '+company+' 진단 요약</h3>'+
       '<p><b>총 DRSUB 행 수:</b> '+matching.length+'건</p>'+
       '<p><b>기록된 DR 합계:</b> '+fmt(totalRecorded)+'</p>'+
       '<p><b>재계산 합계:</b> '+fmt(totalComputed)+'</p>'+
       '<p><b>불일치 건수:</b> <span style="color:'+(mismatches?'#dc2626':'#059669')+';font-weight:700">'+
       mismatches+'건</span></p>';
+    if(mismatches > 0){
+      const delta = totalComputed - totalRecorded;
+      summaryHtml += '<p><b>정정 시 변동:</b> <span style="color:'+(delta>=0?'#059669':'#dc2626')+';font-weight:700">'+
+                     (delta>=0?'+':'')+fmt(delta)+'</span></p>';
+      summaryHtml += '<button id="fixAllBtn" onclick="fixAll()" style="margin-top:8px;padding:10px 16px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;width:100%;font-size:14px">'+
+                     '🔧 불일치 '+mismatches+'건 모두 정정</button>';
+    }
+    summaryEl.innerHTML = summaryHtml;
 
     document.getElementById('results').innerHTML = html;
   } catch(e) {
