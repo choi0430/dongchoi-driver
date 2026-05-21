@@ -7660,37 +7660,264 @@ function _egFindCompletedTourCodes(todayISO){
 function _egCommonStyle(){
   return `
     <style>
-      body{font-family:Arial,'Malgun Gothic',sans-serif;color:#1f2937;margin:0;padding:20px;font-size:11pt;line-height:1.4;}
+      body{font-family:Arial,'Malgun Gothic','맑은 고딕',sans-serif;color:#1f2937;margin:0;padding:18px;font-size:11pt;line-height:1.4;}
       .hdr{border-bottom:3px solid #7c3aed;padding-bottom:12px;margin-bottom:20px;}
-      .hdr h1{margin:0 0 4px;font-size:20pt;color:#7c3aed;}
+      .hdr h1{margin:0 0 4px;font-size:18pt;color:#7c3aed;}
       .hdr .sub{color:#6b7280;font-size:10pt;}
-      .sec-title{font-size:14pt;font-weight:bold;color:#1f2937;background:#f3f4f6;
-                 padding:8px 12px;border-left:4px solid #7c3aed;margin:20px 0 10px;}
-      .meta{display:flex;justify-content:space-between;background:#faf5ff;border:1px solid #e9d5ff;
+      .sec-title{font-size:13pt;font-weight:bold;color:#1f2937;background:#f3f4f6;
+                 padding:8px 12px;border-left:4px solid #7c3aed;margin:18px 0 10px;}
+      .meta{display:table;width:100%;background:#faf5ff;border:1px solid #e9d5ff;
             border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:10pt;}
-      table{border-collapse:collapse;width:100%;font-size:10pt;margin-bottom:14px;}
-      th{background:#7c3aed;color:white;padding:8px 6px;text-align:left;font-weight:600;}
-      td{padding:7px 6px;border-bottom:1px solid #e5e7eb;}
+      .meta div{display:table-cell;width:33%;text-align:center;}
+      .meta div + div{border-left:1px solid #e9d5ff;}
+      .tc-badge{display:inline-block;background:#ede9fe;color:#5b21b6;padding:1px 7px;
+                border-radius:4px;font-weight:bold;font-size:9.5pt;}
+      .date-badge{display:inline-block;background:#1e40af;color:#fff;font-size:9pt;
+                  font-weight:800;padding:2px 8px;border-radius:4px;letter-spacing:.3px;}
+      .sub-badge{display:inline-block;background:#7c3aed;color:white;font-size:8.5pt;
+                 font-weight:700;padding:2px 7px;border-radius:8px;margin-left:5px;}
+      .empty{text-align:center;padding:24px;color:#9ca3af;font-style:italic;font-size:10pt;}
+
+      /* 드라이버 그룹 헤더 */
+      .driver-grp{margin:12px 0;border-radius:10px;overflow:hidden;
+                  border:1px solid #d1d5db;background:white;}
+      .driver-grp .hdr-bar{background:#1f2937;color:white;padding:8px 14px;
+                           font-weight:bold;font-size:11pt;display:table;width:100%;}
+      .driver-grp .hdr-bar > div{display:table-cell;}
+      .driver-grp .hdr-bar .right{text-align:right;color:#fbbf24;}
+
+      /* 운행 카드 (드라이버 급여 스타일) */
+      .trip-card{background:#f8fafc;border-radius:8px;padding:10px 12px;margin:6px 8px;
+                 border:1px solid #e5e7eb;}
+      .trip-card.sub{background:#f5f3ff;border-left:3px solid #7c3aed;}
+      .trip-card .top{display:table;width:100%;}
+      .trip-card .top .info{display:table-cell;vertical-align:top;}
+      .trip-card .top .amt{display:table-cell;vertical-align:top;text-align:right;
+                           min-width:110px;padding-left:8px;}
+      .trip-card .title{font-size:11pt;font-weight:700;color:#1f2937;margin-top:4px;}
+      .trip-card .meta-line{font-size:9pt;color:#6b7280;margin-top:2px;}
+      .trip-card .time-line{font-size:9pt;color:#4f46e5;margin-top:1px;}
+      .trip-card .amount{font-size:13pt;font-weight:800;color:#16a34a;}
+      .trip-card .amount.neg{color:#dc2626;}
+      .trip-card .km-badge{background:#dcfce7;color:#16a34a;padding:0 5px;
+                           border-radius:3px;font-weight:700;font-size:9pt;}
+      .trip-card .night-own{font-size:9pt;color:#dc2626;font-weight:700;margin-top:1px;}
+      .trip-card .night-own.sub{color:#7c3aed;}
+
+      /* 서차지 배지 */
+      .surcharge-row{margin-top:6px;font-size:8.5pt;}
+      .sur-badge{display:inline-block;padding:1px 6px;border-radius:4px;font-weight:700;
+                 margin-right:3px;margin-top:2px;border:1px solid;}
+
+      /* 종료 투어 카드 */
+      .tour-card{background:white;border:1.5px solid #d1d5db;border-radius:10px;
+                 padding:0;margin:12px 0;overflow:hidden;}
+      .tour-card .head{background:linear-gradient(135deg,#7c3aed,#5b21b6);color:white;
+                       padding:10px 14px;}
+      .tour-card .head .row1{display:table;width:100%;}
+      .tour-card .head .row1 .left{display:table-cell;}
+      .tour-card .head .row1 .right{display:table-cell;text-align:right;}
+      .tour-card .head .tc-name{font-size:13pt;font-weight:bold;}
+      .tour-card .head .agency{font-size:9.5pt;opacity:.9;margin-top:2px;}
+      .tour-card .head .period{font-size:10pt;font-weight:700;}
+      .tour-card .head .meta-row{display:table;width:100%;margin-top:8px;
+                                  border-top:1px solid rgba(255,255,255,.3);padding-top:6px;}
+      .tour-card .head .meta-row > div{display:table-cell;font-size:9pt;}
+      .tour-card .body{padding:10px 14px;}
+      .tour-card .reason{font-size:9pt;color:#7c3aed;background:#ede9fe;
+                         padding:4px 10px;border-radius:4px;margin-bottom:8px;font-weight:600;}
+      .tour-card .dr-list{margin-top:8px;}
+      .tour-card .dr-row{display:table;width:100%;font-size:9.5pt;padding:5px 0;
+                         border-bottom:1px solid #f3f4f6;}
+      .tour-card .dr-row > div{display:table-cell;padding:0 4px;}
+      .tour-card .dr-row .dt{width:90px;color:#6b7280;}
+      .tour-card .dr-row .info{color:#1f2937;}
+      .tour-card .dr-row .amt{text-align:right;width:90px;font-weight:700;color:#16a34a;
+                              font-family:Consolas,monospace;}
+      .tour-card .totals{margin-top:8px;padding-top:8px;border-top:2px solid #e5e7eb;
+                         background:#f9fafb;padding:8px 12px;margin:8px -14px -10px;
+                         display:table;width:calc(100% + 28px);}
+      .tour-card .totals > div{display:table-cell;}
+      .tour-card .totals .label{font-size:10pt;font-weight:700;color:#5b21b6;}
+      .tour-card .totals .val{text-align:right;font-size:13pt;font-weight:800;color:#16a34a;}
+
+      .ftr{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;
+           color:#6b7280;font-size:8.5pt;text-align:center;}
+      table{border-collapse:collapse;width:100%;font-size:9.5pt;margin-bottom:12px;}
+      th{background:#7c3aed;color:white;padding:7px 6px;text-align:left;font-weight:600;}
+      td{padding:6px;border-bottom:1px solid #e5e7eb;}
       tr:nth-child(even) td{background:#fafafa;}
       .num{text-align:right;font-family:Consolas,monospace;}
-      .grp-hdr{background:#ede9fe !important;font-weight:bold;color:#5b21b6;padding:8px 10px;}
-      .summary-box{background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:12px 16px;margin:10px 0;}
-      .summary-row{display:flex;justify-content:space-between;padding:4px 0;}
-      .summary-row.tot{border-top:2px solid #16a34a;margin-top:6px;padding-top:8px;font-weight:bold;}
-      .ftr{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;
-           color:#6b7280;font-size:9pt;text-align:center;}
-      .tc-badge{display:inline-block;background:#ede9fe;color:#5b21b6;padding:2px 8px;
-                border-radius:4px;font-weight:bold;font-size:10pt;}
-      .driver-grp{margin:14px 0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;}
-      .driver-grp .name{background:#1f2937;color:white;padding:8px 12px;font-weight:bold;}
-      .empty{text-align:center;padding:30px;color:#9ca3af;font-style:italic;}
+      .summary-box{background:#f0fdf4;border:1px solid #86efac;border-radius:6px;
+                   padding:10px 14px;margin:8px 0;}
+      .summary-row{display:table;width:100%;padding:3px 0;}
+      .summary-row > div{display:table-cell;}
+      .summary-row > div + div{text-align:right;font-weight:bold;}
+      .summary-row.tot{border-top:2px solid #16a34a;margin-top:6px;padding-top:8px;}
     </style>
   `;
 }
 
-// ── 일일 리포트 HTML 빌더 ─────────────────────────────────────────────────
-// 섹션 1: 전날 DR (드라이버별 그룹)
-// 섹션 2: 종료된 투어코드 (이전 발송 제외 = 새로 종료된 것만)
+// ── 운행 카드 빌더 (관리자 급여 탭 _reportRow 스타일 — 정적 PDF에 맞게 펼친 형태) ──
+function _egTripCardHTML(r){
+  const drCost = Number(r.DR_Cost || r.Total || 0) || 0;
+  const nightOwn = Number(r.Night_Owner || 0) || 0;
+  const tS = String(r.Time_Start || r.Start_Time || '').trim();
+  const tE = String(r.Time_End || r.End_Time || '').trim();
+  const timeStr = tS ? (tS + (tE ? ' ~ ' + tE : '')) : '';
+  const kmS = String(r.KM_Start || r.Start_KM || '').trim();
+  const kmE = String(r.KM_End || r.End_KM || '').trim();
+  let kmDiff = 0;
+  if(kmS && kmE){
+    const ks = parseInt(kmS), ke = parseInt(kmE);
+    if(!isNaN(ks) && !isNaN(ke)) kmDiff = Math.abs(ke - ks);
+  }
+  const hotel = r.Hotel || r.Accommodation || '';
+  const guide = r.Guide || '';
+  const tc = r.Tour_Code || r.TourCode || '';
+  const rego = r.Rego || '';
+  const seats = r.Seats || r.Pax || '';
+  const agency = r.Agency || r.Tour_Agency || '';
+  const attraction = r.Attraction || r.Course || '';
+
+  // SUB 차량 여부 — 카드 색상 분기
+  const billing = String(r.Billing_Entity || r.BillingEntity || '').trim().toUpperCase();
+  const isSub = billing && billing.indexOf('EG TRAVEL') >= 0 &&
+                (!billing.match(/DONG\s*CHOI/i));
+
+  // 서차지 배지
+  const sur = [];
+  if(Number(r.OT) > 0) sur.push({l:'OT', v:Number(r.OT), c:'#3b82f6'});
+  if(Number(r.Hotel_Surcharge) > 0) sur.push({l:'호텔', v:Number(r.Hotel_Surcharge), c:'#8b5cf6'});
+  if(Number(r.Dist_Surcharge) > 0) sur.push({l:'거리', v:Number(r.Dist_Surcharge), c:'#0ea5e9'});
+  if(Number(r.Early) > 0) sur.push({l:'조기', v:Number(r.Early), c:'#f59e0b'});
+  if(Number(r.Trailer) > 0) sur.push({l:'트레일러', v:Number(r.Trailer), c:'#64748b'});
+  if(Number(r.Night_DR) > 0) sur.push({l:'야간', v:Number(r.Night_DR), c:'#a5b4fc'});
+  if(Number(r.Wash) > 0) sur.push({l:'세차', v:Number(r.Wash), c:'#10b981'});
+  if(Number(r.Meal) > 0) sur.push({l:'식비', v:Number(r.Meal), c:'#10b981'});
+  if(Number(r.Tip) > 0) sur.push({l:'팁', v:Number(r.Tip), c:'#eab308'});
+  if(String(r.Toll_Personal||'').toUpperCase() === 'Y' && Number(r.Toll) > 0)
+    sur.push({l:'톨비', v:Number(r.Toll), c:'#78716c'});
+  if(String(r.Fuel_Personal||'').toUpperCase() === 'Y' && Number(r.Fuel) > 0)
+    sur.push({l:'연료', v:Number(r.Fuel), c:'#78716c'});
+
+  const _fmtAmt = (v) => (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2});
+  const dateStr = _egFmtDate(r._iso);
+
+  let html = '<div class="trip-card' + (isSub ? ' sub' : '') + '">';
+  html += '<div class="top">';
+  html += '<div class="info">';
+  html += '<div><span class="date-badge">📅 ' + _egEsc(dateStr) + '</span>';
+  if(isSub) html += '<span class="sub-badge">SUB · EG</span>';
+  html += '</div>';
+  html += '<div class="title">' + _egEsc(agency) + ' · ' + _egEsc(attraction) + '</div>';
+  html += '<div class="meta-line">🚐 ' + _egEsc(rego) + (seats ? ' · ' + _egEsc(seats) + '석' : '') + '</div>';
+  if(timeStr) html += '<div class="time-line">⏱ ' + _egEsc(timeStr) + '</div>';
+  if(kmS && kmE){
+    html += '<div class="meta-line">🛣 ' + _egEsc(kmS) + ' → ' + _egEsc(kmE);
+    if(kmDiff > 0) html += ' <span class="km-badge">+' + kmDiff + ' km</span>';
+    html += '</div>';
+  }
+  if(hotel) html += '<div class="meta-line">🏨 ' + _egEsc(hotel) + '</div>';
+  if(guide || tc) html += '<div class="meta-line">👤 ' + _egEsc(guide) + (tc ? ' · <span class="tc-badge">' + _egEsc(tc) + '</span>' : '') + '</div>';
+  html += '</div>';
+  html += '<div class="amt">';
+  html += '<div class="amount' + (drCost < 0 ? ' neg' : '') + '">' + _fmtAmt(drCost) + '</div>';
+  if(nightOwn > 0){
+    html += '<div class="night-own' + (isSub ? ' sub' : '') + '">';
+    html += (isSub ? '차주 납입' : '회사 납입') + ' -$' + nightOwn.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2});
+    html += '</div>';
+  }
+  html += '</div>';
+  html += '</div>';
+
+  if(sur.length > 0){
+    html += '<div class="surcharge-row">';
+    sur.forEach(s => {
+      html += '<span class="sur-badge" style="background:' + s.c + '14;border-color:' + s.c + '55;color:' + s.c + ';">';
+      html += _egEsc(s.l) + ' $' + s.v.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2});
+      html += '</span>';
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+// ── 종료 투어 카드 빌더 (TourCode별로 일정/금액/포함 DR 상세) ──
+function _egTourCompletionCardHTML(t){
+  // t = {tourCode, agency, startDate, endDate, status, guide, pax, reason, drs}
+  const drs = (t.drs || []).slice().sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
+  const totalAmount = drs.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
+  const days = drs.length > 0
+    ? (function(){
+        const isos = drs.map(r=>r._iso).filter(Boolean).sort();
+        return isos.length > 0 ? (isos[isos.length-1] === isos[0] ? 1 :
+          Math.round((new Date(isos[isos.length-1]) - new Date(isos[0])) / 86400000) + 1) : 0;
+      })()
+    : 0;
+
+  let html = '<div class="tour-card">';
+  // 헤더 (보라 그라디언트)
+  html += '<div class="head">';
+  html += '<div class="row1">';
+  html += '<div class="left">';
+  html += '<div class="tc-name">🎫 ' + _egEsc(t.tourCode) + '</div>';
+  html += '<div class="agency">' + _egEsc(t.agency || '—') + '</div>';
+  html += '</div>';
+  html += '<div class="right">';
+  html += '<div class="period">' + _egFmtDate(t.startDate) + ' ~ ' + _egFmtDate(t.endDate) + '</div>';
+  if(days > 0) html += '<div class="agency">총 ' + days + '일 · DR ' + drs.length + '건</div>';
+  html += '</div>';
+  html += '</div>';
+
+  // 부가 정보 행 (가이드, Pax, 상태)
+  html += '<div class="meta-row">';
+  if(t.guide) html += '<div>👤 ' + _egEsc(t.guide) + '</div>';
+  if(t.pax) html += '<div>👥 Pax ' + _egEsc(t.pax) + '</div>';
+  if(t.status) html += '<div>📌 ' + _egEsc(t.status) + '</div>';
+  html += '</div>';
+  html += '</div>';
+
+  // 본문 (종료 사유 + DR 리스트 + 합계)
+  html += '<div class="body">';
+  html += '<div class="reason">✅ 종료 사유: ' + _egEsc(t.reason) + '</div>';
+
+  if(drs.length > 0){
+    html += '<div class="dr-list">';
+    drs.forEach(r => {
+      const amt = Number(r.DR_Cost || r.Total || 0) || 0;
+      const rego = r.Rego || '';
+      const driver = r.Driver || '';
+      const attraction = r.Attraction || r.Course || '';
+      const tS = String(r.Time_Start || r.Start_Time || '').trim();
+      const tE = String(r.Time_End || r.End_Time || '').trim();
+      const timeStr = tS ? (tS + (tE ? '~' + tE : '')) : '';
+      html += '<div class="dr-row">';
+      html += '<div class="dt">' + _egFmtDate(r._iso) + '</div>';
+      html += '<div class="info"><b>' + _egEsc(rego) + '</b> · ' + _egEsc(driver) +
+              (attraction ? ' · ' + _egEsc(attraction) : '') +
+              (timeStr ? ' <span style="color:#4f46e5;">' + _egEsc(timeStr) + '</span>' : '') + '</div>';
+      html += '<div class="amt">$' + amt.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="empty" style="padding:14px;">이 투어코드에는 DR 기록이 없습니다.</div>';
+  }
+
+  // 합계
+  html += '<div class="totals">';
+  html += '<div class="label">💰 투어 합계 (DR ' + drs.length + '건)</div>';
+  html += '<div class="val">$' + totalAmount.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>';
+  html += '</div>';
+
+  html += '</div>'; // body
+  html += '</div>'; // tour-card
+  return html;
+}
+
+// ── 일일 리포트 HTML 빌더 (재작성 — 카드 스타일) ─────────────────────────
 function _egBuildDailyReportHTML(targetDateISO, drs, newlyCompletedTours){
   const drsByDriver = {};
   drs.forEach(r => {
@@ -7698,71 +7925,63 @@ function _egBuildDailyReportHTML(targetDateISO, drs, newlyCompletedTours){
     if(!drsByDriver[d]) drsByDriver[d] = [];
     drsByDriver[d].push(r);
   });
-  const totalAmount = drs.reduce((s,r)=>s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
-  const tcCount = new Set(drs.map(r=>String(r.Tour_Code||r.TourCode||'').trim()).filter(Boolean)).size;
+  const totalAmount = drs.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
+  const tcCount = new Set(drs.map(r => String(r.Tour_Code||r.TourCode||'').trim()).filter(Boolean)).size;
 
-  let html = `<html><head><meta charset="UTF-8">${_egCommonStyle()}</head><body>`;
-  html += `<div class="hdr"><h1>📋 EG TRAVEL 일일 운행 리포트</h1>
-            <div class="sub">대상일: ${_egFmtDate(targetDateISO)} · 발행: ${_egFmtDate(_egTodaySydney())}</div></div>`;
+  let html = '<html><head><meta charset="UTF-8">' + _egCommonStyle() + '</head><body>';
+  html += '<div class="hdr"><h1>📋 EG TRAVEL 일일 운행 리포트</h1>';
+  html += '<div class="sub">대상일: <b>' + _egFmtDate(targetDateISO) + '</b> · 발행: ' + _egFmtDate(_egTodaySydney()) + '</div></div>';
 
-  // 메타
-  html += `<div class="meta">
-    <div><b>운행 건수:</b> ${drs.length}건</div>
-    <div><b>투어코드:</b> ${tcCount}개</div>
-    <div><b>총 금액:</b> $${totalAmount.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-  </div>`;
+  // 메타 박스
+  html += '<div class="meta">';
+  html += '<div><div style="font-size:9pt;color:#6b7280;">운행 건수</div><div style="font-size:14pt;font-weight:bold;color:#1f2937;">' + drs.length + '건</div></div>';
+  html += '<div><div style="font-size:9pt;color:#6b7280;">투어코드</div><div style="font-size:14pt;font-weight:bold;color:#5b21b6;">' + tcCount + '개</div></div>';
+  html += '<div><div style="font-size:9pt;color:#6b7280;">총 금액</div><div style="font-size:14pt;font-weight:bold;color:#16a34a;">$' + totalAmount.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div></div>';
+  html += '</div>';
 
-  // 섹션 1: 드라이버별 전일 운행
-  html += `<div class="sec-title">🚗 전일 운행 (드라이버별)</div>`;
+  // 섹션 1: 드라이버별 전일 운행 (카드 스타일)
+  html += '<div class="sec-title">🚗 전일 운행 (드라이버별)</div>';
   if(drs.length === 0){
     html += '<div class="empty">해당 일자에 EG TRAVEL 관련 운행 기록이 없습니다.</div>';
   } else {
-    Object.keys(drsByDriver).sort().forEach(driver => {
+    const driverOrder = Object.keys(drsByDriver).sort((a,b) => {
+      const at = drsByDriver[a].reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0),0);
+      const bt = drsByDriver[b].reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0),0);
+      return bt - at;
+    });
+    driverOrder.forEach(driver => {
       const list = drsByDriver[driver];
-      const subtotal = list.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
-      html += `<div class="driver-grp">
-        <div class="name">👤 ${_egEsc(driver)} · ${list.length}건 · $${subtotal.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-        <table>
-          <tr><th>날짜</th><th>투어코드</th><th>차량</th><th>가이드</th><th>코스</th>
-              <th>시작</th><th>종료</th><th class="num">금액</th></tr>`;
-      list.sort((a,b)=>(a._iso||'').localeCompare(b._iso||'')).forEach(r => {
-        html += `<tr>
-          <td>${_egFmtDate(r._iso)}</td>
-          <td><span class="tc-badge">${_egEsc(r.Tour_Code||r.TourCode||'')}</span></td>
-          <td>${_egEsc(r.Rego||'')}</td>
-          <td>${_egEsc(r.Guide||'')}</td>
-          <td>${_egEsc(r.Attraction||r.Course||'')}</td>
-          <td>${_egEsc(r.Start_Time||r.StartTime||'')}</td>
-          <td>${_egEsc(r.End_Time||r.EndTime||'')}</td>
-          <td class="num">$${(Number(r.DR_Cost||r.Total||0)||0).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-        </tr>`;
+      const subtotal = list.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
+      html += '<div class="driver-grp">';
+      html += '<div class="hdr-bar">';
+      html += '<div>👤 ' + _egEsc(driver) + ' · ' + list.length + '건</div>';
+      html += '<div class="right">$' + subtotal.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>';
+      html += '</div>';
+      // 시간순 정렬
+      list.sort((a,b) => {
+        const ta = String(a.Time_Start||a.Start_Time||'').trim();
+        const tb = String(b.Time_Start||b.Start_Time||'').trim();
+        return ta.localeCompare(tb);
+      }).forEach(r => {
+        html += _egTripCardHTML(r);
       });
-      html += `</table></div>`;
+      html += '</div>';
     });
   }
 
-  // 섹션 2: 새로 종료된 투어코드
-  html += `<div class="sec-title">✅ 새로 종료된 투어코드</div>`;
+  // 섹션 2: 새로 종료된 투어코드 (TourCode별 카드)
+  html += '<div class="sec-title">✅ 새로 종료된 투어코드</div>';
   if(newlyCompletedTours.length === 0){
     html += '<div class="empty">새로 종료된 투어가 없습니다.</div>';
   } else {
-    html += `<table>
-      <tr><th>TourCode</th><th>여행사</th><th>기간</th><th>가이드</th><th>Pax</th><th>DR</th><th>종료사유</th></tr>`;
+    // 종료일 역순 (최신 먼저)
+    newlyCompletedTours.sort((a,b) => (b.endDate||'').localeCompare(a.endDate||''));
     newlyCompletedTours.forEach(t => {
-      html += `<tr>
-        <td><span class="tc-badge">${_egEsc(t.tourCode)}</span></td>
-        <td>${_egEsc(t.agency)}</td>
-        <td>${_egFmtDate(t.startDate)} ~ ${_egFmtDate(t.endDate)}</td>
-        <td>${_egEsc(t.guide)}</td>
-        <td class="num">${_egEsc(t.pax)}</td>
-        <td class="num">${t.drs.length}건</td>
-        <td>${_egEsc(t.reason)}</td>
-      </tr>`;
+      html += _egTourCompletionCardHTML(t);
     });
-    html += `</table>`;
   }
 
-  html += `<div class="ftr">Dong Choi Pty Ltd · 자동 생성 리포트 · 문의: ${EG_REPORT_ADMIN_BCC}</div>`;
+  html += '<div class="ftr">Dong Choi Pty Ltd · 자동 생성 리포트 · 문의: ' + EG_REPORT_ADMIN_BCC + '</div>';
   html += '</body></html>';
   return html;
 }
