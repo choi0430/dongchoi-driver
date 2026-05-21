@@ -311,18 +311,23 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
   // 관리자 이름 목록 (현재 Branden만 관리자)
   var ADMIN_NAMES = ['Branden Choi', 'Branden', '최동철', 'Dong Cheol Choi'];
+  // EG TRAVEL 뷰어 이름 (admin 권한이지만 EG 관련 데이터만 보임 — Code.gs의 EG_VIEWER_NAMES와 동기 유지)
+  var EG_VIEWER_NAMES = ['Sung Hun Yoo', 'SUNG HUN YOO', '유성훈'];
 
   function _buildLoginSelect(){
     var sel = document.getElementById('la');
     sel.innerHTML = '<option value="">-- 계정 선택 --</option>';
-    // 관리자 계정만 필터링
+    // 관리자 + EG 뷰어 계정 표시
     window._loginDrivers.forEach(function(d){
       var nameKr = d.Name_KR || d.Name_EN || '';
       var nameEn = d.Name_EN || '';
       var isAdmin = ADMIN_NAMES.some(function(an){ return nameKr.indexOf(an)>=0 || nameEn.indexOf(an)>=0; });
-      if(!isAdmin) return;
+      var isEGViewer = !isAdmin && EG_VIEWER_NAMES.some(function(vn){ return nameKr.indexOf(vn)>=0 || nameEn.indexOf(vn)>=0; });
+      if(!isAdmin && !isEGViewer) return;
       var initials = d.Initials || (nameEn.trim().split(' ').filter(Boolean).map(function(w){return w[0];}).join('').toUpperCase().slice(0,2)) || '??';
-      var display = nameKr + (nameEn ? ' (' + nameEn + ')' : '');
+      // 표시 라벨: EG 뷰어는 뱃지 추가 — 운영자가 일반 admin과 구분 가능
+      var roleLabel = isEGViewer ? ' 🔒 [EG TRAVEL 뷰어]' : '';
+      var display = nameKr + (nameEn ? ' (' + nameEn + ')' : '') + roleLabel;
       var val = nameKr + '|' + initials + '|' + nameEn;
       var opt = document.createElement('option');
       opt.value = val;
