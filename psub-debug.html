@@ -167,7 +167,7 @@
 <div class="sub">SUB_Txn 기록값 vs. calcSubReport 재계산 비교</div>
 
 <div class="controls">
-  <input type="text" id="company" value="EG TRAVEL" placeholder="SubCompany (예: EG TRAVEL)">
+  <input type="text" id="company" value="EG TRAVEL PTY LTD" placeholder="SubCompany (예: EG TRAVEL PTY LTD)">
   <button id="runBtn" onclick="run()">진단 실행</button>
 </div>
 
@@ -469,12 +469,21 @@ async function run(){
     await loadAll();
 
     const company = document.getElementById('company').value.trim().toUpperCase();
-    const matching = _subTxns.filter(t =>
+    // 정확 매칭 우선, 없으면 부분 매칭 fallback
+    let matching = _subTxns.filter(t =>
       String(t.SubCompany||'').trim().toUpperCase() === company &&
       String(t.Description||'').startsWith('DRSUB:')
     );
+    let matchMode = 'exact';
+    if(matching.length === 0){
+      matching = _subTxns.filter(t =>
+        String(t.SubCompany||'').toUpperCase().includes(company) &&
+        String(t.Description||'').startsWith('DRSUB:')
+      );
+      matchMode = 'partial';
+    }
 
-    addStatus('6. '+company+' DRSUB 행', matching.length+'건', matching.length?'ok':'err');
+    addStatus('6. '+company+' DRSUB 행 ('+matchMode+')', matching.length+'건', matching.length?'ok':'err');
 
     if(matching.length === 0){
       // 진단 정보 — 어떤 SubCompany 들이 있는지, prefix 통계
