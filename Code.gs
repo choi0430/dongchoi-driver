@@ -7433,15 +7433,50 @@ const EG_REPORT_DAILY_HOUR = 6;            // 매일 발송 시각 (시드니 06
 const EG_REPORT_WEEKLY_HOUR = 6;           // 매주 월요일 06:00
 
 // ── 헬퍼: 한 행에서 EG TRAVEL 관련 키워드 매칭 ─────────────────────────────
+// 차량(Rego) → Owner 매핑 캐시 (요청당 1회 로드)
+let _egVehicleOwnerCache = null;
+function _egLoadVehicleOwners(){
+  if(_egVehicleOwnerCache !== null) return _egVehicleOwnerCache;
+  _egVehicleOwnerCache = {};
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('M_Vehicles');
+    if(!sheet) return _egVehicleOwnerCache;
+    const data = sheet.getDataRange().getValues();
+    if(data.length < 2) return _egVehicleOwnerCache;
+    const headers = data[0].map(String);
+    const regoIdx = headers.indexOf('Rego');
+    const ownerIdx = headers.indexOf('Owner');
+    if(regoIdx < 0 || ownerIdx < 0) return _egVehicleOwnerCache;
+    for(let i=1; i<data.length; i++){
+      const r = String(data[i][regoIdx]||'').trim();
+      const o = String(data[i][ownerIdx]||'').trim();
+      if(r) _egVehicleOwnerCache[r] = o;
+    }
+  } catch(e){
+    Logger.log('_egLoadVehicleOwners error: ' + e);
+  }
+  return _egVehicleOwnerCache;
+}
+
 function _egRowMatches(row){
   if(!row || typeof row !== 'object') return false;
   const kw = EG_REPORT_KEYWORD.toLowerCase();
+  // 1) 텍스트 필드 — Agency, BillingEntity, Description 등
   const fields = ['Tour_Agency','Agency','Billing_Entity','BillingEntity',
                   'SubCompany','Client','Client_Name','Company','Payer','Owner',
                   'AgencyName','Description','Remark','Remarks','Notes','Memo'];
   for(let i=0; i<fields.length; i++){
     const v = row[fields[i]];
     if(v && String(v).toLowerCase().indexOf(kw) >= 0) return true;
+  }
+  // 2) ★ 차량 소유주 — Rego가 EG 차량이면 EG 관련 운행으로 간주
+  //    (예: TV9951이 EG 소유인데 다른 여행사 일을 한 경우)
+  const rego = String(row.Rego||'').trim();
+  if(rego){
+    const owners = _egLoadVehicleOwners();
+    const owner = owners[rego];
+    if(owner && owner.toLowerCase().indexOf(kw) >= 0) return true;
   }
   return false;
 }
@@ -8279,7 +8314,10 @@ function _egCalcAgencyTA(r){
 }
 
 // 캐시 무효화 (매 요청 시작 시 호출 — M_PriceClient 변경 반영)
-function _egResetTACache(){ _egPriceClientCache = null; }
+function _egResetTACache(){
+  _egPriceClientCache = null;
+  _egVehicleOwnerCache = null;  // 차량 소유주 캐시도 함께 무효화
+}
 
 // ── 발송 (공통) — HTML을 PDF로 첨부하여 Gmail로 발송 ──────────────────────
 function _egSendEmailWithPDF(subject, bodyText, docHtml, pdfName, recipients){
