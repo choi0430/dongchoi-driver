@@ -9941,29 +9941,31 @@ function calcSubReport(r) {
   const isCrossSub = isDrvDC; // 이 함수는 isSub=true 진입한 상태 (else 블록 처리됨)
 
   // ═══════════════════════════════════════════════════════════════
-  // 트레일러 소유 분리 (시나리오 4)
+  // 트레일러 소유 분리 (시나리오 4) — 표시용 플래그만
   // ═══════════════════════════════════════════════════════════════
-  // Pre Departure 또는 Daily Report에 Trailer_Number가 있으면 M_Trailers에서 소유자 조회
+  // ★ 정책 (옵션 1): SUB 운임에서는 차감하지 않음 (이중 차감 방지).
+  //   DC 트레일러 사용료 $30은 backend `_autoCreateTrailerRentalTxn`이
+  //   별도의 SUB_Txn CR 행으로 자동 생성하여 회계 라인 분리.
+  //   결과: DRSUB는 운행 운임 그대로 ($1,380) + 별도 CR -$30 → 잔액 $1,350
   const trailerNum = String(r.Trailer_Number||'').trim();
   let trailerOwner = '';
-  let trailerSplitToDC = 0;  // Dong Choi 트레일러 수익 (SUB 비용에서 분리)
+  let trailerSplitToDC = 0;  // 표시용 (UI 배지) — 실제 차감은 backend가 처리
   if(trailerNum && trailerSub > 0){
     const trailerRow = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === trailerNum);
     trailerOwner = (trailerRow?.Owner||'').trim();
-    // Dong Choi 트레일러를 SUB 차량이 사용 → DC 임대료 $30 고정 (SUB에서 차감)
-    //   정책: DC가 트레일러 임대비로 SUB로부터 $30 수령 (TA의 트레일러 금액 전체가 아님)
-    //   예: TA Trailer $80 → SUB에게는 $50 전달, DC는 $30 임대 수익
     if(trailerOwner && /dong\s*choi/i.test(trailerOwner)){
-      trailerSplitToDC = 30;
+      trailerSplitToDC = 30;  // UI 표시용 — SUB 운임에서는 빼지 않음
     }
   }
 
-  // SUB 총액에서 Dong Choi 트레일러 분리
-  const subTotalAdjusted = subTotal - trailerSplitToDC;
-  const trailerSubInCost = trailerSub - trailerSplitToDC;
+  // SUB 총액 — 트레일러 분리 적용 안 함 (backend가 별도 거래로 처리)
+  const subTotalAdjusted = subTotal;
+  const trailerSubInCost = trailerSub;
 
   // ── 순이익 (Dong Choi) = TA - SUB 지급 ──
-  // 시나리오 4면 Dong Choi 트레일러 수익이 자동 포함됨 (subTotalAdjusted가 작아지므로)
+  // ★ 옵션 1: SUB 운임은 트레일러 차감 없음 ($1,380 그대로).
+  //   DC 트레일러 임대 수익 $30은 backend가 별도 CR 거래로 처리하므로
+  //   여기서 profit에는 명시적으로 반영 안 함 (별도 라인에서 +$30 인식됨)
   const profit = taAmount - subTotalAdjusted;
 
   // 시나리오 코드 결정
