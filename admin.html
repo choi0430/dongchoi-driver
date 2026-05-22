@@ -16250,10 +16250,6 @@ function _egQuadrantMatrix(){
   _drCache.forEach(r => {
     const billing = String(r.Billing_Entity || r.BillingEntity || '').trim();
     const agency  = String(r.Agency || '').trim();
-    // ★ EG 관련 운행만 분류 — Agency 또는 BillingEntity에 EG TRAVEL 포함
-    const billingIsEG = _egIsEGEntity(billing);
-    const agencyIsEG  = _egIsEGEntity(agency);
-    if(!billingIsEG && !agencyIsEG) return; // EG 무관 DR
 
     const rego = String(r.Rego || '').trim();
     const veh = rego ? vehMap[rego] : null;
@@ -16266,18 +16262,26 @@ function _egQuadrantMatrix(){
     const isEGVehicle = _egIsEGEntity(owner);
     if(!isDCVehicle && !isEGVehicle) return; // 기타 외주 차량은 EG 매트릭스 무관
 
+    // ★ EG 관련 운행 판정 — 다음 중 하나라도 EG이면 매트릭스 분류 대상:
+    //    · BillingEntity = EG  (EG가 인보이스 발행)
+    //    · Agency = EG         (EG가 여행사)
+    //    · Vehicle Owner = EG  (EG가 차량 소유 → SUB)
+    //   이 가드가 없으면 'DC빌링 + 다른여행사 + EG차량' 케이스가 ② 구역에 못 들어감
+    const billingIsEG = _egIsEGEntity(billing);
+    const agencyIsEG  = _egIsEGEntity(agency);
+    if(!billingIsEG && !agencyIsEG && !isEGVehicle) return; // EG 무관 DR
+
     // 빌링 분류
-    //   billing 비어있으면 → Agency 기준으로 추정 (Agency가 EG면 EG 빌링으로 간주)
+    //   billing 비어있으면 → DC 빌링으로 간주 (자사 운영 기본)
     let isDCBilling, isEGBilling;
     if(!billing){
-      // billing 미지정 — DC 자사 처리 (Agency가 EG면 DC가 EG에게 청구하는 일반 케이스)
       isDCBilling = true;
       isEGBilling = false;
     } else {
       isDCBilling = _egIsDCEntity(billing);
       isEGBilling = _egIsEGEntity(billing);
     }
-    if(!isDCBilling && !isEGBilling) return; // 알 수 없는 빌링
+    if(!isDCBilling && !isEGBilling) return; // 알 수 없는 빌링 (예: 다른 여행사)
 
     // 4구역 분류
     if(isDCBilling && isDCVehicle){
