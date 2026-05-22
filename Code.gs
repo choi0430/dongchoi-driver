@@ -8507,9 +8507,18 @@ function removeEGReportTriggers(){
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 진단 도구 — EG 리포트 누락 케이스 디버깅
-// 사용법: GAS 에디터에서 _egDebugDate('2026-05-22') 실행 후 로그 확인
+// 사용법:
+//   1. GAS 에디터에서 debugEGMay22 (또는 debugEGYesterday) 실행 후 로그 확인
+//   2. 또는 _egDebugDate('2026-05-22') 직접 호출
 // ═══════════════════════════════════════════════════════════════════════════
+function debugEGMay22(){ return _egDebugDate('2026-05-22'); }
+function debugEGYesterday(){ return _egDebugDate(_egYesterdaySydney()); }
 function _egDebugDate(targetISO){
+  if(!targetISO){
+    // 인자 없이 실행됐을 때 안전 폴백 — 어제 날짜로 설정
+    targetISO = _egYesterdaySydney();
+    Logger.log('⚠️ 인자가 전달되지 않아 어제 날짜(' + targetISO + ')로 자동 설정됩니다.');
+  }
   _egResetTACache();  // 캐시 무효화
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName('Daily_Report');
@@ -8530,11 +8539,13 @@ function _egDebugDate(targetISO){
 
   // 대상 일자의 모든 행 검사
   let matched = 0, unmatched = 0;
+  let foundOnDate = 0;
   for(let i=1; i<data.length; i++){
     const row = {};
     headers.forEach((h, ci) => { row[h] = data[i][ci]; });
     const iso = _egToISO(row.Date);
     if(iso !== targetISO) continue;
+    foundOnDate++;
 
     const rego = String(row.Rego||'').trim();
     const owner = owners[rego] || '(매핑 없음)';
@@ -8552,6 +8563,21 @@ function _egDebugDate(targetISO){
     Logger.log(summary);
     if(matches) matched++; else unmatched++;
   }
-  Logger.log('=== 결과: 매칭 ' + matched + '건 / 비매칭 ' + unmatched + '건 ===');
-  return { matched: matched, unmatched: unmatched };
+  Logger.log('=== 결과: ' + targetISO + '에 ' + foundOnDate + '건 발견 / 매칭 ' + matched + '건 / 비매칭 ' + unmatched + '건 ===');
+  if(foundOnDate === 0){
+    Logger.log('⚠️ 해당 날짜에 Daily_Report 행이 없습니다. 날짜 형식 또는 저장 여부 확인 필요.');
+    // 가까운 날짜들 샘플 출력
+    Logger.log('--- 최근 10일 Daily_Report 날짜 분포 ---');
+    const dateCount = {};
+    for(let i=Math.max(1, data.length-100); i<data.length; i++){
+      const row = {};
+      headers.forEach((h, ci) => { row[h] = data[i][ci]; });
+      const iso = _egToISO(row.Date);
+      if(iso) dateCount[iso] = (dateCount[iso]||0) + 1;
+    }
+    Object.keys(dateCount).sort().slice(-10).forEach(d => {
+      Logger.log('  ' + d + ': ' + dateCount[d] + '건');
+    });
+  }
+  return { date: targetISO, found: foundOnDate, matched: matched, unmatched: unmatched };
 }
