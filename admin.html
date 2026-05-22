@@ -3123,6 +3123,128 @@ function esc(s){return String(s||'').replace(/'/g,"\'")}
 function nores(){return'<div style="text-align:center;padding:26px;color:var(--t3)">결과 없음</div>'}
 
 // ═══════════════════════════════════════
+// 미등록 트레일러 빠른 등록 다이얼로그
+// ═══════════════════════════════════════
+function openQuickTrailerRegistration(trailerNum){
+  // 기존에 같은 번호로 시도된 등록이 있으면 그쪽으로 안내
+  const existing = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(trailerNum).trim());
+  if(existing){
+    toast('이미 등록된 트레일러: ' + trailerNum, 'in');
+    const idx = DB.T.indexOf(existing);
+    if(idx >= 0) openM('T', idx);
+    return;
+  }
+  // 차량 Owner 목록에서 가능한 소유주 후보 (트레일러 소유주로 자주 쓰임)
+  const allOwners = [...new Set((DB.V||[]).map(v=>String(v.Owner||v.SubOwner||'').trim()).filter(Boolean))].sort();
+  if(!allOwners.some(o => /dong choi/i.test(o))) allOwners.unshift('DONG CHOI PTY LTD');
+  // ★ 외부 임대 옵션 추가 — 자주 빌리는 외부 업체가 있다면 미리 옵션화 가능
+  const externalOwners = ['EXTERNAL RENTAL', 'OTHER COMPANY'];
+  const allOptions = [...allOwners, ...externalOwners.filter(e => !allOwners.includes(e))];
+  const ownerOpts = allOptions.map(o => `<option value="${escH(o)}">${escH(o)}</option>`).join('');
+  // 사용 정보 (DR 캐시에서 추출)
+  const usages = (_drCache || []).filter(r => String(r.Trailer_Number||'').trim() === String(trailerNum).trim());
+  const usageInfo = usages.length > 0
+    ? `<div style="font-size:11px;color:var(--t3);margin-top:4px;">📊 DR 사용 ${usages.length}회 · 차량: ${[...new Set(usages.map(u=>u.Rego).filter(Boolean))].slice(0,3).join(', ')||'—'}</div>`
+    : '';
+  const html = `
+    <div id="qtr-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this) closeQuickTrailerRegistration()">
+      <div style="background:white;border-radius:14px;padding:20px;max-width:480px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,.3);">
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:14px;">
+          <div>
+            <div style="font-size:16px;font-weight:800;color:#a21caf;">🚐 트레일러 빠른 등록</div>
+            <div style="font-size:11px;color:var(--t3);margin-top:2px;">M_Trailers에 추가하여 회계 자동 정산 가능하게 함</div>
+          </div>
+          <button onclick="closeQuickTrailerRegistration()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--t3);">✕</button>
+        </div>
+        <div style="background:#fdf4ff;border:1px solid #f0abfc;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+          <div style="font-size:11px;font-weight:700;color:#a21caf;">트레일러 번호</div>
+          <div style="font-size:15px;font-weight:800;color:#1f2937;margin-top:2px;font-family:var(--fn);">${escH(trailerNum)}</div>
+          ${usageInfo}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--t1);">소유주 *</label>
+            <select id="qtr-owner" style="width:100%;padding:8px;border:1.5px solid var(--bd);border-radius:8px;font-size:13px;margin-top:4px;">
+              <option value="">— 선택 —</option>
+              ${ownerOpts}
+            </select>
+            <div style="font-size:10px;color:var(--t3);margin-top:2px;">💡 외부에서 임대한 경우 EXTERNAL RENTAL 또는 임대 업체명 입력 (목록에 없으면 아래 직접 입력)</div>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--t1);">소유주 직접 입력 (선택 사항)</label>
+            <input id="qtr-owner-custom" type="text" placeholder="예: ABC 트레일러 임대" style="width:100%;padding:8px;border:1.5px solid var(--bd);border-radius:8px;font-size:13px;margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--t1);">임대료 (Rental_Fee, $)</label>
+            <input id="qtr-fee" type="number" value="30" min="0" style="width:100%;padding:8px;border:1.5px solid var(--bd);border-radius:8px;font-size:13px;margin-top:4px;">
+            <div style="font-size:10px;color:var(--t3);margin-top:2px;">DC가 임대료를 수령(자사 소유) 또는 지급(외부 임대)할 때 자동 거래 생성에 사용</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px;">
+          <button onclick="closeQuickTrailerRegistration()" class="btn bgh" style="flex:1;padding:10px;border-radius:8px;font-weight:600;">취소</button>
+          <button onclick="submitQuickTrailerRegistration('${String(trailerNum).replace(/'/g,"\\'")}')" class="btn" style="flex:2;background:#a21caf;color:white;padding:10px;border-radius:8px;font-weight:700;">✅ 등록하기</button>
+        </div>
+        <div style="text-align:center;margin-top:10px;">
+          <span style="font-size:10px;color:var(--t3);cursor:pointer;text-decoration:underline;" onclick="closeQuickTrailerRegistration();nv('pmas','nmas');setTimeout(()=>openM('T',null),200);">전체 정보 입력하기 (Rego/E-Safety 등) →</span>
+        </div>
+      </div>
+    </div>`;
+  // 기존 백드롭 제거 후 새로 삽입
+  document.getElementById('qtr-backdrop')?.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeQuickTrailerRegistration(){
+  document.getElementById('qtr-backdrop')?.remove();
+}
+
+async function submitQuickTrailerRegistration(trailerNum){
+  const ownerSel = document.getElementById('qtr-owner').value.trim();
+  const ownerCustom = document.getElementById('qtr-owner-custom').value.trim();
+  const owner = ownerCustom || ownerSel;
+  const feeRaw = document.getElementById('qtr-fee').value;
+  const fee = parseFloat(feeRaw);
+
+  if(!owner){
+    toast('소유주를 선택하거나 입력해주세요', 'er');
+    return;
+  }
+  if(isNaN(fee) || fee < 0){
+    toast('임대료가 올바르지 않습니다', 'er');
+    return;
+  }
+
+  toast('등록 중...', 'in');
+  try {
+    const newRow = {
+      Trailer_Number: trailerNum,
+      Owner: owner,
+      Rental_Fee: fee,
+      Active: 'Y'
+    };
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'add_master', sheet: 'M_Trailers', data: newRow, _user: getAdminUser() })
+    });
+    const j = await res.json();
+    if(!j.ok){
+      toast('등록 실패: ' + (j.error || '알 수 없음'), 'er');
+      return;
+    }
+    // DB.T 캐시 갱신
+    if(!Array.isArray(DB.T)) DB.T = [];
+    DB.T.push(newRow);
+    closeQuickTrailerRegistration();
+    toast('✅ ' + trailerNum + ' 등록 완료 · 소유주: ' + owner, 'ok');
+    // 대시보드 즉시 갱신 (알림에서 제거됨)
+    if(typeof rDash === 'function') rDash();
+  } catch(e){
+    toast('등록 오류: ' + e.message, 'er');
+  }
+}
+
+// ═══════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════
 function rDash(){
@@ -3275,6 +3397,41 @@ function rDash(){
         m:`${num} (트레일러) — E-Safety Check 만료일 미등록`});
     }
   });
+  // ── M_Trailers에 미등록된 트레일러 번호 (DR에서 입력된 것 추적) ──
+  // 트레일러 부족 시 외부에서 빌려 사용하는 케이스 — 등록 안내 + 빠른 등록 다이얼로그
+  try {
+    const _drRowsT = _drCache || [];
+    const registeredNums = new Set((DB.T||[]).map(t => String(t.Trailer_Number||'').trim()).filter(Boolean));
+    const unregUsage = {};  // 트레일러번호 → { count, firstDate, lastDate, regos:Set, drivers:Set }
+    _drRowsT.forEach(r => {
+      const tn = String(r.Trailer_Number||'').trim();
+      if(!tn) return;
+      if(registeredNums.has(tn)) return;
+      const iso = parseToISO(r.Date||'') || '';
+      if(!unregUsage[tn]){
+        unregUsage[tn] = { count:0, firstDate: iso, lastDate: iso, regos: new Set(), drivers: new Set() };
+      }
+      const u = unregUsage[tn];
+      u.count++;
+      if(iso){
+        if(!u.firstDate || iso < u.firstDate) u.firstDate = iso;
+        if(!u.lastDate || iso > u.lastDate) u.lastDate = iso;
+      }
+      if(r.Rego) u.regos.add(r.Rego);
+      if(r.Driver) u.drivers.add(r.Driver);
+    });
+    Object.entries(unregUsage).forEach(([tn, u]) => {
+      const regosTxt = Array.from(u.regos).slice(0,3).join(', ');
+      const lastTxt = u.lastDate ? fmtDate(u.lastDate) : '';
+      const safeTn = String(tn).replace(/'/g,"\\'");
+      als.push({
+        sort: 9995, type:'trailer_unregistered',
+        bg:'#fdf4ff', bc:'#c026d3', fc:'#a21caf', icon:'🚐',
+        m:`<b>${escH(tn)}</b> — 미등록 트레일러 (DR 사용 ${u.count}회${lastTxt?', 최근 '+lastTxt:''}${regosTxt?' · '+escH(regosTxt):''}) ` +
+          `<span style="cursor:pointer;text-decoration:underline;margin-left:6px;font-weight:600;" onclick="openQuickTrailerRegistration('${safeTn}')">빠른 등록 →</span>`
+      });
+    });
+  } catch(e){ console.warn('Unregistered trailer scan failed:', e); }
   // ── 휴무 알림 (Leave Alerts) ──
   if(window._adminLeaves && window._adminLeaves.length){
     const today = parseToISO(fmtDate(new Date().toISOString()));
