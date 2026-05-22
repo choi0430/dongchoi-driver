@@ -8319,10 +8319,10 @@ function sendEGDailyReport(opts){
     const alreadySent = _egGetAlreadySentTourCodes();
     const newCompleted = allCompleted.filter(t => !alreadySent.has(t.tourCode.toUpperCase()));
 
-    // 3. 데이터가 둘 다 비어있으면 skip (이메일 폭탄 방지)
-    if(drs.length === 0 && newCompleted.length === 0){
-      Logger.log('[EG Daily] skip — 전날 DR 0건 & 새 종료투어 0건');
-      return { ok: true, skipped: true, reason: 'no_data' };
+    // 3. 전날 DR이 0건이면 skip (DR이 있을 때만 발송)
+    if(drs.length === 0){
+      Logger.log('[EG Daily] skip — 전날 DR 0건 (운행 없음)');
+      return { ok: true, skipped: true, reason: 'no_dr' };
     }
 
     // 4. HTML 빌드
