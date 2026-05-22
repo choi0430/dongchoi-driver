@@ -16214,6 +16214,213 @@ function _calcSubDueFromLastDate(lastISO){
   return toLocalISO(d);
 }
 
+// ═══════════════════════════════════════════════════════════════
+// EG 4구역 매트릭스 (BillingEntity × 차량 Owner)
+// ───────────────────────────────────────────────────────────────
+// EG TRAVEL 관련 모든 DR을 4구역으로 분류:
+//   ① DC빌링 + DC차량 → 무관 (EG 카드에서 제외)
+//   ② DC빌링 + EG차량 → EG가 서브 (DC가 EG에게 외주비 지급)
+//   ③ EG빌링 + DC차량 → DC가 EG에게 청구 (EG가 agent)
+//   ④ EG빌링 + EG차량 → 참조 (DC 회계 무관, EG가 자기 차량으로 자기 일)
+//
+// 각 구역별로 DR 비용 + EG 인보이스 발행액(TA) 둘 다 표시
+// ═══════════════════════════════════════════════════════════════
+function _egIsEGEntity(s){
+  if(!s) return false;
+  return /eg\s*travel/i.test(String(s));
+}
+function _egIsDCEntity(s){
+  if(!s) return true; // 빈값/공백은 DC로 간주 (기본)
+  const u = String(s).toUpperCase().trim();
+  if(!u) return true;
+  return DC_OWNERS.includes(u) || /DONG\s*CHOI/i.test(u);
+}
+
+// EG 관련 4구역 매트릭스 빌드 — DR 캐시 기준
+//   반환: { q2: [], q3: [], q4: [], counts:{q1,q2,q3,q4} }
+//   q1(무관)은 카운트만 (실제 행은 저장 안 함)
+function _egQuadrantMatrix(){
+  const out = { q2: [], q3: [], q4: [], counts: {q1:0, q2:0, q3:0, q4:0} };
+  if(!Array.isArray(_drCache)) return out;
+  const vehMap = {};
+  (DB.V || []).forEach(v => { if(v.Rego) vehMap[v.Rego] = v; });
+
+  _drCache.forEach(r => {
+    const billing = String(r.Billing_Entity || r.BillingEntity || '').trim();
+    const agency  = String(r.Agency || '').trim();
+    // ★ EG 관련 운행만 분류 — Agency 또는 BillingEntity에 EG TRAVEL 포함
+    const billingIsEG = _egIsEGEntity(billing);
+    const agencyIsEG  = _egIsEGEntity(agency);
+    if(!billingIsEG && !agencyIsEG) return; // EG 무관 DR
+
+    const rego = String(r.Rego || '').trim();
+    const veh = rego ? vehMap[rego] : null;
+    const owner = veh ? String(veh.Owner || '').trim() : '';
+    // 차량 분류
+    //   - DC 차량: owner가 DC_OWNERS에 속하거나 비어있음
+    //   - EG 차량: owner가 EG TRAVEL
+    //   - 기타 외주 (예: YK): EG가 아니지만 DC도 아닌 차량 — EG 카드 무관
+    const isDCVehicle = _egIsDCEntity(owner);
+    const isEGVehicle = _egIsEGEntity(owner);
+    if(!isDCVehicle && !isEGVehicle) return; // 기타 외주 차량은 EG 매트릭스 무관
+
+    // 빌링 분류
+    //   billing 비어있으면 → Agency 기준으로 추정 (Agency가 EG면 EG 빌링으로 간주)
+    let isDCBilling, isEGBilling;
+    if(!billing){
+      // billing 미지정 — DC 자사 처리 (Agency가 EG면 DC가 EG에게 청구하는 일반 케이스)
+      isDCBilling = true;
+      isEGBilling = false;
+    } else {
+      isDCBilling = _egIsDCEntity(billing);
+      isEGBilling = _egIsEGEntity(billing);
+    }
+    if(!isDCBilling && !isEGBilling) return; // 알 수 없는 빌링
+
+    // 4구역 분류
+    if(isDCBilling && isDCVehicle){
+      // ① DC빌링 + DC차량 — EG와 무관 (Agency가 EG여도 DC 일반 운영으로 본다)
+      out.counts.q1++;
+    } else if(isDCBilling && isEGVehicle){
+      // ② DC빌링 + EG차량 — EG가 서브 (DC가 EG에게 외주비 지급)
+      out.q2.push(r); out.counts.q2++;
+    } else if(isEGBilling && isDCVehicle){
+      // ③ EG빌링 + DC차량 — DC가 EG에게 청구 (EG가 agent 역할)
+      out.q3.push(r); out.counts.q3++;
+    } else if(isEGBilling && isEGVehicle){
+      // ④ EG빌링 + EG차량 — 참조 (DC 회계 무관)
+      out.q4.push(r); out.counts.q4++;
+    }
+  });
+  return out;
+}
+
+// 4구역 매트릭스 HTML 렌더 (EG 카드 안에 삽입)
+function _egQuadrantMatrixHTML(){
+  const m = _egQuadrantMatrix();
+  // q1(=무관)만 있고 q2~q4가 모두 비어있으면 매트릭스 자체 표시 안 함
+  if(m.counts.q2 === 0 && m.counts.q3 === 0 && m.counts.q4 === 0 && m.counts.q1 === 0) return '';
+
+  const _fmt = (v) => '$' + Number(v||0).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const _sum = (rows, fn) => rows.reduce((s,r) => s + (fn(r)||0), 0);
+  const _drOf = r => Number(r.DR_Cost||r.Total||0)||0;
+  const _taOf = r => (typeof calcAgencyTA === 'function') ? (Number(calcAgencyTA(r))||0) : 0;
+
+  const q2DR = _sum(m.q2, _drOf), q2TA = _sum(m.q2, _taOf);
+  const q3DR = _sum(m.q3, _drOf), q3TA = _sum(m.q3, _taOf);
+  const q4DR = _sum(m.q4, _drOf), q4TA = _sum(m.q4, _taOf);
+
+  // ─ 셀 빌더 ───────────────────────────────────────────
+  function _cell(opts){
+    const { title, subtitle, count, drVal, taVal, accent, drLabel, taLabel, note, rows, rowsKey } = opts;
+    if(count === 0){
+      return `<div style="background:#f9fafb;border:1px dashed #d1d5db;border-radius:8px;padding:10px;opacity:0.5;">
+        <div style="font-size:10px;font-weight:700;color:#6b7280;">${title}</div>
+        <div style="font-size:8.5px;color:var(--t3);margin-top:2px;">${subtitle}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:6px;text-align:center;font-style:italic;">해당 운행 없음</div>
+      </div>`;
+    }
+    // 펼침 토글 ID
+    const toggleId = 'eg-quad-' + rowsKey;
+    let html = `<div style="background:white;border:1.5px solid ${accent}55;border-radius:8px;padding:10px;cursor:pointer;" onclick="_egToggleQuad('${toggleId}')">
+      <div style="display:flex;justify-content:space-between;align-items:start;">
+        <div style="flex:1;">
+          <div style="font-size:10.5px;font-weight:700;color:${accent};">${title}</div>
+          <div style="font-size:8.5px;color:var(--t3);margin-top:1px;">${subtitle}</div>
+        </div>
+        <div style="font-size:9px;color:${accent};background:${accent}1a;padding:1px 6px;border-radius:4px;font-weight:700;">${count}건</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:9.5px;">
+        <span style="color:#6b7280;">${drLabel||'DR 비용'}</span>
+        <span style="font-family:var(--fn);font-weight:700;color:#16a34a;">${_fmt(drVal)}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:9.5px;">
+        <span style="color:#6b7280;">${taLabel||'EG 인보이스'}</span>
+        <span style="font-family:var(--fn);font-weight:700;color:${accent};">${_fmt(taVal)}</span>
+      </div>`;
+    if(note) html += `<div style="font-size:8.5px;color:var(--t3);margin-top:4px;font-style:italic;">${note}</div>`;
+    html += `<div style="text-align:center;font-size:9px;color:${accent};margin-top:6px;">▼ 상세 보기</div>`;
+    html += `</div>`;
+    // 펼침 컨테이너
+    if(rows && rows.length){
+      html += `<div id="${toggleId}" style="display:none;background:white;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:6px 8px;font-size:9.5px;max-height:280px;overflow-y:auto;">`;
+      const sorted = rows.slice().sort((a,b)=> String(parseToISO(a.Date)||'').localeCompare(String(parseToISO(b.Date)||'')));
+      sorted.forEach(r => {
+        const dr = _drOf(r);
+        const ta = _taOf(r);
+        const dt = parseToISO(r.Date)||'';
+        const dtShort = dt ? dt.slice(5).replace('-','/') : '—';
+        const tc = String(r.Tour_Code||r.TourCode||'').trim();
+        html += `<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:6px;padding:3px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="color:#6b7280;">${escH(dtShort)}</span>
+          <span style="color:#1f2937;font-size:9px;">${escH(r.Rego||'')} · ${escH(r.Driver||'')}${tc?' · <span style="color:'+accent+';">'+escH(tc)+'</span>':''}</span>
+          <span style="font-family:var(--fn);color:#16a34a;font-weight:600;">${_fmt(dr)}</span>
+          <span style="font-family:var(--fn);color:${accent};font-weight:600;">${_fmt(ta)}</span>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+    return html;
+  }
+
+  // ─ 헤더 + 4사분면 그리드 ────────────────────────────
+  let html = `
+  <div style="margin-top:14px;padding:12px;background:linear-gradient(135deg,#faf5ff,#fdf4ff);border:1.5px solid #d8b4fe;border-radius:12px;">
+    <div style="font-size:11px;font-weight:800;color:#7c3aed;margin-bottom:8px;">
+      📊 EG 관련 운행 4구역 분류 (DR 기준)
+      <span style="font-size:9px;font-weight:400;color:var(--t3);">· BillingEntity × 차량 Owner</span>
+    </div>
+    <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:8px;font-size:10px;">
+      <!-- 헤더 행 -->
+      <div></div>
+      <div style="text-align:center;font-size:9px;font-weight:700;color:#1f2937;background:#f3f4f6;padding:4px;border-radius:4px;">🚐 DC 차량</div>
+      <div style="text-align:center;font-size:9px;font-weight:700;color:#7c3aed;background:#ede9fe;padding:4px;border-radius:4px;">🚌 EG 차량</div>
+      <!-- DC 빌링 행 -->
+      <div style="font-size:9px;font-weight:700;color:#1f2937;background:#f3f4f6;padding:4px;border-radius:4px;display:flex;align-items:center;justify-content:center;">DC<br>빌링</div>
+      ${_cell({
+        title:'① DC 자사 운영', subtitle:'DC가 청구 + DC가 운행',
+        count: m.counts.q1, drVal:0, taVal:0,
+        accent:'#6b7280',
+        note:'EG와 무관 — 카운트만 표시',
+        rows:[], rowsKey:'q1'
+      })}
+      ${_cell({
+        title:'② EG가 서브', subtitle:'DC가 청구 + EG 차량 운행',
+        count: m.counts.q2, drVal: q2DR, taVal: q2TA,
+        accent:'#7c3aed',
+        drLabel:'EG에게 지급', taLabel:'DC가 청구',
+        note:'DC가 EG에게 외주비 지급 + 여행사에 청구',
+        rows: m.q2, rowsKey:'q2'
+      })}
+      <!-- EG 빌링 행 -->
+      <div style="font-size:9px;font-weight:700;color:#7c3aed;background:#ede9fe;padding:4px;border-radius:4px;display:flex;align-items:center;justify-content:center;">EG<br>빌링</div>
+      ${_cell({
+        title:'③ DC가 EG에게 청구', subtitle:'EG가 agent + DC 차량 운행',
+        count: m.counts.q3, drVal: q3DR, taVal: q3TA,
+        accent:'#0ea5e9',
+        drLabel:'드라이버 비용', taLabel:'EG에게 청구',
+        note:'EG가 agent 역할 — DC가 EG에게 인보이스 발행',
+        rows: m.q3, rowsKey:'q3'
+      })}
+      ${_cell({
+        title:'④ EG 자사 운영', subtitle:'EG가 청구 + EG 차량 운행',
+        count: m.counts.q4, drVal: q4DR, taVal: q4TA,
+        accent:'#94a3b8',
+        drLabel:'드라이버 비용', taLabel:'EG 인보이스액',
+        note:'DC 회계 무관 — 참조용',
+        rows: m.q4, rowsKey:'q4'
+      })}
+    </div>
+  </div>`;
+  return html;
+}
+
+// 셀 펼침 토글
+function _egToggleQuad(id){
+  const el = document.getElementById(id);
+  if(el) el.style.display = (el.style.display === 'none' || !el.style.display) ? 'block' : 'none';
+}
+
 function _subBalances(){
   // ★ SUBINV 우선 정책: LEDGER/DRSUB가 같은 SubCompany+기간의 SUBINV에 의해 가려진 경우 제외
   // ★ DRSUB 우선 정책: 같은 날짜+차량 운행이 LEDGER에도 있으면 DRSUB가 더 정확하므로 LEDGER 가림
@@ -16471,6 +16678,7 @@ function renderBalSubList(){
         </div>
       </div>
       ${tgHtml}
+      ${_egIsEGEntity(a.name) ? _egQuadrantMatrixHTML() : ''}
       ${driverWageHtml}
       ${a.balance > 0.01 ? `<div style="margin-top:8px;text-align:right;"><button onclick="event.stopPropagation();_quickAddPayment('sub','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;" title="지급 처리">💰 지급</button></div>` : ''}
     </div>`;
