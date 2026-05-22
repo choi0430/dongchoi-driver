@@ -668,9 +668,14 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           </label>
           <div id="pre-trailer-row" style="display:none;margin-top:8px;">
             <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">트레일러 번호 선택 — 다른 드라이버가 사용 중이면 표시됩니다</div>
-            <select id="pre-trailer-num" class="form-input" style="width:100%;">
+            <select id="pre-trailer-num" class="form-input" style="width:100%;" onchange="onPreTrailerSelectChange()">
               <option value="">— 선택 —</option>
             </select>
+            <div id="pre-trailer-custom-row" style="display:none;margin-top:8px;padding:8px;background:rgba(192,38,211,0.08);border:1.5px dashed rgba(192,38,211,0.4);border-radius:8px;">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">🚐 트레일러 번호 직접 입력 (외부 임대 등)</div>
+              <input type="text" id="pre-trailer-custom" class="form-input" style="width:100%;text-transform:uppercase;" placeholder="예: ABC123" oninput="this.value=this.value.toUpperCase()">
+              <div style="font-size:10px;color:var(--muted);margin-top:4px;">⚠️ 관리자가 나중에 소유주와 임대료를 등록합니다</div>
+            </div>
             <div id="pre-trailer-status" style="font-size:11px;margin-top:6px;color:var(--muted);"></div>
           </div>
         </div>
@@ -5401,10 +5406,19 @@ async function completePre(){
 
   // 트레일러 사용 여부
   const trailerUse = document.getElementById('pre-trailer-use')?.checked || false;
-  const trailerNum = trailerUse ? (document.getElementById('pre-trailer-num')?.value || '').trim() : '';
+  let trailerNum = '';
+  if(trailerUse){
+    const selVal = (document.getElementById('pre-trailer-num')?.value || '').trim();
+    if(selVal === '__CUSTOM__'){
+      // 직접 입력 모드 — 텍스트 입력값 사용
+      trailerNum = (document.getElementById('pre-trailer-custom')?.value || '').trim().toUpperCase();
+    } else {
+      trailerNum = selVal;
+    }
+  }
   if(trailerUse && !trailerNum){
     _unlockSubmitBtn(_preBtn);
-    showToast('🚐 트레일러를 선택하세요. Please select a trailer.', 'error');
+    showToast('🚐 트레일러 번호를 선택하거나 직접 입력하세요. Please select or enter a trailer number.', 'error');
     return;
   }
 
@@ -11479,6 +11493,11 @@ async function onPreTrailerToggle(){
   } else {
     document.getElementById('pre-trailer-num').value = '';
     document.getElementById('pre-trailer-status').textContent = '';
+    // 직접 입력란도 함께 초기화
+    const customRow = document.getElementById('pre-trailer-custom-row');
+    const customInput = document.getElementById('pre-trailer-custom');
+    if(customRow) customRow.style.display = 'none';
+    if(customInput) customInput.value = '';
   }
 }
 
@@ -11493,7 +11512,9 @@ async function populatePreTrailers(){
     String(a.Trailer_Number||'').localeCompare(String(b.Trailer_Number||''))
   );
   if(!trailers.length){
-    sel.innerHTML = '<option value="">트레일러 없음 (관리자에 등록 필요)</option>';
+    // 등록된 트레일러가 아예 없어도 외부 임대를 위해 직접 입력 옵션은 노출
+    sel.innerHTML = '<option value="">— 선택 —</option><option value="__CUSTOM__">📝 명단에 없음 (직접 입력)</option>';
+    statusEl.textContent = '등록된 트레일러 없음 — 외부 임대 시 직접 입력 가능';
     return;
   }
   // 현재 활성(잠긴) 트레일러 조회
@@ -11523,9 +11544,29 @@ async function populatePreTrailers(){
     if(lock && !isMine) opt.disabled = true;
     sel.appendChild(opt);
   });
+  // ── 명단에 없음 / 직접 입력 옵션 (외부 임대 등) ──
+  const customOpt = document.createElement('option');
+  customOpt.value = '__CUSTOM__';
+  customOpt.textContent = '📝 명단에 없음 (직접 입력)';
+  sel.appendChild(customOpt);
   statusEl.textContent = activeTrailers.length
     ? `현재 ${activeTrailers.length}대 사용 중`
     : '모든 트레일러 사용 가능';
+}
+
+// 트레일러 선택 변경 — 직접 입력 모드 토글
+function onPreTrailerSelectChange(){
+  const sel = document.getElementById('pre-trailer-num');
+  const customRow = document.getElementById('pre-trailer-custom-row');
+  const customInput = document.getElementById('pre-trailer-custom');
+  if(!sel || !customRow) return;
+  if(sel.value === '__CUSTOM__'){
+    customRow.style.display = 'block';
+    if(customInput) setTimeout(() => customInput.focus(), 50);
+  } else {
+    customRow.style.display = 'none';
+    if(customInput) customInput.value = '';
+  }
 }
 
 // ─── End of Shift Checklist ───────────────────────
