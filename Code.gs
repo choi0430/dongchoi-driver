@@ -8504,3 +8504,54 @@ function removeEGReportTriggers(){
   });
   return { ok: true, removed: removed };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 진단 도구 — EG 리포트 누락 케이스 디버깅
+// 사용법: GAS 에디터에서 _egDebugDate('2026-05-22') 실행 후 로그 확인
+// ═══════════════════════════════════════════════════════════════════════════
+function _egDebugDate(targetISO){
+  _egResetTACache();  // 캐시 무효화
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('Daily_Report');
+  if(!sheet){ Logger.log('Daily_Report 시트 없음'); return; }
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0].map(String);
+  Logger.log('=== EG Debug for ' + targetISO + ' ===');
+  Logger.log('헤더: ' + headers.join(', '));
+
+  // 차량 캐시 확인
+  const owners = _egLoadVehicleOwners();
+  Logger.log('M_Vehicles에서 EG 차량들:');
+  Object.keys(owners).forEach(rego => {
+    if(/eg\s*travel/i.test(owners[rego])){
+      Logger.log('  ' + rego + ' → ' + owners[rego]);
+    }
+  });
+
+  // 대상 일자의 모든 행 검사
+  let matched = 0, unmatched = 0;
+  for(let i=1; i<data.length; i++){
+    const row = {};
+    headers.forEach((h, ci) => { row[h] = data[i][ci]; });
+    const iso = _egToISO(row.Date);
+    if(iso !== targetISO) continue;
+
+    const rego = String(row.Rego||'').trim();
+    const owner = owners[rego] || '(매핑 없음)';
+    const matches = _egRowMatches(row);
+    const summary = [
+      'Row ' + (i+1),
+      'Date=' + iso,
+      'Rego=' + rego,
+      'Driver=' + (row.Driver||''),
+      'Agency=' + (row.Agency||''),
+      'Billing=' + (row.Billing_Entity||row.BillingEntity||''),
+      'VehOwner=' + owner,
+      'Match=' + (matches ? 'YES ✅' : 'NO ❌')
+    ].join(' · ');
+    Logger.log(summary);
+    if(matches) matched++; else unmatched++;
+  }
+  Logger.log('=== 결과: 매칭 ' + matched + '건 / 비매칭 ' + unmatched + '건 ===');
+  return { matched: matched, unmatched: unmatched };
+}
