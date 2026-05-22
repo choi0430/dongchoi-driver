@@ -9845,7 +9845,7 @@ function calcSubReport(r) {
       isSub: false, isPrivate: false,
       subOwner: owner, rego, capKey, attraction, agency, driver,
       taAmount: 0,  // DC 수입 아님
-      subCost: { base:0, ot:0, hotel:0, dist:0, trailer:0, night:0, total:0 },
+      subCost: { base:0, ot:0, hotel:0, dist:0, trailer:0, parking:0, night:0, total:0 },
       drCost: 0,
       profit: 0,
       billingEntity: billingEntity,
@@ -9856,7 +9856,7 @@ function calcSubReport(r) {
   if(!isSub || isPrivate) {
     const drCost = parseFloat(r.DR_Cost||r.SVC_Charge)||0;
     return { isSub: isSub && !isPrivate, isPrivate, subOwner: (isSub && isPrivate) ? owner : '', rego, capKey, attraction, agency, driver,
-      taAmount: isPrivate ? 0 : taAmount, subCost:{base:0,ot:0,hotel:0,dist:0,trailer:0,night:0,total:0},
+      taAmount: isPrivate ? 0 : taAmount, subCost:{base:0,ot:0,hotel:0,dist:0,trailer:0,parking:0,night:0,total:0},
       drCost: isPrivate ? 0 : drCost, profit: isPrivate ? 0 : taAmount - drCost };
   }
 
@@ -9907,14 +9907,27 @@ function calcSubReport(r) {
   // Night_Owner (야경 차주 납입금)
   const nightOwner = parseFloat(r.Night_Owner)||0;
 
+  // ★ EG TRAVEL 정책: SUB 차량이 EG TRAVEL이면 공항 주차비도 SUB에게 지급
+  //   (다른 SUB 회사는 종전대로 제외 — DC가 청구해서 DC가 수령)
+  //   조건은 calcAgencyTA의 parking 조건과 동일: 공항 픽업 + (호주로/Plus Australia + 21/25S 아님)
+  let subParking = 0;
+  if(/eg\s*travel/i.test(owner)){
+    const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
+    const _isHojuroP = /호주로|hojuro|plus\s*australia/i.test(agency);
+    if(apPat.test(r.Pickup||'') && !(_isHojuroP && !isLarge)){
+      subParking = isLarge ? 40 : 30;
+    }
+  }
+
   // ★★ SUB 총액 계산 — TA 서차지를 그대로 전달하는 게 아니라,
   //   SUB의 실제 서차지(SUB가 받아야 할 금액)를 직접 합산.
   //   - 포함: Hotel, Dist, Trailer, OT (SUB가 실제 운행하면서 발생한 서차지)
-  //   - 제외: Parking (DC가 여행사에 청구 → DC 수입, SUB 무관)
+  //   - EG에 한정 포함: Parking (DC가 여행사에 청구한 만큼 EG에게도 지급)
+  //   - 제외: Parking (EG 외 SUB는 DC 수입으로 유지)
   //   - 제외: Toll, Early (DC 직접 정산)
   //   이게 정확한 모델 — 이전 "subTotal = subBase + taSurchargeTotal - parking" 회피 트릭 대신
   //   서차지 구성요소를 명시적으로 더함
-  const subTotal = subBase + hotelSub + distSub + trailerSub + subOT;
+  const subTotal = subBase + hotelSub + distSub + trailerSub + subOT + subParking;
 
   // 디버그 로그 (진단용 — 추후 제거)
   if(window._debugSub){
@@ -9977,7 +9990,7 @@ function calcSubReport(r) {
   return {
     isSub: true, subOwner: owner, rego, capKey, attraction, agency, driver,
     taAmount,
-    subCost: { base: subBase, ot: subOT, hotel: hotelSub, dist: distSub, trailer: trailerSubInCost, night: nightOwner, total: subTotalAdjusted },
+    subCost: { base: subBase, ot: subOT, hotel: hotelSub, dist: distSub, trailer: trailerSubInCost, parking: subParking, night: nightOwner, total: subTotalAdjusted },
     drCost,
     profit,
     scenario,        // 'SUB_normal' | 'CROSS_DC_drives_SUB'
