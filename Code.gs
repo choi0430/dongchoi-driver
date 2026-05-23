@@ -8874,3 +8874,172 @@ function _flushAllSheetCache() {
     return { ok: false, error: e.toString() };
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🩺 EG Daily Report 발송 누락 진단 (2026-05-23)
+// ═══════════════════════════════════════════════════════════════════════════
+// 사용법: GAS Editor에서 diagEGReport() 실행 → Logger에서 결과 확인.
+//
+// 점검 항목:
+//   1) 현재 등록된 트리거 (sendEGDailyReport / sendEGWeeklyReport)
+//   2) EG_Report_Log 최근 발송 이력 (성공/실패/스킵)
+//   3) 수신자 설정 (M_Clients의 EG TRAVEL 행 + Email 필드)
+//   4) 전날 Daily_Report 데이터 (DR이 있는지)
+//   5) 알려진 종료 투어코드 vs 이미 발송된 투어코드
+//   6) Dry run으로 실제 발송 시뮬레이션 (이메일은 안 보냄)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function diagEGReport() {
+  const log = [];
+  log.push('═══ EG Daily Report 진단 — ' + Utilities.formatDate(new Date(), 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss') + ' ═══');
+
+  // ── 1) 트리거 상태 ──
+  log.push('\n──[1] 등록된 트리거 ──');
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    const egTriggers = triggers.filter(t => {
+      const fn = t.getHandlerFunction();
+      return fn === 'sendEGDailyReport' || fn === 'sendEGWeeklyReport';
+    });
+    if (egTriggers.length === 0) {
+      log.push('  ❌ EG 리포트 트리거가 등록되어 있지 않음!');
+      log.push('     → setupEGReportTriggers() 함수를 실행하세요');
+    } else {
+      egTriggers.forEach(t => {
+        log.push('  ✅ ' + t.getHandlerFunction() +
+                 ' / type=' + t.getEventType() +
+                 ' / source=' + t.getTriggerSource());
+      });
+    }
+  } catch(e) {
+    log.push('  ⚠️ 트리거 조회 실패: ' + e);
+  }
+
+  // ── 2) 최근 발송 이력 ──
+  log.push('\n──[2] EG_Report_Log 최근 10건 ──');
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const logSheet = ss.getSheetByName('EG_Report_Log');
+    if (!logSheet) {
+      log.push('  ⚠️ EG_Report_Log 시트가 없음 (아직 한 번도 실행 안 됨?)');
+    } else {
+      const data = logSheet.getDataRange().getValues();
+      if (data.length < 2) {
+        log.push('  ⚠️ 발송 이력 없음 (시트는 있지만 비어있음)');
+      } else {
+        const headers = data[0];
+        const recentRows = data.slice(Math.max(1, data.length - 10));
+        log.push('  헤더: ' + headers.join(' | '));
+        recentRows.forEach((row, i) => {
+          const summary = headers.map((h, ci) => {
+            let v = row[ci];
+            if (v instanceof Date) v = Utilities.formatDate(v, 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
+            const s = String(v||'');
+            return s.length > 40 ? s.substring(0,40)+'...' : s;
+          });
+          log.push('  • ' + summary.join(' | '));
+        });
+      }
+    }
+  } catch(e) {
+    log.push('  ⚠️ EG_Report_Log 조회 실패: ' + e);
+  }
+
+  // ── 3) 수신자 설정 확인 ──
+  log.push('\n──[3] 수신자 설정 ──');
+  try {
+    const recipients = _egGetRecipients();
+    log.push('  TO:  "' + recipients.to + '"');
+    log.push('  CC:  "' + recipients.cc + '"');
+    log.push('  BCC: "' + recipients.bcc + '"');
+    if (!recipients.to) {
+      log.push('  ❌ TO 수신자가 비어있음! 발송 자체가 실패합니다.');
+      log.push('     → M_Clients 시트에서 Name 컬럼에 "EG TRAVEL" 또는 "EG"가 포함된 행의 Email 필드를 확인하세요');
+      log.push('     키워드: ' + (typeof EG_REPORT_KEYWORD !== 'undefined' ? EG_REPORT_KEYWORD : '(상수 미정의)'));
+    }
+  } catch(e) {
+    log.push('  ⚠️ 수신자 조회 실패: ' + e);
+  }
+
+  // ── 4) 전날 DR 데이터 ──
+  log.push('\n──[4] 전날 Daily_Report 데이터 ──');
+  try {
+    const yesterday = _egYesterdaySydney();
+    log.push('  대상 날짜: ' + yesterday);
+    const drs = _egLoadDRs(yesterday, yesterday);
+    log.push('  DR 건수: ' + drs.length);
+    if (drs.length === 0) {
+      log.push('  ⚠️ 전날 DR이 0건 → 발송이 "no_dr" 사유로 스킵됨');
+      log.push('     (이건 버그가 아니라 정상 동작 — 운행이 없으면 발송 안 함)');
+    } else {
+      log.push('  DR 샘플 (처음 5건):');
+      drs.slice(0, 5).forEach((dr, i) => {
+        const tc = dr.Tour_Code || dr.TourCode || '';
+        const drv = dr.Driver || '';
+        const ag = dr.Agency || '';
+        log.push('    ' + (i+1) + '. TC=' + tc + ' / Driver=' + drv + ' / Agency=' + ag);
+      });
+    }
+  } catch(e) {
+    log.push('  ⚠️ DR 조회 실패: ' + e + '\n' + (e.stack || ''));
+  }
+
+  // ── 5) 종료된 투어코드 vs 이미 발송된 ──
+  log.push('\n──[5] 새로 종료된 투어코드 ──');
+  try {
+    const todayISO = _egTodaySydney();
+    const allCompleted = _egFindCompletedTourCodes(todayISO);
+    const alreadySent = _egGetAlreadySentTourCodes();
+    log.push('  종료 감지된 TC: ' + allCompleted.length);
+    log.push('  이미 발송 처리된 TC: ' + alreadySent.size);
+    const newCompleted = allCompleted.filter(t => !alreadySent.has(t.tourCode.toUpperCase()));
+    log.push('  신규 종료 TC (이번 발송 대상): ' + newCompleted.length);
+    if (newCompleted.length > 0) {
+      log.push('  샘플:');
+      newCompleted.slice(0, 5).forEach(t => {
+        log.push('    • ' + t.tourCode + ' (마지막 운행일 ' + t.lastDate + ')');
+      });
+    }
+  } catch(e) {
+    log.push('  ⚠️ 종료 투어코드 조회 실패: ' + e);
+  }
+
+  // ── 6) Dry run ──
+  log.push('\n──[6] Dry Run (실제 발송 안 함, 시뮬레이션만) ──');
+  try {
+    const dry = sendEGDailyReport({ dryRun: true });
+    log.push('  결과: ' + JSON.stringify({
+      ok: dry.ok, dryRun: dry.dryRun, skipped: dry.skipped,
+      reason: dry.reason, drCount: dry.drCount, completedCount: dry.completedCount,
+      error: dry.error
+    }, null, 2));
+    if (dry.skipped) {
+      log.push('  → 발송 스킵 사유: ' + dry.reason);
+    }
+    if (dry.subject) log.push('  제목: ' + dry.subject);
+  } catch(e) {
+    log.push('  ⚠️ Dry run 실패: ' + e + '\n' + (e.stack || ''));
+  }
+
+  // ── 종합 진단 ──
+  log.push('\n═══ 종합 권장 사항 ═══');
+  log.push('  - 트리거가 없으면: setupEGReportTriggers() 실행');
+  log.push('  - 수신자가 비어있으면: M_Clients의 EG TRAVEL 행에 Email 등록');
+  log.push('  - 전날 DR이 없는데 발송 필요하면: 정상 동작이므로 변경 불필요');
+  log.push('  - 트리거는 있는데 실행이 안 됐으면: GAS Editor → Triggers (좌측 시계 아이콘) → Execution History 확인');
+  log.push('  - 즉시 강제 발송하려면: sendEGDailyReport({dryRun: false}) 수동 실행');
+
+  const output = log.join('\n');
+  Logger.log(output);
+  return output;
+}
+
+// 어제 날짜로 강제 발송 (수동 보내기)
+function sendEGDailyReport_force() {
+  return sendEGDailyReport({ dryRun: false });
+}
+
+// 특정 날짜로 강제 발송 (예: sendEGDailyReport_forDate('2026-05-22'))
+function sendEGDailyReport_forDate(dateISO) {
+  return sendEGDailyReport({ dryRun: false, date: dateISO });
+}
