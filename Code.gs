@@ -8949,3 +8949,73 @@ function _fixAgencyTxn013_(dryRun) {
     return log.join('\n');
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔍 Agency_Txn 진단 (Sunjin Tour / INV-202605-013 관련)
+// ═══════════════════════════════════════════════════════════════════════════
+function diagAgencyTxn_013() {
+  const log = [];
+  log.push('═══ Agency_Txn 진단: Sunjin Tour & INV-202605-013 ═══');
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Agency_Txn');
+    if (!sheet) { log.push('❌ Agency_Txn 시트 없음'); Logger.log(log.join('\n')); return; }
+
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+
+    log.push('헤더: ' + JSON.stringify(headers));
+    log.push('총 행 수: ' + (data.length - 1));
+
+    const idCol     = headers.indexOf('InvoiceID');
+    const typeCol   = headers.indexOf('Type');
+    const agencyCol = headers.indexOf('Agency');
+
+    // 1) Type 컬럼의 모든 unique 값 수집
+    const typeSet = new Set();
+    for (let i = 1; i < data.length; i++) {
+      typeSet.add(String(data[i][typeCol] || ''));
+    }
+    log.push('\n── Type 컬럼 unique 값 ──');
+    [...typeSet].sort().forEach(t => log.push('  "' + t + '" (len=' + t.length + ')'));
+
+    // 2) Sunjin Tour 관련 행 전체 출력
+    log.push('\n── Sunjin Tour 관련 행 (Agency 컬럼에 "Sunjin" 포함) ──');
+    let sunjinCount = 0;
+    for (let i = 1; i < data.length; i++) {
+      const ag = String(data[i][agencyCol] || '');
+      if (ag.indexOf('Sunjin') >= 0 || ag.indexOf('sunjin') >= 0) {
+        sunjinCount++;
+        log.push('  row ' + (i + 1) + ':');
+        headers.forEach((h, ci) => {
+          let v = data[i][ci];
+          if (v instanceof Date) v = Utilities.formatDate(v, 'Australia/Sydney', 'yyyy-MM-dd');
+          let s = String(v || '');
+          if (s.length > 80) s = s.substring(0, 80) + '...';
+          log.push('    ' + h + ' = "' + s + '"');
+        });
+      }
+    }
+    log.push('Sunjin 행 총 ' + sunjinCount + '개');
+
+    // 3) InvoiceID에 "013" 포함된 행
+    log.push('\n── InvoiceID에 "013" 포함된 모든 행 ──');
+    let n013 = 0;
+    for (let i = 1; i < data.length; i++) {
+      const id = String(data[i][idCol] || '');
+      if (id.indexOf('013') >= 0) {
+        n013++;
+        log.push('  row ' + (i + 1) + ': InvoiceID="' + id + '" (len=' + id.length + ')' +
+                 ', Type="' + data[i][typeCol] + '"' +
+                 ', Agency="' + data[i][agencyCol] + '"');
+      }
+    }
+    log.push('013 포함 행 ' + n013 + '개');
+
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+  } catch (err) {
+    Logger.log('error: ' + err);
+    return 'error: ' + err;
+  }
+}
