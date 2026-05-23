@@ -21763,6 +21763,25 @@ async function saveInvoiceToSheet() {
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) { _fail();toast('여행사와 기간을 선택하세요','er'); return; }
 
+  // ★ 2026-05-23 fix: stale _trueEditData로 인한 데이터 오기록 방지
+  //   시나리오 — INV-A를 편집 모드로 열고(_trueEditData 세팅), 저장 안 한 채로
+  //   다른 인보이스를 만들면 _buildInvRows가 INV-A의 rows를 반환 → INV-B 번호로
+  //   INV-A의 데이터가 저장되는 버그. 편집 모드면 invNum 일치 검증 필수.
+  if (_trueEditData && _trueEditData.invNumber) {
+    const expectedAgency = _trueEditData.savedInv?.Agency;
+    const expectedFrom   = _trueEditData.savedInv?.PeriodFrom;
+    if (expectedAgency && expectedFrom &&
+        (String(expectedAgency).trim() !== String(agency).trim() ||
+         String(expectedFrom).trim()   !== String(from).trim())) {
+      _fail();
+      toast(`⚠️ ${_trueEditData.invNumber} 편집 모드입니다. 다른 인보이스를 만들려면 "편집 취소" 후 진행하세요.`, 'er');
+      console.warn('[saveInvoice] stale _trueEditData detected:',
+        'editing', _trueEditData.invNumber, '(', expectedAgency, expectedFrom, ')',
+        'but form shows', agency, from);
+      return;
+    }
+  }
+
   const rows = _buildInvRows(agency, from, to);
   if (!rows.length) { _fail();toast('항목이 없습니다','er'); return; }
 
@@ -21913,18 +21932,30 @@ async function saveInvoiceToSheet() {
       const drAmount = roundMoney(grandTotal);
 
       // 중복 체크: 동일 InvoiceID가 이미 있는지 확인
+      // ★ 2026-05-23 fix: existingTxn 매칭 전 캐시 강제 fresh reload
+      //   stale 캐시 때문에 동일 InvoiceID 행을 못 찾아 중복 add 되는 버그 방지.
+      //   살짝 느려지지만 정합성이 더 중요.
+      try {
+        const _agRes = await fetch(APPS_SCRIPT_URL + '?action=get_agency_txn');
+        const _agJson = await _agRes.json();
+        if (_agJson.ok && Array.isArray(_agJson.rows)) _balAgencyTxns = _agJson.rows;
+      } catch(e) { console.warn('[Invoice→Balance] agency_txn pre-check reload failed:', e); }
+
       const existingTxn = (_balAgencyTxns||[]).find(t => String(t.InvoiceID||'').trim() === invNum && String(t.Type||'').trim() === 'invoice');
       if (!existingTxn) {
         const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: actualFrom, FinishDate: actualTo, DueDate: dueDateStr };
 
-        // ① DR 행: 인보이스 총 청구액
+        // ① DR 행: 인보이스 총 청구액 (await — 응답 받은 후 다음 단계)
         const drTxn = { ...baseTxn, Type: 'invoice', DR: drAmount, CR: 0,
           Remark: `\uC778\uBCF4\uC774\uC2A4 \uBC1C\uD589 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})` };
-        fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
-          body: JSON.stringify({action:'add_agency_txn', data:drTxn, _user:getAdminUser()})
-        }).then(r=>r.json()).then(j=>{
-          if(j.ok) console.log('[Invoice→Balance] DR(invoice) 등록:', invNum, drAmount);
-        }).catch(e=>console.warn('[Invoice→Balance] DR error:', e));
+        try {
+          const _drRes = await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+            body: JSON.stringify({action:'add_agency_txn', data:drTxn, _user:getAdminUser()})
+          });
+          const _drJson = await _drRes.json();
+          if(_drJson.ok) console.log('[Invoice→Balance] DR(invoice) 등록:', invNum, drAmount);
+          else console.warn('[Invoice→Balance] DR fail:', _drJson.error);
+        } catch(e) { console.warn('[Invoice→Balance] DR error:', e); }
 
         // ② 선수금/크레딧 개별 CR 행
         _invDeductions.filter(d => d.amount > 0).forEach(d => {
