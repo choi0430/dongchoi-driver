@@ -8581,3 +8581,225 @@ function _egDebugDate(targetISO){
   }
   return { date: targetISO, found: foundOnDate, matched: matched, unmatched: unmatched };
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// 🆘 INV-202605-014 복원 (2026-05-23)
+// ═══════════════════════════════════════════════════════════════════════════
+// 시나리오: 원본 INV-202605-014가 새 인보이스로 덮어쓰여짐.
+// 대응: 7일치 자동 백업 시트 중 원본이 살아있는 가장 최근 백업에서
+//      해당 행 1개만 추출 → 현재 Invoices 시트의 014번 행을 정확히 교체.
+//      Agency_Txn에서도 같은 InvoiceID의 행이 새 데이터로 잘못 매핑됐을
+//      가능성이 있으므로 함께 검증/표시.
+//
+// ⚠️ 안전 가드:
+//   - dryRun=true 가 기본값. 처음에는 미리보기만 실행.
+//   - 백업이 비어있거나 014가 없으면 중단.
+//   - 복원 전에 현재 014 행 전체를 Logger에 출력 (사후 검증용).
+//
+// 사용법:
+//   1) GAS Editor에서 recoverInv014_preview() 실행 → Logger에서 결과 확인
+//   2) 출력된 백업 행이 원본 PDF($2,050, Tour Hojuro, 김민철, 0514 VG-143-KE-8N)
+//      와 일치하는지 확인
+//   3) 일치하면 recoverInv014_commit() 실행 → 실제 복원
+// ═══════════════════════════════════════════════════════════════════════════
+
+function recoverInv014_preview() { return _recoverInv014_(true); }
+function recoverInv014_commit()  { return _recoverInv014_(false); }
+
+function _recoverInv014_(dryRun) {
+  const INV_NUM = 'INV-202605-014';
+  const log = [];
+  log.push('═══ INV-202605-014 복원 ' + (dryRun ? '[미리보기]' : '[실행]') + ' ═══');
+
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Invoices');
+    if (!sheet) { log.push('❌ Invoices 시트 없음'); Logger.log(log.join('\n')); return log.join('\n'); }
+
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const invNumCol = headers.indexOf('InvNumber');
+    if (invNumCol < 0) { log.push('❌ InvNumber 컬럼 없음'); Logger.log(log.join('\n')); return log.join('\n'); }
+
+    // ── 1) 현재 시트의 014 행 찾기 + 출력 ──
+    const allData = sheet.getDataRange().getValues();
+    let curRow = -1;
+    for (let i = 1; i < allData.length; i++) {
+      if (String(allData[i][invNumCol]).trim() === INV_NUM) { curRow = i + 1; break; }
+    }
+    if (curRow < 0) {
+      log.push('⚠️ 현재 시트에 ' + INV_NUM + ' 없음 — append 됩니다');
+    } else {
+      const cur = allData[curRow - 1];
+      log.push('── 현재 시트의 ' + INV_NUM + ' (덮어쓴 데이터) ──');
+      headers.forEach((h, ci) => {
+        let v = String(cur[ci] || '');
+        if (v.length > 120) v = v.substring(0, 120) + '... [' + v.length + '자]';
+        log.push('  ' + h + ' = ' + v);
+      });
+    }
+
+    // ── 2) 백업 시트 중 원본 014가 살아있는 가장 최근 백업 찾기 ──
+    const allSheets = ss.getSheets();
+    const backups = allSheets
+      .map(sh => sh.getName())
+      .filter(n => /^Invoices_BAK_\d{8}$/.test(n))
+      .sort()
+      .reverse(); // 최신부터
+
+    log.push('\n── 사용 가능한 Invoices 백업: ' + backups.length + '개 ──');
+    backups.forEach(b => log.push('  • ' + b));
+
+    if (backups.length === 0) {
+      log.push('\n❌ Invoices 백업 시트 없음 — 자동 백업이 실행되지 않은 듯합니다');
+      Logger.log(log.join('\n'));
+      return log.join('\n');
+    }
+
+    // 각 백업에서 014 찾기. 첫 발견 사용. (PDF에 따르면 IssuedDate=17/05/2026,
+    // GrandTotal=2050. 이 값이 일치하는 백업을 우선 사용)
+    let bestBak = null;
+    let bestRowArr = null;
+    let bestHeaders = null;
+
+    for (let bi = 0; bi < backups.length; bi++) {
+      const bakName = backups[bi];
+      const bakSheet = ss.getSheetByName(bakName);
+      const bakData = bakSheet.getDataRange().getValues();
+      if (bakData.length < 2) continue;
+      const bakHeaders = bakData[0];
+      const bakInvCol = bakHeaders.indexOf('InvNumber');
+      if (bakInvCol < 0) continue;
+
+      for (let ri = 1; ri < bakData.length; ri++) {
+        if (String(bakData[ri][bakInvCol]).trim() === INV_NUM) {
+          const row = bakData[ri];
+          const grandCol = bakHeaders.indexOf('GrandTotal');
+          const agencyCol = bakHeaders.indexOf('Agency');
+          const guideCol  = bakHeaders.indexOf('Guide');
+          const tcCol     = bakHeaders.indexOf('TourCode');
+          const grand = grandCol >= 0 ? Number(row[grandCol]) : 0;
+          const agency = agencyCol >= 0 ? String(row[agencyCol]) : '';
+          const guide = guideCol >= 0 ? String(row[guideCol]) : '';
+          const tc = tcCol >= 0 ? String(row[tcCol]) : '';
+
+          log.push('\n── ' + bakName + '에서 ' + INV_NUM + ' 발견 ──');
+          log.push('  Agency:     ' + agency);
+          log.push('  GrandTotal: ' + grand);
+          log.push('  Guide:      ' + guide);
+          log.push('  TourCode:   ' + tc);
+
+          // 원본 판별: PDF는 Tour Hojuro, $2050, 김민철, 0514 VG-143-KE-8N
+          const looksLikeOriginal =
+            agency.indexOf('Hojuro') >= 0 &&
+            Math.abs(grand - 2050) < 0.5;
+
+          if (looksLikeOriginal) {
+            log.push('  ✅ 원본과 일치 — 이 백업을 사용합니다');
+            bestBak = bakName;
+            bestRowArr = row;
+            bestHeaders = bakHeaders;
+            break;
+          } else {
+            log.push('  ⚠️ 원본과 다름 (이 백업도 이미 덮어쓴 상태) — 더 오래된 백업 탐색');
+          }
+          break; // 이 백업의 014는 하나뿐이므로 다음 백업으로
+        }
+      }
+      if (bestBak) break;
+    }
+
+    if (!bestBak) {
+      log.push('\n❌ 모든 백업에 원본 ' + INV_NUM + '이 없음');
+      log.push('   (모든 백업이 덮어쓴 후에 찍혔거나, 014가 백업 전에 없었음)');
+      log.push('   → PDF 기반 수동 재구성 함수 recoverInv014_fromPDF()를 사용해야 합니다');
+      Logger.log(log.join('\n'));
+      return log.join('\n');
+    }
+
+    // ── 3) 백업 행 전체 출력 ──
+    log.push('\n── 복원 대상 데이터 (' + bestBak + ') ──');
+    bestHeaders.forEach((h, ci) => {
+      let v = String(bestRowArr[ci] || '');
+      if (v.length > 200) v = v.substring(0, 200) + '... [' + v.length + '자]';
+      log.push('  ' + h + ' = ' + v);
+    });
+
+    if (dryRun) {
+      log.push('\n[DRY RUN] 실제 변경 안 함. recoverInv014_commit() 실행하면 적용됩니다.');
+      Logger.log(log.join('\n'));
+      return log.join('\n');
+    }
+
+    // ── 4) 실제 복원 ──
+    // 백업의 헤더 순서대로 데이터를 현재 시트 헤더 순서에 맞게 매핑
+    const newRowArr = headers.map(h => {
+      const bakCi = bestHeaders.indexOf(h);
+      return bakCi >= 0 ? bestRowArr[bakCi] : '';
+    });
+
+    if (curRow > 0) {
+      sheet.getRange(curRow, 1, 1, headers.length).setValues([newRowArr]);
+      log.push('\n✅ Invoices 시트 row ' + curRow + ' ' + INV_NUM + ' 복원 완료');
+    } else {
+      sheet.appendRow(newRowArr);
+      log.push('\n✅ Invoices 시트에 ' + INV_NUM + ' 새로 추가 (이전엔 없었음)');
+    }
+
+    // ── 5) Audit log ──
+    try {
+      appendAuditLog('Branden', 'recover_invoice', 'Invoices', INV_NUM,
+        'restored from ' + bestBak + ' (overwritten data replaced)');
+    } catch(e) { log.push('audit log 실패: ' + e); }
+
+    log.push('\n⚠️ Agency_Txn 시트에 ' + INV_NUM + ' 관련 행이 있는지도 확인하세요.');
+    log.push('   덮어쓴 인보이스가 Agency_Txn에 잘못된 DR/날짜를 만들었을 수 있습니다.');
+    log.push('   필요 시 recoverInv014_checkAgencyTxn() 실행.');
+
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+
+  } catch (err) {
+    log.push('❌ 에러: ' + err.toString() + '\n' + err.stack);
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+  }
+}
+
+// ── Agency_Txn에서 014 관련 행 점검 ──
+function recoverInv014_checkAgencyTxn() {
+  const INV_NUM = 'INV-202605-014';
+  const log = [];
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Agency_Txn');
+    if (!sheet) { log.push('Agency_Txn 시트 없음'); Logger.log(log.join('\n')); return; }
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const idCol = headers.indexOf('InvoiceID');
+    const remarkCol = headers.indexOf('Remark');
+    log.push('═══ Agency_Txn에서 ' + INV_NUM + ' 관련 행 ═══');
+    let found = 0;
+    for (let i = 1; i < data.length; i++) {
+      const id = String(data[i][idCol] || '');
+      const remark = String(data[i][remarkCol] || '');
+      if (id === INV_NUM || remark.indexOf(INV_NUM) >= 0) {
+        found++;
+        log.push('  row ' + (i + 1) + ':');
+        headers.forEach((h, ci) => {
+          let v = String(data[i][ci] || '');
+          if (v.length > 100) v = v.substring(0, 100) + '...';
+          log.push('    ' + h + ' = ' + v);
+        });
+      }
+    }
+    log.push('총 ' + found + '개 행');
+    log.push('\n원본 PDF: Agency=Tour Hojuro Pty Ltd, Date=17/05/2026, DR=2050,');
+    log.push('         StartDate=15/05/2026, FinishDate=17/05/2026, DueDate=31/05/2026,');
+    log.push('         TourCode=0514 VG-143-KE-8N, Guide=김민철');
+    log.push('이 값과 다르면 admin 페이지에서 직접 수정하거나 별도 패치 필요.');
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+  } catch (err) {
+    Logger.log('error: ' + err);
+    return 'error: ' + err;
+  }
+}
