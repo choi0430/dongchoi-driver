@@ -9019,3 +9019,172 @@ function diagAgencyTxn_013() {
     return 'error: ' + err;
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🆘 Agency_Txn: Plus Australia의 잘못된 INV-202605-014 청구 행 삭제 (2026-05-23)
+// ═══════════════════════════════════════════════════════════════════════════
+// 시나리오:
+//   - 진짜 INV-202605-014 = Tour Hojuro, $2,050, 김민철, 0514 VG-143-KE-8N
+//     (이미 Tour Hojuro 거래내역에 올바르게 존재 — 화면 확인 완료)
+//   - Plus Australia에도 014 청구 행이 있는데 실제론 018의 데이터
+//     (018과 TourCode/Guide/DR/기간 모두 동일 — 복제본)
+//
+// 대응: Plus Australia의 014 청구 행을 식별 → 018 행과 비교 →
+//      "018의 복제본"이 맞으면 삭제 (Tour Hojuro의 진짜 014는 건드리지 않음)
+//
+// ⚠️ 안전 가드:
+//   - dryRun=true 기본. 미리보기 → commit 2단계.
+//   - 동일 InvoiceID + Agency 조합으로 정확히 1개 행만 매칭되어야 함.
+//   - 같은 거래처의 018 행과 핵심 필드(TourCode/Guide/DR/Remark)가
+//     동일한 것을 확인한 후에만 삭제 진행.
+//   - 일치하지 않으면 중단하고 수동 점검 안내.
+//
+// 사용법:
+//   1) deleteDup014_preview() → Logger 확인
+//   2) deleteDup014_commit() → 실제 삭제
+// ═══════════════════════════════════════════════════════════════════════════
+
+function deleteDup014_preview() { return _deleteDup014_(true); }
+function deleteDup014_commit()  { return _deleteDup014_(false); }
+
+function _deleteDup014_(dryRun) {
+  const TARGET_INV   = 'INV-202605-014';
+  const TWIN_INV     = 'INV-202605-018';
+  const TARGET_AG    = 'Plus Australia Tour Pty Ltd';  // 잘못된 행이 있는 거래처
+  const log = [];
+  log.push('═══ Plus Australia 중복 ' + TARGET_INV + ' 삭제 ' +
+           (dryRun ? '[미리보기]' : '[실행]') + ' ═══');
+
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Agency_Txn');
+    if (!sheet) { log.push('❌ Agency_Txn 없음'); Logger.log(log.join('\n')); return; }
+
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const idCol     = headers.indexOf('InvoiceID');
+    const typeCol   = headers.indexOf('Type');
+    const agencyCol = headers.indexOf('Agency');
+
+    // ── 1) Plus Australia의 014 청구 행 찾기 ──
+    const targets = [];
+    for (let i = 1; i < data.length; i++) {
+      const id = String(data[i][idCol] || '').trim();
+      const ag = String(data[i][agencyCol] || '').trim();
+      const type = String(data[i][typeCol] || '').toLowerCase().trim();
+      if (id === TARGET_INV && ag === TARGET_AG && type === 'invoice') {
+        targets.push({ rowNum: i + 1, row: data[i] });
+      }
+    }
+
+    log.push('Plus Australia + ' + TARGET_INV + ' 청구 행: ' + targets.length + '개');
+    if (targets.length === 0) {
+      log.push('❌ 삭제 대상 없음 — 이미 처리됐거나 Agency 이름이 다름');
+      log.push('   참고: TARGET_AG="' + TARGET_AG + '"');
+      Logger.log(log.join('\n')); return log.join('\n');
+    }
+    if (targets.length > 1) {
+      log.push('❌ 일치 행이 ' + targets.length + '개 — 수동 점검 필요');
+      targets.forEach(t => log.push('  row ' + t.rowNum));
+      Logger.log(log.join('\n')); return log.join('\n');
+    }
+
+    const target = targets[0];
+    log.push('\n── 삭제 후보: row ' + target.rowNum + ' ──');
+    headers.forEach((h, ci) => {
+      let v = target.row[ci];
+      if (v instanceof Date) v = Utilities.formatDate(v, 'Australia/Sydney', 'yyyy-MM-dd');
+      let s = String(v || '');
+      if (s.length > 80) s = s.substring(0, 80) + '...';
+      log.push('  ' + h + ' = "' + s + '"');
+    });
+
+    // ── 2) Plus Australia의 018 행 찾기 (쌍둥이) ──
+    const twins = [];
+    for (let i = 1; i < data.length; i++) {
+      const id = String(data[i][idCol] || '').trim();
+      const ag = String(data[i][agencyCol] || '').trim();
+      const type = String(data[i][typeCol] || '').toLowerCase().trim();
+      if (id === TWIN_INV && ag === TARGET_AG && type === 'invoice') {
+        twins.push({ rowNum: i + 1, row: data[i] });
+      }
+    }
+    if (twins.length === 0) {
+      log.push('\n❌ 비교 대상 ' + TWIN_INV + ' 청구 행 없음 — 가설(018 복제본)을 검증할 수 없음');
+      log.push('   수동 점검 권장. 그래도 강제 삭제하려면 force=true 옵션 함수 추가 필요.');
+      Logger.log(log.join('\n')); return log.join('\n');
+    }
+    if (twins.length > 1) {
+      log.push('\n⚠️ ' + TWIN_INV + ' 행이 ' + twins.length + '개');
+    }
+    const twin = twins[0];
+    log.push('\n── 쌍둥이 비교 대상: row ' + twin.rowNum + ' (' + TWIN_INV + ') ──');
+
+    // ── 3) 핵심 필드 비교 ──
+    const compareFields = ['TourCode','Guide','DR','Remark','StartDate','FinishDate','Date'];
+    log.push('\n── 핵심 필드 비교 (014 vs 018) ──');
+    let matchCount = 0;
+    let diffCount = 0;
+    compareFields.forEach(f => {
+      const ci = headers.indexOf(f);
+      if (ci < 0) { log.push('  ⚠️ ' + f + ' 컬럼 없음'); return; }
+      let v1 = target.row[ci];
+      let v2 = twin.row[ci];
+      if (v1 instanceof Date) v1 = Utilities.formatDate(v1, 'Australia/Sydney', 'yyyy-MM-dd');
+      if (v2 instanceof Date) v2 = Utilities.formatDate(v2, 'Australia/Sydney', 'yyyy-MM-dd');
+      const same = String(v1).trim() === String(v2).trim();
+      log.push('  ' + (same ? '✓ 동일' : '✗ 다름') + ' ' + f +
+               ': 014="' + v1 + '" / 018="' + v2 + '"');
+      if (same) matchCount++; else diffCount++;
+    });
+
+    // Date(거래일) 필드는 의도적으로 동일하지 않을 수 있으니 별도 처리.
+    // TourCode/Guide/DR/Remark/StartDate/FinishDate이 모두 동일하면
+    // "018의 복제본"으로 간주하기에 충분.
+    const keyFields = ['TourCode','Guide','DR','Remark','StartDate','FinishDate'];
+    const allKeyMatch = keyFields.every(f => {
+      const ci = headers.indexOf(f);
+      if (ci < 0) return false;
+      let v1 = target.row[ci];
+      let v2 = twin.row[ci];
+      if (v1 instanceof Date) v1 = Utilities.formatDate(v1, 'Australia/Sydney', 'yyyy-MM-dd');
+      if (v2 instanceof Date) v2 = Utilities.formatDate(v2, 'Australia/Sydney', 'yyyy-MM-dd');
+      return String(v1).trim() === String(v2).trim();
+    });
+
+    log.push('\n── 판정 ──');
+    if (allKeyMatch) {
+      log.push('✅ TourCode/Guide/DR/Remark/StartDate/FinishDate 모두 동일');
+      log.push('   → row ' + target.rowNum + '은 ' + TWIN_INV + '의 복제본이 맞음 (안전 삭제 가능)');
+    } else {
+      log.push('❌ 핵심 필드가 ' + TWIN_INV + '과 다름 — 단순 복제본 아님');
+      log.push('   → 자동 삭제 위험. 수동 점검 필요. 중단합니다.');
+      Logger.log(log.join('\n')); return log.join('\n');
+    }
+
+    if (dryRun) {
+      log.push('\n[DRY RUN] 실제 삭제 안 함. deleteDup014_commit() 실행하면 row ' +
+               target.rowNum + '이 삭제됩니다.');
+      Logger.log(log.join('\n')); return log.join('\n');
+    }
+
+    // ── 4) 실제 삭제 ──
+    sheet.deleteRow(target.rowNum);
+    log.push('\n✅ row ' + target.rowNum + ' 삭제 완료 (Plus Australia ' + TARGET_INV + ' 청구 행)');
+
+    // ── 5) Audit log ──
+    try {
+      appendAuditLog('Branden', 'delete_duplicate_agency_txn', 'Agency_Txn',
+        String(target.rowNum),
+        TARGET_AG + ' ' + TARGET_INV + ' 청구 행 삭제 (' + TWIN_INV + '의 복제본)');
+    } catch(e) { log.push('audit log 실패: ' + e); }
+
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+
+  } catch (err) {
+    log.push('❌ 에러: ' + err.toString() + '\n' + err.stack);
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+  }
+}
