@@ -8803,3 +8803,149 @@ function recoverInv014_checkAgencyTxn() {
     return 'error: ' + err;
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🆘 Agency_Txn INV-202605-013 청구 행 수정 (2026-05-23)
+// ═══════════════════════════════════════════════════════════════════════════
+// 시나리오: Agency_Txn에 INV-202605-013 청구 행이 INV-202605-012의 데이터
+//          (TourCode=CKH-1-260511TW-4, Guide=김창현, DR=3680, 12~16/05)로
+//          잘못 기록됨. 실제 PDF는 CKH-1-260513OZ / 김제우 / $3,060 / 14~17/05.
+//
+// 대응: Type='청구' AND InvoiceID='INV-202605-013' 행을 찾아
+//      PDF 원본 데이터로 다음 필드를 갱신:
+//        TourCode, Guide, DR, Remark, StartDate, FinishDate, DueDate
+//      (Date, InvoiceID, Type, CR, Agency, RowID는 건드리지 않음)
+//
+// ⚠️ 안전 가드:
+//   - dryRun=true 가 기본값. 처음에는 미리보기만.
+//   - 동일 InvoiceID의 '청구' 행이 여러 개면 중단 (수동 점검 필요).
+//   - 변경 전 원본 값을 Logger에 출력.
+//
+// 사용법:
+//   1) GAS Editor에서 fixAgencyTxn013_preview() 실행 → Logger 확인
+//   2) 원본 값과 새 값이 의도와 맞는지 검증
+//   3) fixAgencyTxn013_commit() 실행 → 실제 적용
+// ═══════════════════════════════════════════════════════════════════════════
+
+function fixAgencyTxn013_preview() { return _fixAgencyTxn013_(true); }
+function fixAgencyTxn013_commit()  { return _fixAgencyTxn013_(false); }
+
+function _fixAgencyTxn013_(dryRun) {
+  const INV_NUM = 'INV-202605-013';
+  // PDF 원본 데이터
+  const NEW_VALUES = {
+    TourCode:   'CKH-1-260513OZ',
+    Guide:      '김제우',
+    DR:         3060,
+    Remark:     '인보이스 발행 (4건, 14/05/2026~17/05/2026)',
+    StartDate:  '2026-05-14',
+    FinishDate: '2026-05-17',
+    DueDate:    '2026-05-31'
+  };
+
+  const log = [];
+  log.push('═══ Agency_Txn ' + INV_NUM + ' 청구 행 수정 ' +
+           (dryRun ? '[미리보기]' : '[실행]') + ' ═══');
+
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('Agency_Txn');
+    if (!sheet) { log.push('❌ Agency_Txn 시트 없음'); Logger.log(log.join('\n')); return log.join('\n'); }
+
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const idCol     = headers.indexOf('InvoiceID');
+    const typeCol   = headers.indexOf('Type');
+    if (idCol < 0 || typeCol < 0) {
+      log.push('❌ InvoiceID 또는 Type 컬럼 없음');
+      Logger.log(log.join('\n')); return log.join('\n');
+    }
+
+    // ── 1) Type='청구' AND InvoiceID=013 행 찾기 ──
+    const matches = [];
+    for (let i = 1; i < data.length; i++) {
+      const id = String(data[i][idCol] || '').trim();
+      const type = String(data[i][typeCol] || '').trim();
+      if (id === INV_NUM && type === '청구') {
+        matches.push({ rowNum: i + 1, row: data[i] });
+      }
+    }
+
+    log.push('일치 행: ' + matches.length + '개');
+    if (matches.length === 0) {
+      log.push('❌ ' + INV_NUM + ' 청구 행이 Agency_Txn에 없음 — 이미 삭제됐거나 InvoiceID가 다름');
+      Logger.log(log.join('\n')); return log.join('\n');
+    }
+    if (matches.length > 1) {
+      log.push('❌ 동일 청구 행이 ' + matches.length + '개 — 중복 의심. 수동 점검 필요.');
+      matches.forEach(m => log.push('  row ' + m.rowNum));
+      Logger.log(log.join('\n')); return log.join('\n');
+    }
+
+    const target = matches[0];
+    log.push('\n── 대상: row ' + target.rowNum + ' ──');
+
+    // ── 2) 현재 값 vs 새 값 비교 출력 ──
+    log.push('\n── 변경 전 → 변경 후 ──');
+    const updates = []; // {colIdx, oldVal, newVal, fieldName}
+    Object.keys(NEW_VALUES).forEach(field => {
+      const ci = headers.indexOf(field);
+      if (ci < 0) {
+        log.push('  ⚠️ ' + field + ' 컬럼이 Agency_Txn에 없음 (스킵)');
+        return;
+      }
+      const oldVal = target.row[ci];
+      const newVal = NEW_VALUES[field];
+      let oldDisp = oldVal instanceof Date
+        ? Utilities.formatDate(oldVal, 'Australia/Sydney', 'yyyy-MM-dd')
+        : String(oldVal);
+      const changed = String(oldDisp).trim() !== String(newVal).trim();
+      log.push('  ' + (changed ? '🔄' : '✓ ') + ' ' + field +
+               ': "' + oldDisp + '" → "' + newVal + '"' +
+               (changed ? '' : ' (이미 일치)'));
+      if (changed) updates.push({ colIdx: ci, oldVal: oldDisp, newVal: newVal, field: field });
+    });
+
+    // 다른 필드(변경 안 하는 것)도 참고 출력
+    log.push('\n── 유지되는 필드 (변경 안 함) ──');
+    ['RowID','Agency','Date','InvoiceID','Type','CR'].forEach(f => {
+      const ci = headers.indexOf(f);
+      if (ci < 0) return;
+      let v = target.row[ci];
+      if (v instanceof Date) v = Utilities.formatDate(v, 'Australia/Sydney', 'yyyy-MM-dd');
+      log.push('  ' + f + ': ' + v);
+    });
+
+    if (updates.length === 0) {
+      log.push('\n변경할 항목 없음 — 이미 모두 일치합니다.');
+      Logger.log(log.join('\n')); return log.join('\n');
+    }
+
+    if (dryRun) {
+      log.push('\n[DRY RUN] 실제 변경 없음. fixAgencyTxn013_commit() 실행하면 적용됩니다.');
+      Logger.log(log.join('\n')); return log.join('\n');
+    }
+
+    // ── 3) 실제 수정 ──
+    updates.forEach(u => {
+      sheet.getRange(target.rowNum, u.colIdx + 1).setValue(u.newVal);
+    });
+
+    log.push('\n✅ ' + updates.length + '개 필드 수정 완료 (row ' + target.rowNum + ')');
+
+    // ── 4) Audit log ──
+    try {
+      const summary = updates.map(u => u.field + ': ' + u.oldVal + ' → ' + u.newVal).join(' | ');
+      appendAuditLog('Branden', 'fix_agency_txn', 'Agency_Txn', String(target.rowNum),
+        INV_NUM + ' 청구 행 수정 — ' + summary);
+    } catch(e) { log.push('audit log 실패: ' + e); }
+
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+
+  } catch (err) {
+    log.push('❌ 에러: ' + err.toString() + '\n' + err.stack);
+    Logger.log(log.join('\n'));
+    return log.join('\n');
+  }
+}
