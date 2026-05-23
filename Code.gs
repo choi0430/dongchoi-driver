@@ -8866,7 +8866,7 @@ function _fixAgencyTxn013_(dryRun) {
     for (let i = 1; i < data.length; i++) {
       const id = String(data[i][idCol] || '').trim();
       const type = String(data[i][typeCol] || '').trim();
-      if (id === INV_NUM && type === '청구') {
+      if (id === INV_NUM && type.toLowerCase() === 'invoice') {
         matches.push({ rowNum: i + 1, row: data[i] });
       }
     }
