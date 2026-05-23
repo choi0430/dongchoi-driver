@@ -1570,6 +1570,40 @@ function doPost(e) {
       }
     }
 
+    // ─── 멱등성 게이트 (Request_ID 중복 차단) ───
+    // 같은 Request_ID로 들어온 두 번째 요청은 시트에 쓰지 않고 ok=true 반환.
+    // 클라이언트 retry queue가 timeout 후 같은 요청을 다시 보내도 중복 저장되지 않음.
+    // 적용 액션: write 계열만. read 계열은 멱등성 의미 없음.
+    const _IDEMPOTENT_ACTIONS = {
+      save_report: 1, save_predeparture: 1, save_endofshift: 1,
+      save_defect_report: 1, save_mot_report: 1, save_leave_request: 1,
+      save_incident_report: 1, save_sub_report: 1, save_correction_request: 1,
+      update_report: 1, delete_report: 1,
+      save_invoice: 1, delete_invoice: 1, update_invoice_status: 1,
+      add_agency_txn: 1, update_agency_txn: 1, delete_agency_txn: 1,
+      add_sub_txn: 1, update_sub_txn: 1, delete_sub_txn: 1,
+      add_ledger: 1, update_ledger: 1, delete_ledger: 1,
+      add_wage: 1, update_wage: 1, delete_wage: 1,
+      add_master: 1, update_master: 1, delete_master: 1,
+      save_schedule: 1, delete_schedule: 1, update_schedule_status: 1
+    };
+    const _reqId = (payload.data && payload.data.Request_ID) ? String(payload.data.Request_ID).trim() : '';
+    if (_reqId && _IDEMPOTENT_ACTIONS[action]) {
+      try {
+        const cache = CacheService.getScriptCache();
+        const key = 'rid:' + _reqId;
+        const existing = cache.get(key);
+        if (existing) {
+          // 이미 동일 Request_ID가 처리됨 — 시트에 쓰지 않고 ok 반환
+          Logger.log('[Idempotency] duplicate blocked: ' + _reqId + ' action=' + action);
+          return cors({ ok: true, idempotent: true, message: 'duplicate request — already processed' });
+        }
+        // 24시간 동안 이 Request_ID를 기록 (단위: 초, 최대 21600 = 6시간 인 점 주의 → 21600 설정)
+        // GAS CacheService는 최대 6시간 지원. 그 이상 보호하려면 Properties Service 필요.
+        cache.put(key, '1', 21600);
+      } catch(e) { Logger.log('[Idempotency] cache failed: ' + e); }
+    }
+
     switch (action) {
       // ── 인증 (POST) ──
       case 'login':
