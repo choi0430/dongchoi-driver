@@ -1354,6 +1354,18 @@ function doGet(e) {
       effectiveDriver = tokenValid.user;
     }
 
+    // ── 캐시 우회 (?force_refresh=1 또는 ?nocache=1) ──
+    // 클라이언트가 명시적으로 fresh 데이터 필요할 때 사용 (예: 수동 동기화 버튼)
+    if (e.parameter.force_refresh === '1' || e.parameter.nocache === '1') {
+      if (sheet) {
+        try { _invalidateSheetCache(sheet); } catch(err) {}
+      }
+      // 'all_masters' 가상 키도 무효화 (마스터 조회시)
+      if (action === 'get_all_masters' || (sheet && sheet.indexOf('M_') === 0)) {
+        try { _invalidateSheetCache('all_masters'); } catch(err) {}
+      }
+    }
+
     switch (action) {
       case 'ping':
         return cors({ok: true, msg: 'DC Fleet API ready', ts: new Date().toISOString()});
@@ -1602,6 +1614,49 @@ function doPost(e) {
         // GAS CacheService는 최대 6시간 지원. 그 이상 보호하려면 Properties Service 필요.
         cache.put(key, '1', 21600);
       } catch(e) { Logger.log('[Idempotency] cache failed: ' + e); }
+    }
+
+    // ─── 시트 캐시 자동 무효화 (write 액션) ───
+    // doPost 진입 시점에 영향받을 시트 캐시를 미리 삭제 → 처리 직후 read는 fresh
+    // 잘못된 write로 무효화만 일어나도 안전 (TTL 60초라 곧 다시 캐싱됨)
+    const _ACTION_INVALIDATES = {
+      save_report: ['Daily_Report', 'Invoices'],     // DR 변경은 Invoices PaidCR에 영향
+      save_predeparture: ['Pre_Departure'],
+      save_endofshift: ['End_of_Shift'],
+      save_defect_report: ['Defect_Reports'],
+      save_mot_report: ['MOT_Report'],
+      save_leave_request: ['Leave_Requests'],
+      save_incident_report: ['Incident_Reports'],
+      save_sub_report: ['Daily_Report'],             // SUB report도 Daily_Report에 저장됨
+      update_report: ['Daily_Report', 'Pre_Departure', 'End_of_Shift', 'Invoices'],
+      delete_report: ['Daily_Report', 'Pre_Departure', 'End_of_Shift', 'Invoices'],
+      save_invoice: ['Invoices'],
+      delete_invoice: ['Invoices'],
+      update_invoice_status: ['Invoices'],
+      add_agency_txn: ['Agency_Txn', 'Invoices'],    // PaidCR 변경
+      update_agency_txn: ['Agency_Txn', 'Invoices'],
+      delete_agency_txn: ['Agency_Txn', 'Invoices'],
+      add_sub_txn: ['SUB_Txn'],
+      update_sub_txn: ['SUB_Txn'],
+      delete_sub_txn: ['SUB_Txn'],
+      add_ledger: ['Ledger'],
+      update_ledger: ['Ledger'],
+      delete_ledger: ['Ledger'],
+      add_wage: ['Wages'],
+      update_wage: ['Wages'],
+      delete_wage: ['Wages'],
+      save_schedule: ['Schedule'],
+      delete_schedule: ['Schedule'],
+      update_schedule_status: ['Schedule', 'Invoices'],
+      // 마스터 — payload.sheet에 시트명 들어있음. all_masters도 함께 무효화 (_invalidateSheetCache가 자동 처리)
+      add_master: payload.sheet ? [payload.sheet] : null,
+      update_master: payload.sheet ? [payload.sheet] : null,
+      delete_master: payload.sheet ? [payload.sheet] : null,
+      bulk_update_guide_phones: ['M_Guides']
+    };
+    const _invalidateList = _ACTION_INVALIDATES[action];
+    if (_invalidateList && _invalidateList.length) {
+      try { _invalidateSheetCache(_invalidateList); } catch(e) { Logger.log('[cache] invalidate fail: ' + e); }
     }
 
     switch (action) {
@@ -2009,40 +2064,50 @@ function doPost(e) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function getReports(sheetName, driver) {
+  // ★ 캐싱: driver 필터는 캐시 후 적용 (시트 전체는 한 번만 읽음)
   try {
-    const ss = SpreadsheetApp.openById(SHEET_ID);
-    const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
+    const cached = _cachedRead(sheetName, function() {
+      const ss = SpreadsheetApp.openById(SHEET_ID);
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) return {ok: false, msg: sheetName + ' sheet not found'};
 
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return {ok: true, rows: []};
+      const data = sheet.getDataRange().getValues();
+      if (data.length < 2) return {ok: true, rows: []};
 
-    const headers = data[0];
-    const DATE_FIELDS = ['Date', 'Submitted', 'License_Expiry', 'Authority_Expiry', 'Rego_Date', 'HVIS_Date'];
+      const headers = data[0];
+      const DATE_FIELDS = ['Date', 'Submitted', 'License_Expiry', 'Authority_Expiry', 'Rego_Date', 'HVIS_Date'];
 
-    function formatCell(h, v) {
-      if (DATE_FIELDS.indexOf(h) !== -1 && v instanceof Date && !isNaN(v)) {
-        return formatDateForSheet(v);
+      function formatCell(h, v) {
+        if (DATE_FIELDS.indexOf(h) !== -1 && v instanceof Date && !isNaN(v)) {
+          return formatDateForSheet(v);
+        }
+        return v;
       }
-      return v;
-    }
 
-    let rows = data.slice(1).map((row, i) => {
-      const obj = {_rowIndex: i + 2}; // 1-indexed sheet row (헤더가 1행이므로 i+2)
-      headers.forEach((h, idx) => {
-        obj[h] = formatCell(h, row[idx]);
+      const rows = data.slice(1).map(function(row, i) {
+        const obj = {_rowIndex: i + 2};
+        headers.forEach(function(h, idx) {
+          obj[h] = formatCell(h, row[idx]);
+        });
+        return obj;
       });
-      return obj;
+      return {ok: true, rows: rows};
     });
 
-    if (driver) rows = rows.filter(r => r.Driver === driver);
-    return {ok: true, rows};
+    if (!cached.ok) return cached;
+    let rows = cached.rows || [];
+    if (driver) rows = rows.filter(function(r) { return r.Driver === driver; });
+    return {ok: true, rows: rows};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
 }
 
 function getMaster(sheetName) {
+  return _cachedRead(sheetName, function() { return _getMasterImpl(sheetName); });
+}
+
+function _getMasterImpl(sheetName) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, sheetName); // 누락 컬럼 자동 보정
@@ -2102,6 +2167,10 @@ function getMaster(sheetName) {
 }
 
 function getAllMasters() {
+  return _cachedRead('all_masters', function() { return _getAllMastersImpl(); });
+}
+
+function _getAllMastersImpl() {
   try {
     const sheets = ['M_Vehicles', 'M_Drivers', 'M_Clients', 'M_Guides', 'M_Hotels', 'M_Trailers',
                     'M_PriceClient', 'M_PriceDriver', 'M_PriceSub', 'M_SUB',
@@ -4164,6 +4233,12 @@ function saveInvoice(data) {
  * 모든 인보이스 조회
  */
 function getInvoices() {
+  // getInvoices는 Invoices + Agency_Txn 합성. 캐시 키 'Invoices'로 통일.
+  // Agency_Txn 변경 시도 'Invoices' 캐시 함께 무효화 (saveInvoice/addAgencyTxn 등에서 처리)
+  return _cachedRead('Invoices', function() { return _getInvoicesImpl(); });
+}
+
+function _getInvoicesImpl() {
   try {
     const ss    = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ss.getSheetByName('Invoices');
@@ -8614,4 +8689,188 @@ function _egDebugDate(targetISO){
     });
   }
   return { date: targetISO, found: foundOnDate, matched: matched, unmatched: unmatched };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚀 시트 read 캐싱 인프라 (2026-05-23)
+// ═══════════════════════════════════════════════════════════════════════════
+// 목적: 같은 시트를 1분 안에 여러 번 읽으면 시트 IO 안 거치고 캐시 응답
+//      → 관리자/드라이버 앱 페이지 전환 속도 개선
+//
+// 동작 방식:
+//   1. _cachedRead(sheetName, computeFn): 캐시에 있으면 즉시 반환,
+//      없으면 computeFn() 실행 후 60초 캐싱
+//   2. _invalidateSheetCache(sheetName): write 후 호출. 해당 시트 캐시 삭제
+//   3. CacheService 값 한계(100KB) 우회 — 메타 키에 chunk 개수 저장,
+//      chunk_0, chunk_1, ... 로 분할 저장
+//
+// 안전 가드:
+//   - TTL 60초 (최악의 경우 1분 지연)
+//   - 모든 save_*/update_*/delete_* 액션 후 해당 시트 캐시 자동 무효화
+//   - 클라이언트가 ?force_refresh=1 또는 ?nocache=1 주면 캐시 무시
+//   - 100KB 초과 시 분할 저장. 그래도 6MB(100KB × 60 chunk) 한계는 있음
+//     → 1MB 이상 시트는 그냥 캐시 안 함 (시트 IO가 캐시 IO와 비슷해짐)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const _SHEET_CACHE_TTL = 60;              // 60초
+const _SHEET_CACHE_MAX_CHUNKS = 60;       // 최대 60 chunks (~6MB)
+const _SHEET_CACHE_MAX_TOTAL_KB = 1024;   // 1MB 이상은 캐시 안 함
+const _SHEET_CACHE_CHUNK_SIZE = 95 * 1024; // 95KB (100KB 한계 안전 마진)
+
+// 캐시 활성 시트 화이트리스트 — 자주 읽지만 변경 빈도 낮은 것만
+const _CACHE_ENABLED_SHEETS = {
+  'Daily_Report': 1, 'Pre_Departure': 1, 'End_of_Shift': 1,
+  'Invoices': 1, 'Agency_Txn': 1, 'SUB_Txn': 1, 'Schedule': 1,
+  'Wages': 1, 'Ledger': 1, 'Driver_Roster': 1,
+  'M_Vehicles': 1, 'M_Drivers': 1, 'M_Clients': 1, 'M_Guides': 1,
+  'M_Hotels': 1, 'M_Trailers': 1, 'M_PriceClient': 1, 'M_PriceDriver': 1,
+  'M_PriceSub': 1, 'M_SUB': 1, 'M_NightRates': 1, 'M_SvcOptions': 1,
+  'M_HotelOptions': 1, 'M_DistOptions': 1, 'M_Attractions': 1,
+  'Notices': 1, 'Company_Profile': 1, 'Leave_Requests': 1,
+  'Defect_Reports': 1, 'MOT_Report': 1, 'Bus_Damage': 1,
+  'HVIS_Bookings': 1, 'Maint_Records': 1,
+  // 가상 키 (다중 시트 응답)
+  'all_masters': 1
+};
+
+function _sheetCacheKey(sheetName) { return 'shc:' + sheetName; }
+
+/**
+ * 캐시된 read. 캐시 hit이면 즉시 반환, miss면 computeFn 실행 후 캐싱.
+ * @param {string} sheetName  시트 이름 (또는 가상 키)
+ * @param {function} computeFn  () => result. 캐시 miss 시에만 실행
+ * @returns {*}  computeFn의 결과 (캐시 hit이면 deserialize한 동일 값)
+ */
+function _cachedRead(sheetName, computeFn) {
+  if (!_CACHE_ENABLED_SHEETS[sheetName]) {
+    return computeFn();
+  }
+  try {
+    const cache = CacheService.getScriptCache();
+    const metaKey = _sheetCacheKey(sheetName);
+    const meta = cache.get(metaKey);
+    if (meta) {
+      // 캐시 hit — chunks 모아서 reconstruct
+      try {
+        const m = JSON.parse(meta);
+        if (m.chunks === 1) {
+          // 단일 chunk
+          return JSON.parse(m.data);
+        } else {
+          // 다중 chunk
+          const keys = [];
+          for (let i = 0; i < m.chunks; i++) keys.push(metaKey + ':c' + i);
+          const chunks = cache.getAll(keys);
+          let combined = '';
+          for (let i = 0; i < m.chunks; i++) {
+            const part = chunks[metaKey + ':c' + i];
+            if (!part) { combined = null; break; }
+            combined += part;
+          }
+          if (combined !== null) {
+            return JSON.parse(combined);
+          }
+          // chunk 일부 만료된 경우 fall-through (다시 계산)
+        }
+      } catch(e) {
+        Logger.log('[cache] hit deserialize fail ' + sheetName + ': ' + e);
+      }
+    }
+    // 캐시 miss — 계산 후 저장
+    const result = computeFn();
+    try {
+      const serialized = JSON.stringify(result);
+      const sizeKb = Math.ceil(serialized.length / 1024);
+      if (sizeKb > _SHEET_CACHE_MAX_TOTAL_KB) {
+        // 너무 크면 캐시 안 함 (다음 요청도 시트 IO하지만 메모리 절약)
+        Logger.log('[cache] skip large sheet ' + sheetName + ' (' + sizeKb + 'KB)');
+        return result;
+      }
+      if (serialized.length <= _SHEET_CACHE_CHUNK_SIZE) {
+        // 단일 chunk
+        cache.putAll({
+          [metaKey]: JSON.stringify({ chunks: 1, data: serialized, savedAt: Date.now() })
+        }, _SHEET_CACHE_TTL);
+      } else {
+        // 분할 저장
+        const numChunks = Math.ceil(serialized.length / _SHEET_CACHE_CHUNK_SIZE);
+        if (numChunks > _SHEET_CACHE_MAX_CHUNKS) {
+          Logger.log('[cache] too many chunks for ' + sheetName);
+          return result;
+        }
+        const toStore = {};
+        for (let i = 0; i < numChunks; i++) {
+          const start = i * _SHEET_CACHE_CHUNK_SIZE;
+          toStore[metaKey + ':c' + i] = serialized.slice(start, start + _SHEET_CACHE_CHUNK_SIZE);
+        }
+        toStore[metaKey] = JSON.stringify({ chunks: numChunks, savedAt: Date.now() });
+        cache.putAll(toStore, _SHEET_CACHE_TTL);
+      }
+    } catch(e) {
+      Logger.log('[cache] put fail ' + sheetName + ': ' + e);
+    }
+    return result;
+  } catch(e) {
+    // 캐시 자체 실패 시 fallback — computeFn 직접 실행
+    Logger.log('[cache] fatal ' + sheetName + ': ' + e);
+    return computeFn();
+  }
+}
+
+/**
+ * 시트 변경 후 호출 — 해당 시트와 관련 캐시를 무효화.
+ * @param {string|string[]} sheetName  시트 이름 또는 배열
+ */
+function _invalidateSheetCache(sheetName) {
+  if (!sheetName) return;
+  const names = Array.isArray(sheetName) ? sheetName : [sheetName];
+  try {
+    const cache = CacheService.getScriptCache();
+    const keysToRemove = [];
+    names.forEach(n => {
+      const meta = cache.get(_sheetCacheKey(n));
+      if (meta) {
+        try {
+          const m = JSON.parse(meta);
+          if (m.chunks && m.chunks > 1) {
+            for (let i = 0; i < m.chunks; i++) keysToRemove.push(_sheetCacheKey(n) + ':c' + i);
+          }
+        } catch(e) {}
+        keysToRemove.push(_sheetCacheKey(n));
+      }
+      // 마스터 변경은 all_masters 종합 캐시도 무효화
+      if (n && n.indexOf('M_') === 0) keysToRemove.push(_sheetCacheKey('all_masters'));
+    });
+    if (keysToRemove.length) {
+      cache.removeAll(keysToRemove);
+    }
+  } catch(e) {
+    Logger.log('[cache] invalidate fail: ' + e);
+  }
+}
+
+/**
+ * 전체 캐시 강제 무효화 (관리자 디버그 / 수동 동기화용)
+ */
+function _flushAllSheetCache() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const allKeys = Object.keys(_CACHE_ENABLED_SHEETS).map(_sheetCacheKey);
+    // chunks 키들은 정확히 알 수 없으므로 메타와 c0~c{MAX}까지 일괄 삭제
+    const expanded = [];
+    allKeys.forEach(k => {
+      expanded.push(k);
+      for (let i = 0; i < _SHEET_CACHE_MAX_CHUNKS; i++) expanded.push(k + ':c' + i);
+    });
+    // removeAll은 한 번에 1000개까지 가능
+    const CHUNK = 500;
+    for (let i = 0; i < expanded.length; i += CHUNK) {
+      cache.removeAll(expanded.slice(i, i + CHUNK));
+    }
+    Logger.log('[cache] flushed ' + expanded.length + ' keys');
+    return { ok: true, keys: expanded.length };
+  } catch(e) {
+    Logger.log('[cache] flush fail: ' + e);
+    return { ok: false, error: e.toString() };
+  }
 }
