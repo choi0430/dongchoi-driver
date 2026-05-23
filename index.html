@@ -3770,17 +3770,40 @@ function _onAuthFailure(reason){
   };
 })();
 
+// ═══════════════════════════════════════════════
+// Idempotency / Request_ID — 중복 저장 방지
+// ═══════════════════════════════════════════════
+// 모든 GAS write 요청에 고유 Request_ID를 부여.
+// GAS 측에서 같은 Request_ID로 들어온 두 번째 요청은 거부하고 ok=true 반환.
+// retry queue에 들어간 요청은 동일 ID를 유지 → 재시도해도 중복 안 됨.
+function _generateRequestId() {
+  // crypto.randomUUID는 모바일 사파리도 지원 (iOS 15.4+, Android Chrome 92+)
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    try { return crypto.randomUUID(); } catch(e) {}
+  }
+  // fallback
+  return 'rid-' + Date.now() + '-' + Math.random().toString(36).slice(2,10);
+}
+
 async function submitToSheets(action, data) {
+  // 호출자가 Request_ID를 이미 부여했으면 (retry queue에서 온 경우) 그대로 사용
+  if (!data.Request_ID) data.Request_ID = _generateRequestId();
   try {
+    // 30초 timeout (GAS 콜드 스타트 + 시트 쓰기 여유)
+    const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const tid = ctrl ? setTimeout(() => ctrl.abort(), 30000) : null;
     const res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action, data })
+      body: JSON.stringify({ action, data }),
+      signal: ctrl ? ctrl.signal : undefined
     });
+    if (tid) clearTimeout(tid);
     return await res.json();
   } catch(e) {
-    console.error('Sheets 연동 오류:', e);
-    return { ok: false, error: e.toString() };
+    const isAbort = e && (e.name === 'AbortError' || /aborted/i.test(String(e)));
+    console.error('Sheets 연동 오류:', e, isAbort ? '(timeout)' : '');
+    return { ok: false, error: e.toString(), timedOut: isAbort };
   }
 }
 
@@ -3798,43 +3821,66 @@ function saveRetryQueue(q) {
 }
 function addToRetryQueue(action, data) {
   const q = getRetryQueue();
+  // Request_ID 기반 중복 제거: 같은 ID가 이미 큐에 있으면 두 번 안 넣음
+  if (data && data.Request_ID) {
+    const exists = q.some(item => item.data && item.data.Request_ID === data.Request_ID);
+    if (exists) {
+      console.log('[RetryQueue] same Request_ID already queued, skip:', data.Request_ID);
+      return;
+    }
+  }
   q.push({ action, data, addedAt: new Date().toISOString(), attempts: 0 });
   saveRetryQueue(q);
   console.warn('📥 재시도 큐에 추가:', action, '(총', q.length, '건)');
 }
 
+// 동시 flush 방지 락 (online 이벤트 + 폴링 + 수동 등 여러 곳에서 호출되어도 한 번만)
+let _flushingRetryQueue = false;
+
 async function flushRetryQueue() {
-  const q = getRetryQueue();
-  if(!q.length) return;
-  console.log('🔄 재시도 큐 처리 중... 총', q.length, '건');
-  const failed = [];
-  for(const item of q) {
-    try {
-      const r = await submitToSheets(item.action, item.data);
-      if(r?.ok) {
-        console.log('✅ 재전송 성공:', item.action);
-      } else {
-        item.attempts = (item.attempts||0) + 1;
-        if(item.attempts < 5) failed.push(item); // 5회 초과 시 폐기
-        else console.warn('❌ 재전송 5회 초과, 폐기:', item.action);
-      }
-    } catch(e) {
-      item.attempts = (item.attempts||0) + 1;
-      if(item.attempts < 5) failed.push(item);
-    }
+  if (_flushingRetryQueue) {
+    console.log('[RetryQueue] flush already running, skip');
+    return;
   }
-  saveRetryQueue(failed);
-  if(failed.length === 0 && q.length > 0) showToast('☁️ Queued reports (미전송 리포트) ' + q.length + 'sent (건 전송 완료)', 'success');
+  _flushingRetryQueue = true;
+  try {
+    const q = getRetryQueue();
+    if(!q.length) return;
+    console.log('🔄 재시도 큐 처리 중... 총', q.length, '건');
+    const failed = [];
+    for(const item of q) {
+      try {
+        const r = await submitToSheets(item.action, item.data);
+        if(r?.ok) {
+          console.log('✅ 재전송 성공:', item.action, r.idempotent ? '(idempotent)' : '');
+        } else {
+          item.attempts = (item.attempts||0) + 1;
+          if(item.attempts < 5) failed.push(item); // 5회 초과 시 폐기
+          else console.warn('❌ 재전송 5회 초과, 폐기:', item.action);
+        }
+      } catch(e) {
+        item.attempts = (item.attempts||0) + 1;
+        if(item.attempts < 5) failed.push(item);
+      }
+    }
+    saveRetryQueue(failed);
+    if(failed.length === 0 && q.length > 0) showToast('☁️ Queued reports (미전송 리포트) ' + q.length + 'sent (건 전송 완료)', 'success');
+  } finally {
+    _flushingRetryQueue = false;
+  }
 }
 
 // 실패 시 재시도 큐에 넣는 postToSheets 래퍼
 function postToSheetsWithRetry(action, data) {
   const _syd = new Date(new Date().toLocaleString('en-US',{timeZone:'Australia/Sydney'}));
   data.Submitted = todayDisplay() + ' ' + _syd.toTimeString().slice(0,5);
+  // Request_ID 미리 부여 — retry queue에 들어가도 동일 ID 유지 → 서버에서 중복 차단
+  if (!data.Request_ID) data.Request_ID = _generateRequestId();
   submitToSheets(action, data)
     .then(r => {
       if(r?.ok) {
-        showToast('☁️ Google Sheets 저장됨', 'success');
+        if (r.idempotent) showToast('☁️ 이미 저장됨 (재시도 확인)', 'success');
+        else showToast('☁️ Google Sheets 저장됨', 'success');
       } else if(r?.code === 'VEHICLE_LOCKED' || r?.code === 'TRAILER_LOCKED') {
         // ★ 잠금 충돌 — 재시도 큐에 넣지 않고 사용자에게 모달 알림
         console.error('잠금 충돌:', r);
@@ -5344,6 +5390,7 @@ async function completePre(){
   const alreadyMine = activeShifts.some(s => s.rego === rego && s.date === selectedDate);
   if(alreadyMine){
     const myShift = activeShifts.find(s => s.rego === rego && s.date === selectedDate);
+    _unlockSubmitBtn(_preBtn);
     showLockedVehicleModal(rego, {driver: currentDriver?.name||'나', date: myShift?.date||'', startTime: myShift?.startTime||''});
     return;
   }
@@ -5355,6 +5402,7 @@ async function completePre(){
     if(json.ok && json.regos){
       const conflict = json.regos.find(r => r.rego === rego);
       if(conflict){
+        _unlockSubmitBtn(_preBtn);
         showLockedVehicleModal(rego, conflict);
         return;
       }
@@ -5662,7 +5710,7 @@ function submitDailyReport(){
         issues.push(`• 투어코드: "${_tourCode}" — 처음 사용${sug?`\n  (혹시 "${sug}"?)`:''}`);
       }
       const proceed = confirm(`⚠️ 입력 확인\n\n${issues.join('\n\n')}\n\n그대로 저장하시겠습니까?\n\n[취소] 다시 확인  /  [확인] 그대로 저장`);
-      if(!proceed) return;
+      if(!proceed) { _unlockSubmitBtn(_drBtn); return; }
     }
   }
 
@@ -5680,11 +5728,11 @@ function submitDailyReport(){
         `이대로 저장하면 정산/청구에 영향을 줄 수 있습니다.\n\n` +
         `[취소] 다시 확인 (권장)  /  [확인] 그대로 저장`
       );
-      if(!proceed) return;
+      if(!proceed) { _unlockSubmitBtn(_drBtn); return; }
     }
   }
-  const _drBtn = document.querySelector('button[onclick="submitDailyReport()"]');
-  if(_drBtn){ _drBtn.disabled=true; _drBtn.textContent='⏳ 저장 중...'; }
+  // ★ 검증 통과 — 저장 단계 표시 (버튼은 위에서 _lockSubmitBtn으로 잠긴 _drBtn 재사용)
+  if(_drBtn){ _drBtn.innerHTML = '⏳ 저장 중...'; }
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(!shift){ _unlockSubmitBtn(_drBtn);showToast('⚠️ Pre Departure를 먼저 완료하세요','error'); return; }
   if(!editingShiftId){ _unlockSubmitBtn(_drBtn);showToast('⚠️ editingShiftId 없음','error'); return; }
@@ -5702,17 +5750,18 @@ function submitDailyReport(){
   /* ── 개선: KM 0값 경고 ── */
   if (_kmSt === 0 || _kmEn === 0) {
     if (!confirm(`⚠️ KM 값이 0입니다.\n시작 KM: ${_kmSt.toLocaleString()}\n마친 KM: ${_kmEn.toLocaleString()}\n\n0인 채로 저장하시겠습니까?`)) {
-      const _drBtn2 = document.querySelector('button[onclick="submitDailyReport()"]');
-      if(_drBtn2){ _drBtn2.disabled=false; _drBtn2.textContent='💾 저장'; }
+      _unlockSubmitBtn(_drBtn);
       return;
     }
   }
   // KM 유효성 검사: Pre Departure ≤ DR 시작 KM < DR 마친 KM
   if (_kmSt && shift.startKm && _kmSt < shift.startKm) {
+    _unlockSubmitBtn(_drBtn);
     showToast(`⚠️ 시작 KM(${_kmSt.toLocaleString()})은 Pre Departure KM(${shift.startKm.toLocaleString()}) 이상이어야 합니다`, 'error');
     return;
   }
   if (_kmSt && _kmEn && _kmEn <= _kmSt) {
+    _unlockSubmitBtn(_drBtn);
     showToast(`⚠️ 마친 KM(${_kmEn.toLocaleString()})은 시작 KM(${_kmSt.toLocaleString()})보다 커야 합니다`, 'error');
     return;
   }
@@ -6377,25 +6426,29 @@ function submitEndShift(){
   // ★ 검증 통과 → 저장 단계 표시
   if(_eosBtn){ _eosBtn.innerHTML = '⏳ 저장 중...'; }
   const shift = activeShifts.find(s=>s.id===editingShiftId);
-  if(!shift){return;}
+  if(!shift){ _unlockSubmitBtn(_eosBtn); return; }
   // KM 유효성 검사
   const _endKmVal = parseInt(km);
   if (isNaN(_endKmVal) || _endKmVal <= 0) {
+    _unlockSubmitBtn(_eosBtn);
     showToast('⚠️ 유효한 종료 KM을 입력하세요. Please enter a valid End KM.', 'error');
     return;
   }
   // ① 종료 KM > 출발 KM
   if (shift.startKm && _endKmVal < shift.startKm) {
+    _unlockSubmitBtn(_eosBtn);
     showToast(`⚠️ 종료 KM(${_endKmVal.toLocaleString()})이 출발 KM(${shift.startKm.toLocaleString()})보다 작습니다. End KM must be greater than Start KM.`, 'error');
     return;
   }
   if (shift.startKm && _endKmVal === shift.startKm) {
+    _unlockSubmitBtn(_eosBtn);
     showToast(`⚠️ 종료 KM이 출발 KM과 같습니다. End KM must be greater than Start KM (${shift.startKm.toLocaleString()}).`, 'error');
     return;
   }
   // ② 종료 KM ≥ 마지막 Daily Report 마친 KM
   const _lastDR = shift.dailyReports?.length ? shift.dailyReports[shift.dailyReports.length - 1] : null;
   if (_lastDR && _lastDR.kmEnd && _endKmVal < parseInt(_lastDR.kmEnd)) {
+    _unlockSubmitBtn(_eosBtn);
     showToast(`⚠️ 종료 KM(${_endKmVal.toLocaleString()})은 마지막 Daily Report 마친 KM(${parseInt(_lastDR.kmEnd).toLocaleString()}) 이상이어야 합니다`, 'error');
     return;
   }
@@ -13001,7 +13054,7 @@ async function submitSubReport(){
         dupWarn.style.display='';
         dupWarn.textContent = `⚠️ ${date} / ${rego} 리포트가 이미 존재합니다 (${dup.Driver||''}). 중복 저장됩니다.`;
       }
-      if(!confirm(`${date} / ${rego} 리포트가 이미 존재합니다.\n드라이버: ${dup.Driver||''}\n\n그래도 저장하시겠습니까?`)) return;
+      if(!confirm(`${date} / ${rego} 리포트가 이미 존재합니다.\n드라이버: ${dup.Driver||''}\n\n그래도 저장하시겠습니까?`)) { _unlockSubmitBtn(_subBtn); return; }
     }
   }catch(e){ /* 중복 체크 실패 시 그냥 진행 */ }
 
