@@ -17568,6 +17568,12 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     return _localISO(d);
   };
 
+  // ★ 투어코드 → 가장 늦은 여행사 수금 예정일 (모든 receivables 기준, 필터 적용 전)
+  //   SUB 지급 예정일을 같은 투어코드의 여행사 수금일에 맞추기 위함.
+  //   안전 원칙: 같은 투어코드의 receivables이 여러 개면 가장 늦은 due를 사용 →
+  //   "수금 다 받기 전에 SUB에 지급하는 일" 방지.
+  const _tourCodeReceivableDue = {}; // normalized tourCode → latest dueISO
+
   const receivables = []; // agency income due this week
   const subPayables = []; // sub costs due this week
   const driverPay = [];   // driver wages for this week
@@ -17614,6 +17620,29 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     if (!dueISO) return;
     // ★ 토/일 → 다음 주 월요일로 이동
     dueISO = _adjustWeekendToMonday(dueISO);
+
+    // ★ 매칭용: 이 receivable의 투어코드(들)를 맵에 등록 (주간 필터 적용 전)
+    //   tx.TourCode는 콤마로 join된 문자열일 수 있음 → 각각 분리해 등록
+    //   같은 tourCode에 여러 receivable이 있으면 가장 늦은 due를 보관
+    const _regTcs = String(tx.TourCode || '').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
+    _regTcs.forEach(tcKey => {
+      const prev = _tourCodeReceivableDue[tcKey];
+      if (!prev || dueISO > prev) _tourCodeReceivableDue[tcKey] = dueISO;
+    });
+    // 인보이스 캐시에서 추가 TourCode 풀어내기 (multi-line invoice)
+    if (invNum && Array.isArray(_invHistoryCache)) {
+      const inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNum);
+      if (inv) {
+        const invTcStr = String(inv.TourCode || '').trim();
+        if (invTcStr) {
+          invTcStr.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean).forEach(tcKey => {
+            const prev = _tourCodeReceivableDue[tcKey];
+            if (!prev || dueISO > prev) _tourCodeReceivableDue[tcKey] = dueISO;
+          });
+        }
+      }
+    }
+
     if (dueISO < filterStartS || dueISO > sunS) return;
 
     // Check unpaid balance
@@ -17673,7 +17702,6 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
       let dueISO = _localISO(dd);
       // ★ 토/일 → 다음 주 월요일
       dueISO = _adjustWeekendToMonday(dueISO);
-      if(dueISO < filterStartS || dueISO > sunS) return;
 
       // TA 금액 — calcAgencyTA로 계산
       let amount = 0;
@@ -17684,6 +17712,15 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
 
       const tourCode = typeof pickTourCode === 'function' ? pickTourCode(r) : String(r.Tour_Code||'');
       const guide = String(r.Guide||'').trim();
+
+      // ★ 시나리오3도 매칭 맵에 등록 (주간 필터 적용 전)
+      if (tourCode) {
+        const tcKey = tourCode.toUpperCase();
+        const prev = _tourCodeReceivableDue[tcKey];
+        if (!prev || dueISO > prev) _tourCodeReceivableDue[tcKey] = dueISO;
+      }
+
+      if(dueISO < filterStartS || dueISO > sunS) return;
 
       // 운행 단위 InvoiceID (가상) — TC 기반으로 그룹화 가능하도록
       const virtualInvoiceId = 'TRIP:' + dateISO + '_' + rego + '_' + tourCode;
@@ -17719,6 +17756,20 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
           if(!dueDate) return;
           // ★ 토/일 → 다음 주 월요일
           dueDate = _adjustWeekendToMonday(dueDate);
+
+          // ★ 같은 투어코드의 여행사 수금 예정일에 맞춤
+          //   매칭되면 receivable due 사용 (수금 후 지급 원칙)
+          //   매칭 안 되면 원래 SUB due 그대로 (자체 EG 운행 등)
+          let dueAdjustReason = ''; // UI 디버그용 (현재 화면엔 안 보임)
+          const tcKey = String(g.tourCode || '').trim().toUpperCase();
+          if (tcKey && _tourCodeReceivableDue[tcKey]) {
+            const matchedDue = _tourCodeReceivableDue[tcKey];
+            if (matchedDue !== dueDate) {
+              dueAdjustReason = 'matched to receivable ' + matchedDue + ' (was ' + dueDate + ')';
+              dueDate = matchedDue;
+            }
+          }
+
           if(dueDate < filterStartS || dueDate > sunS) return;
           subPayables.push({
             company: b.name,
