@@ -8227,25 +8227,18 @@ function _egTripCardHTML(r){
   const agency = r.Agency || r.Tour_Agency || '';
   const attraction = r.Attraction || r.Course || '';
 
-  // 청구 대상 라벨 & 카드 색상
-  let targetLabel = '';
-  let badgeText = '';
-  let badgeColor = '';
+  // 청구/지급 대상 뱃지 (한 운행에 여러 방향 표시 가능)
+  const badges = [];  // [{text, color}]
   if(cls === 'DC_BILLS_EG_VEH'){
     // DC가 빌링, EG 차량 → EG가 DC에 청구 (받을 돈)
-    targetLabel = 'DC 청구';
-    badgeText = '→ DC';
-    badgeColor = '#7c3aed';
+    badges.push({text: '→ DC 청구', color: '#7c3aed'});
   } else if(cls === 'EG_BILLS_DC_VEH'){
-    // EG가 빌링, DC 차량 → EG가 DC에 지급 (줄 돈)
-    targetLabel = 'DC 지급';
-    badgeText = '← DC';
-    badgeColor = '#dc2626';
+    // EG가 빌링, DC 차량 → 여행사에 청구 + DC에 지급 (양방향)
+    badges.push({text: '→ ' + (agency || '여행사') + ' 청구', color: '#0891b2'});
+    badges.push({text: '← DC 지급', color: '#dc2626'});
   } else if(cls === 'EG_BILLS_OWN'){
     // EG 자체 운행 → 여행사 직접 청구
-    targetLabel = '여행사 청구';
-    badgeText = '→ ' + (agency || '여행사');
-    badgeColor = '#0891b2';
+    badges.push({text: '→ ' + (agency || '여행사') + ' 청구', color: '#0891b2'});
   }
 
   // 서차지 배지
@@ -8272,9 +8265,9 @@ function _egTripCardHTML(r){
   html += '<div class="top">';
   html += '<div class="info">';
   html += '<div><span class="date-badge">📅 ' + _egEsc(dateStr) + '</span>';
-  if(badgeText){
-    html += '<span class="sub-badge" style="background:' + badgeColor + ';">' + _egEsc(badgeText) + '</span>';
-  }
+  badges.forEach(b => {
+    html += '<span class="sub-badge" style="background:' + b.color + ';margin-left:6px;">' + _egEsc(b.text) + '</span>';
+  });
   html += '</div>';
   html += '<div class="title">' + _egEsc(agency) + ' · ' + _egEsc(attraction) + '</div>';
   html += '<div class="meta-line">🚐 ' + _egEsc(rego) + (seats ? ' · ' + _egEsc(seats) + '석' : '') + '</div>';
