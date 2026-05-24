@@ -17554,6 +17554,20 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
   // 토글 ON 시 이전 미수도 포함 — 시작일을 무한 과거로 (2020-01-01)
   const filterStartS = includeOverdue ? '2020-01-01' : monS;
 
+  // ★ Due date가 토(Sat) / 일(Sun)이면 다음 주 월요일로 미룸
+  //   회계 관행: 주말은 은행 거래일 아니므로 영업일 기준으로 due를 이동
+  //   토 → +2일, 일 → +1일 → 항상 다음 주 월요일
+  const _adjustWeekendToMonday = (iso) => {
+    if (!iso) return iso;
+    const d = new Date(iso + 'T00:00:00');
+    if (isNaN(d.getTime())) return iso;
+    const dow = d.getDay(); // 0=Sun, 6=Sat
+    if (dow === 6) d.setDate(d.getDate() + 2);       // 토 → 월
+    else if (dow === 0) d.setDate(d.getDate() + 1);  // 일 → 월
+    else return iso;
+    return _localISO(d);
+  };
+
   const receivables = []; // agency income due this week
   const subPayables = []; // sub costs due this week
   const driverPay = [];   // driver wages for this week
@@ -17598,6 +17612,8 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
       }
     }
     if (!dueISO) return;
+    // ★ 토/일 → 다음 주 월요일로 이동
+    dueISO = _adjustWeekendToMonday(dueISO);
     if (dueISO < filterStartS || dueISO > sunS) return;
 
     // Check unpaid balance
@@ -17654,7 +17670,9 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
       // 운행일 + 14일 = 수금 예정일
       const dd = new Date(dateISO + 'T00:00:00');
       dd.setDate(dd.getDate() + 14);
-      const dueISO = _localISO(dd);
+      let dueISO = _localISO(dd);
+      // ★ 토/일 → 다음 주 월요일
+      dueISO = _adjustWeekendToMonday(dueISO);
       if(dueISO < filterStartS || dueISO > sunS) return;
 
       // TA 금액 — calcAgencyTA로 계산
@@ -17697,8 +17715,10 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
         b.tourGroups.forEach(g => {
           if(g.excluded) return; // 제외 처리된 항목 skip
           if(g.balance <= 0.01) return; // 완납 항목 skip
-          const dueDate = g.dueDate || '';
+          let dueDate = g.dueDate || '';
           if(!dueDate) return;
+          // ★ 토/일 → 다음 주 월요일
+          dueDate = _adjustWeekendToMonday(dueDate);
           if(dueDate < filterStartS || dueDate > sunS) return;
           subPayables.push({
             company: b.name,
@@ -18273,8 +18293,14 @@ function renderBalWeeklySummary() {
   const totIncome = agBal.reduce((s, a) => s + a.dr, 0);
   const totCollected = agBal.reduce((s, a) => s + a.cr, 0);
   const totReceivable = roundMoney(totIncome - totCollected);
-  const totSub = subBal.reduce((s, a) => s + a.dr + a.wageDr, 0);
-  const totSubPaid = subBal.reduce((s, a) => s + a.cr + a.wageCr, 0);
+  // ★ FIX 2026-05-23: 미지급 중복 계산 버그
+  //   기존: totSub = subBal.dr + subBal.wageDr (Wage 카테고리)
+  //         → subBal.wageDr은 "차주가 자기 드라이버에게 지급할 wage 정보"로
+  //           자사 회계와 무관한데도 totSub에 더해져서 미지급이 두 배로 표시됨.
+  //   수정: totSub은 외주(Outsourcing)만, totWage는 자사 wage(dcOwner만)만.
+  //         subBal.wageDr/wageCr은 무시 (차주 내부 정보, 자사 미지급 아님)
+  const totSub = subBal.reduce((s, a) => s + a.dr, 0);
+  const totSubPaid = subBal.reduce((s, a) => s + a.cr, 0);
   const totWage = wageBal.reduce((s, a) => s + a.dr, 0);
   const totWagePaid = wageBal.reduce((s, a) => s + a.cr, 0);
   const totNet = roundMoney(totIncome - totSub - totWage);
