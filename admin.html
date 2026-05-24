@@ -18277,14 +18277,65 @@ function renderBalDetail(){
         <th style="text-align:center;padding:6px 2px;">⚙</th>
       </tr></thead><tbody>`;
     // ★ 날짜 오름차순으로 누적 잔액 계산 (rows가 이미 오름차순)
+    //   잔액(Balance)은 시간순으로 그대로 계산 → balMap에 보존.
+    //   화면 표시는 InvoiceID 그룹별로 재정렬하지만, 각 행의 잔액은 시간순 누적값을 그대로 표시.
     const sortedAsc = rows;
     let runBal = 0;
     const balMap = new Map();
-    sortedAsc.forEach(r => {
+    const timeOrderIdx = new Map(); // 행의 시간순 인덱스 (그룹 정렬 시 보조 키로 사용)
+    sortedAsc.forEach((r, i) => {
       runBal += (Number(r.DR)||0) - (Number(r.CR)||0);
       balMap.set(r, Math.round(runBal*100)/100);
+      timeOrderIdx.set(r, i);
     });
-    rows.forEach((r,i)=>{
+
+    // ★ InvoiceID 기준 그룹화 표시 정렬
+    //   - InvoiceID가 있는 행은 그 ID로 그룹핑 (청구 + 같은 ID의 수금/이체가 함께)
+    //   - InvoiceID 없는 행(선수금/크레딧 입금)은 _orphan_{시간index} 키로 독립 그룹
+    //   - 그룹의 기준 날짜 = 그룹 내 'invoice' 행의 Date. 없으면 그룹 내 가장 빠른 Date
+    //   - 그룹끼리: 기준 날짜 오름차순 (같으면 invoice 그룹이 먼저)
+    //   - 그룹 내: invoice → payment → 기타 순, 같은 type은 시간순
+    const _typeOrder = { 'invoice': 0, 'payment': 1, 'prepaid_use': 2, 'credit_use': 3, 'prepaid_in': 4, 'credit_in': 5 };
+    const _groupMap = new Map(); // groupKey → { rows: [], anchorISO: '', hasInvoice: bool }
+    sortedAsc.forEach(r => {
+      const invId = String(r.InvoiceID||'').trim();
+      const key = invId || ('_orphan_' + timeOrderIdx.get(r));
+      let g = _groupMap.get(key);
+      if (!g) { g = { rows: [], anchorISO: '', hasInvoice: false, key: key }; _groupMap.set(key, g); }
+      g.rows.push(r);
+      const iso = parseToISO(r.Date||'');
+      const isInvoice = String(r.Type||'').trim() === 'invoice';
+      if (isInvoice) {
+        // 청구 행이 그룹의 기준 날짜 (최우선)
+        g.anchorISO = iso;
+        g.hasInvoice = true;
+      } else if (!g.hasInvoice) {
+        // 청구 행이 아직 없으면 그룹 내 가장 빠른 날짜를 anchor로
+        if (!g.anchorISO || (iso && iso < g.anchorISO)) g.anchorISO = iso;
+      }
+    });
+    // 그룹 내부 정렬: type 우선순위 → 시간순
+    _groupMap.forEach(g => {
+      g.rows.sort((a, b) => {
+        const ta = _typeOrder[String(a.Type||'').trim()] ?? 99;
+        const tb = _typeOrder[String(b.Type||'').trim()] ?? 99;
+        if (ta !== tb) return ta - tb;
+        return (timeOrderIdx.get(a) || 0) - (timeOrderIdx.get(b) || 0);
+      });
+    });
+    // 그룹 정렬: anchor 날짜 오름차순. 같은 날짜면 invoice 그룹 우선.
+    const _sortedGroups = Array.from(_groupMap.values()).sort((a, b) => {
+      const c = (a.anchorISO||'').localeCompare(b.anchorISO||'');
+      if (c !== 0) return c;
+      if (a.hasInvoice && !b.hasInvoice) return -1;
+      if (!a.hasInvoice && b.hasInvoice) return 1;
+      return 0;
+    });
+    // 최종 표시 순서로 rows 재구성
+    const _displayRows = [];
+    _sortedGroups.forEach(g => g.rows.forEach(r => _displayRows.push(r)));
+
+    _displayRows.forEach((r,i)=>{
       const realIdx = _balAgencyTxns.indexOf(r);
       const bal = balMap.get(r)||0;
       const remark = r.Remark || '—';
