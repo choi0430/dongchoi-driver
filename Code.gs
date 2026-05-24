@@ -137,18 +137,7 @@ const TAB_COLORS = {
 // Utility Functions
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ★ 슬라이딩 만료 정보 전달용 module-scoped state
-// _validateToken이 토큰 만료를 연장하면 _LAST_TOKEN_EXP에 설정되어
-// cors() 응답 본문에 _tokenExpiresAt 필드로 자동 첨부됨 (클라이언트가 dc_token_exp 갱신)
-var _LAST_TOKEN_EXP = '';
-
 function cors(data) {
-  try {
-    if (_LAST_TOKEN_EXP && data && typeof data === 'object' && !Array.isArray(data)
-        && data._tokenExpiresAt === undefined) {
-      data._tokenExpiresAt = _LAST_TOKEN_EXP;
-    }
-  } catch (e) {}
   return ContentService
     .createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
@@ -165,8 +154,8 @@ function cors(data) {
 //   4) 만료된 토큰은 자동 삭제
 //
 // 유효기간:
-//   - 드라이버: 30일 + 슬라이딩 연장 (활발히 쓰면 사실상 무기한)
-//   - 관리자:  7일 + 슬라이딩 연장
+//   - 드라이버: 7일
+//   - 관리자:  24시간
 //
 // M_Drivers의 PIN은 절대로 클라이언트에 응답으로 나가지 않음 (strip_pin_from_master)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -174,11 +163,8 @@ function cors(data) {
 // 관리자 계정 이름 (M_Drivers의 Name_KR 또는 Name_EN와 일치)
 const ADMIN_NAMES = ['Branden Choi', 'Branden', '최동철', 'Dong Cheol Choi'];
 
-const TOKEN_TTL_DRIVER_MS = 30 * 24 * 60 * 60 * 1000;  // 30일 (드라이버: 자동 로그아웃 빈도 최소화)
-const TOKEN_TTL_ADMIN_MS  = 7  * 24 * 60 * 60 * 1000;  // 7일  (관리자)
-// ★ 슬라이딩 만료: 토큰 사용 시 만료까지 SLIDING_THRESHOLD_MS 이하 남았으면 자동 연장
-//   → 활발히 사용 중인 사용자는 사실상 로그아웃되지 않음
-const TOKEN_SLIDING_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 만료 24시간 이내면 자동 연장
+const TOKEN_TTL_DRIVER_MS = 7 * 24 * 60 * 60 * 1000;   // 7일
+const TOKEN_TTL_ADMIN_MS  = 1 * 24 * 60 * 60 * 1000;   // 24시간
 
 // ── 보안 상수 ──
 // PIN 해시 식별 prefix (이 prefix가 있으면 해시된 값으로 인식)
@@ -502,8 +488,7 @@ function _logoutAction(payload, tokenParam) {
 }
 
 function _validateToken(token) {
-  // 반환: { valid: bool, role, user, reason, expiresAt? }
-  // ★ 슬라이딩 만료: 토큰 사용 시 만료가 임박했으면 자동 연장
+  // 반환: { valid: bool, role, user, reason }
   if (!token) return {valid: false, reason: 'no_token'};
   try {
     const sheet = _getAuthSheet();
@@ -519,20 +504,6 @@ function _validateToken(token) {
           try { sheet.deleteRow(i + 1); } catch(e) {}
           return {valid: false, reason: 'expired'};
         }
-        const role = String(data[i][2] || 'driver');
-        const user = String(data[i][1] || '');
-        let finalExp = exp;
-        // ── 슬라이딩 만료 ──
-        // 남은 시간이 SLIDING_THRESHOLD 이하면 새 TTL 만큼 연장
-        try {
-          const remainMs = exp.getTime() - now.getTime();
-          if (remainMs < TOKEN_SLIDING_THRESHOLD_MS) {
-            const ttl = (role === 'admin') ? TOKEN_TTL_ADMIN_MS : TOKEN_TTL_DRIVER_MS;
-            const newExp = new Date(now.getTime() + ttl);
-            sheet.getRange(i + 1, 5).setValue(newExp.toISOString()); // Expires 갱신
-            finalExp = newExp;
-          }
-        } catch(e) {}
         // LastUsed 갱신 (성능 고려해서 하루에 한 번 정도만)
         try {
           const lastUsedStr = String(data[i][5] || '');
@@ -543,9 +514,8 @@ function _validateToken(token) {
         } catch(e) {}
         return {
           valid: true,
-          role: role,
-          user: user,
-          expiresAt: finalExp.toISOString()
+          role: String(data[i][2] || 'driver'),
+          user: String(data[i][1] || '')
         };
       }
     }
@@ -1373,8 +1343,6 @@ function doGet(e) {
 
     // ── 인증 게이트 ──
     const tokenValid = _validateToken(token);
-    // 슬라이딩 만료: 응답에 새 만료 시각 첨부 (클라이언트가 dc_token_exp 갱신)
-    _LAST_TOKEN_EXP = (tokenValid && tokenValid.valid && tokenValid.expiresAt) ? tokenValid.expiresAt : '';
     const gate = _authGate(action, tokenValid.role, tokenValid);
     if (!gate.allow) return cors(gate.response);
 
@@ -1600,8 +1568,6 @@ function doPost(e) {
 
     // ── 인증 게이트 ──
     const tokenValid = _validateToken(token);
-    // 슬라이딩 만료: 응답에 새 만료 시각 첨부
-    _LAST_TOKEN_EXP = (tokenValid && tokenValid.valid && tokenValid.expiresAt) ? tokenValid.expiresAt : '';
     const gate = _authGate(action, tokenValid.role, tokenValid);
     if (!gate.allow) return cors(gate.response);
 
@@ -6684,6 +6650,124 @@ function cleanupSelfOwnedSubTxns(dryRun) {
     };
   } catch (e) {
     return { ok: false, error: String(e) };
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// 🩺 cleanupSelfOwnedSubTxns 결과를 Logger에 출력하는 wrapper들
+// ───────────────────────────────────────────────────────────────────────
+function cleanupSelfOwnedSubTxns_preview() {
+  const r = cleanupSelfOwnedSubTxns(true);
+  const log = [];
+  log.push('═══ cleanupSelfOwnedSubTxns [DRY RUN] ═══');
+  if (!r.ok) {
+    log.push('❌ 실패: ' + r.error);
+    Logger.log(log.join('\n'));
+    return r;
+  }
+  log.push('삭제 후보: ' + r.candidateCount + '건 (합계 DR $' + (r.totalDR||0).toLocaleString() + ')');
+  log.push('보존 (CR 있어 안 건드림): ' + r.blockedCount + '건');
+  log.push('');
+  if (r.candidates && r.candidates.length) {
+    log.push('── 삭제 후보 ──');
+    r.candidates.forEach(c => {
+      log.push('  row ' + c.rowIndex + ' | ' + c.date + ' | ' + c.subCompany + ' | TC=' + c.tourCode + ' | DR=$' + c.dr + ' | ' + c.desc);
+    });
+  }
+  if (r.blocked && r.blocked.length) {
+    log.push('');
+    log.push('── 보존 (이미 CR 지급된 그룹) ──');
+    r.blocked.forEach(c => {
+      log.push('  row ' + c.rowIndex + ' | ' + c.date + ' | ' + c.subCompany + ' | TC=' + c.tourCode + ' | DR=$' + c.dr);
+    });
+  }
+  log.push('');
+  log.push('확정 삭제하려면: cleanupSelfOwnedSubTxns_commit() 실행');
+  Logger.log(log.join('\n'));
+  return r;
+}
+
+function cleanupSelfOwnedSubTxns_commit() {
+  const r = cleanupSelfOwnedSubTxns(false);
+  const log = [];
+  log.push('═══ cleanupSelfOwnedSubTxns [COMMIT] ═══');
+  if (!r.ok) {
+    log.push('❌ 실패: ' + r.error);
+  } else {
+    log.push('✅ 삭제 완료: ' + (r.deleted || 0) + '행');
+    log.push('보존 (CR 있어 안 건드림): ' + (r.blocked || 0) + '건');
+  }
+  Logger.log(log.join('\n'));
+  return r;
+}
+
+// 진단: 18건 q4 운행이 Schedule에 등록되어 있는지 확인 (BillingEntity 기준)
+function diagEGq4ScheduleCoverage() {
+  const log = [];
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    // SUB_Txn에서 EG TRAVEL의 DRSUB 행 TourCode 추출
+    const subSheet = ss.getSheetByName('SUB_Txn');
+    const subData = subSheet.getDataRange().getValues();
+    const subHeaders = subData[0];
+    const scI = subHeaders.indexOf('SubCompany');
+    const tcI = subHeaders.indexOf('TourCode');
+    const dcI = subHeaders.indexOf('Description');
+    const drI = subHeaders.indexOf('DR');
+    const crI = subHeaders.indexOf('CR');
+    const egTourCodes = new Set();
+    const egTcCrPaid = {};
+    for (let i = 1; i < subData.length; i++) {
+      const row = subData[i];
+      const sc = String(row[scI]||'').toUpperCase();
+      if (sc.indexOf('EG TRAVEL') < 0) continue;
+      const desc = String(row[dcI]||'');
+      let tc = tcI >= 0 ? String(row[tcI]||'').trim() : '';
+      if (!tc) {
+        const m = desc.match(/^DRSUB:\d{4}-\d{2}-\d{2}_[^_]+_(.+)$/);
+        if (m) tc = m[1].trim();
+      }
+      if (!tc) continue;
+      if (desc.startsWith('DRSUB:') && Number(row[drI]||0) > 0) egTourCodes.add(tc);
+      if (Number(row[crI]||0) > 0) egTcCrPaid[tc] = (egTcCrPaid[tc]||0) + Number(row[crI]);
+    }
+    // Schedule.BillingEntity 매핑
+    const schSheet = ss.getSheetByName('Schedule');
+    const schData = schSheet ? schSheet.getDataRange().getValues() : [];
+    const schMap = {};
+    if (schData.length > 1) {
+      const h = schData[0];
+      const tIdx = h.indexOf('TourCode');
+      const bIdx = h.indexOf('BillingEntity');
+      for (let i = 1; i < schData.length; i++) {
+        const tc = String(schData[i][tIdx]||'').trim();
+        const be = String(schData[i][bIdx]||'').trim();
+        if (tc) schMap[tc] = be || '(빈 값)';
+      }
+    }
+    log.push('═══ EG TRAVEL DRSUB TourCodes vs Schedule.BillingEntity ═══');
+    log.push('EG TRAVEL DRSUB 자동 등록 TourCode: ' + egTourCodes.size + '개');
+    log.push('');
+    log.push('TC | Schedule.BillingEntity | CR 지급 여부 | 정리 가능?');
+    log.push('---');
+    let canClean = 0, cantClean = 0, hasCR = 0, notInSched = 0;
+    Array.from(egTourCodes).sort().forEach(tc => {
+      const be = schMap[tc];
+      const crSum = egTcCrPaid[tc] || 0;
+      let status;
+      if (!be) { status = '⚠️ Schedule에 없음 → 건드릴 수 없음'; notInSched++; }
+      else if (crSum > 0) { status = '🔒 CR $' + crSum + ' 있어 보존'; hasCR++; }
+      else if (be.toUpperCase().indexOf('EG TRAVEL') >= 0) { status = '✅ 정리 가능 (BE=' + be + ' == EG TRAVEL)'; canClean++; }
+      else { status = '⏭ 정리 안 됨 (BE=' + be + ' ≠ EG TRAVEL)'; cantClean++; }
+      log.push(tc + ' | ' + (be||'(없음)') + ' | $' + crSum + ' | ' + status);
+    });
+    log.push('---');
+    log.push('정리 가능: ' + canClean + ' | CR로 보존: ' + hasCR + ' | Schedule에 없음: ' + notInSched + ' | BE 불일치: ' + cantClean);
+    Logger.log(log.join('\n'));
+    return { canClean, hasCR, notInSched, cantClean };
+  } catch (e) {
+    Logger.log('error: ' + e);
+    return { error: String(e) };
   }
 }
 
