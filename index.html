@@ -2274,9 +2274,20 @@ function fmtDate(val) {
 }
 
 function todayDisplay() {
-  const n = new Date();
+  // ★ 시드니 타임존 강제 — 폰 타임존이 시드니가 아니거나
+  //   시드니 자정 부근에 작성할 때 어제 날짜로 들어가는 문제 방지
+  //   (예: Pre Departure에서 발생한 이슈)
+  const n = new Date(new Date().toLocaleString('en-US', {timeZone: 'Australia/Sydney'}));
   return String(n.getDate()).padStart(2,'0') + '/' +
     String(n.getMonth()+1).padStart(2,'0') + '/' + n.getFullYear();
+}
+
+// 시드니 기준 오늘 (YYYY-MM-DD) — 네이티브 date picker용
+function todaySydneyISO() {
+  const n = new Date(new Date().toLocaleString('en-US', {timeZone: 'Australia/Sydney'}));
+  return n.getFullYear() + '-' +
+    String(n.getMonth()+1).padStart(2,'0') + '-' +
+    String(n.getDate()).padStart(2,'0');
 }
 
 // ── 사용자 입력 날짜 정규화 → 'dd/mm/yyyy' 또는 '' (실패 시) ─────────
@@ -5169,16 +5180,13 @@ function _renderMotPage() {
 document.getElementById('app').style.display = 'none';
 document.getElementById('login-screen').style.display = 'flex';
 
-document.getElementById('today-label').textContent = (()=>{const d=new Date();const dd=String(d.getDate()).padStart(2,'0'),mm=String(d.getMonth()+1).padStart(2,'0'),yy=d.getFullYear();const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+yy+' ('+days[d.getDay()]+')';})();
+document.getElementById('today-label').textContent = (()=>{const d=new Date(new Date().toLocaleString('en-US',{timeZone:'Australia/Sydney'}));const dd=String(d.getDate()).padStart(2,'0'),mm=String(d.getMonth()+1).padStart(2,'0'),yy=d.getFullYear();const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dd+'/'+mm+'/'+yy+' ('+days[d.getDay()]+')';})();
 document.getElementById('pre-date').value = todayDisplay();
   loadMasterData(); // Google Sheets 마스터 데이터 로드
 document.getElementById('dr-date').value = todayDisplay();
-// 네이티브 date picker 초기값 세팅 (오늘 날짜, YYYY-MM-DD)
+// 네이티브 date picker 초기값 세팅 (시드니 기준 오늘, YYYY-MM-DD)
 (function(){
-  const todayISO = (()=>{
-    const n=new Date();
-    return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
-  })();
+  const todayISO = todaySydneyISO();
   ['pre-date-native','dr-date-native','end-date-native'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value=todayISO;
   });
