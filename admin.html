@@ -16896,6 +16896,10 @@ function _egQuadrantMatrixHTML(){
   }
 
   // ─ 헤더 + 4사분면 그리드 ────────────────────────────
+  //   ★ 빈 행 숨김: q1+q2=0 이면 DC 빌링 행 숨김, q3+q4=0 이면 EG 빌링 행 숨김
+  const showDCRow = (m.counts.q1 + m.counts.q2) > 0;
+  const showEGRow = (m.counts.q3 + m.counts.q4) > 0;
+  // 둘 다 비어있으면 매트릭스 전체 안 보임 (이미 위에서 일찍 return)
   let html = `
   <div style="margin-top:14px;padding:12px;background:linear-gradient(135deg,#faf5ff,#fdf4ff);border:1.5px solid #d8b4fe;border-radius:12px;">
     <div style="font-size:11px;font-weight:800;color:#7c3aed;margin-bottom:8px;">
@@ -16907,6 +16911,7 @@ function _egQuadrantMatrixHTML(){
       <div></div>
       <div style="text-align:center;font-size:9px;font-weight:700;color:#1f2937;background:#f3f4f6;padding:4px;border-radius:4px;">🚐 DC 차량</div>
       <div style="text-align:center;font-size:9px;font-weight:700;color:#7c3aed;background:#ede9fe;padding:4px;border-radius:4px;">🚌 EG 차량</div>
+      ${showDCRow ? `
       <!-- DC 빌링 행 -->
       <div style="font-size:9px;font-weight:700;color:#1f2937;background:#f3f4f6;padding:4px;border-radius:4px;display:flex;align-items:center;justify-content:center;">DC<br>빌링</div>
       ${_cell({
@@ -16924,6 +16929,8 @@ function _egQuadrantMatrixHTML(){
         note:'DC가 EG에게 외주비 지급 + 여행사에 청구',
         rows: m.q2, rowsKey:'q2'
       })}
+      ` : ''}
+      ${showEGRow ? `
       <!-- EG 빌링 행 -->
       <div style="font-size:9px;font-weight:700;color:#7c3aed;background:#ede9fe;padding:4px;border-radius:4px;display:flex;align-items:center;justify-content:center;">EG<br>빌링</div>
       ${_cell({
@@ -16942,6 +16949,7 @@ function _egQuadrantMatrixHTML(){
         note:'DC 회계 무관 — 참조용',
         rows: m.q4, rowsKey:'q4'
       })}
+      ` : ''}
     </div>
   </div>`;
   return html;
