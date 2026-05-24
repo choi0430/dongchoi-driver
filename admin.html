@@ -16130,6 +16130,91 @@ async function _syncDailyReportSubToSubTxn(){
         .filter(Boolean)
     );
 
+    // ★ 2026-05-23 fix: stale DRSUB 자동 정리
+    //   Daily_Report의 BillingEntity가 사후에 DC → 다른 회사로 바뀐 경우,
+    //   처음 자동 생성된 DRSUB가 남아있어 외주 거래에 잘못 표시되는 문제.
+    //   이번 sync 사이클에 그런 행을 찾아 삭제 (단, CR이 있는 그룹은 보존).
+    //
+    //   판정 로직:
+    //   - 모든 DRSUB 행의 (date+rego+tourCode) 추출
+    //   - 대응되는 Daily_Report 행을 찾아 현재 BillingEntity 확인
+    //   - BillingEntity가 DC 아니면 → 잘못 등록된 DRSUB → 삭제 후보
+    //   - 같은 (SubCompany + TourCode) 그룹에 CR > 0 있으면 보존
+    try {
+      const _isBEDCSafe = (be) => {
+        const b = String(be||'').trim().toUpperCase();
+        return !b || b === 'DC' || /DONG\s*CHOI/i.test(b);
+      };
+      // DR 인덱스: key = date_rego_tourCode → r
+      const drIdx = {};
+      (_drCache || []).forEach(r => {
+        const dateISO = parseToISO(r.Date||'');
+        const rego = (r.Rego||'').trim();
+        const tc = pickTourCode(r);
+        if(dateISO && rego) drIdx[dateISO + '_' + rego + '_' + tc] = r;
+      });
+      // CR 있는 그룹 식별 (안전 가드)
+      const groupHasCR = {};
+      (_balSubTxns || []).forEach(t => {
+        if(!(Number(t.CR)||0)) return;
+        const sc = String(t.SubCompany||'').trim().toUpperCase();
+        // PAID_TC: prefix면 그 TourCode로 그룹화
+        const desc = String(t.Description||'');
+        const mp = desc.match(/^PAID_TC:(.+)$/);
+        if(mp){ groupHasCR[sc + '|' + mp[1].trim()] = true; return; }
+        // 일반 CR: tourCode 컬럼 또는 description 파싱
+        let tc = String(t.TourCode||'').trim();
+        if(!tc){
+          const md = desc.match(/^[A-Z]+:\d{4}-\d{2}-\d{2}_[^_]+_(.+)$/);
+          if(md) tc = md[1].trim();
+        }
+        if(tc) groupHasCR[sc + '|' + tc] = true;
+      });
+      // stale DRSUB 후보
+      const staleRowsToDelete = [];
+      (_balSubTxns || []).forEach(t => {
+        const desc = String(t.Description||'');
+        if(!desc.startsWith('DRSUB:')) return;
+        const m = desc.match(/^DRSUB:(\d{4}-\d{2}-\d{2})_([^_]+)_(.+)$/);
+        if(!m) return;
+        const drKey = m[1] + '_' + m[2] + '_' + m[3];
+        const dr = drIdx[drKey];
+        if(!dr) return; // DR이 삭제됐을 수 있음 — 안전상 건드리지 않음
+        const beNow = dr.Billing_Entity || dr.BillingEntity || '';
+        if(_isBEDCSafe(beNow)) return; // 현재도 DC면 정상 — 건드리지 않음
+        // 현재 BE가 DC 아님 → stale DRSUB. CR 있는지 확인.
+        const sc = String(t.SubCompany||'').trim().toUpperCase();
+        if(groupHasCR[sc + '|' + m[3].trim()]) return; // 그룹에 CR 있으면 보존
+        if(!t._rowIndex) return; // rowIndex 없으면 GAS에서 삭제 불가
+        staleRowsToDelete.push({ rowIndex: t._rowIndex, desc: desc, sc: t.SubCompany });
+      });
+      if(staleRowsToDelete.length){
+        console.log('[SUB Sync] stale DRSUB 삭제 시도:', staleRowsToDelete.length, '건 (BillingEntity가 DC 아닌 운행)');
+        // 한 번에 하나씩 삭제 (rate-limit 안전)
+        for(const item of staleRowsToDelete){
+          try {
+            const res = await fetch(APPS_SCRIPT_URL, {
+              method: 'POST', headers: {'Content-Type':'text/plain'},
+              body: JSON.stringify({action:'delete_sub_txn', rowIndex: item.rowIndex, _user: getAdminUser()})
+            });
+            const j = await res.json();
+            if(j.ok){
+              // 로컬 캐시에서도 제거
+              const idx = _balSubTxns.findIndex(x => x._rowIndex === item.rowIndex);
+              if(idx >= 0) _balSubTxns.splice(idx, 1);
+            } else console.warn('[SUB Sync] stale DRSUB 삭제 실패:', item.desc, j);
+          } catch(e){ console.warn('[SUB Sync] stale DRSUB 삭제 에러:', item.desc, e); }
+        }
+        // 삭제 후 existingKeys 재구축
+        existingKeys.clear();
+        _balSubTxns
+          .filter(t => String(t.Description||'').startsWith('DRSUB:'))
+          .map(t => _drsubKeyOf(t.Description))
+          .filter(Boolean)
+          .forEach(k => existingKeys.add(k));
+      }
+    } catch(e){ console.warn('[SUB Sync] stale DRSUB 정리 중 오류:', e); }
+
     const vehicles = DB.V || [];
     const newTxns = [];
 
