@@ -5925,6 +5925,8 @@ function getDriverSchedule(driver, from, to) {
       const flightIn = row[idx.FlightIn] || '';
       const flightOut = row[idx.FlightOut] || '';
       const hotel = row[idx.Hotel] || '';
+      // ★ BillingEntity — 빈 값이면 'DC' (자사 발행 기본)
+      const billingEntity = String(row[idx.BillingEntity] || '').trim() || 'DC';
 
       days.forEach(d => {
         if (!d || !d.date) return;
@@ -5959,6 +5961,8 @@ function getDriverSchedule(driver, from, to) {
             tourId: tourId,
             tourCode: tourCode,
             agency: agency,
+            billingEntity: billingEntity,
+            BillingEntity: billingEntity,
             date: dateStr,
             slotKey: slotKey,
             slot: slot,
