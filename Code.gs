@@ -137,7 +137,18 @@ const TAB_COLORS = {
 // Utility Functions
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ★ 슬라이딩 만료 정보 전달용 module-scoped state
+// _validateToken이 토큰 만료를 연장하면 _LAST_TOKEN_EXP에 설정되어
+// cors() 응답 본문에 _tokenExpiresAt 필드로 자동 첨부됨 (클라이언트가 dc_token_exp 갱신)
+var _LAST_TOKEN_EXP = '';
+
 function cors(data) {
+  try {
+    if (_LAST_TOKEN_EXP && data && typeof data === 'object' && !Array.isArray(data)
+        && data._tokenExpiresAt === undefined) {
+      data._tokenExpiresAt = _LAST_TOKEN_EXP;
+    }
+  } catch (e) {}
   return ContentService
     .createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
@@ -154,8 +165,8 @@ function cors(data) {
 //   4) 만료된 토큰은 자동 삭제
 //
 // 유효기간:
-//   - 드라이버: 7일
-//   - 관리자:  24시간
+//   - 드라이버: 30일 + 슬라이딩 연장 (활발히 쓰면 사실상 무기한)
+//   - 관리자:  7일 + 슬라이딩 연장
 //
 // M_Drivers의 PIN은 절대로 클라이언트에 응답으로 나가지 않음 (strip_pin_from_master)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -163,8 +174,11 @@ function cors(data) {
 // 관리자 계정 이름 (M_Drivers의 Name_KR 또는 Name_EN와 일치)
 const ADMIN_NAMES = ['Branden Choi', 'Branden', '최동철', 'Dong Cheol Choi'];
 
-const TOKEN_TTL_DRIVER_MS = 7 * 24 * 60 * 60 * 1000;   // 7일
-const TOKEN_TTL_ADMIN_MS  = 1 * 24 * 60 * 60 * 1000;   // 24시간
+const TOKEN_TTL_DRIVER_MS = 30 * 24 * 60 * 60 * 1000;  // 30일 (드라이버: 자동 로그아웃 빈도 최소화)
+const TOKEN_TTL_ADMIN_MS  = 7  * 24 * 60 * 60 * 1000;  // 7일  (관리자)
+// ★ 슬라이딩 만료: 토큰 사용 시 만료까지 SLIDING_THRESHOLD_MS 이하 남았으면 자동 연장
+//   → 활발히 사용 중인 사용자는 사실상 로그아웃되지 않음
+const TOKEN_SLIDING_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 만료 24시간 이내면 자동 연장
 
 // ── 보안 상수 ──
 // PIN 해시 식별 prefix (이 prefix가 있으면 해시된 값으로 인식)
@@ -488,7 +502,8 @@ function _logoutAction(payload, tokenParam) {
 }
 
 function _validateToken(token) {
-  // 반환: { valid: bool, role, user, reason }
+  // 반환: { valid: bool, role, user, reason, expiresAt? }
+  // ★ 슬라이딩 만료: 토큰 사용 시 만료가 임박했으면 자동 연장
   if (!token) return {valid: false, reason: 'no_token'};
   try {
     const sheet = _getAuthSheet();
@@ -504,6 +519,20 @@ function _validateToken(token) {
           try { sheet.deleteRow(i + 1); } catch(e) {}
           return {valid: false, reason: 'expired'};
         }
+        const role = String(data[i][2] || 'driver');
+        const user = String(data[i][1] || '');
+        let finalExp = exp;
+        // ── 슬라이딩 만료 ──
+        // 남은 시간이 SLIDING_THRESHOLD 이하면 새 TTL 만큼 연장
+        try {
+          const remainMs = exp.getTime() - now.getTime();
+          if (remainMs < TOKEN_SLIDING_THRESHOLD_MS) {
+            const ttl = (role === 'admin') ? TOKEN_TTL_ADMIN_MS : TOKEN_TTL_DRIVER_MS;
+            const newExp = new Date(now.getTime() + ttl);
+            sheet.getRange(i + 1, 5).setValue(newExp.toISOString()); // Expires 갱신
+            finalExp = newExp;
+          }
+        } catch(e) {}
         // LastUsed 갱신 (성능 고려해서 하루에 한 번 정도만)
         try {
           const lastUsedStr = String(data[i][5] || '');
@@ -514,8 +543,9 @@ function _validateToken(token) {
         } catch(e) {}
         return {
           valid: true,
-          role: String(data[i][2] || 'driver'),
-          user: String(data[i][1] || '')
+          role: role,
+          user: user,
+          expiresAt: finalExp.toISOString()
         };
       }
     }
@@ -1343,6 +1373,8 @@ function doGet(e) {
 
     // ── 인증 게이트 ──
     const tokenValid = _validateToken(token);
+    // 슬라이딩 만료: 응답에 새 만료 시각 첨부 (클라이언트가 dc_token_exp 갱신)
+    _LAST_TOKEN_EXP = (tokenValid && tokenValid.valid && tokenValid.expiresAt) ? tokenValid.expiresAt : '';
     const gate = _authGate(action, tokenValid.role, tokenValid);
     if (!gate.allow) return cors(gate.response);
 
@@ -1568,6 +1600,8 @@ function doPost(e) {
 
     // ── 인증 게이트 ──
     const tokenValid = _validateToken(token);
+    // 슬라이딩 만료: 응답에 새 만료 시각 첨부
+    _LAST_TOKEN_EXP = (tokenValid && tokenValid.valid && tokenValid.expiresAt) ? tokenValid.expiresAt : '';
     const gate = _authGate(action, tokenValid.role, tokenValid);
     if (!gate.allow) return cors(gate.response);
 
