@@ -3708,6 +3708,203 @@ function _onAuthFailure(reason){
   try { if(typeof showToast==='function') showToast(msg,'error'); else alert(msg); } catch(e){ try{alert(msg);}catch(e2){} }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SOFT RE-AUTH — 세션 만료 시 PIN 모달만 띄우고 현재 화면/폼 입력 보존
+// ═══════════════════════════════════════════════════════════════════════════
+// 사용 방식: interceptor가 unauthorized/forbidden 받으면 _softReauth(reason) 호출
+// - 앱 화면(#app)은 그대로 두고 오버레이로 PIN 모달만 표시
+// - 인증 성공 시 모달만 닫음 → 사용자가 입력 중이던 폼은 손대지 않음
+// - 모달 표시 중에는 추가 401이 와도 무시 (백그라운드 폴링이 같은 에러 받아도 모달 중복 X)
+//
+// admin_only(forbidden+admin_only)는 권한 문제이므로 PIN으로 해결 불가 → 기존 하드 로그아웃 사용
+// ═══════════════════════════════════════════════════════════════════════════
+var _reauthInProgress = false;
+var _reauthPinValue = '';
+
+function _reauthModalEnsure(){
+  if(document.getElementById('reauth-modal')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'reauth-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:99999;display:none;align-items:center;justify-content:center;padding:24px;';
+  overlay.innerHTML = ''
+    + '<div style="width:340px;max-width:calc(100% - 16px);background:rgba(30,41,59,0.95);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,0.5);">'
+    +   '<div style="text-align:center;margin-bottom:18px;">'
+    +     '<div style="font-size:36px;margin-bottom:6px;">🔒</div>'
+    +     '<div style="font-size:17px;font-weight:800;color:white;">세션 갱신 필요</div>'
+    +     '<div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:6px;line-height:1.4;">작업 내용은 그대로 유지됩니다.<br>PIN만 다시 입력해주세요.</div>'
+    +     '<div id="reauth-driver-name" style="font-size:13px;font-weight:700;color:#60a5fa;margin-top:10px;"></div>'
+    +   '</div>'
+    +   '<div style="display:flex;gap:14px;justify-content:center;margin:6px 0 18px;" id="reauth-dots">'
+    +     '<div class="reauth-dot" id="rdot-0" style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-radius:50%;transition:all .2s;"></div>'
+    +     '<div class="reauth-dot" id="rdot-1" style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-radius:50%;transition:all .2s;"></div>'
+    +     '<div class="reauth-dot" id="rdot-2" style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-radius:50%;transition:all .2s;"></div>'
+    +     '<div class="reauth-dot" id="rdot-3" style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-radius:50%;transition:all .2s;"></div>'
+    +   '</div>'
+    +   '<div id="reauth-keypad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;">'
+    +     '<button type="button" class="reauth-key" data-key="1" style="padding:18px;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:white;font-size:22px;font-weight:700;font-family:\'DM Mono\',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">1</button>'
+    +     '<button type="button" class="reauth-key" data-key="2" style="padding:18px;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:white;font-size:22px;font-weight:700;font-family:\'DM Mono\',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">2</button>'
+    +     '<button type="button" class="reauth-key" data-key="3" style="padding:18px;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:white;font-size:22px;font-weight:700;font-family:\'DM Mono\',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">3</button>'
+    +     '<button type="button" class="reauth-key" data-key="4" style="padding:18px;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:white;font-size:22px;font-weight:700;font-family:\'DM Mono\',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">4</button>'
+    +     '<button type="button" class="reauth-key" data-key="5" style="padding:18px;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:white;font-size:22px;font-weight:700;font-family:\'DM Mono\',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">5</button>'
+    +     '<button type="button" class="reauth-key" data-key="6" style="padding:18px;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:white;font-size:22px;font-weight:700;font-family:\'DM Mono\',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">6</button>'
+    +     '<button type="button" class="reauth-key" data-key="7" style="padding:18px;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:white;font-size:22px;font-weight:700;font-family:\'DM Mono\',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">7</button>'
+    +     '<button type="button" class="reauth-key" data-key="8" style="padding:18px;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:white;font-size:22px;font-weight:700;font-family:\'DM Mono\',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">8</button>'
+    +     '<button type="button" class="reauth-key" data-key="9" style="padding:18px;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:white;font-size:22px;font-weight:700;font-family:\'DM Mono\',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">9</button>'
+    +     '<div></div>'
+    +     '<button type="button" class="reauth-key" data-key="0" style="padding:18px;background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:12px;color:white;font-size:22px;font-weight:700;font-family:\'DM Mono\',monospace;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">0</button>'
+    +     '<button type="button" class="reauth-key" data-key="back" style="padding:18px;background:rgba(255,255,255,0.04);border:1.5px solid rgba(255,255,255,0.1);border-radius:12px;color:rgba(255,255,255,0.6);font-size:18px;font-weight:600;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;">⌫</button>'
+    +   '</div>'
+    +   '<div id="reauth-error" style="color:#f87171;font-size:12px;text-align:center;margin-bottom:10px;min-height:16px;"></div>'
+    +   '<button id="reauth-logout-btn" type="button" style="width:100%;padding:10px;border-radius:10px;border:none;background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.55);font-size:12px;font-weight:600;cursor:pointer;">취소하고 로그아웃</button>'
+    + '</div>';
+  document.body.appendChild(overlay);
+  // 이벤트 바인딩 (한 번만)
+  const keypad = overlay.querySelector('#reauth-keypad');
+  keypad.addEventListener('click', function(e){
+    const btn = e.target.closest('.reauth-key');
+    if(!btn) return;
+    const key = btn.dataset.key;
+    if(key === 'back') _reauthPinBack();
+    else if(/^[0-9]$/.test(key)) _reauthPinPress(key);
+  });
+  document.getElementById('reauth-logout-btn').addEventListener('click', _reauthFallbackLogout);
+  // 키보드 입력 지원
+  document.addEventListener('keydown', function(e){
+    if(!_reauthInProgress) return;
+    if(/^[0-9]$/.test(e.key)) _reauthPinPress(e.key);
+    else if(e.key === 'Backspace') { e.preventDefault(); _reauthPinBack(); }
+  });
+}
+
+function _reauthPinPress(digit){
+  if(!_reauthInProgress) return;
+  if(_reauthPinValue.length >= 4) return;
+  _reauthPinValue += digit;
+  _reauthUpdateDots();
+  if(_reauthPinValue.length === 4) _reauthSubmit();
+}
+function _reauthPinBack(){
+  _reauthPinValue = _reauthPinValue.slice(0, -1);
+  _reauthUpdateDots();
+}
+function _reauthPinClear(){
+  _reauthPinValue = '';
+  _reauthUpdateDots();
+}
+function _reauthUpdateDots(){
+  for(let i = 0; i < 4; i++){
+    const dot = document.getElementById('rdot-'+i);
+    if(dot){
+      dot.classList.remove('error','filled');
+      if(i < _reauthPinValue.length) dot.classList.add('filled');
+    }
+  }
+}
+function _reauthShowError(msg){
+  const el = document.getElementById('reauth-error');
+  if(el) el.textContent = msg ? '❌ ' + msg : '';
+  for(let i = 0; i < 4; i++){
+    const dot = document.getElementById('rdot-'+i);
+    if(dot){ dot.classList.add('error'); dot.classList.remove('filled'); }
+  }
+  setTimeout(_reauthPinClear, 500);
+}
+
+async function _reauthSubmit(){
+  const driverName = (localStorage.getItem('dc_last_driver') || '').split('|')[0];
+  if(!driverName){
+    // 드라이버 이름 없으면 부드러운 재인증 불가 → 하드 로그아웃
+    _reauthFallbackLogout();
+    return;
+  }
+  const pin = _reauthPinValue;
+  _reauthShowError(''); // 에러 클리어
+  try {
+    const ua = (navigator.userAgent||'').slice(0,80) + ' [reauth]';
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'login', name: driverName, pin: pin, ua: ua})
+    });
+    const j = await res.json();
+    if(!j || !j.ok || !j.token){
+      // PIN 틀림 / 락아웃 / 기타
+      let m = 'PIN 번호가 틀렸습니다';
+      if(j && j.reason === 'too_many_attempts') m = (j.message || '너무 많은 시도. 잠시 후 다시');
+      else if(j && j.warning === 'attempts_remaining') m = '틀림 — 남은 시도 ' + (j.attemptsLeft||0) + '회';
+      _reauthShowError(m);
+      return;
+    }
+    // 성공 — 토큰 저장하고 모달만 닫음 (앱은 그대로)
+    setAuthToken(j.token);
+    try {
+      localStorage.setItem('dc_token_exp', j.expiresAt||'');
+      localStorage.setItem('dc_token_user', j.displayName||driverName);
+      localStorage.setItem('dc_token_role', j.role||'driver');
+      localStorage.setItem('dc_session_' + driverName, '1');
+    } catch(e){}
+    _reauthClose();
+    try { if(typeof showToast==='function') showToast('세션 갱신 완료','success'); } catch(e){}
+  } catch(e) {
+    _reauthShowError('네트워크 오류 — 다시 시도');
+  }
+}
+
+function _reauthOpen(reason){
+  // 이미 진행 중이면 중복 호출 무시
+  if(_reauthInProgress) return;
+  // admin_only 권한 문제는 PIN 재입력으로 해결 안 됨 → 하드 로그아웃
+  if(reason === 'forbidden' || reason === 'admin_only'){
+    _onAuthFailure(reason);
+    return;
+  }
+  // 드라이버 이름 없으면 부드러운 재인증 불가
+  const driverName = (localStorage.getItem('dc_last_driver') || '').split('|')[0];
+  if(!driverName){
+    _onAuthFailure(reason);
+    return;
+  }
+  _reauthInProgress = true;
+  _reauthPinValue = '';
+  _reauthModalEnsure();
+  const nameEl = document.getElementById('reauth-driver-name');
+  if(nameEl) nameEl.textContent = '👤 ' + driverName;
+  _reauthShowError('');
+  _reauthUpdateDots();
+  const overlay = document.getElementById('reauth-modal');
+  if(overlay) overlay.style.display = 'flex';
+  // 토큰은 클리어 (만료된 거 더 안 쓰도록) — 단 dc_last_driver와 dc_session_*는 보존
+  try { localStorage.removeItem('dc_token'); localStorage.removeItem('dc_token_exp'); } catch(e){}
+}
+
+function _reauthClose(){
+  _reauthInProgress = false;
+  _reauthPinValue = '';
+  const overlay = document.getElementById('reauth-modal');
+  if(overlay) overlay.style.display = 'none';
+}
+
+function _reauthFallbackLogout(){
+  _reauthClose();
+  _onAuthFailure('cancelled');
+}
+
+// 추가 CSS (점 dot, 키 active)
+(function _reauthStyle(){
+  if(document.getElementById('reauth-style')) return;
+  const s = document.createElement('style');
+  s.id = 'reauth-style';
+  s.textContent = '.reauth-key:active{background:rgba(37,99,235,0.3) !important;border-color:rgba(37,99,235,0.6) !important;transform:scale(0.95);}'
+    + '.reauth-dot.filled{background:#3b82f6 !important;border-color:#3b82f6 !important;}'
+    + '.reauth-dot.error{background:#ef4444 !important;border-color:#ef4444 !important;animation:shakeDot 0.4s;}';
+  document.head.appendChild(s);
+})();
+
+// 외부에서 호출하는 단일 진입점 — interceptor가 사용
+function _softReauth(reason){
+  _reauthOpen(reason);
+}
+
 // APPS_SCRIPT_URL 로 가는 모든 요청에 토큰 자동 주입
 (function installFetchInterceptor(){
   if (window.__gasFetchIntercepted) return;
@@ -3763,7 +3960,13 @@ function _onAuthFailure(reason){
                 const body = (init && init.body) || '';
                 const isPublic = /"action"\s*:\s*"(login|ping|logout|get_login_names)"/.test(body)
                   || /action=(login|ping|logout|get_login_names)/.test(url);
-                if (!isPublic) _onAuthFailure(j.reason || j.error || 'unauthorized');
+                // 재인증 모달 진행 중이면 추가 401 무시 (백그라운드 폴링 중복 트리거 차단)
+                if (!isPublic && !_reauthInProgress) {
+                  const r = j.reason || j.error || 'unauthorized';
+                  // 부드러운 재인증 사용 (PIN 모달만 띄움, 앱 화면/폼 보존)
+                  if (typeof _softReauth === 'function') _softReauth(r);
+                  else _onAuthFailure(r);
+                }
               }
             } catch(e){}
           }).catch(()=>{});
