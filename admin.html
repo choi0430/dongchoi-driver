@@ -2817,6 +2817,10 @@ function _onAuthFailure(reason){
           clone.text().then(txt => {
             try {
               const j = JSON.parse(txt);
+              // ★ 슬라이딩 만료: 서버가 _tokenExpiresAt 첨부 → 로컬 만료시각 갱신
+              if (j && j._tokenExpiresAt) {
+                try { localStorage.setItem('dc_token_exp', j._tokenExpiresAt); } catch(e){}
+              }
               // ★ 인증/권한 실패 감지 — 다음 중 하나라도 해당하면 재로그인 안내
               //   1) authRequired: true (기존)
               //   2) error === 'unauthorized' (토큰 없음/만료)
