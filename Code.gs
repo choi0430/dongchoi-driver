@@ -6136,6 +6136,30 @@ function updateScheduleStatus(tourId, status, invoiceId) {
     const upCol = headers.indexOf('UpdatedAt');
     const now = new Date();
     const sydNow = Utilities.formatDate(now, 'Australia/Sydney', 'yyyy-MM-dd HH:mm:ss');
+
+    // ★ 2026-05-23 가드: 같은 InvoiceID가 다른 TourID에 이미 있는지 사전 검사
+    //   하나의 InvoiceID는 하나의 TourID에만 연결되어야 함 (data integrity)
+    if (invoiceId && invCol >= 0) {
+      const tgtId = String(tourId).trim();
+      const tgtInv = String(invoiceId).trim();
+      for (let i = 1; i < data.length; i++) {
+        const rid = String(data[i][idCol]).trim();
+        const riv = String(data[i][invCol]||'').trim();
+        if (rid !== tgtId && riv === tgtInv) {
+          // 다른 TourID가 이미 같은 InvoiceID 사용 중 → 충돌
+          Logger.log('[updateScheduleStatus] CONFLICT: InvoiceID ' + tgtInv +
+                     ' already used by TourID ' + rid + ' (request was for ' + tgtId + ')');
+          return {
+            ok: false,
+            error: 'InvoiceID conflict',
+            conflictMessage: 'InvoiceID ' + tgtInv + '이 이미 다른 일정(' + rid + ')에 연결되어 있습니다',
+            conflictTourId: rid,
+            conflictInvoiceId: tgtInv
+          };
+        }
+      }
+    }
+
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][idCol]).trim() === String(tourId).trim()) {
         sheet.getRange(i + 1, stCol + 1).setValue(status);
