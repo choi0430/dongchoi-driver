@@ -17751,7 +17751,10 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
         if(!b || !Array.isArray(b.tourGroups)) return;
         b.tourGroups.forEach(g => {
           if(g.excluded) return; // 제외 처리된 항목 skip
-          if(g.balance <= 0.01) return; // 완납 항목 skip
+          // ★ 잔액 0인 항목도 리스트에 포함 (완지급 — 녹색 "✓ 지급" 표시)
+          //   여행사 수금 예정과 동일 패턴. 합계엔 안 들어감 (r.isPaid 체크).
+          //   단 due가 이번 주가 아니면 여전히 필터링.
+          if(g.dr <= 0.01 && g.cr <= 0.01) return; // 양쪽 다 0인 빈 그룹은 표시 안 함
           let dueDate = g.dueDate || '';
           if(!dueDate) return;
           // ★ 토/일 → 다음 주 월요일
@@ -17778,7 +17781,7 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
             amount: g.dr,
             paid: g.cr,
             balance: g.balance,
-            isPaid: false,
+            isPaid: g.balance <= 0.01,
             dueDate: dueDate,
             tourCode: g.tourCode || '',
             guide: (g.guides && g.guides[0]) || '',
