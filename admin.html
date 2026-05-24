@@ -18276,18 +18276,12 @@ function renderBalDetail(){
         <th style="text-align:right;padding:6px 4px;">Balance (잔액)</th>
         <th style="text-align:center;padding:6px 2px;">⚙</th>
       </tr></thead><tbody>`;
-    // ★ 날짜 오름차순으로 누적 잔액 계산 (rows가 이미 오름차순)
-    //   잔액(Balance)은 시간순으로 그대로 계산 → balMap에 보존.
-    //   화면 표시는 InvoiceID 그룹별로 재정렬하지만, 각 행의 잔액은 시간순 누적값을 그대로 표시.
+    // ★ 행은 시간순으로 정렬되어 있지만, 화면 표시는 InvoiceID 그룹별로 재정렬한다.
+    //   잔액(Balance)도 화면 순서대로 누적 계산 → 위에서 아래로 자연스럽게 누적값이 보임.
+    //   (전체 합계 DR/CR/미수금은 정렬과 무관하므로 영향 없음)
     const sortedAsc = rows;
-    let runBal = 0;
-    const balMap = new Map();
-    const timeOrderIdx = new Map(); // 행의 시간순 인덱스 (그룹 정렬 시 보조 키로 사용)
-    sortedAsc.forEach((r, i) => {
-      runBal += (Number(r.DR)||0) - (Number(r.CR)||0);
-      balMap.set(r, Math.round(runBal*100)/100);
-      timeOrderIdx.set(r, i);
-    });
+    const timeOrderIdx = new Map(); // 그룹 내 정렬 보조 키 (시간순 인덱스)
+    sortedAsc.forEach((r, i) => { timeOrderIdx.set(r, i); });
 
     // ★ InvoiceID 기준 그룹화 표시 정렬
     //   - InvoiceID가 있는 행은 그 ID로 그룹핑 (청구 + 같은 ID의 수금/이체가 함께)
@@ -18334,6 +18328,14 @@ function renderBalDetail(){
     // 최종 표시 순서로 rows 재구성
     const _displayRows = [];
     _sortedGroups.forEach(g => g.rows.forEach(r => _displayRows.push(r)));
+
+    // ★ 표시 순서대로 누적 잔액 계산
+    let runBal = 0;
+    const balMap = new Map();
+    _displayRows.forEach(r => {
+      runBal += (Number(r.DR)||0) - (Number(r.CR)||0);
+      balMap.set(r, Math.round(runBal*100)/100);
+    });
 
     _displayRows.forEach((r,i)=>{
       const realIdx = _balAgencyTxns.indexOf(r);
