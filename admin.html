@@ -17855,7 +17855,10 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
   return {
     receivables, subPayables, driverPay,
     totalIn, totalCollected, totalSubOut, totalSubPaid, totalWageOut, totalWageEarned, totalWagePaid,
-    netCashFlow: roundMoney(totalIn - totalSubOut - totalWageOut)
+    // ★ 순 현금 흐름 = (받은 돈 + 더 받아야 할 돈) − (지급한 돈 + 더 지급해야 할 돈)
+    //   = 이번 주 기간에 일어난 모든 현금 변동의 합 (이미 정산된 것 + 앞으로 정산할 것)
+    //   "이전 미수금 포함" 토글 켰을 때 직관적인 누적 흐름을 보여줌
+    netCashFlow: roundMoney((totalCollected + totalIn) - (totalSubPaid + totalWagePaid + totalSubOut + totalWageOut))
   };
 }
 
@@ -18083,7 +18086,7 @@ function renderBalWeeklySummary() {
       </label>
     </div>
     <div style="background:${cf.netCashFlow>=0?'var(--gnd)':'var(--rdd)'};border:1px solid ${cf.netCashFlow>=0?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'};border-radius:12px;padding:14px;text-align:center;margin-bottom:10px;">
-      <div style="font-size:10px;color:var(--t3);margin-bottom:4px;">\uC21C \uD604\uAE08 \uD750\uB984 (\uB354 \ubc1b\uc544\uc57c \ud560 \ub3c8 - \ub354 \uc9c0\uae09\ud574\uc57c \ud560 \ub3c8)</div>
+      <div style="font-size:10px;color:var(--t3);margin-bottom:4px;">\uC21C \uD604\uAE08 \uD750\uB984 (\ubc1b\uc740 \ub3c8 + \ub354 \ubc1b\uc544\uc57c \ud560 \ub3c8 \u2212 \uc9c0\uae09\ud55c \ub3c8 \u2212 \ub354 \uc9c0\uae09\ud574\uc57c \ud560 \ub3c8)</div>
       <div style="font-size:24px;font-weight:800;color:${netColor};font-family:var(--fn);">${netSign}${$f(cf.netCashFlow)}</div>
     </div>
     <!-- 4분할 카드: 받음/받아야 할 / 지급함/지급해야 할 -->
