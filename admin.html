@@ -18344,19 +18344,20 @@ function renderBalWeeklySummary() {
   const totIncome = agBal.reduce((s, a) => s + a.dr, 0);
   const totCollected = agBal.reduce((s, a) => s + a.cr, 0);
   const totReceivable = roundMoney(totIncome - totCollected);
-  // ★ FIX 2026-05-23: 미지급 중복 계산 버그
-  //   기존: totSub = subBal.dr + subBal.wageDr (Wage 카테고리)
-  //         → subBal.wageDr은 "차주가 자기 드라이버에게 지급할 wage 정보"로
-  //           자사 회계와 무관한데도 totSub에 더해져서 미지급이 두 배로 표시됨.
-  //   수정: totSub은 외주(Outsourcing)만, totWage는 자사 wage(dcOwner만)만.
-  //         subBal.wageDr/wageCr은 무시 (차주 내부 정보, 자사 미지급 아님)
-  const totSub = subBal.reduce((s, a) => s + a.dr, 0);
-  const totSubPaid = subBal.reduce((s, a) => s + a.cr, 0);
-  const totWage = wageBal.reduce((s, a) => s + a.dr, 0);
-  const totWagePaid = wageBal.reduce((s, a) => s + a.cr, 0);
+  // ★ FIX 2026-05-23 v2: 미지급 계산
+  //   - subBal[].dr / cr 은 "제외 처리된 항목"까지 포함한 전체 값
+  //   - subBal[].outsourcingBalIncl 은 _subBalances가 이미 제외분 빼고 계산한 외주 잔액
+  //   - 회사별 음수(선불 상태)는 다른 회사의 미지급과 상쇄하지 않도록 Math.max(0, ...) 적용
+  const totSubOutsourcing = subBal.reduce((s, a) => s + Math.max(0, a.outsourcingBalIncl || 0), 0);
+  const totSub = roundMoney(totSubOutsourcing);              // 외주 미지급 (제외분 빠짐, 음수 상쇄 없음)
+  const totSubPaid = subBal.reduce((s, a) => s + (a.cr||0), 0);
+  const totWage = wageBal.reduce((s, a) => s + (a.dr||0), 0);
+  const totWagePaid = wageBal.reduce((s, a) => s + (a.cr||0), 0);
+  const totWageRemaining = wageBal.reduce((s, a) => s + Math.max(0, (a.dr||0) - (a.cr||0)), 0);
   const totNet = roundMoney(totIncome - totSub - totWage);
   // ★ 미수/미지급 차액 (받을 돈 - 지급할 돈)
-  const totUnpaid = roundMoney((totSub - totSubPaid) + (totWage - totWagePaid));
+  //   미지급 = 서브 외주 미지급 + 자사 드라이버 wage 미지급
+  const totUnpaid = roundMoney(totSubOutsourcing + totWageRemaining);
   const netUnpaid = roundMoney(totReceivable - totUnpaid);
 
   listEl.innerHTML += `
