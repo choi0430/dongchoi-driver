@@ -16707,65 +16707,104 @@ function _egQuadrantMatrixHTML(){
     if(note) html += `<div style="font-size:8.5px;color:var(--t3);margin-top:4px;font-style:italic;">${note}</div>`;
     html += `<div style="text-align:center;font-size:9px;color:${accent};margin-top:6px;">▼ 상세 보기</div>`;
     html += `</div>`;
-    // 펼침 컨테이너 (래퍼 안)
+    // 펼침 컨테이너 (래퍼 안) — 주별 navigation
     if(rows && rows.length){
-      html += `<div id="${toggleId}" style="display:none;background:white;border:1px solid #e5e7eb;border-top:none;margin-top:-1px;border-radius:0 0 8px 8px;padding:6px 8px;font-size:9.5px;max-height:380px;overflow-y:auto;">`;
-      const sorted = rows.slice().sort((a,b)=> String(parseToISO(a.Date)||'').localeCompare(String(parseToISO(b.Date)||'')));
-      sorted.forEach(r => {
-        const dr = _drOf(r);
-        const ta = _taOf(r);
-        const dt = parseToISO(r.Date)||'';
-        const dtShort = dt ? dt.slice(5).replace('-','/') : '—';
-        const tc = String(r.Tour_Code||r.TourCode||'').trim();
-        const gd = String(r.Guide||'').trim();
-        const att = String(r.Attraction||r.Tour||'').trim();
-        const stTime = String(r.Start_Time||'').trim();
-        const enTime = String(r.End_Time||'').trim();
-        const stPlace = String(r.Start_Place||'').trim();
-        const enPlace = String(r.End_Place||'').trim();
-        // Surcharge 값들
-        const otAmt    = parseFloat(r.OT)||0;
-        const hotelAmt = parseFloat(r.Hotel_Surcharge)||0;
-        const distAmt  = parseFloat(r.Dist_Surcharge)||0;
-        const earlyAmt = parseFloat(r.Early)||0;
-        const parkAmt  = parseFloat(r.Parking)||0;
-        const trailerAmt = parseFloat(r.Trailer)||0;
-        // Surcharge 뱃지 빌드
-        const _sb = (label, amt, color) => amt > 0
-          ? `<span style="font-size:8.5px;background:${color}15;color:${color};padding:1px 5px;border-radius:3px;font-weight:600;white-space:nowrap;">${label} +$${amt.toLocaleString('en',{maximumFractionDigits:0})}</span>`
-          : '';
-        const surBadges = [
-          _sb('OT', otAmt, '#dc2626'),
-          _sb('Hotel', hotelAmt, '#0891b2'),
-          _sb('Dist', distAmt, '#7c3aed'),
-          _sb('Early', earlyAmt, '#ea580c'),
-          _sb('Park', parkAmt, '#0d9488'),
-          _sb('Trailer', trailerAmt, '#9333ea')
-        ].filter(Boolean).join(' ');
-        // 일정 (시간 + 장소)
-        const timeStr = (stTime && enTime) ? `${stTime}–${enTime}` : (stTime || enTime || '');
-        const placeStr = (stPlace && enPlace && stPlace !== enPlace)
-          ? `${stPlace} → ${enPlace}`
-          : (stPlace || enPlace || '');
-        const itineraryLine = [timeStr, placeStr].filter(Boolean).join(' · ');
-
-        html += `<div style="padding:5px 0;border-bottom:1px solid #f3f4f6;">
-          <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:6px;align-items:center;">
-            <span style="color:#6b7280;">${escH(dtShort)}</span>
-            <span style="color:#1f2937;font-size:9px;">
-              ${escH(r.Rego||'')} · ${escH(r.Driver||'')}${gd?' · <span style="color:#0891b2;">🧭 '+escH(gd)+'</span>':''}${tc?' · <span style="color:'+accent+';font-weight:600;">'+escH(tc)+'</span>':''}
-            </span>
-            <span style="font-family:var(--fn);color:#16a34a;font-weight:600;">${_fmt(dr)}</span>
-            <span style="font-family:var(--fn);color:${accent};font-weight:600;">${_fmt(ta)}</span>
-          </div>
-          ${(att || itineraryLine || surBadges) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-left:42px;margin-top:2px;font-size:8.5px;color:var(--t3);">
-            ${att ? `<span style="font-weight:600;color:#374151;">${escH(att)}</span>` : ''}
-            ${itineraryLine ? `<span style="color:#6b7280;">${escH(itineraryLine)}</span>` : ''}
-            ${surBadges}
-          </div>` : ''}
-        </div>`;
+      // ★ 주별 그룹화 (월요일 기준, 시드니 시간)
+      //   weekKey = 'YYYY-MM-DD' of Monday of that week
+      const weekMap = new Map(); // weekKey → { rows: [], dr, ta, startISO, endISO }
+      rows.forEach(r => {
+        const iso = parseToISO(r.Date)||'';
+        if(!iso) return;
+        // 월요일 찾기
+        const d = new Date(iso + 'T00:00:00');
+        const dow = d.getDay(); // 0=Sun..6=Sat
+        const offsetToMon = (dow === 0) ? -6 : (1 - dow);
+        const mon = new Date(d);
+        mon.setDate(d.getDate() + offsetToMon);
+        const monISO = toLocalISO(mon);
+        const sun = new Date(mon);
+        sun.setDate(mon.getDate() + 6);
+        const sunISO = toLocalISO(sun);
+        let w = weekMap.get(monISO);
+        if(!w){ w = { rows:[], dr:0, ta:0, startISO: monISO, endISO: sunISO }; weekMap.set(monISO, w); }
+        w.rows.push(r);
+        w.dr += _drOf(r);
+        w.ta += _taOf(r);
       });
-      html += `</div>`;
+      // 주차 키 오름차순 (오래된 → 최신)
+      const weekKeys = Array.from(weekMap.keys()).sort();
+      // 데이터 컨테이너 — 각 주를 별도 panel로 미리 렌더하되 active 1개만 보여줌
+      // 전역 state는 _egQuadWeekState[toggleId] 로 관리
+      // 첫 진입 시 가장 최근 주를 보여줌
+      const initialIdx = weekKeys.length - 1;
+      html += `<div id="${toggleId}" style="display:none;background:white;border:1px solid #e5e7eb;border-top:none;margin-top:-1px;border-radius:0 0 8px 8px;padding:0;font-size:9.5px;overflow:hidden;"
+                    data-week-keys='${JSON.stringify(weekKeys)}' data-week-idx="${initialIdx}">`;
+      // 네비게이션 바
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:${accent}0d;border-bottom:1px solid ${accent}33;position:sticky;top:0;z-index:1;">
+        <button onclick="event.stopPropagation();_egQuadNavWeek('${toggleId}',-1)" style="background:none;border:1px solid ${accent}55;color:${accent};border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;font-weight:700;">◀</button>
+        <div id="${toggleId}-label" style="font-size:10px;font-weight:700;color:${accent};text-align:center;flex:1;"></div>
+        <button onclick="event.stopPropagation();_egQuadNavWeek('${toggleId}',1)" style="background:none;border:1px solid ${accent}55;color:${accent};border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;font-weight:700;">▶</button>
+      </div>`;
+      // 각 주를 별도 panel로 (display:none, active 1개만)
+      html += `<div id="${toggleId}-panels" style="max-height:340px;overflow-y:auto;padding:6px 8px;" 
+                    ontouchstart="_egQuadTouchStart(event,'${toggleId}')" 
+                    ontouchend="_egQuadTouchEnd(event,'${toggleId}')">`;
+      weekKeys.forEach((wk, wi) => {
+        const w = weekMap.get(wk);
+        const sorted = w.rows.slice().sort((a,b)=> String(parseToISO(a.Date)||'').localeCompare(String(parseToISO(b.Date)||'')));
+        html += `<div data-week-panel="${wi}" style="display:${wi===initialIdx?'block':'none'};" data-week-key="${wk}" data-week-end="${w.endISO}" data-week-dr="${w.dr}" data-week-ta="${w.ta}" data-week-count="${w.rows.length}">`;
+        sorted.forEach(r => {
+          const dr = _drOf(r);
+          const ta = _taOf(r);
+          const dt = parseToISO(r.Date)||'';
+          const dtShort = dt ? dt.slice(5).replace('-','/') : '—';
+          const tc = String(r.Tour_Code||r.TourCode||'').trim();
+          const gd = String(r.Guide||'').trim();
+          const att = String(r.Attraction||r.Tour||'').trim();
+          const stTime = String(r.Start_Time||'').trim();
+          const enTime = String(r.End_Time||'').trim();
+          const stPlace = String(r.Start_Place||'').trim();
+          const enPlace = String(r.End_Place||'').trim();
+          const otAmt    = parseFloat(r.OT)||0;
+          const hotelAmt = parseFloat(r.Hotel_Surcharge)||0;
+          const distAmt  = parseFloat(r.Dist_Surcharge)||0;
+          const earlyAmt = parseFloat(r.Early)||0;
+          const parkAmt  = parseFloat(r.Parking)||0;
+          const trailerAmt = parseFloat(r.Trailer)||0;
+          const _sb = (label, amt, color) => amt > 0
+            ? `<span style="font-size:8.5px;background:${color}15;color:${color};padding:1px 5px;border-radius:3px;font-weight:600;white-space:nowrap;">${label} +$${amt.toLocaleString('en',{maximumFractionDigits:0})}</span>`
+            : '';
+          const surBadges = [
+            _sb('OT', otAmt, '#dc2626'),
+            _sb('Hotel', hotelAmt, '#0891b2'),
+            _sb('Dist', distAmt, '#7c3aed'),
+            _sb('Early', earlyAmt, '#ea580c'),
+            _sb('Park', parkAmt, '#0d9488'),
+            _sb('Trailer', trailerAmt, '#9333ea')
+          ].filter(Boolean).join(' ');
+          const timeStr = (stTime && enTime) ? `${stTime}–${enTime}` : (stTime || enTime || '');
+          const placeStr = (stPlace && enPlace && stPlace !== enPlace) ? `${stPlace} → ${enPlace}` : (stPlace || enPlace || '');
+          const itineraryLine = [timeStr, placeStr].filter(Boolean).join(' · ');
+          html += `<div style="padding:5px 0;border-bottom:1px solid #f3f4f6;">
+            <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:6px;align-items:center;">
+              <span style="color:#6b7280;">${escH(dtShort)}</span>
+              <span style="color:#1f2937;font-size:9px;">
+                ${escH(r.Rego||'')} · ${escH(r.Driver||'')}${gd?' · <span style="color:#0891b2;">🧭 '+escH(gd)+'</span>':''}${tc?' · <span style="color:'+accent+';font-weight:600;">'+escH(tc)+'</span>':''}
+              </span>
+              <span style="font-family:var(--fn);color:#16a34a;font-weight:600;">${_fmt(dr)}</span>
+              <span style="font-family:var(--fn);color:${accent};font-weight:600;">${_fmt(ta)}</span>
+            </div>
+            ${(att || itineraryLine || surBadges) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-left:42px;margin-top:2px;font-size:8.5px;color:var(--t3);">
+              ${att ? `<span style="font-weight:600;color:#374151;">${escH(att)}</span>` : ''}
+              ${itineraryLine ? `<span style="color:#6b7280;">${escH(itineraryLine)}</span>` : ''}
+              ${surBadges}
+            </div>` : ''}
+          </div>`;
+        });
+        html += `</div>`;
+      });
+      html += `</div>`; // panels
+      html += `</div>`; // toggleId container
     }
     html += `</div>`;  // grid item 래퍼 닫기
     return html;
@@ -16823,10 +16862,73 @@ function _egQuadrantMatrixHTML(){
   return html;
 }
 
-// 셀 펼침 토글
+// 셀 펼침 토글 + 현재 주 label 업데이트
 function _egToggleQuad(id){
   const el = document.getElementById(id);
-  if(el) el.style.display = (el.style.display === 'none' || !el.style.display) ? 'block' : 'none';
+  if(!el) return;
+  const willOpen = (el.style.display === 'none' || !el.style.display);
+  el.style.display = willOpen ? 'block' : 'none';
+  if(willOpen) _egQuadUpdateLabel(id);
+}
+
+// 주 navigation — delta = -1 (prev) or +1 (next)
+function _egQuadNavWeek(id, delta){
+  const container = document.getElementById(id);
+  if(!container) return;
+  const keys = JSON.parse(container.dataset.weekKeys || '[]');
+  if(!keys.length) return;
+  let idx = parseInt(container.dataset.weekIdx || '0');
+  idx = Math.max(0, Math.min(keys.length - 1, idx + delta));
+  container.dataset.weekIdx = idx;
+  // 모든 panel 숨기고 active만 show
+  const panels = container.querySelectorAll('[data-week-panel]');
+  panels.forEach(p => {
+    p.style.display = (parseInt(p.dataset.weekPanel) === idx) ? 'block' : 'none';
+  });
+  _egQuadUpdateLabel(id);
+  // 스크롤 맨 위로
+  const panelsHost = document.getElementById(id + '-panels');
+  if(panelsHost) panelsHost.scrollTop = 0;
+}
+
+// 현재 주 label (예: "5월 18~24일 · 7건 · DR $1,860 · TA $5,200")
+function _egQuadUpdateLabel(id){
+  const container = document.getElementById(id);
+  const label = document.getElementById(id + '-label');
+  if(!container || !label) return;
+  const keys = JSON.parse(container.dataset.weekKeys || '[]');
+  const idx = parseInt(container.dataset.weekIdx || '0');
+  const total = keys.length;
+  if(!total){ label.textContent = ''; return; }
+  const activePanel = container.querySelector('[data-week-panel="'+idx+'"]');
+  if(!activePanel){ label.textContent = ''; return; }
+  const startISO = activePanel.dataset.weekKey;
+  const endISO = activePanel.dataset.weekEnd;
+  const dr = Number(activePanel.dataset.weekDr)||0;
+  const ta = Number(activePanel.dataset.weekTa)||0;
+  const count = Number(activePanel.dataset.weekCount)||0;
+  // 짧은 표시: "5/18 ~ 5/24"
+  const _short = iso => { const [y,m,d] = iso.split('-'); return parseInt(m)+'/'+parseInt(d); };
+  const range = _short(startISO) + ' ~ ' + _short(endISO);
+  const fmt = v => '$' + (Math.round(v*100)/100).toLocaleString('en',{minimumFractionDigits:2});
+  label.innerHTML = `${range} <span style="font-weight:400;color:var(--t3);">· ${count}건 · DR ${fmt(dr)} · TA ${fmt(ta)}</span> <span style="font-weight:400;color:var(--t3);font-size:9px;">(${idx+1}/${total})</span>`;
+}
+
+// 터치 스와이프 — 좌우로 50px 이상 이동하면 주 전환
+let _egQuadTouchX = null;
+function _egQuadTouchStart(e, id){
+  if(e.touches && e.touches.length === 1) _egQuadTouchX = e.touches[0].clientX;
+}
+function _egQuadTouchEnd(e, id){
+  if(_egQuadTouchX === null) return;
+  const endX = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientX : null;
+  if(endX === null){ _egQuadTouchX = null; return; }
+  const dx = endX - _egQuadTouchX;
+  _egQuadTouchX = null;
+  if(Math.abs(dx) < 50) return; // 짧은 터치는 무시 (스크롤일 가능성)
+  // 왼쪽으로 스와이프 (dx < 0) → 다음 주
+  // 오른쪽으로 스와이프 (dx > 0) → 이전 주
+  _egQuadNavWeek(id, dx < 0 ? 1 : -1);
 }
 
 function _subBalances(){
