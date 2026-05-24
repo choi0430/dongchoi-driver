@@ -22,6 +22,7 @@
       "(function(){",
       "  try { if (typeof _subCompanies !== \"undefined\") window.__beDdSubCompanies = _subCompanies; } catch(e) {}",
       "  try { if (typeof _driverSchedule !== \"undefined\") window.__beDdDriverSched = _driverSchedule; } catch(e) {}",
+      "  try { if (typeof _driverScheduleCache !== \"undefined\") window.__beDdDriverSchedCache = _driverScheduleCache; } catch(e) {}",
       "  try { if (typeof _schedule !== \"undefined\") window.__beDdSched = _schedule; } catch(e) {}",
       "  try { if (typeof _schedules !== \"undefined\") window.__beDdScheds = _schedules; } catch(e) {}",
       "  try { if (typeof _mySchedule !== \"undefined\") window.__beDdMySched = _mySchedule; } catch(e) {}",
@@ -67,6 +68,8 @@
   }
 
   function getSchedules() {
+    if (Array.isArray(window.__beDdDriverSchedCache) && window.__beDdDriverSchedCache.length) return window.__beDdDriverSchedCache;
+    if (Array.isArray(window._driverScheduleCache) && window._driverScheduleCache.length) return window._driverScheduleCache;
     if (Array.isArray(window.__beDdDriverSched) && window.__beDdDriverSched.length) return window.__beDdDriverSched;
     if (Array.isArray(window.__beDdSched) && window.__beDdSched.length) return window.__beDdSched;
     if (Array.isArray(window.__beDdScheds) && window.__beDdScheds.length) return window.__beDdScheds;
@@ -104,6 +107,9 @@
 
   // TourCode가 Schedule에 있으면 그 BE 반환. BE가 비어있으면 'DC'로 처리 (자사 인보이스 발행 기본)
   // 반환값: { matched: bool, be: string }
+  // 슬롯 객체는 두 가지 형식 모두 지원:
+  //   1) 시트 raw 헤더 형식: { TourCode, TourID, BillingEntity }
+  //   2) driver app schedule slot 형식: { tourCode, tourId, billingEntity, BillingEntity }
   function lookupBEByTourCode(tourCode) {
     if (!tourCode) return { matched: false, be: "" };
     var t = String(tourCode).trim().toUpperCase();
@@ -111,10 +117,10 @@
     for (var i = 0; i < schs.length; i++) {
       var s = schs[i];
       if (!s) continue;
-      var tc1 = String(s.TourCode||"").trim().toUpperCase();
-      var tc2 = String(s.TourID||"").trim().toUpperCase();
+      var tc1 = String(s.TourCode || s.tourCode || "").trim().toUpperCase();
+      var tc2 = String(s.TourID   || s.tourId   || "").trim().toUpperCase();
       if (tc1 === t || tc2 === t) {
-        var be = String(s.BillingEntity || "").trim();
+        var be = String(s.BillingEntity || s.billingEntity || "").trim();
         return { matched: true, be: be || "DC" };  // 매칭됐는데 BE 비어있으면 DC로
       }
     }
