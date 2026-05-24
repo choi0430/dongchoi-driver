@@ -22621,27 +22621,83 @@ async function _updateSchedulesAfterInvoice(invNum, agency, rows, manualItems, p
   });
 
   // 매칭되는 Schedule 찾기
-  // ★ 매칭 기준 강화: pickTourCode 헬퍼 사용 + 공백/하이픈 정규화 + 정확 매칭 우선
+  // ★ 2026-05-23 강화: Agency + TourCode 정확 일치 + 기간 겹침 + 다른 InvoiceID 보호
+  //   - 정규화 매칭(공백/하이픈 제거)은 fallback으로만 사용 + 기간 겹침 검증 필수
+  //   - 이미 다른 InvoiceID가 있는 Schedule은 절대 덮어쓰지 않음 (실수 방지)
+  //   - 매칭 후보가 여러 개여도 첫 번째만 매칭 (한 인보이스 = 한 스케줄 원칙)
   const _normalize = s => String(s||'').trim().toUpperCase().replace(/[\s\-_\.]/g, '');
   const invTourCodesNormalized = new Set([...invTourCodes].map(_normalize));
   const agencyTrim = String(agency||'').trim().toLowerCase();
+  // 인보이스 기간 정규화 (YYYY-MM-DD)
+  const _toISO = (v) => {
+    if(!v) return '';
+    const s = String(v).trim();
+    if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+    const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if(dmy) return dmy[3]+'-'+dmy[2].padStart(2,'0')+'-'+dmy[1].padStart(2,'0');
+    return s;
+  };
+  const invFromISO = _toISO(periodFrom);
+  const invToISO   = _toISO(periodTo);
+  // 기간 겹침 체크 (인보이스 기간 [F,T] vs Schedule [SD,ED]) — 어느 한쪽이라도 비면 통과
+  const _overlaps = (sdISO, edISO) => {
+    if(!invFromISO || !invToISO || !sdISO || !edISO) return true; // 모르면 통과 (보수적이지만 너무 막으면 매칭 안 됨)
+    return !(edISO < invFromISO || sdISO > invToISO);
+  };
 
-  const matchedSchedules = _schCache.filter(s => {
-    // Agency 일치 (대소문자 무시)
+  // 1차: 정확 일치 + 기간 겹침 + InvoiceID 비어있음
+  const exactMatches = _schCache.filter(s => {
     if(String(s.Agency||'').trim().toLowerCase() !== agencyTrim) return false;
-    // 이미 invoiced/paid/cancelled는 스킵 (덮어쓰기 방지)
     const curStatus = String(s.Status||'scheduled').toLowerCase();
     if(curStatus === 'invoiced' || curStatus === 'paid' || curStatus === 'cancelled') return false;
-    // TourCode 매칭 — 모든 필드 변형 지원 (pickTourCode)
+    // ★ 이미 다른 InvoiceID 있는 행은 절대 건드리지 않음
+    const existingInv = String(s.InvoiceID||'').trim();
+    if(existingInv && existingInv !== invNum) {
+      console.warn('[Schedule Update] 보호:', s.TourID, '이미 InvoiceID=', existingInv, '있어서 매칭 안 함');
+      return false;
+    }
+    if(invTourCodes.size === 0) return false;
     const sTc = pickTourCode(s).toUpperCase();
-    const sTcNorm = _normalize(sTc);
-    if(invTourCodes.size === 0) return false; // 인보이스에 TourCode 없으면 매칭 불가
-    // 정확 일치
-    if(invTourCodes.has(sTc)) return true;
-    // 정규화 일치 (공백/하이픈 차이 무시)
-    if(invTourCodesNormalized.has(sTcNorm)) return true;
-    return false;
+    if(!invTourCodes.has(sTc)) return false;
+    // 기간 겹침 확인
+    const sdISO = _toISO(s.StartDate);
+    const edISO = _toISO(s.EndDate);
+    if(!_overlaps(sdISO, edISO)) {
+      console.warn('[Schedule Update] 기간 불일치:', s.TourID, 'sch=', sdISO, '-', edISO, 'inv=', invFromISO, '-', invToISO);
+      return false;
+    }
+    return true;
   });
+
+  let matchedSchedules = exactMatches;
+
+  // 2차: 정확 매칭 실패 시에만 정규화 매칭 시도 (더 엄격한 조건)
+  //   — 기간 겹침 필수, InvoiceID 비어있어야, 그리고 정규화로도 매칭되어야
+  if(matchedSchedules.length === 0){
+    matchedSchedules = _schCache.filter(s => {
+      if(String(s.Agency||'').trim().toLowerCase() !== agencyTrim) return false;
+      const curStatus = String(s.Status||'scheduled').toLowerCase();
+      if(curStatus === 'invoiced' || curStatus === 'paid' || curStatus === 'cancelled') return false;
+      const existingInv = String(s.InvoiceID||'').trim();
+      if(existingInv && existingInv !== invNum) return false;
+      if(invTourCodes.size === 0) return false;
+      const sTc = pickTourCode(s).toUpperCase();
+      const sTcNorm = _normalize(sTc);
+      // 정확 매칭은 위에서 이미 실패. 여기선 정규화만 시도
+      if(invTourCodes.has(sTc)) return false; // 1차에서 이미 잡혔어야
+      if(!invTourCodesNormalized.has(sTcNorm)) return false;
+      // 기간 겹침 필수 (정규화 매칭이라 더 위험 → 더 엄격)
+      const sdISO = _toISO(s.StartDate);
+      const edISO = _toISO(s.EndDate);
+      if(invFromISO && invToISO && sdISO && edISO){
+        if(edISO < invFromISO || sdISO > invToISO) return false;
+      } else {
+        return false; // 기간 정보 없으면 정규화 매칭 거부 (안전)
+      }
+      console.log('[Schedule Update] 정규화 매칭 사용:', s.TourID, 'TC=', sTc, '→ 인보이스', invNum);
+      return true;
+    });
+  }
 
   if(matchedSchedules.length === 0){
     console.log('[Schedule Update] 매칭되는 일정 없음 (Agency:', agency, ', TourCodes:', [...invTourCodes].join(','), ')');
@@ -22666,6 +22722,10 @@ async function _updateSchedulesAfterInvoice(invNum, agency, rows, manualItems, p
         // 메모리 캐시도 즉시 업데이트
         sch.Status = 'invoiced';
         sch.InvoiceID = invNum;
+      } else if(j.conflictMessage){
+        // ★ InvoiceID 충돌 — 콘솔 경고 + 토스트
+        console.warn('[Schedule Update] 충돌:', sch.TourID, '→', j.conflictMessage);
+        if(typeof toast === 'function') toast('⚠️ '+sch.TourID+': '+j.conflictMessage, 'er');
       }
     } catch(e){ console.warn('[Schedule Update]', sch.TourID, '실패:', e); }
   }
@@ -22736,14 +22796,39 @@ async function _updateSchedulesAfterPayment(invoiceId, agency){
       const _normalize = s => String(s||'').trim().toUpperCase().replace(/[\s\-_\.]/g, '');
       const invTourCodesNormalized = new Set([...invTourCodes].map(_normalize));
       const agencyTrim = String(agency||'').trim().toLowerCase();
+      // ★ 인보이스 기간 정보 (Items에서 추출 또는 inv 자체)
+      const _toISO = (v) => {
+        if(!v) return '';
+        const s = String(v).trim();
+        if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+        const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if(dmy) return dmy[3]+'-'+dmy[2].padStart(2,'0')+'-'+dmy[1].padStart(2,'0');
+        return s;
+      };
+      const invFromISO = _toISO(inv.PeriodFrom || inv.From);
+      const invToISO   = _toISO(inv.PeriodTo   || inv.To);
+
       matchedSchedules = (_schCache||[]).filter(s => {
         if(String(s.Agency||'').trim().toLowerCase() !== agencyTrim) return false;
         const curStatus = String(s.Status||'').toLowerCase();
         if(curStatus === 'paid' || curStatus === 'cancelled') return false;
+        // ★ 이미 다른 InvoiceID 있는 행은 건드리지 않음
+        const existingInv = String(s.InvoiceID||'').trim();
+        if(existingInv && existingInv !== invoiceId) return false;
         const sTc = pickTourCode(s).toUpperCase();
-        if(invTourCodes.has(sTc)) return true;
-        if(invTourCodesNormalized.has(_normalize(sTc))) return true;
-        return false;
+        const sTcNorm = _normalize(sTc);
+        const isExact = invTourCodes.has(sTc);
+        const isNorm = !isExact && invTourCodesNormalized.has(sTcNorm);
+        if(!isExact && !isNorm) return false;
+        // ★ 기간 겹침 검증 (정규화 매칭은 필수, 정확 매칭은 정보 있을 때만)
+        const sdISO = _toISO(s.StartDate);
+        const edISO = _toISO(s.EndDate);
+        if(invFromISO && invToISO && sdISO && edISO){
+          if(edISO < invFromISO || sdISO > invToISO) return false;
+        } else if(isNorm){
+          return false; // 정규화 매칭은 기간 정보 없으면 거부
+        }
+        return true;
       });
       if(matchedSchedules.length > 0){
         console.log('[Schedule Update] InvoiceID 매칭 실패 → TourCode fallback 매칭:', matchedSchedules.length, '건');
@@ -22773,6 +22858,9 @@ async function _updateSchedulesAfterPayment(invoiceId, agency){
       if(j.ok){
         sch.Status = 'paid';
         if(invoiceId) sch.InvoiceID = invoiceId;
+      } else if(j.conflictMessage){
+        console.warn('[Schedule Update] 결제 충돌:', sch.TourID, '→', j.conflictMessage);
+        if(typeof toast === 'function') toast('⚠️ '+sch.TourID+': '+j.conflictMessage, 'er');
       }
     } catch(e){ console.warn('[Schedule Update]', sch.TourID, '실패:', e); }
   }
