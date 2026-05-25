@@ -116,6 +116,27 @@ const MASTER_HEADERS = {
   'EG_Report_Log': ['SentAt','ReportType','PeriodFrom','PeriodTo','Recipients','TourCodes','Subject','Status','Notes']
 };
 
+// ═══════════════════════════════════════════════════════════════
+// BillingEntity가 DC(자사)인지 판정 — 다양한 표기 모두 허용
+// ═══════════════════════════════════════════════════════════════
+// 잡히는 표기 (모두 true):
+//   '', null, undefined (빈값 = 기본 자사)
+//   'DC', 'dc', 'Dc', 'D.C.', 'D.C', 'D C' (점/공백 변이)
+//   'Dong Choi', 'DONG CHOI PTY LTD', 'dongchoi', 'Dong  Choi  Pty  Ltd'
+//   '동초이', '동최' (한글 표기 — 향후 확장 대비)
+// 잡히지 않는 표기 (false):
+//   'EG TRAVEL PTY LTD', 'TOUR HOJURO PTY LTD' 등 다른 회사명
+function isBillingEntityDC_(be){
+  if (be === null || be === undefined) return true;
+  var s = String(be).replace(/^\s+|\s+$/g,'');  // trim
+  if (!s) return true;
+  var norm = s.replace(/[.\s\-_·]+/g,'').toUpperCase();
+  if (norm === 'DC') return true;
+  if (norm.indexOf('DONGCHOI') >= 0) return true;
+  if (s.indexOf('동초이') >= 0 || s.indexOf('동최') >= 0) return true;
+  return false;
+}
+
 // ── Tab Colors ──
 const TAB_COLORS = {
   'M_Vehicles':'#d97706','M_Drivers':'#1a56db','M_Clients':'#7e3af2',
@@ -2635,8 +2656,7 @@ function _autoAddInvoiceDraftItem(data) {
   // ★★ BillingEntity 분기 — DC가 인보이스 발행할 운행만 등록
   //    BillingEntity = DC (또는 비어있음 = 기본 자사) → 정상 등록
   //    BillingEntity = 다른 회사 (EG TRAVEL 등) → 그 회사가 자체 발행 → 등록 안 함
-  const billingEntity = String(data.Billing_Entity || data.BillingEntity || '').trim().toUpperCase();
-  if (billingEntity && billingEntity !== 'DC' && !/DONG\s*CHOI/i.test(billingEntity)) {
+  if (!isBillingEntityDC_(data.Billing_Entity || data.BillingEntity || '')) {
     return; // 비-DC 발행 운행 → Manual Items 등록 안 함
   }
 
