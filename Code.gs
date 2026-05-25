@@ -8100,6 +8100,22 @@ function _egCalcEgSubAmount(r){
   // 4) Toll (대형만)
   const tollAmt = isLarge ? toll : 0;
 
+  // 5) 트레일러 대여비 - 트레일러 소유주가 식별되면 -$30 (소유주에게 지급)
+  let trailerRental = 0;
+  let trailerOwnerName = '';
+  if(trailerDR > 0){
+    const trNum = String(r.Trailer_Number||'').trim();
+    if(trNum){
+      const tOwners = _egLoadTrailerOwners();
+      const rawOwner = tOwners[trNum] || '';
+      const trOwner = _egNormEntity(rawOwner);
+      if(trOwner){
+        trailerRental = -30;
+        trailerOwnerName = rawOwner;
+      }
+    }
+  }
+
   // Breakdown 구성
   const items = [];
   if(baseRate !== 0){
@@ -8138,12 +8154,18 @@ function _egCalcEgSubAmount(r){
   if(trailerTA !== 0){
     items.push({
       label: '트레일러 서차지 (DR $' + trailerDR + ' → TA $' + trailerTA + ')',
-      amount: trailerTA,
-      note: '※ 대여비 -$30은 별도 SUB_Txn으로 자동 처리됨'
+      amount: trailerTA
+    });
+  }
+  if(trailerRental !== 0){
+    items.push({
+      label: '트레일러 대여비',
+      amount: trailerRental,
+      note: trailerOwnerName ? '(소유주: ' + trailerOwnerName + ')' : ''
     });
   }
 
-  const total = baseRate + otTA + hotelTA + distTA + earlyTA + parking + tollAmt + trailerTA;
+  const total = baseRate + otTA + hotelTA + distTA + earlyTA + parking + tollAmt + trailerTA + trailerRental;
 
   return {
     total: total,
