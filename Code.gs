@@ -7768,6 +7768,125 @@ function _egLoadPriceSub(){
   return _egPriceSubCache;
 }
 
+// M_PriceDriver 로더 (드라이버 base rate)
+let _egPriceDriverCache = null;
+function _egLoadPriceDriver(){
+  if(_egPriceDriverCache !== null) return _egPriceDriverCache;
+  _egPriceDriverCache = {};
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName('M_PriceDriver');
+    if(!sheet) return _egPriceDriverCache;
+    const data = sheet.getDataRange().getValues();
+    if(data.length < 2) return _egPriceDriverCache;
+    const headers = data[0].map(String);
+    const courseIdx = headers.indexOf('Course');
+    const mhIdx = headers.indexOf('max_hours');
+    const seatCols = {};
+    ['21','25','40','50'].forEach(s => {
+      seatCols[s] = {
+        base: headers.indexOf('seats_' + s + '_base'),
+        ot: headers.indexOf('seats_' + s + '_ot')
+      };
+    });
+    for(let i=1; i<data.length; i++){
+      const row = data[i];
+      const course = String(row[courseIdx]||'').trim();
+      if(!course) continue;
+      const entry = { max_hours: Number(row[mhIdx])||0 };
+      ['21','25','40','50'].forEach(s => {
+        entry[s] = {
+          base: Number(row[seatCols[s].base])||0,
+          ot: Number(row[seatCols[s].ot])||0
+        };
+      });
+      _egPriceDriverCache[course] = entry;
+    }
+  } catch(e){
+    Logger.log('_egLoadPriceDriver error: ' + e);
+  }
+  return _egPriceDriverCache;
+}
+
+// 드라이버 지급액 breakdown — {total, items}
+function _egCalcDriverPay(r){
+  const PD = _egLoadPriceDriver();
+  const attraction = String(r.Attraction||r.tour||'').trim();
+  const seatsRaw = String(r.Seats||r.seats||'').replace(/S/i,'').trim();
+  const capNum = parseInt(seatsRaw)||25;
+  const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
+
+  // Base rate from M_PriceDriver
+  function _findCourse(cn){
+    if(!PD || !cn) return null;
+    if(PD[cn]) return PD[cn];
+    const lc = cn.toLowerCase();
+    const keys = Object.keys(PD);
+    for(let i=0; i<keys.length; i++){
+      if(keys[i].toLowerCase() === lc) return PD[keys[i]];
+    }
+    return null;
+  }
+  const ce = _findCourse(attraction);
+  let baseRate = 0;
+  if(ce){ const sd = ce[capKey] || ce['21']; baseRate = Number(sd && sd.base) || 0; }
+
+  // 각 항목 (DR 값 그대로)
+  const ot   = Number(r.OT||0);
+  const htl  = Number(r.Hotel_Surcharge||0);
+  const dst  = Number(r.Dist_Surcharge||0);
+  const erl  = Number(r.Early||0);
+  const trl  = Number(r.Trailer||0);
+  const ngt  = Number(r.Night_DR||0);
+  const ngo  = Number(r.Night_Owner||0);
+  const wash = Number(r.Wash||0);
+  const meal = Number(r.Meal||0);
+  const tip  = Number(r.Tip||0);
+  const etc  = Number(r.Etc||0);
+  const etcDesc = String(r.Etc_Desc||'').trim();
+  const tollP = String(r.Toll_Personal||'').toUpperCase() === 'Y' ? Number(r.Toll||0) : 0;
+  const fuelP = String(r.Fuel_Personal||'').toUpperCase() === 'Y' ? Number(r.Fuel||0) : 0;
+
+  const items = [];
+  if(baseRate !== 0){
+    items.push({label: 'Base (' + (attraction||'코스') + ' · ' + capNum + 'S)', amount: baseRate});
+  } else {
+    // fallback: 시트의 DR_Cost를 base로 표시할 수도 있지만 일단 0 처리
+    const drStored = Number(r.DR_Cost || r.Total || 0);
+    if(drStored !== 0){
+      items.push({label: 'Base (저장값 사용)', amount: drStored, note: 'M_PriceDriver 매칭 없음'});
+      return {
+        total: drStored,
+        items: items,
+        valueOf: function(){ return this.total; },
+        toString: function(){ return String(this.total); }
+      };
+    }
+  }
+  if(ot !== 0)  items.push({label: 'OT', amount: ot});
+  if(htl !== 0) items.push({label: '호텔 서차지', amount: htl});
+  if(dst !== 0) items.push({label: '거리 서차지', amount: dst});
+  if(erl !== 0) items.push({label: '조기 서차지', amount: erl});
+  if(trl !== 0) items.push({label: '트레일러', amount: trl});
+  if(ngt !== 0) items.push({label: '야간 운행', amount: ngt});
+  if(wash !== 0) items.push({label: '세차비', amount: wash});
+  if(meal !== 0) items.push({label: '식비', amount: meal});
+  if(tip !== 0) items.push({label: '팁', amount: tip});
+  if(tollP !== 0) items.push({label: '톨비 (개인)', amount: tollP});
+  if(fuelP !== 0) items.push({label: '연료 (개인)', amount: fuelP});
+  if(etc !== 0) items.push({label: '기타' + (etcDesc?' ('+etcDesc+')':''), amount: etc});
+  if(ngo !== 0) items.push({label: '차주 납입 차감', amount: -Math.abs(ngo)});
+
+  const total = items.reduce((s, it) => s + it.amount, 0);
+
+  return {
+    total: total,
+    items: items,
+    valueOf: function(){ return this.total; },
+    toString: function(){ return String(this.total); }
+  };
+}
+
 // EG SUB 청구액 계산 — breakdown 객체 반환
 // 반환: {total, items: [{label, amount, sign}]}
 function _egCalcEgSubAmount(r){
@@ -8254,7 +8373,10 @@ function _egCommonStyle(){
 
 // ── 운행 카드 빌더 (관리자 급여 탭 _reportRow 스타일 — 정적 PDF에 맞게 펼친 형태) ──
 function _egTripCardHTML(r){
-  const drCost = Number(r.DR_Cost || r.Total || 0) || 0;
+  const drCostStored = Number(r.DR_Cost || r.Total || 0) || 0;
+  const drCalc = _egCalcDriverPay(r);   // {total, items}
+  const drCost = drCalc.total !== 0 ? drCalc.total : drCostStored;
+  const drBreakdown = drCalc.items;
   const taCalc = _egCalcEgSubAmount(r);  // {total, items}
   const taAmount = taCalc.total;
   const breakdown = taCalc.items;
@@ -8349,25 +8471,43 @@ function _egTripCardHTML(r){
   html += '</div>';
   html += '</div>';
 
-  // Breakdown 테이블 (EG 청구/지급 금액 산출 근거)
-  if(taAmount !== 0 && breakdown.length > 0){
-    html += '<div style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:8px 12px;margin-top:8px;border-radius:0 0 6px 6px;">';
-    html += '<div style="font-size:8pt;color:#6b7280;font-weight:600;margin-bottom:4px;">📊 산출 근거</div>';
-    html += '<table style="width:100%;font-size:9pt;border-collapse:collapse;">';
-    breakdown.forEach(it => {
-      const sign = it.amount < 0 ? '-' : '+';
-      const absAmt = Math.abs(it.amount);
-      const color = it.amount < 0 ? '#dc2626' : '#374151';
-      html += '<tr>';
-      html += '<td style="padding:2px 0;color:#4b5563;">' + _egEsc(it.label);
-      if(it.note) html += ' <span style="color:#9ca3af;font-size:8pt;">' + _egEsc(it.note) + '</span>';
-      html += '</td>';
-      html += '<td style="padding:2px 0;text-align:right;color:' + color + ';font-variant-numeric:tabular-nums;">' + sign + '$' + absAmt.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td>';
-      html += '</tr>';
-    });
-    html += '<tr style="border-top:1px solid #d1d5db;"><td style="padding:4px 0 2px;font-weight:700;color:#1f2937;">합계</td>';
-    html += '<td style="padding:4px 0 2px;text-align:right;font-weight:700;color:' + ((cls === 'EG_BILLS_DC_VEH') ? '#dc2626' : '#7c3aed') + ';font-variant-numeric:tabular-nums;">$' + taAmount.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td></tr>';
-    html += '</table>';
+  // Breakdown 테이블 — EG 청구액 + 드라이버 지급액 2-column
+  const hasEG = taAmount !== 0 && breakdown.length > 0;
+  const hasDR = drBreakdown.length > 0;
+  if(hasEG || hasDR){
+    const _renderBreakdown = (title, items, total, totalColor) => {
+      let h = '<div style="font-size:8pt;color:#6b7280;font-weight:600;margin-bottom:4px;">' + title + '</div>';
+      h += '<table style="width:100%;font-size:9pt;border-collapse:collapse;">';
+      items.forEach(it => {
+        const sign = it.amount < 0 ? '-' : '+';
+        const absAmt = Math.abs(it.amount);
+        const color = it.amount < 0 ? '#dc2626' : '#374151';
+        h += '<tr>';
+        h += '<td style="padding:2px 4px 2px 0;color:#4b5563;">' + _egEsc(it.label);
+        if(it.note) h += ' <span style="color:#9ca3af;font-size:8pt;">' + _egEsc(it.note) + '</span>';
+        h += '</td>';
+        h += '<td style="padding:2px 0;text-align:right;color:' + color + ';font-variant-numeric:tabular-nums;white-space:nowrap;">' + sign + '$' + absAmt.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td>';
+        h += '</tr>';
+      });
+      h += '<tr style="border-top:1px solid #d1d5db;"><td style="padding:4px 0 2px;font-weight:700;color:#1f2937;">합계</td>';
+      h += '<td style="padding:4px 0 2px;text-align:right;font-weight:700;color:' + totalColor + ';font-variant-numeric:tabular-nums;white-space:nowrap;">$' + total.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td></tr>';
+      h += '</table>';
+      return h;
+    };
+
+    html += '<div style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:8px 12px;margin-top:8px;border-radius:0 0 6px 6px;display:flex;gap:12px;flex-wrap:wrap;">';
+    if(hasEG){
+      const egTitle = (cls === 'EG_BILLS_DC_VEH') ? '📊 EG 지급액 산출 근거' : '📊 EG 청구액 산출 근거';
+      const egColor = (cls === 'EG_BILLS_DC_VEH') ? '#dc2626' : '#7c3aed';
+      html += '<div style="flex:1;min-width:240px;">';
+      html += _renderBreakdown(egTitle, breakdown, taAmount, egColor);
+      html += '</div>';
+    }
+    if(hasDR){
+      html += '<div style="flex:1;min-width:240px;">';
+      html += _renderBreakdown('📊 드라이버 지급액 산출 근거', drBreakdown, drCost, '#16a34a');
+      html += '</div>';
+    }
     html += '</div>';
   }
   html += '</div>';
@@ -8835,6 +8975,7 @@ function _egResetTACache(){
   _egVehicleOwnerCache = null;  // 차량 소유주 캐시도 함께 무효화
   _egPriceSubCache = null;      // SUB 가격 캐시
   _egTrailerOwnerCache = null;  // 트레일러 소유주 캐시
+  _egPriceDriverCache = null;   // 드라이버 가격 캐시
 }
 
 // ── 발송 (공통) — HTML을 PDF로 첨부하여 Gmail로 발송 ──────────────────────
