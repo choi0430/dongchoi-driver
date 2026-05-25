@@ -26162,9 +26162,30 @@ function renderDR(){
             }
           }
 
+          // ★ 좌석 추정: 슬롯 → tour 레벨 → 차량 마스터 fallback
+          let _slotSeats = _stripPfx(slot.seats || slot.Seats) || '';
+          if(!_slotSeats) _slotSeats = String(t.Seats || '').trim();
+          if(!_slotSeats && slotRego){
+            const _veh = (DB.V||[]).find(v => String(v.Rego||'').trim().toUpperCase() === slotRego);
+            if(_veh && _veh.Capacity){
+              const cap = parseInt(_veh.Capacity);
+              if(cap>=50) _slotSeats = '50S';
+              else if(cap>=40) _slotSeats = '40S';
+              else if(cap>=25) _slotSeats = '25S';
+              else if(cap>=20) _slotSeats = '21S';
+            }
+          }
           allScheduleSlots.push({
             tourId: t.TourID, tourCode: t.TourCode, agency: t.Agency,
-            date: dDate, slotKey, driver: slotDriver, rego: slotRego, slot
+            date: dDate, slotKey, driver: slotDriver, rego: slotRego, slot,
+            // ★ 슬롯의 풍부한 정보 평탄화 — adminCreateMissingDR prefill에서 사용
+            seats: _slotSeats,
+            course: _stripPfx(slot.course || slot.Course || slot.attraction || slot.Attraction) || '',
+            startTime: _stripPfx(slot.startTime || slot.start_time || slot.start) || '',
+            endTime:   _stripPfx(slot.endTime   || slot.end_time   || slot.end)   || '',
+            startPlace: _stripPfx(slot.startPlace || slot.start_place || slot.pickup  || slot.Pickup)  || '',
+            endPlace:   _stripPfx(slot.endPlace   || slot.end_place   || slot.dropoff || slot.Dropoff) || '',
+            guide:      _stripPfx(slot.guide      || slot.Guide) || ''
           });
         });
       });
