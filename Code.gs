@@ -8729,84 +8729,149 @@ function _egBuildDailyReportHTML(targetDateISO, drs, newlyCompletedTours){
 // 1) 운행 통계, 2) 운행 상세 테이블, 3) 드라이버별 지급액
 function _egBuildWeeklyReportHTML(monISO, sunISO, drs){
   _egResetTACache();
+
+  // 분류
+  const claims = [];   // 받을 돈: DC_BILLS_EG_VEH + EG_BILLS_OWN
+  const payments = []; // 줄 돈: EG_BILLS_DC_VEH
+  drs.forEach(r => {
+    const cls = _egClassifyRow(r);
+    if(cls === 'DC_BILLS_EG_VEH' || cls === 'EG_BILLS_OWN') claims.push(r);
+    else if(cls === 'EG_BILLS_DC_VEH') payments.push(r);
+  });
+
+  const totalClaim = claims.reduce((s,r)=>s + _egCalcEgSubAmount(r).total, 0);
+  const totalPay = payments.reduce((s,r)=>s + _egCalcEgSubAmount(r).total, 0);
   const totalDR = drs.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
-  const totalTA = drs.reduce((s,r)=>s + _egCalcEgSubAmount(r).total, 0);
   const tcSet = new Set();
-  const drvCount = {};
   const vehCount = {};
-  const driverWage = {};   // 드라이버별 DR_Cost 합계 (실제 지급해야 할 금액)
   drs.forEach(r => {
     const tc = String(r.Tour_Code||r.TourCode||'').trim();
     if(tc) tcSet.add(tc);
-    const drv = String(r.Driver||'').trim() || 'Unknown';
-    drvCount[drv] = (drvCount[drv]||0) + 1;
     const veh = String(r.Rego||'').trim() || '?';
     vehCount[veh] = (vehCount[veh]||0) + 1;
-    const wage = Number(r.DR_Cost||r.Total||0) || 0;
-    driverWage[drv] = (driverWage[drv]||0) + wage;
   });
 
   let html = `<html><head><meta charset="UTF-8">${_egCommonStyle()}</head><body>`;
   html += `<div class="hdr"><h1>📊 EG TRAVEL 주간 운행 요약</h1>
             <div class="sub">기간: ${_egFmtDate(monISO)} ~ ${_egFmtDate(sunISO)} · 발행: ${_egFmtDate(_egTodaySydney())}</div></div>`;
 
-  // 통계 박스 (두 합계 모두)
+  // 통계 박스
   html += `<div class="summary-box">
     <div class="summary-row"><div>📋 운행 건수</div><div>${drs.length}건</div></div>
     <div class="summary-row"><div>🎫 투어코드 수</div><div>${tcSet.size}개</div></div>
-    <div class="summary-row"><div>👤 드라이버 수</div><div>${Object.keys(drvCount).length}명</div></div>
     <div class="summary-row"><div>🚐 차량 수</div><div>${Object.keys(vehCount).length}대</div></div>
-    <div class="summary-row tot"><div style="color:#7c3aed;">💜 EG 인보이스 발행액</div>
-      <div style="color:#7c3aed;font-size:13pt;">$${totalTA.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
+    <div class="summary-row tot"><div style="color:#7c3aed;">💰 EG 청구액 (받을 돈)</div>
+      <div style="color:#7c3aed;font-size:13pt;">$${totalClaim.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
+    <div class="summary-row tot"><div style="color:#dc2626;">💸 EG 지급액 (줄 돈)</div>
+      <div style="color:#dc2626;font-size:13pt;">$${totalPay.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
     <div class="summary-row tot"><div style="color:#16a34a;">💵 드라이버 지급액 합계</div>
       <div style="color:#16a34a;font-size:13pt;">$${totalDR.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
   </div>`;
 
-  // 운행 상세 테이블 — EG/드라이버 컬럼 둘 다
-  html += `<div class="sec-title">📋 운행 상세</div>`;
-  if(drs.length === 0){
-    html += '<div class="empty">이번 주 EG TRAVEL 관련 운행 기록이 없습니다.</div>';
+  // 운행 행 렌더 헬퍼 (청구/지급 공통)
+  const _renderTripRow = (r) => {
+    const ta = _egCalcEgSubAmount(r).total;
+    const dr = Number(r.DR_Cost||r.Total||0)||0;
+    const cls = _egClassifyRow(r);
+    const agency = String(r.Agency||r.Tour_Agency||'').trim();
+    let target = '';
+    if(cls === 'DC_BILLS_EG_VEH') target = 'DC';
+    else if(cls === 'EG_BILLS_DC_VEH') target = agency || '여행사';
+    else if(cls === 'EG_BILLS_OWN') target = agency || '여행사';
+    const amtColor = (cls === 'EG_BILLS_DC_VEH') ? '#dc2626' : '#7c3aed';
+    return `<tr>
+      <td>${_egFmtDate(r._iso)}</td>
+      <td><span class="tc-badge">${_egEsc(r.Tour_Code||r.TourCode||'')}</span></td>
+      <td>${_egEsc(r.Rego||'')}</td>
+      <td>${_egEsc(r.Driver||'')}</td>
+      <td>${_egEsc(target)}</td>
+      <td>${_egEsc(r.Attraction||r.Course||'')}</td>
+      <td class="num" style="color:${amtColor};font-weight:700;">$${ta.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td class="num" style="color:#16a34a;font-weight:700;">$${dr.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+    </tr>`;
+  };
+
+  const _tableHead = (amtLabel, amtColor) => `<table>
+      <tr><th>날짜</th><th>TourCode</th><th>차량</th><th>드라이버</th><th>대상</th>
+          <th>코스</th><th class="num" style="color:${amtColor};">${amtLabel}</th><th class="num">드라이버</th></tr>`;
+  const _totalRow = (label, ta, dr, color) => `<tr style="background:#f9fafb;">
+      <td colspan="6"><b>${label}</b></td>
+      <td class="num" style="color:${color};font-weight:800;">$${ta.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td class="num" style="color:#16a34a;font-weight:800;">$${dr.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+    </tr>`;
+
+  // ── 섹션 1: EG 청구 내역 (받을 돈) ──
+  html += `<div class="sec-title">💰 EG 청구 내역 (받을 돈)</div>`;
+  if(claims.length === 0){
+    html += '<div class="empty">청구 대상 운행이 없습니다.</div>';
   } else {
-    html += `<table>
-      <tr><th>날짜</th><th>TourCode</th><th>차량</th><th>드라이버</th><th>가이드</th>
-          <th>코스</th><th class="num">EG 인보이스</th><th class="num">드라이버</th></tr>`;
-    drs.slice().sort((a,b)=>(a._iso||'').localeCompare(b._iso||'')).forEach(r => {
-      const ta = _egCalcEgSubAmount(r).total;
-      const dr = Number(r.DR_Cost||r.Total||0)||0;
-      html += `<tr>
-        <td>${_egFmtDate(r._iso)}</td>
-        <td><span class="tc-badge">${_egEsc(r.Tour_Code||r.TourCode||'')}</span></td>
-        <td>${_egEsc(r.Rego||'')}</td>
-        <td>${_egEsc(r.Driver||'')}</td>
-        <td>${_egEsc(r.Guide||'')}</td>
-        <td>${_egEsc(r.Attraction||r.Course||'')}</td>
-        <td class="num" style="color:#7c3aed;font-weight:700;">$${ta.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-        <td class="num" style="color:#16a34a;font-weight:700;">$${dr.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-      </tr>`;
+    html += _tableHead('EG 청구액', '#7c3aed');
+    claims.slice().sort((a,b)=>(a._iso||'').localeCompare(b._iso||'')).forEach(r => {
+      html += _renderTripRow(r);
     });
-    html += `</table>`;
+    const claimDR = claims.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
+    html += _totalRow('합계', totalClaim, claimDR, '#7c3aed');
+    html += '</table>';
   }
 
-  // 드라이버별 지급액 섹션 — DR_Cost 기준
-  html += `<div class="sec-title">💵 드라이버별 지급액 (이번 주)</div>`;
-  const wagedDrivers = Object.entries(driverWage).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
-  if(wagedDrivers.length === 0){
-    html += '<div class="empty">이번 주 EG 관련 드라이버 지급액이 없습니다.</div>';
+  // ── 섹션 2: EG 지급 내역 (줄 돈) ──
+  html += `<div class="sec-title">💸 EG 지급 내역 (줄 돈)</div>`;
+  if(payments.length === 0){
+    html += '<div class="empty">지급 대상 운행이 없습니다.</div>';
   } else {
-    const totWage = wagedDrivers.reduce((s,[,v])=>s+v, 0);
+    html += _tableHead('EG 지급액', '#dc2626');
+    payments.slice().sort((a,b)=>(a._iso||'').localeCompare(b._iso||'')).forEach(r => {
+      html += _renderTripRow(r);
+    });
+    const payDR = payments.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
+    html += _totalRow('합계', totalPay, payDR, '#dc2626');
+    html += '</table>';
+  }
+
+  // ── 섹션 3: 차주별 드라이버 지급 요약 ──
+  html += `<div class="sec-title">👥 차주별 드라이버 지급 요약</div>`;
+  const vehOwners = _egLoadVehicleOwners();
+  const ownerDriverSum = {};  // {ownerKey: {driverName: {amount, count}}}
+  const ownerDisplay = {};
+  drs.forEach(r => {
+    const rego = String(r.Rego||'').trim();
+    const rawOwner = vehOwners[rego] || 'Unknown';
+    const ownerNorm = _egNormEntity(rawOwner) || rawOwner;
+    const driver = String(r.Driver||'').trim() || 'Unknown';
+    const cost = Number(r.DR_Cost||r.Total||0)||0;
+    if(!ownerDriverSum[ownerNorm]) ownerDriverSum[ownerNorm] = {};
+    if(!ownerDriverSum[ownerNorm][driver]) ownerDriverSum[ownerNorm][driver] = {amount:0, count:0};
+    ownerDriverSum[ownerNorm][driver].amount += cost;
+    ownerDriverSum[ownerNorm][driver].count += 1;
+    if(!ownerDisplay[ownerNorm] || ownerDisplay[ownerNorm].length < rawOwner.length){
+      ownerDisplay[ownerNorm] = rawOwner;
+    }
+  });
+  const ownerKeys = Object.keys(ownerDriverSum).sort();
+  if(ownerKeys.length === 0){
+    html += '<div class="empty">드라이버 지급 내역이 없습니다.</div>';
+  } else {
     html += `<table>
-      <tr><th>드라이버</th><th class="num">운행 건수</th><th class="num">지급액</th></tr>`;
-    wagedDrivers.forEach(([drv, wage]) => {
-      html += `<tr>
-        <td>${_egEsc(drv)}</td>
-        <td class="num">${drvCount[drv]||0}건</td>
-        <td class="num" style="color:#16a34a;font-weight:700;">$${wage.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <tr><th>차주</th><th>드라이버</th><th class="num">운행 건수</th><th class="num">지급액</th></tr>`;
+    ownerKeys.forEach(ownerKey => {
+      const drivers = ownerDriverSum[ownerKey];
+      const driverNames = Object.keys(drivers).sort((a,b) => drivers[b].amount - drivers[a].amount);
+      const ownerTot = driverNames.reduce((s,d)=>s+drivers[d].amount, 0);
+      const ownerCnt = driverNames.reduce((s,d)=>s+drivers[d].count, 0);
+      driverNames.forEach((dn, idx) => {
+        html += `<tr>
+          <td>${idx === 0 ? '🏢 ' + _egEsc(ownerDisplay[ownerKey]) : ''}</td>
+          <td>${_egEsc(dn)}</td>
+          <td class="num">${drivers[dn].count}건</td>
+          <td class="num" style="color:#16a34a;font-weight:700;">$${drivers[dn].amount.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        </tr>`;
+      });
+      html += `<tr style="background:#f0fdf4;">
+        <td colspan="2"><b>${_egEsc(ownerDisplay[ownerKey])} 소계</b></td>
+        <td class="num"><b>${ownerCnt}건</b></td>
+        <td class="num" style="color:#16a34a;font-weight:800;">$${ownerTot.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       </tr>`;
     });
-    html += `<tr style="background:#f0fdf4;">
-      <td><b>합계</b></td><td></td>
-      <td class="num" style="color:#16a34a;font-weight:800;font-size:11pt;">$${totWage.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-    </tr>`;
     html += `</table>`;
   }
 
@@ -9108,14 +9173,23 @@ function sendEGWeeklyReport(opts){
     const pdfName = 'EG_Weekly_Report_' + fromISO + '_to_' + toISO + '.pdf';
     _egResetTACache();
     const totDR = drs.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
-    const totTA = drs.reduce((s,r)=>s + _egCalcEgSubAmount(r).total, 0);
-    const subject = `[EG TRAVEL] 주간 운행 요약 ${_egFmtDate(fromISO)}~${_egFmtDate(toISO)} — ${drs.length}건, EG $${totTA.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+    // 청구/지급 분리 합계
+    let wkClaim = 0, wkPay = 0;
+    drs.forEach(r => {
+      const c = _egClassifyRow(r);
+      const amt = _egCalcEgSubAmount(r).total;
+      if(c === 'DC_BILLS_EG_VEH' || c === 'EG_BILLS_OWN') wkClaim += amt;
+      else if(c === 'EG_BILLS_DC_VEH') wkPay += amt;
+    });
+    const totTA = wkClaim + wkPay;
+    const subject = `[EG TRAVEL] 주간 운행 요약 ${_egFmtDate(fromISO)}~${_egFmtDate(toISO)} — ${drs.length}건, 청구 $${wkClaim.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})} / 지급 $${wkPay.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
     const body = `안녕하세요,\n\n` +
       `${_egFmtDate(fromISO)} ~ ${_egFmtDate(toISO)} EG TRAVEL 주간 운행 요약을 첨부합니다.\n\n` +
       `· 총 운행 건수: ${drs.length}건\n` +
-      `· EG 인보이스 발행액: $${totTA.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` +
-      `· 드라이버 지급액: $${totDR.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n\n` +
-      `상세 운행 내역과 드라이버별 지급액은 첨부 PDF를 참고하세요.\n\n` +
+      `· EG 청구액 (받을 돈): $${wkClaim.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` +
+      `· EG 지급액 (줄 돈): $${wkPay.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n` +
+      `· 드라이버 지급액 합계: $${totDR.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}\n\n` +
+      `상세 운행 내역과 차주별 드라이버 지급액은 첨부 PDF를 참고하세요.\n\n` +
       `Kind regards,\nDong Choi Pty Ltd`;
 
     if(dryRun){
