@@ -1489,6 +1489,13 @@ function doGet(e) {
       case 'get_active_trailers':
         return cors(getActiveTrailers());
 
+      case 'lookup_pd_trailer':
+        return cors(lookupTrailerForDR({
+          date: e.parameter.date,
+          driver: e.parameter.driver || effectiveDriver,
+          rego: e.parameter.rego
+        }));
+
       case 'get_my_shifts':
         return cors(getMyShifts(effectiveDriver));
 
@@ -1676,6 +1683,14 @@ function doPost(e) {
 
       case 'release_trailer':
         return cors(releaseTrailer(payload.driver || _user, payload.trailerNum));
+
+      case 'patch_pd_trailer':
+        return cors(patchPDTrailer({
+          date: payload.date,
+          driver: payload.driver || _user,
+          rego: payload.rego,
+          trailerNum: payload.trailerNum
+        }));
 
       case 'update_report': {
         const r = updateReport(payload.sheet, payload.rowIndex, payload.data);
@@ -2890,6 +2905,85 @@ function getActiveTrailers() {
     });
 
     return {ok: true, trailers: active};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// DR 저장 직전 검증용: 같은 (날짜, 드라이버, 차량)의 PD에서 트레일러 정보 조회
+// 반환: {ok, pdTrailer: 'TR-001' or '', hasPDTrailer: bool}
+function lookupTrailerForDR(opts) {
+  try {
+    opts = opts || {};
+    const date = String(opts.date || '').trim();
+    const driver = String(opts.driver || '').trim();
+    const rego = String(opts.rego || '').trim();
+    if (!date || !driver || !rego) {
+      return {ok: false, error: 'missing date/driver/rego'};
+    }
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const preSheet = ss.getSheetByName('Pre_Departure');
+    if (!preSheet) return {ok: true, pdTrailer: '', hasPDTrailer: false};
+    const data = preSheet.getDataRange().getValues();
+    if (data.length < 2) return {ok: true, pdTrailer: '', hasPDTrailer: false};
+    const headers = data[0];
+    const idx = {};
+    headers.forEach((h, i) => { idx[String(h)] = i; });
+    const targetISO = _normalizeDateISO(date);
+
+    // 가장 최근의 PD (같은 날짜+드라이버+차량) 찾기
+    let foundTrailer = '';
+    for (let i = data.length - 1; i >= 1; i--) {
+      const row = data[i];
+      const rowISO = _normalizeDateISO(row[idx.Date]);
+      if (rowISO !== targetISO) continue;
+      if (String(row[idx.Driver] || '').trim() !== driver) continue;
+      if (String(row[idx.Rego] || '').trim() !== rego) continue;
+      foundTrailer = String(row[idx.Trailer_Number] || '').trim();
+      break;
+    }
+    return {
+      ok: true,
+      pdTrailer: foundTrailer,
+      hasPDTrailer: !!foundTrailer
+    };
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+// PD에 트레일러 번호 사후 추가 (DR 작성 중 누락이 발견된 경우)
+function patchPDTrailer(opts) {
+  try {
+    opts = opts || {};
+    const date = String(opts.date || '').trim();
+    const driver = String(opts.driver || '').trim();
+    const rego = String(opts.rego || '').trim();
+    const trailerNum = String(opts.trailerNum || '').trim();
+    if (!date || !driver || !rego || !trailerNum) {
+      return {ok: false, error: 'missing required field'};
+    }
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const preSheet = ss.getSheetByName('Pre_Departure');
+    if (!preSheet) return {ok: false, error: 'Pre_Departure sheet not found'};
+    const data = preSheet.getDataRange().getValues();
+    if (data.length < 2) return {ok: false, error: 'no PD rows'};
+    const headers = data[0];
+    const idx = {};
+    headers.forEach((h, i) => { idx[String(h)] = i; });
+    const targetISO = _normalizeDateISO(date);
+
+    for (let i = data.length - 1; i >= 1; i--) {
+      const row = data[i];
+      const rowISO = _normalizeDateISO(row[idx.Date]);
+      if (rowISO !== targetISO) continue;
+      if (String(row[idx.Driver] || '').trim() !== driver) continue;
+      if (String(row[idx.Rego] || '').trim() !== rego) continue;
+      // 해당 PD 행 발견 → Trailer_Number 셀 업데이트
+      preSheet.getRange(i + 1, idx.Trailer_Number + 1).setValue(trailerNum);
+      return {ok: true, updated: true, rowIndex: i + 1};
+    }
+    return {ok: false, error: 'matching PD not found'};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
@@ -8649,6 +8743,64 @@ function _egBuildDailyReportHTML(targetDateISO, drs, newlyCompletedTours){
 
   // 시간순 정렬 헬퍼
   const _byTime = (a,b) => String(a.Time_Start||a.Start_Time||'').localeCompare(String(b.Time_Start||b.Start_Time||''));
+
+  // ── 안전망: 트레일러 정보 불일치 감지 ──
+  // PD에 트레일러 있는데 DR에 없음 → 청구 누락 의심
+  // DR에 트레일러 비용 있는데 PD/DR Trailer_Number 없음 → 소유주 미상
+  const trailerWarnings = [];
+  drs.forEach(r => {
+    const drTrailerCost = Number(r.Trailer||0);
+    const drTrailerNum = String(r.Trailer_Number||'').trim();
+    // DR의 Trailer_Number가 비어있으면 PD에서 조회
+    let pdTrailer = '';
+    try {
+      const pdResult = lookupTrailerForDR({
+        date: r._iso,
+        driver: String(r.Driver||'').trim(),
+        rego: String(r.Rego||'').trim()
+      });
+      if(pdResult && pdResult.ok) pdTrailer = pdResult.pdTrailer || '';
+    } catch(e){}
+
+    // 케이스 A: PD에 트레일러 있는데 DR Trailer 비용 0 → 청구 누락 의심
+    if(pdTrailer && drTrailerCost === 0){
+      trailerWarnings.push({
+        type: 'missing_charge',
+        date: r._iso,
+        driver: String(r.Driver||''),
+        rego: String(r.Rego||''),
+        agency: String(r.Agency||''),
+        pdTrailer: pdTrailer,
+        msg: 'PD에 트레일러 [' + pdTrailer + '] 픽업 기록이 있으나 DR에 트레일러 비용이 없습니다. 청구 누락 가능성.'
+      });
+    }
+    // 케이스 B: DR에 트레일러 비용 있는데 Trailer_Number 미상
+    if(drTrailerCost > 0 && !drTrailerNum && !pdTrailer){
+      trailerWarnings.push({
+        type: 'missing_number',
+        date: r._iso,
+        driver: String(r.Driver||''),
+        rego: String(r.Rego||''),
+        agency: String(r.Agency||''),
+        cost: drTrailerCost,
+        msg: '트레일러 비용 $' + drTrailerCost + ' 입력됐으나 트레일러 번호 미상. 소유주 식별 불가 → 대여비 차감 누락.'
+      });
+    }
+  });
+
+  if(trailerWarnings.length > 0){
+    html += '<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:12px;margin:12px 0;">';
+    html += '<div style="font-size:11pt;font-weight:700;color:#92400e;margin-bottom:6px;">⚠️ 검토 필요 (트레일러 정보 불일치) — ' + trailerWarnings.length + '건</div>';
+    html += '<div style="font-size:9pt;color:#78350f;margin-bottom:8px;">아래 운행은 트레일러 정보가 일치하지 않습니다. 정산 전 확인이 필요합니다.</div>';
+    trailerWarnings.forEach(w => {
+      html += '<div style="background:#fffbeb;padding:6px 10px;margin-bottom:4px;border-radius:4px;font-size:9.5pt;">';
+      html += '<b>' + _egFmtDate(w.date) + '</b> · ' + _egEsc(w.driver) + ' / ' + _egEsc(w.rego);
+      if(w.agency) html += ' · ' + _egEsc(w.agency);
+      html += '<br><span style="color:#92400e;">' + _egEsc(w.msg) + '</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
 
   // ── 섹션 1: EG 청구 내역 (받을 돈) ──
   html += '<div class="sec-title">💰 EG 청구 내역 (받을 돈)</div>';
