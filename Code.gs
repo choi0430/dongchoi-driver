@@ -7768,8 +7768,8 @@ function _egLoadPriceSub(){
   return _egPriceSubCache;
 }
 
-// EG SUB 청구액 계산 — Sub rate + 모든 서차지 (DR값 그대로) + 공항주차 + 트레일러(서차지 +, 대여비 -)
-// 양방향 모두 같은 금액 (DC→EG, EG→DC 동일)
+// EG SUB 청구액 계산 — breakdown 객체 반환
+// 반환: {total, items: [{label, amount, sign}]}
 function _egCalcEgSubAmount(r){
   const PS = _egLoadPriceSub();
   const attraction = String(r.Attraction||r.tour||'').trim();
@@ -7778,7 +7778,7 @@ function _egCalcEgSubAmount(r){
   const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
   const isLarge = capNum>=40;
 
-  // 1) M_PriceSub의 EG TRAVEL 행에서 base rate 조회 (SubCo 풀네임/짧은코드 모두 시도)
+  // 1) M_PriceSub의 EG TRAVEL 행에서 base rate 조회
   function _findSub(){
     const keys = Object.keys(PS);
     for(let i=0; i<keys.length; i++){
@@ -7799,39 +7799,81 @@ function _egCalcEgSubAmount(r){
   const subEntity = _findSub();
   const ce = subEntity ? _findCourse(subEntity, attraction) : null;
   let baseRate = 0;
-  if(ce){ const sd = ce[capKey] || ce['21']; baseRate = Number(sd && sd.rate) || 0; }
-  // fallback: SVC_Charge
-  if(baseRate === 0) baseRate = Number(r.SVC_Charge)||0;
+  let baseSource = '';
+  if(ce){
+    const sd = ce[capKey] || ce['21'];
+    baseRate = Number(sd && sd.rate) || 0;
+    baseSource = 'M_PriceSub';
+  }
+  if(baseRate === 0){
+    baseRate = Number(r.SVC_Charge)||0;
+    baseSource = 'SVC_Charge';
+  }
 
-  // 2) 서차지 — DR 값 그대로 (TA 환산식 적용 X)
+  // 2) 각 서차지 (DR 값 그대로)
   const htl  = Number(r.Hotel_Surcharge||r.hotel||0);
   const dst  = Number(r.Dist_Surcharge||r.dist||0);
   const ot   = Number(r.OT||r.ot||0);
   const erl  = Number(r.Early||0);
   const toll = Number(r.Toll||0);
 
-  // 3) 공항 픽업 주차비 (대형 $40 / 그 외 $30)
+  // 3) 공항 픽업 주차비
   const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
   const pickup = String(r.Pickup||'');
   const parking = apPat.test(pickup) ? (isLarge ? 40 : 30) : 0;
 
-  // 4) Toll (대형만 청구액에 포함)
+  // 4) Toll (대형만)
   const tollAmt = isLarge ? toll : 0;
 
-  // 5) 트레일러 — 서차지(DR값 그대로) + 대여비 -$30 (소유주가 운행자와 다를 때)
-  const trailerSurcharge = Number(r.Trailer||0);  // 보통 $80
+  // 5) 트레일러
+  const trailerSurcharge = Number(r.Trailer||0);
   let trailerRental = 0;
+  let trailerOwnerName = '';
   if(trailerSurcharge > 0){
     const trNum = String(r.Trailer_Number||'').trim();
     if(trNum){
       const tOwners = _egLoadTrailerOwners();
-      const trOwner = _egNormEntity(tOwners[trNum] || '');
-      // 트레일러 소유주가 식별되면 -$30 (운행자에게서 소유주에게 가는 임대료)
-      if(trOwner) trailerRental = -30;
+      const rawOwner = tOwners[trNum] || '';
+      const trOwner = _egNormEntity(rawOwner);
+      if(trOwner){
+        trailerRental = -30;
+        trailerOwnerName = rawOwner;
+      }
     }
   }
 
-  return baseRate + ot + htl + dst + erl + parking + tollAmt + trailerSurcharge + trailerRental;
+  // Breakdown 구성
+  const items = [];
+  if(baseRate !== 0){
+    items.push({
+      label: 'Base (' + (attraction||'코스') + ' · ' + capNum + 'S)',
+      amount: baseRate,
+      note: baseSource === 'SVC_Charge' ? '(SVC fallback)' : ''
+    });
+  }
+  if(ot !== 0)  items.push({label: 'OT', amount: ot});
+  if(htl !== 0) items.push({label: '호텔 서차지', amount: htl});
+  if(dst !== 0) items.push({label: '거리 서차지', amount: dst});
+  if(erl !== 0) items.push({label: '조기 서차지', amount: erl});
+  if(parking !== 0) items.push({label: '공항 픽업 주차비', amount: parking});
+  if(tollAmt !== 0) items.push({label: '톨비', amount: tollAmt});
+  if(trailerSurcharge !== 0) items.push({label: '트레일러 서차지', amount: trailerSurcharge});
+  if(trailerRental !== 0) items.push({
+    label: '트레일러 대여비',
+    amount: trailerRental,
+    note: trailerOwnerName ? '(소유주: ' + trailerOwnerName + ')' : ''
+  });
+
+  const total = baseRate + ot + htl + dst + erl + parking + tollAmt + trailerSurcharge + trailerRental;
+
+  // 숫자로 직접 사용되는 경우(reduce 등) 호환 위해 Number primitive 흉내 + items 첨부
+  // 객체로 반환하되, valueOf로 산술 연산 시 total 사용 가능
+  return {
+    total: total,
+    items: items,
+    valueOf: function(){ return this.total; },
+    toString: function(){ return String(this.total); }
+  };
 }
 
 // 운행 분류 — 'EG_BILLS' (Billing=EG, EG가 여행사에 청구) / 'DC_BILLS_EG_VEH' (Billing=DC, EG차량 sub) / null
@@ -8206,7 +8248,9 @@ function _egCommonStyle(){
 // ── 운행 카드 빌더 (관리자 급여 탭 _reportRow 스타일 — 정적 PDF에 맞게 펼친 형태) ──
 function _egTripCardHTML(r){
   const drCost = Number(r.DR_Cost || r.Total || 0) || 0;
-  const taAmount = _egCalcEgSubAmount(r);  // SUB 가격 기반 계산
+  const taCalc = _egCalcEgSubAmount(r);  // {total, items}
+  const taAmount = taCalc.total;
+  const breakdown = taCalc.items;
   const cls = _egClassifyRow(r);  // EG_BILLS_DC_VEH / DC_BILLS_EG_VEH / EG_BILLS_OWN
   const nightOwn = Number(r.Night_Owner || 0) || 0;
   const tS = _egFmtTime(r.Time_Start || r.Start_Time);
@@ -8298,13 +8342,25 @@ function _egTripCardHTML(r){
   html += '</div>';
   html += '</div>';
 
-  if(sur.length > 0){
-    html += '<div class="surcharge-row">';
-    sur.forEach(s => {
-      html += '<span class="sur-badge" style="background:' + s.c + '14;border-color:' + s.c + '55;color:' + s.c + ';">';
-      html += _egEsc(s.l) + ' $' + s.v.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2});
-      html += '</span>';
+  // Breakdown 테이블 (EG 청구/지급 금액 산출 근거)
+  if(taAmount !== 0 && breakdown.length > 0){
+    html += '<div style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:8px 12px;margin-top:8px;border-radius:0 0 6px 6px;">';
+    html += '<div style="font-size:8pt;color:#6b7280;font-weight:600;margin-bottom:4px;">📊 산출 근거</div>';
+    html += '<table style="width:100%;font-size:9pt;border-collapse:collapse;">';
+    breakdown.forEach(it => {
+      const sign = it.amount < 0 ? '-' : '+';
+      const absAmt = Math.abs(it.amount);
+      const color = it.amount < 0 ? '#dc2626' : '#374151';
+      html += '<tr>';
+      html += '<td style="padding:2px 0;color:#4b5563;">' + _egEsc(it.label);
+      if(it.note) html += ' <span style="color:#9ca3af;font-size:8pt;">' + _egEsc(it.note) + '</span>';
+      html += '</td>';
+      html += '<td style="padding:2px 0;text-align:right;color:' + color + ';font-variant-numeric:tabular-nums;">' + sign + '$' + absAmt.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td>';
+      html += '</tr>';
     });
+    html += '<tr style="border-top:1px solid #d1d5db;"><td style="padding:4px 0 2px;font-weight:700;color:#1f2937;">합계</td>';
+    html += '<td style="padding:4px 0 2px;text-align:right;font-weight:700;color:' + ((cls === 'EG_BILLS_DC_VEH') ? '#dc2626' : '#7c3aed') + ';font-variant-numeric:tabular-nums;">$' + taAmount.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td></tr>';
+    html += '</table>';
     html += '</div>';
   }
   html += '</div>';
@@ -8316,7 +8372,7 @@ function _egTourCompletionCardHTML(t){
   // t = {tourCode, agency, startDate, endDate, status, guide, pax, reason, drs}
   const drs = (t.drs || []).slice().sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
   const totalDR = drs.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
-  const totalTA = drs.reduce((s,r) => s + _egCalcEgSubAmount(r), 0);
+  const totalTA = drs.reduce((s,r) => s + _egCalcEgSubAmount(r).total, 0);
   const days = drs.length > 0
     ? (function(){
         const isos = drs.map(r=>r._iso).filter(Boolean).sort();
@@ -8362,7 +8418,7 @@ function _egTourCompletionCardHTML(t){
     html += '</div>';
     drs.forEach(r => {
       const dr = Number(r.DR_Cost || r.Total || 0) || 0;
-      const ta = _egCalcEgSubAmount(r);
+      const ta = _egCalcEgSubAmount(r).total;
       const rego = r.Rego || '';
       const driver = r.Driver || '';
       const attraction = r.Attraction || r.Course || '';
@@ -8411,8 +8467,8 @@ function _egBuildDailyReportHTML(targetDateISO, drs, newlyCompletedTours){
     }
   });
 
-  const totalClaim = claims.reduce((s,r) => s + _egCalcEgSubAmount(r), 0);
-  const totalPay = payments.reduce((s,r) => s + _egCalcEgSubAmount(r), 0);
+  const totalClaim = claims.reduce((s,r) => s + _egCalcEgSubAmount(r).total, 0);
+  const totalPay = payments.reduce((s,r) => s + _egCalcEgSubAmount(r).total, 0);
   const totalDR = drs.reduce((s,r) => s + (Number(r.DR_Cost||r.Total||0) || 0), 0);
   const tcCount = new Set(drs.map(r => String(r.Tour_Code||r.TourCode||'').trim()).filter(Boolean)).size;
 
@@ -8511,7 +8567,7 @@ function _egBuildDailyReportHTML(targetDateISO, drs, newlyCompletedTours){
 function _egBuildWeeklyReportHTML(monISO, sunISO, drs){
   _egResetTACache();
   const totalDR = drs.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
-  const totalTA = drs.reduce((s,r)=>s+_egCalcEgSubAmount(r), 0);
+  const totalTA = drs.reduce((s,r)=>s + _egCalcEgSubAmount(r).total, 0);
   const tcSet = new Set();
   const drvCount = {};
   const vehCount = {};
@@ -8552,7 +8608,7 @@ function _egBuildWeeklyReportHTML(monISO, sunISO, drs){
       <tr><th>날짜</th><th>TourCode</th><th>차량</th><th>드라이버</th><th>가이드</th>
           <th>코스</th><th class="num">EG 인보이스</th><th class="num">드라이버</th></tr>`;
     drs.slice().sort((a,b)=>(a._iso||'').localeCompare(b._iso||'')).forEach(r => {
-      const ta = _egCalcEgSubAmount(r);
+      const ta = _egCalcEgSubAmount(r).total;
       const dr = Number(r.DR_Cost||r.Total||0)||0;
       html += `<tr>
         <td>${_egFmtDate(r._iso)}</td>
@@ -8888,7 +8944,7 @@ function sendEGWeeklyReport(opts){
     const pdfName = 'EG_Weekly_Report_' + fromISO + '_to_' + toISO + '.pdf';
     _egResetTACache();
     const totDR = drs.reduce((s,r)=>s+(Number(r.DR_Cost||r.Total||0)||0), 0);
-    const totTA = drs.reduce((s,r)=>s+_egCalcEgSubAmount(r), 0);
+    const totTA = drs.reduce((s,r)=>s + _egCalcEgSubAmount(r).total, 0);
     const subject = `[EG TRAVEL] 주간 운행 요약 ${_egFmtDate(fromISO)}~${_egFmtDate(toISO)} — ${drs.length}건, EG $${totTA.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
     const body = `안녕하세요,\n\n` +
       `${_egFmtDate(fromISO)} ~ ${_egFmtDate(toISO)} EG TRAVEL 주간 운행 요약을 첨부합니다.\n\n` +
