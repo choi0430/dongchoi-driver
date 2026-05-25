@@ -10114,6 +10114,31 @@ const DC_OWNERS = ['DONG CHOI PTY LTD', null, ''];
 const DC_ACCREDITATION_NAME = 'DONG CHOI PTY LTD';
 
 // ═══════════════════════════════════════════════════════════════
+// BillingEntity가 DC(자사)인지 판정 — 다양한 표기 모두 허용
+// ═══════════════════════════════════════════════════════════════
+// 잡히는 표기 (모두 true):
+//   '', null, undefined (빈값 = 기본 자사)
+//   'DC', 'dc', 'Dc', 'D.C.', 'D.C', 'D C' (점/공백 변이)
+//   'Dong Choi', 'DONG CHOI PTY LTD', 'dongchoi', 'Dong  Choi  Pty  Ltd'
+//   '동초이', '동최' (한글 표기 — 향후 확장 대비)
+// 잡히지 않는 표기 (false):
+//   'EG TRAVEL PTY LTD', 'TOUR HOJURO PTY LTD' 등 다른 회사명
+function isBillingEntityDC(be){
+  if(be === null || be === undefined) return true;
+  // 1) 정규화: 공백/점/특수문자 제거 후 대문자
+  const s = String(be).trim();
+  if(!s) return true;
+  const norm = s.replace(/[.\s\-_·]+/g,'').toUpperCase();
+  // 'DC' (점/공백 제거 후)
+  if(norm === 'DC') return true;
+  // 'DONGCHOI', 'DONGCHOIPTYLTD' 등 — 'DONGCHOI' 포함이면 매치
+  if(norm.indexOf('DONGCHOI') >= 0) return true;
+  // 한글 '동초이' (선택)
+  if(s.indexOf('동초이') >= 0 || s.indexOf('동최') >= 0) return true;
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // 여행사별 Payment Terms (인보이스 결제 기한 — 일 단위)
 // M_Clients 시트의 Payment_Terms 컬럼에서 가져옴 (기본값 14일)
 // ═══════════════════════════════════════════════════════════════
@@ -10182,8 +10207,7 @@ function calcSubReport(r) {
   //       → DC는 SUB 지급 의무 없음 (운행기록만 보존)
   //       → TA도 DC 수입 아님 (다른 회사가 직접 청구)
   const billingEntity = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
-  const _isBEDC = !billingEntity || billingEntity === 'DC' ||
-                  /DONG\s*CHOI/i.test(billingEntity);
+  const _isBEDC = isBillingEntityDC(r.Billing_Entity || r.BillingEntity || '');
   if(!_isBEDC){
     // BillingEntity가 다른 회사 → 회계 무관, 표시용 정보만 반환
     return {
@@ -15803,10 +15827,7 @@ window.cleanupNonDCBilledSubTxns = async function(){
   } catch(e){ console.error('SUB_Txn 로드 실패', e); return; }
 
   // BillingEntity≠DC인 DR 식별
-  const nonDCDrs = drs.filter(r => {
-    const be = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
-    return be && be !== 'DC' && !/DONG\s*CHOI/i.test(be);
-  });
+  const nonDCDrs = drs.filter(r => !isBillingEntityDC(r.Billing_Entity || r.BillingEntity || ''));
   console.log('📜 BillingEntity≠DC인 DR 수:', nonDCDrs.length, '건');
 
   // 각 DR에 대한 DRSUB key 생성
@@ -16158,10 +16179,7 @@ async function _syncDailyReportSubToSubTxn(){
     //   - BillingEntity가 DC 아니면 → 잘못 등록된 DRSUB → 삭제 후보
     //   - 같은 (SubCompany + TourCode) 그룹에 CR > 0 있으면 보존
     try {
-      const _isBEDCSafe = (be) => {
-        const b = String(be||'').trim().toUpperCase();
-        return !b || b === 'DC' || /DONG\s*CHOI/i.test(b);
-      };
+      const _isBEDCSafe = isBillingEntityDC;  // ★ 글로벌 헬퍼 사용 (다양한 표기 모두 잡음)
       // DR 인덱스: key = date_rego_tourCode → r
       const drIdx = {};
       (_drCache || []).forEach(r => {
@@ -16252,9 +16270,7 @@ async function _syncDailyReportSubToSubTxn(){
       //   - BillingEntity = DC (또는 비어있음 = 기본 자사) → DC가 차주(EG 등)에게 지급
       //   - BillingEntity = EG TRAVEL → EG가 클라이언트에 직접 인보이스 발행
       //     → DC는 EG에게 지급할 게 없음 (회계 무관, 운행기록만 보존)
-      const billingEntity = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
-      const _isBEDC = !billingEntity || billingEntity === 'DC' ||
-                      /DONG\s*CHOI/i.test(billingEntity);
+      const _isBEDC = isBillingEntityDC(r.Billing_Entity || r.BillingEntity || '');
       if(!_isBEDC){
         // BillingEntity가 다른 회사 (EG TRAVEL 등) → SUB 지급 자동 등록 안 함
         return;
@@ -17060,8 +17076,7 @@ function _subBalances(){
   const _nonDCBilledKeys = new Set();
   if(Array.isArray(_drCache) && Array.isArray(DB?.V)){
     (_drCache || []).forEach(r => {
-      const be = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
-      if(!be || be === 'DC' || /DONG\s*CHOI/i.test(be)) return;
+      if(isBillingEntityDC(r.Billing_Entity || r.BillingEntity || '')) return;
       const rego = String(r.Rego||'').trim();
       const veh = DB.V.find(v => v.Rego === rego);
       const owner = veh ? String(veh.Owner||'').trim() : '';
@@ -17791,10 +17806,8 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
   //   예: EG가 인보이스 발행 + DC 차량 → DC가 EG에서 받을 돈
   if(Array.isArray(_drCache) && Array.isArray(DB?.V)){
     (_drCache || []).forEach(r => {
-      const be = String(r.Billing_Entity||r.BillingEntity||'').trim();
-      const beUC = be.toUpperCase();
       // BillingEntity가 DC면 시나리오 1/2 → 통과 (인보이스 기반으로 이미 처리)
-      if(!beUC || beUC === 'DC' || /DONG\s*CHOI/i.test(beUC)) return;
+      if(isBillingEntityDC(r.Billing_Entity || r.BillingEntity || '')) return;
       // 차량 owner 체크
       const rego = String(r.Rego||'').trim();
       const veh = DB.V.find(v => v.Rego === rego);
