@@ -10209,8 +10209,25 @@ function calcSubReport(r) {
   // SUB 서차지 = TA 서차지 (Hotel/Dist/OT/Early/Parking/Toll/Trailer 모두 포함)
   // 즉, SUB 총액 = SUB base + (TA 총액 - TA base)
   const subRates = getSubRates();
-  const psRate = DB.PS[owner]?.[attraction]?.[capKey]?.rate||0;
-  const subBase = parseFloat(subRates[owner]?.[attraction]?.[capKey]) || psRate;
+  // ★ DB.PS / subRates 룩업 — owner 및 course가 정확히 같지 않아도 잡히도록 (대소문자/공백 무시)
+  //   ex) Owner "EG TRAVEL PTY LTD" vs PS SubCo "EG Travel Pty Ltd" 등 mismatch 방지
+  const _normKey = (s) => String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+  const _findKey = (obj, target) => {
+    if(!obj || !target) return null;
+    if(obj[target]) return target;
+    const n = _normKey(target);
+    const found = Object.keys(obj).find(k => _normKey(k) === n);
+    return found || null;
+  };
+  const _psOwnerKey = _findKey(DB.PS, owner);
+  const _psCourses = _psOwnerKey ? DB.PS[_psOwnerKey] : null;
+  const _psCourseKey = _findKey(_psCourses, attraction);
+  const psRate = (_psCourseKey && _psCourses[_psCourseKey]?.[capKey]?.rate) || 0;
+
+  const _srOwnerKey = _findKey(subRates, owner);
+  const _srCourses = _srOwnerKey ? subRates[_srOwnerKey] : null;
+  const _srCourseKey = _findKey(_srCourses, attraction);
+  const subBase = parseFloat(_srCourseKey && _srCourses[_srCourseKey]?.[capKey]) || psRate;
 
   // TA base 계산 (M_PriceClient에서 같은 방식으로)
   const agPC = DB.PC[agency];
