@@ -7981,8 +7981,28 @@ function _egCalcDriverPay(r){
   };
 }
 
-// EG SUB 청구액 계산 — breakdown 객체 반환
-// 반환: {total, items: [{label, amount, sign}]}
+// ── 환산 헬퍼 (admin.html과 동일한 로직) ──
+function _egHotelDRtoTA(dr, sn){
+  if(!dr || dr===0) return 0;
+  if(sn>=50) return dr===15?80:dr===30?160:dr*4;
+  if(sn>=40) return dr===15?75:dr===30?150:dr*4;
+  return dr===10?40:dr===20?80:dr*4;
+}
+function _egDistDRtoTA(dr, sn){
+  if(!dr || dr===0) return 0;
+  if(sn>=50) return dr===40?160:dr*4;
+  if(sn>=40) return dr===40?150:Math.round(dr*3.75);
+  return dr===30?80:Math.round(dr*2.67);
+}
+function _egTrailerSurchargeDRtoTA(dr, sn){
+  // 트레일러 서차지 환산: 21/25S DR$30→$80, 40S+ 청구 없음
+  if(!dr || dr===0) return 0;
+  if(sn>=40) return 0;
+  return dr===30?80:Math.round(dr*2.67);
+}
+
+// EG SUB 청구액 계산 — calcSubReport와 정합하는 로직
+// 반환: {total, items: [{label, amount, note}]}
 function _egCalcEgSubAmount(r){
   const PS = _egLoadPriceSub();
   const attraction = String(r.Attraction||r.tour||'').trim();
@@ -7990,8 +8010,9 @@ function _egCalcEgSubAmount(r){
   const capNum = parseInt(seatsRaw)||25;
   const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
   const isLarge = capNum>=40;
+  const agency = String(r.Agency||r.agency||'').trim();
 
-  // 1) M_PriceSub의 EG TRAVEL 행에서 base rate 조회
+  // 1) M_PriceSub의 EG TRAVEL 행에서 base rate
   function _findSub(){
     const keys = Object.keys(PS);
     for(let i=0; i<keys.length; i++){
@@ -8023,44 +8044,61 @@ function _egCalcEgSubAmount(r){
     baseSource = 'SVC_Charge';
   }
 
-  // 2) 각 서차지 (DR 값 그대로)
-  const htl  = Number(r.Hotel_Surcharge||r.hotel||0);
-  const dst  = Number(r.Dist_Surcharge||r.dist||0);
-  const ot   = Number(r.OT||r.ot||0);
-  const erl  = Number(r.Early||0);
+  // 2) 서차지 — TA 환산식 적용 (calcSubReport와 동일)
+  const hotelDR = Number(r.Hotel_Surcharge||0);
+  const distDR  = Number(r.Dist_Surcharge||0);
+  const trailerDR = Number(r.Trailer||0);
+  const otDR  = Number(r.OT||0);
+  const earlyDR = Number(r.Early||0);
   const toll = Number(r.Toll||0);
 
-  // 3) 공항 픽업 주차비
+  const hotelTA   = _egHotelDRtoTA(hotelDR, capNum);
+  const distTA    = _egDistDRtoTA(distDR, capNum);
+  const trailerTA = _egTrailerSurchargeDRtoTA(trailerDR, capNum);
+
+  // OT 환산 — 호주로(Tour Hojuro)/Plus Australia 21~25S: 30분 UNIT
+  const otRateTA = capNum>=50?160:capNum>=40?150:80;
+  const otRateDR = capNum>=40?40:30;
+  const isHojuroOT = /호주로|hojuro|plus\s*australia/i.test(agency);
+  const otTA = isHojuroOT
+    ? Math.round((otDR / (otRateDR/2)) * (otRateTA/2))
+    : Math.round((otRateDR>0 ? otDR/otRateDR : 0) * otRateTA);
+
+  // Early 환산 — Hojuro 21/25S: $80 / 그 외: Airport Transfer rate × 0.3
+  let earlyTA = 0;
+  if(earlyDR > 0){
+    const isHojuroEarly = /호주로|hojuro|plus\s*australia/i.test(agency);
+    if(isHojuroEarly && capNum < 40){
+      earlyTA = 80;
+    } else {
+      // M_PriceClient에서 같은 여행사의 Airport Transfer rate 찾기 (fallback: 다른 여행사)
+      const PC = _egLoadPriceClient();
+      let atE = null;
+      const agPC = PC[agency];
+      if(agPC){
+        atE = _findCourse(agPC, 'Airport Transfer');
+      }
+      if(!atE){
+        const allAgs = Object.keys(PC);
+        for(let i=0; i<allAgs.length; i++){
+          atE = _findCourse(PC[allAgs[i]], 'Airport Transfer');
+          if(atE) break;
+        }
+      }
+      if(atE){
+        const sd2 = atE[capKey] || atE['21'];
+        earlyTA = Math.round((Number(sd2 && sd2.rate)||0) * 0.3);
+      }
+    }
+  }
+
+  // 3) 공항 픽업 주차비 (EG는 항상 부담)
   const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
   const pickup = String(r.Pickup||'');
   const parking = apPat.test(pickup) ? (isLarge ? 40 : 30) : 0;
 
   // 4) Toll (대형만)
   const tollAmt = isLarge ? toll : 0;
-
-  // 5) 트레일러
-  // DR.Trailer 필드: 드라이버 입력값 ($30 = 트레일러 사용 표시, 드라이버 지급액)
-  // → EG 청구 시: 서차지 $80으로 환산
-  // → 대여비: 트레일러 소유주가 식별되면 -$30 차감 (소유주에게 지급)
-  const trailerDR = Number(r.Trailer||0);  // 드라이버 입력값 (보통 $30)
-  let trailerSurcharge = 0;
-  let trailerRental = 0;
-  let trailerOwnerName = '';
-  if(trailerDR > 0){
-    // 환산: DR $30 → 서차지 $80 (1:1 매핑이 아닐 경우 비율 계산)
-    trailerSurcharge = (trailerDR === 30) ? 80 : Math.round(trailerDR * (80/30));
-    // 대여비 차감
-    const trNum = String(r.Trailer_Number||'').trim();
-    if(trNum){
-      const tOwners = _egLoadTrailerOwners();
-      const rawOwner = tOwners[trNum] || '';
-      const trOwner = _egNormEntity(rawOwner);
-      if(trOwner){
-        trailerRental = -30;
-        trailerOwnerName = rawOwner;
-      }
-    }
-  }
 
   // Breakdown 구성
   const items = [];
@@ -8071,23 +8109,42 @@ function _egCalcEgSubAmount(r){
       note: baseSource === 'SVC_Charge' ? '(SVC fallback)' : ''
     });
   }
-  if(ot !== 0)  items.push({label: 'OT', amount: ot});
-  if(htl !== 0) items.push({label: '호텔 서차지', amount: htl});
-  if(dst !== 0) items.push({label: '거리 서차지', amount: dst});
-  if(erl !== 0) items.push({label: '조기 서차지', amount: erl});
+  if(otTA !== 0){
+    items.push({
+      label: 'OT' + (otDR ? ' (DR $' + otDR + ' → TA $' + otTA + ')' : ''),
+      amount: otTA
+    });
+  }
+  if(hotelTA !== 0){
+    items.push({
+      label: '호텔 서차지 (DR $' + hotelDR + ' → TA $' + hotelTA + ')',
+      amount: hotelTA
+    });
+  }
+  if(distTA !== 0){
+    items.push({
+      label: '거리 서차지 (DR $' + distDR + ' → TA $' + distTA + ')',
+      amount: distTA
+    });
+  }
+  if(earlyTA !== 0){
+    items.push({
+      label: '조기 서차지 (DR $' + earlyDR + ' → TA $' + earlyTA + ')',
+      amount: earlyTA
+    });
+  }
   if(parking !== 0) items.push({label: '공항 픽업 주차비', amount: parking});
   if(tollAmt !== 0) items.push({label: '톨비', amount: tollAmt});
-  if(trailerSurcharge !== 0) items.push({label: '트레일러 서차지', amount: trailerSurcharge});
-  if(trailerRental !== 0) items.push({
-    label: '트레일러 대여비',
-    amount: trailerRental,
-    note: trailerOwnerName ? '(소유주: ' + trailerOwnerName + ')' : ''
-  });
+  if(trailerTA !== 0){
+    items.push({
+      label: '트레일러 서차지 (DR $' + trailerDR + ' → TA $' + trailerTA + ')',
+      amount: trailerTA,
+      note: '※ 대여비 -$30은 별도 SUB_Txn으로 자동 처리됨'
+    });
+  }
 
-  const total = baseRate + ot + htl + dst + erl + parking + tollAmt + trailerSurcharge + trailerRental;
+  const total = baseRate + otTA + hotelTA + distTA + earlyTA + parking + tollAmt + trailerTA;
 
-  // 숫자로 직접 사용되는 경우(reduce 등) 호환 위해 Number primitive 흉내 + items 첨부
-  // 객체로 반환하되, valueOf로 산술 연산 시 total 사용 가능
   return {
     total: total,
     items: items,
