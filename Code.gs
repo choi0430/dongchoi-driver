@@ -8093,9 +8093,12 @@ function _egCalcEgSubAmount(r){
   }
 
   // 3) 공항 픽업 주차비 (EG는 항상 부담)
+  // ★ 단, Tour Hojuro / Plus Australia + 21/25S: 여행사가 청구 안 받음 → EG도 부담 안 함
   const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
   const pickup = String(r.Pickup||'');
-  const parking = apPat.test(pickup) ? (isLarge ? 40 : 30) : 0;
+  const isHojuroParking = /호주로|hojuro|plus\s*australia/i.test(agency);
+  const _excludeParkingForAgency = isHojuroParking && capNum < 40;  // 21/25S만
+  const parking = (apPat.test(pickup) && !_excludeParkingForAgency) ? (isLarge ? 40 : 30) : 0;
 
   // 4) Toll (대형만)
   const tollAmt = isLarge ? toll : 0;
