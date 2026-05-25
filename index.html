@@ -5892,6 +5892,10 @@ function submitDailyReport(){
   const _drBtn = _lockSubmitBtn('button[onclick="submitDailyReport()"]', '⏳ 검증 중...');
   if(!_drBtn) return; // 이미 처리 중
 
+  // ★ 전체 함수를 try/catch로 감싸서 검증 단계 예외도 잡음 (검증 중 멈춤 방지)
+  try {
+  console.log('[submitDailyReport] STAGE 0: start');
+
   const agency = document.getElementById('dr-agency').value;
   const att = document.getElementById('dr-attraction').value;
   const _nightType = document.getElementById('f-night-type')?.value || 'none';
@@ -5947,10 +5951,12 @@ function submitDailyReport(){
   }
   // ★ 트레일러 정보 검증 — PD vs DR 양방향 체크 (비동기)
   if(!_skipValidation){
+    // ★ shift 변수가 이 스코프에 없었음 — activeShifts에서 직접 가져오기 (ReferenceError 방지)
+    const _shift = activeShifts.find(s => s.id === editingShiftId);
     const _drTrailerVal = Number(document.getElementById('f-trailer')?.value || 0);
     const _drDate = document.getElementById('dr-date')?.value || _todayISO();
-    const _drDriver = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : (shift?.driver || '');
-    const _drRego = shift?.rego || '';
+    const _drDriver = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : (_shift?.driver || (currentDriver?.name || ''));
+    const _drRego = _shift?.rego || '';
     if(_drDriver && _drRego){
       _checkTrailerWithPD(_drBtn, _drTrailerVal, _drDate, _drDriver, _drRego, () => {
         // 검증 통과 콜백 → 실제 저장 진행
@@ -5960,6 +5966,13 @@ function submitDailyReport(){
     }
   }
   _finalizeDailyReportSave(_drBtn);
+
+  } catch(err) {
+    // ★ 검증 단계에서 예상치 못한 예외 발생 — 버튼 unlock해서 다시 시도 가능하게
+    console.error('submitDailyReport validation error:', err);
+    _unlockSubmitBtn(_drBtn);
+    showToast('❌ 검증 오류: ' + (err?.message || err) + ' (다시 시도해주세요)', 'error');
+  }
 }
 
 // 트레일러 PD-DR 정합성 검증
