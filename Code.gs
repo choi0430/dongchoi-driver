@@ -8443,6 +8443,22 @@ function _egTripCardHTML(r){
   });
   html += '</div>';
   html += '<div class="title">' + _egEsc(agency) + ' · ' + _egEsc(attraction) + '</div>';
+
+  // 거래 흐름 설명
+  let flowNote = '';
+  if(cls === 'EG_BILLS_DC_VEH'){
+    // EG가 여행사 청구 + DC 차량 sub → 받은 돈을 DC에 패스스루
+    flowNote = '💡 EG가 ' + _egEsc(agency || '여행사') + '에 청구 → 받은 금액을 DC에 지급';
+  } else if(cls === 'DC_BILLS_EG_VEH'){
+    // DC가 여행사 청구 + EG 차량 sub → EG가 DC에 청구
+    flowNote = '💡 DC가 ' + _egEsc(agency || '여행사') + '에 청구 → EG는 sub로 운행, DC에 청구';
+  } else if(cls === 'EG_BILLS_OWN'){
+    flowNote = '💡 EG 자체 운행 — ' + _egEsc(agency || '여행사') + '에 직접 청구';
+  }
+  if(flowNote){
+    html += '<div style="font-size:8.5pt;color:#6b7280;font-style:italic;margin:2px 0 4px;">' + flowNote + '</div>';
+  }
+
   html += '<div class="meta-line">🚐 ' + _egEsc(rego) + (seats ? ' · ' + _egEsc(seats) + '석' : '') + '</div>';
   if(timeStr) html += '<div class="time-line">⏱ ' + _egEsc(timeStr) + '</div>';
   if(kmS && kmE){
