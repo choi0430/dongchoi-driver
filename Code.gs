@@ -7826,10 +7826,17 @@ function _egCalcEgSubAmount(r){
   const tollAmt = isLarge ? toll : 0;
 
   // 5) 트레일러
-  const trailerSurcharge = Number(r.Trailer||0);
+  // DR.Trailer 필드: 드라이버 입력값 ($30 = 트레일러 사용 표시, 드라이버 지급액)
+  // → EG 청구 시: 서차지 $80으로 환산
+  // → 대여비: 트레일러 소유주가 식별되면 -$30 차감 (소유주에게 지급)
+  const trailerDR = Number(r.Trailer||0);  // 드라이버 입력값 (보통 $30)
+  let trailerSurcharge = 0;
   let trailerRental = 0;
   let trailerOwnerName = '';
-  if(trailerSurcharge > 0){
+  if(trailerDR > 0){
+    // 환산: DR $30 → 서차지 $80 (1:1 매핑이 아닐 경우 비율 계산)
+    trailerSurcharge = (trailerDR === 30) ? 80 : Math.round(trailerDR * (80/30));
+    // 대여비 차감
     const trNum = String(r.Trailer_Number||'').trim();
     if(trNum){
       const tOwners = _egLoadTrailerOwners();
