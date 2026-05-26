@@ -16144,6 +16144,12 @@ async function _cleanupDuplicateSubTxn(){
 // 고유 키: DRSUB:Date_Rego_TourCode (LEDGER와 구분)
 // 같은 운행이 LEDGER에도 있을 수 있으나 DRSUB가 더 정확 (Daily_Report 직접 기반)
 async function _syncDailyReportSubToSubTxn(){
+  // ★ 동시 실행 방지 — 한 sync가 진행 중인데 다른 sync 호출이 또 시작되면 중복 등록 발생
+  if (window._syncDRSubInProgress) {
+    console.log('[SUB Sync] 이미 동기화 진행 중 — 중복 실행 차단');
+    return;
+  }
+  window._syncDRSubInProgress = true;
   try {
     // DR 캐시 보장
     if(!_drCache){
@@ -16252,6 +16258,8 @@ async function _syncDailyReportSubToSubTxn(){
 
     const vehicles = DB.V || [];
     const newTxns = [];
+    const _pushedKeys = new Set();  // ★ 이번 sync 안에서 이미 push한 키 추적 — 중복 push 방지
+    const _diagSkipped = [];        // ★ 진단용: skip된 케이스 기록
 
     (_drCache || []).forEach(r => {
       // Private 운행 제외
@@ -16267,9 +16275,6 @@ async function _syncDailyReportSubToSubTxn(){
       if(DC_OWNERS.includes(owner)) return;
 
       // ★★ BillingEntity 분기 — DC가 인보이스 발행할 때만 SUB 지급 등록
-      //   - BillingEntity = DC (또는 비어있음 = 기본 자사) → DC가 차주(EG 등)에게 지급
-      //   - BillingEntity = EG TRAVEL → EG가 클라이언트에 직접 인보이스 발행
-      //     → DC는 EG에게 지급할 게 없음 (회계 무관, 운행기록만 보존)
       const _isBEDC = isBillingEntityDC(r.Billing_Entity || r.BillingEntity || '');
       if(!_isBEDC){
         // BillingEntity가 다른 회사 (EG TRAVEL 등) → SUB 지급 자동 등록 안 함
@@ -16281,14 +16286,29 @@ async function _syncDailyReportSubToSubTxn(){
 
       // calcSubReport로 SUB 비용 계산
       let calc;
-      try { calc = calcSubReport(r); } catch(e){ return; }
-      if(!calc) return;
+      try { calc = calcSubReport(r); } catch(e){
+        _diagSkipped.push({date: r.Date, rego, reason: 'calcSubReport threw', err: String(e)});
+        return;
+      }
+      if(!calc) {
+        _diagSkipped.push({date: r.Date, rego, reason: 'calcSubReport returned null'});
+        return;
+      }
       const subCost = (calc.subCost?.total) || 0;
-      if(subCost <= 0) return;
+      if(subCost <= 0) {
+        _diagSkipped.push({date: r.Date, rego, attraction: r.Attraction, owner, reason: 'subCost <= 0', subCostBreakdown: calc.subCost});
+        return;
+      }
 
       const tourCode = pickTourCode(r);
       const drsubKey = `DRSUB:${dateISO}_${rego}_${tourCode}`;
       if(existingKeys.has(drsubKey)) return;
+      // ★ 이번 sync 내에서 이미 처리된 키도 skip (DR이 _drCache에 중복으로 있을 수 있음)
+      if(_pushedKeys.has(drsubKey)) {
+        _diagSkipped.push({date: r.Date, rego, drsubKey, reason: '_drCache duplicate row — same DRSUB key already pushed this batch'});
+        return;
+      }
+      _pushedKeys.add(drsubKey);
 
       // 풍부한 정보 수집 — 가이드, 드라이버, 어트랙션
       const driver = String(r.Driver||'').trim();
@@ -16316,8 +16336,12 @@ async function _syncDailyReportSubToSubTxn(){
       });
     });
 
+    // ★ 진단: 어떤 DR이 skip됐는지 로그 (24일 누락 등 진단용)
+    if(_diagSkipped.length > 0){
+      console.log('[SUB Sync] skipped %d DR rows (진단용):', _diagSkipped.length, _diagSkipped);
+    }
     if(newTxns.length === 0) return;
-    console.log('[SUB Sync] DailyReport→SUB_Txn 자동 등록:', newTxns.length, '건');
+    console.log('[SUB Sync] DailyReport→SUB_Txn 자동 등록:', newTxns.length, '건', newTxns.map(t=>t.Description));
 
     for(const txn of newTxns) {
       try {
@@ -16334,6 +16358,8 @@ async function _syncDailyReportSubToSubTxn(){
     }
   } catch(e) {
     console.warn('[SUB Sync] DailyReport→SUB_Txn 동기화 오류:', e);
+  } finally {
+    window._syncDRSubInProgress = false;
   }
 }
 
