@@ -95,6 +95,9 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 .ds-slot-card{background:white;border:1.5px solid var(--border);border-radius:12px;padding:12px 14px;margin:0 12px 8px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.04);transition:transform .15s, box-shadow .15s;}
 .ds-slot-card:active{transform:scale(0.98);}
 .ds-slot-card.today{border-color:#fbbf24;background:linear-gradient(135deg,#fffbeb,#fff);box-shadow:0 2px 8px rgba(251,191,36,0.12);}
+.ds-slot-card.missed{border-color:#ef4444;background:linear-gradient(135deg,#fef2f2,#fff);box-shadow:0 2px 8px rgba(239,68,68,0.12);}
+.ds-missed-banner{margin:12px 12px 0;background:linear-gradient(135deg,#fef2f2,#fff);border:1.5px solid #fecaca;border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:center;cursor:pointer;}
+.ds-missed-banner:active{transform:scale(0.99);}
 .ds-slot-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;}
 .ds-slot-badge{font-size:10px;font-weight:800;color:#7c3aed;background:#ede9fe;padding:3px 8px;border-radius:6px;letter-spacing:-0.2px;}
 .ds-slot-title{font-size:14px;font-weight:800;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -9641,8 +9644,9 @@ async function loadDriverSchedule(){
   }
   try{
     const today = _todayLocalISO();
+    const from = _addDaysISO(today, -14); // ★ 과거 14일까지 — DR 미작성 일정 감지용
     const to = _addDaysISO(today, 7); // 오늘부터 1주일치
-    const url = `${APPS_SCRIPT_URL}?action=get_driver_schedule&driver=${encodeURIComponent(driverName)}&from=${today}&to=${to}`;
+    const url = `${APPS_SCRIPT_URL}?action=get_driver_schedule&driver=${encodeURIComponent(driverName)}&from=${from}&to=${to}`;
     const res = await fetch(url);
     const json = await res.json();
     if(json?.ok){
@@ -9722,13 +9726,24 @@ function renderDriverSchedule(){
   const todaySlots = _driverScheduleCache.filter(s => s.date === today);
   const tomorrowSlots = _driverScheduleCache.filter(s => s.date === tomorrow);
   const futureSlots = _driverScheduleCache.filter(s => s.date > tomorrow).slice(0, 3);
+  // ★ 미작성 과거 일정 — 어제까지(today 미만)에서 DR 매칭이 없는 슬롯만
+  //   상태가 cancelled가 아닌 것만 GAS에서 이미 걸러져 있음
+  const missedSlots = _driverScheduleCache
+    .filter(s => s.date < today && !_isSlotReported(s))
+    .sort((a,b) => b.date < a.date ? -1 : (b.date > a.date ? 1 : 0)); // 최근 미작성 먼저
 
-  if(todaySlots.length === 0 && tomorrowSlots.length === 0 && futureSlots.length === 0){
+  if(todaySlots.length === 0 && tomorrowSlots.length === 0 && futureSlots.length === 0 && missedSlots.length === 0){
     wrap.innerHTML = '';
+    // 미작성 알림 배너도 제거
+    const mb = document.getElementById('home-missed-banner');
+    if(mb){ mb.innerHTML=''; mb.style.display='none'; }
     return;
   }
 
-  const renderSlot = (s, isToday) => {
+  const renderSlot = (s, isToday, mode) => {
+    // mode: 'today' | 'tomorrow' | 'future' | 'missed'
+    mode = mode || (isToday ? 'today' : 'future');
+    const isMissed = mode === 'missed';
     const slot = s.slot || {};
     const reported = _isSlotReported(s);
     const titleParts = [s.tourCode || s.tourId, s.agency].filter(Boolean);
@@ -9778,17 +9793,31 @@ function renderDriverSchedule(){
     if(s.pax) detailParts.push(`${s.pax}명`);
 
     // ★ 리포트 제출된 슬롯은 회색 처리 + ✅ 완료 표시 + 클릭 비활성
-    const cardClass = `ds-slot-card ${isToday?'today':''}${reported?' reported':''}`;
+    //   미작성 과거 일정은 빨간 테두리 + "🔴 DR 미작성 — 지금 시작" CTA
+    const cardClass = `ds-slot-card ${isMissed?'missed':(isToday?'today':'')}${reported?' reported':''}`;
     const onclickAttr = reported ? '' : `onclick="startDRFromSchedule('${s.tourId}','${s.date}','${s.slotKey}')"`;
-    const ctaHtml = reported
-      ? `<div class="ds-slot-cta" style="background:#dcfce7;color:#16a34a;">✅ DR 완료 (Reported)</div>`
-      : (isToday ? `<div class="ds-slot-cta">📋 이 일정으로 DR 시작 →</div>` : '');
+    let ctaHtml = '';
+    if(reported){
+      ctaHtml = `<div class="ds-slot-cta" style="background:#dcfce7;color:#16a34a;">✅ DR 완료 (Reported)</div>`;
+    } else if(isMissed){
+      ctaHtml = `<div class="ds-slot-cta" style="background:#fee2e2;color:#b91c1c;">🔴 DR 미작성 — 지금 시작 →</div>`;
+    } else if(isToday){
+      ctaHtml = `<div class="ds-slot-cta">📋 이 일정으로 DR 시작 →</div>`;
+    }
 
-    // ★ 미래 일정은 카드에 날짜 표시 (오늘/내일 외 future)
-    const showFutureDate = !isToday && s.date && s.date > _addDaysISO(_todayLocalISO(), 1);
-    const dateBadge = showFutureDate
-      ? `<span style="font-size:10px;font-weight:700;color:#7c3aed;background:#f3e8ff;border-radius:6px;padding:2px 7px;margin-right:4px;">📅 ${_fmtAU(s.date)}</span>`
-      : '';
+    // ★ 카드에 날짜 표시
+    //   - missed: 빨간색 (며칠 전인지 강조)
+    //   - future: 보라색
+    const showDateBadge = isMissed || (!isToday && s.date && s.date > _addDaysISO(_todayLocalISO(), 1));
+    let dateBadge = '';
+    if(isMissed){
+      // 며칠 전인지 계산
+      const dayDiff = Math.round((new Date(_todayLocalISO()+'T00:00:00').getTime() - new Date(s.date+'T00:00:00').getTime()) / 86400000);
+      const dayLabel = dayDiff === 1 ? '어제' : `${dayDiff}일 전`;
+      dateBadge = `<span style="font-size:10px;font-weight:700;color:#b91c1c;background:#fee2e2;border-radius:6px;padding:2px 7px;margin-right:4px;">📅 ${_fmtAU(s.date)} · ${dayLabel}</span>`;
+    } else if(showDateBadge){
+      dateBadge = `<span style="font-size:10px;font-weight:700;color:#7c3aed;background:#f3e8ff;border-radius:6px;padding:2px 7px;margin-right:4px;">📅 ${_fmtAU(s.date)}</span>`;
+    }
 
     return `<div class="${cardClass}" ${onclickAttr} style="${reported?'opacity:.65;cursor:default;':''}">
       <div class="ds-slot-head">
@@ -9804,15 +9833,26 @@ function renderDriverSchedule(){
   };
 
   let html = '';
-  if(todaySlots.length){
+  // ★ 미작성 과거 일정 — 최상단에 빨간색으로 표시 (가장 눈에 띄게)
+  if(missedSlots.length){
     html += `<div class="ds-section-hdr">
+      <div style="width:36px;height:36px;border-radius:10px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:18px;">🔴</div>
+      <div style="flex:1;">
+        <div style="font-weight:800;font-size:14px;color:#b91c1c;">미작성 일정 (Missed Reports)</div>
+        <div style="font-size:11px;color:#dc2626;">⚠️ Daily Report를 작성하지 않은 일정이 ${missedSlots.length}건 있습니다</div>
+      </div>
+    </div>`;
+    html += missedSlots.map(s => renderSlot(s, false, 'missed')).join('');
+  }
+  if(todaySlots.length){
+    html += `<div class="ds-section-hdr"${missedSlots.length?' style="margin-top:8px;"':''}>
       <div style="width:36px;height:36px;border-radius:10px;background:#fef3c7;display:flex;align-items:center;justify-content:center;font-size:18px;">📅</div>
       <div style="flex:1;">
         <div style="font-weight:800;font-size:14px;color:var(--text);">오늘 일정 (Today)</div>
         <div style="font-size:11px;color:var(--muted);">${_fmtAU(today)} · ${todaySlots.length}건 배정</div>
       </div>
     </div>`;
-    html += todaySlots.map(s => renderSlot(s, true)).join('');
+    html += todaySlots.map(s => renderSlot(s, true, 'today')).join('');
   }
   if(tomorrowSlots.length){
     html += `<div class="ds-section-hdr" style="margin-top:8px;">
@@ -9822,7 +9862,7 @@ function renderDriverSchedule(){
         <div style="font-size:10px;color:var(--muted);">${_fmtAU(tomorrow)} · ${tomorrowSlots.length}건</div>
       </div>
     </div>`;
-    html += tomorrowSlots.map(s => renderSlot(s, false)).join('');
+    html += tomorrowSlots.map(s => renderSlot(s, false, 'tomorrow')).join('');
   }
   if(futureSlots.length){
     html += `<div class="ds-section-hdr" style="margin-top:8px;">
@@ -9832,10 +9872,57 @@ function renderDriverSchedule(){
         <div style="font-size:10px;color:var(--muted);">${futureSlots.length}건</div>
       </div>
     </div>`;
-    html += futureSlots.map(s => renderSlot(s, false)).join('');
+    html += futureSlots.map(s => renderSlot(s, false, 'future')).join('');
   }
 
   wrap.innerHTML = html;
+  // ★ 미작성 일정 알림 배너 (드라이버 필독 영역 위/아래)
+  _renderMissedScheduleBanner(missedSlots);
+}
+
+// ★ 미작성 일정 알림 배너 — 홈 상단 (드라이버 필독 위)
+function _renderMissedScheduleBanner(missedSlots){
+  // banner element는 home 페이지 상단에 위치 (드라이버 필독 직전)
+  let banner = document.getElementById('home-missed-banner');
+  if(!banner){
+    // 동적 생성 — notice banner 다음에 끼워 넣기
+    const noticeBanner = document.getElementById('home-notice-banner');
+    const scheduleSection = document.getElementById('home-schedule-section');
+    const anchor = noticeBanner || scheduleSection;
+    if(!anchor || !anchor.parentNode) return;
+    banner = document.createElement('div');
+    banner.id = 'home-missed-banner';
+    banner.style.display = 'none';
+    if(noticeBanner){
+      noticeBanner.parentNode.insertBefore(banner, noticeBanner.nextSibling);
+    } else {
+      anchor.parentNode.insertBefore(banner, anchor);
+    }
+  }
+  if(!missedSlots || !missedSlots.length){
+    banner.innerHTML = '';
+    banner.style.display = 'none';
+    return;
+  }
+  // 가장 오래된 미작성 일정 1건 강조
+  const oldest = [...missedSlots].sort((a,b) => a.date < b.date ? -1 : 1)[0];
+  const dayDiff = Math.round((new Date(_todayLocalISO()+'T00:00:00').getTime() - new Date(oldest.date+'T00:00:00').getTime()) / 86400000);
+  const dayLabel = dayDiff === 1 ? '어제' : `${dayDiff}일 전`;
+  banner.className = 'ds-missed-banner';
+  banner.style.display = 'flex';
+  banner.onclick = () => {
+    // 미작성 섹션으로 스크롤
+    const sec = document.getElementById('home-schedule-section');
+    if(sec) sec.scrollIntoView({behavior:'smooth', block:'start'});
+  };
+  banner.innerHTML = `
+    <span style="font-size:22px;">🔴</span>
+    <div style="flex:1;min-width:0;">
+      <div style="font-weight:800;font-size:13px;color:#b91c1c;">⚠️ DR 미작성 일정 ${missedSlots.length}건</div>
+      <div style="font-size:11px;color:#dc2626;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${dayLabel} (${_fmtAU(oldest.date)}) ${oldest.tourCode||oldest.tourId} — 탭하여 확인 →</div>
+    </div>
+    <span style="font-size:13px;color:#b91c1c;font-weight:700;">›</span>
+  `;
 }
 
 // Schedule prefill 적용 — sessionStorage의 일정 데이터를 DR 폼에 자동 채움
@@ -10024,6 +10111,9 @@ function startDRFromSchedule(tourId, date, slotKey){
     if(typeof toast === 'function') toast('일정 정보를 찾을 수 없습니다','er');
     return;
   }
+  // ★ 미작성 과거 일정인지 판정
+  const today = _todayLocalISO();
+  const isPast = date < today;
   // sessionStorage에 저장 → DR 화면이 열릴 때 자동 채움
   try{
     sessionStorage.setItem('dc_dr_prefill', JSON.stringify(matched));
@@ -10031,10 +10121,21 @@ function startDRFromSchedule(tourId, date, slotKey){
   if(typeof toast === 'function') toast('✅ 일정 데이터 적용 중...', 'in');
   // 활성 시프트 우선 처리
   if(typeof activeShifts !== 'undefined' && activeShifts && activeShifts.length){
-    // 활성 시프트가 있으면 일정의 차량과 일치하는 것 우선
-    const matchedShift = activeShifts.find(s => s.rego === matched.slot.rego) || activeShifts[0];
-    if(matchedShift && typeof addDailyReport === 'function'){
-      addDailyReport(matchedShift.id);
+    // ★ 활성 시프트 중 같은 날짜+차량을 우선
+    const sameDayShift = activeShifts.find(s => s.date === date && s.rego === matched.slot.rego)
+      || activeShifts.find(s => s.date === date)
+      || (!isPast ? (activeShifts.find(s => s.rego === matched.slot.rego) || activeShifts[0]) : null);
+    if(sameDayShift && typeof addDailyReport === 'function'){
+      addDailyReport(sameDayShift.id);
+      return;
+    }
+    // 과거 일정인데 같은 날짜 시프트가 없으면 — Pre부터 시작 안내
+    if(isPast){
+      if(typeof showPage === 'function') showPage('report');
+      if(typeof goStep === 'function') goStep(1);
+      setTimeout(() => {
+        if(typeof toast === 'function') toast(`⚠️ 과거 일정 (${date.slice(8,10)}/${date.slice(5,7)}) — Pre Departure부터 차례로 작성해 주세요`,'in');
+      }, 400);
       return;
     }
   }
@@ -10042,7 +10143,11 @@ function startDRFromSchedule(tourId, date, slotKey){
   if(typeof showPage === 'function') showPage('report');
   if(typeof goStep === 'function') goStep(1);
   setTimeout(() => {
-    if(typeof toast === 'function') toast('🚐 먼저 Pre-Departure를 작성하세요. 작성 후 일정 정보가 자동 입력됩니다.','in');
+    if(isPast){
+      if(typeof toast === 'function') toast(`⚠️ 과거 일정 (${date.slice(8,10)}/${date.slice(5,7)}) — Pre Departure부터 차례로 작성해 주세요`,'in');
+    } else {
+      if(typeof toast === 'function') toast('🚐 먼저 Pre-Departure를 작성하세요. 작성 후 일정 정보가 자동 입력됩니다.','in');
+    }
   }, 400);
 }
 
