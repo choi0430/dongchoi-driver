@@ -17096,9 +17096,11 @@ function _subBalances(){
     }
   });
 
-  // ★★ 시나리오 4 (BillingEntity≠DC + 차량 owner≠DC) 운행의 날짜+차량 키 — 계산 제외용
+  // ★★ 시나리오 4 (BillingEntity≠DC + 차량 owner≠DC) 운행의 (날짜+차량+투어코드) 키 — 계산 제외용
   //    시나리오 2 (DC 발행 + EG 차량) 은 통과 — SUB 지급 정상 잡힘
   //    시나리오 4 만 제외 — DC 회계 무관, 참고용만
+  //    ★ 2026-05 fix: 같은 날 같은 차량으로 두 운행 (한 건은 DC 발행, 한 건은 EG 발행)인 경우,
+  //       날짜+차량만으로 매칭하면 DC 발행 운행까지 잘못 제외됨. TourCode 포함으로 정확히 구분.
   const _nonDCBilledKeys = new Set();
   if(Array.isArray(_drCache) && Array.isArray(DB?.V)){
     (_drCache || []).forEach(r => {
@@ -17110,7 +17112,10 @@ function _subBalances(){
       if(isDCVehicle) return; // 시나리오 3 — 통과
       const dateISO = parseToISO(r.Date||'');
       if(!dateISO || !rego) return;
-      _nonDCBilledKeys.add(dateISO + '|' + rego);
+      const tc = String(r.TourCode || r.Tour_Code || '').trim();
+      // TourCode 포함 키 (정확) + 날짜/차량만 키 (TourCode 없는 옛 데이터 호환용 fallback)
+      _nonDCBilledKeys.add(dateISO + '|' + rego + '|' + tc);
+      if(!tc) _nonDCBilledKeys.add(dateISO + '|' + rego);  // 옛 데이터 호환
     });
   }
 
@@ -17124,9 +17129,16 @@ function _subBalances(){
       if(m && drsubKeys.has(m[1] + '|' + m[2])) return; // DRSUB 우선
     }
     // ★★ BillingEntity≠DC 운행의 DRSUB/LEDGER 제외
+    //    ★ 2026-05 fix: TourCode까지 매칭해야 같은 날 같은 차량으로 두 운행 있을 때 오작동 안 함
     if(desc.startsWith('DRSUB:') || desc.startsWith('LEDGER:')){
-      const m = desc.match(/^(?:DRSUB|LEDGER):(\d{4}-\d{2}-\d{2})_([^_]+)/);
-      if(m && _nonDCBilledKeys.has(m[1] + '|' + m[2])) return; // 비-DC 발행 — 계산 제외
+      const m = desc.match(/^(?:DRSUB|LEDGER):(\d{4}-\d{2}-\d{2})_([^_]+)(?:_(.+))?$/);
+      if(m){
+        const tcFromDesc = (m[3] || '').trim();
+        // 1) 정확한 키 (날짜+차량+투어코드) 매칭 — TourCode 있으면 우선
+        if(tcFromDesc && _nonDCBilledKeys.has(m[1] + '|' + m[2] + '|' + tcFromDesc)) return;
+        // 2) Fallback: TourCode 없는 옛 데이터 — 날짜+차량만 매칭 (TourCode가 옛 데이터에서 비어있던 케이스)
+        if(!tcFromDesc && _nonDCBilledKeys.has(m[1] + '|' + m[2])) return;
+      }
     }
     // ★ SubCompany fallback chain — 잔액/주간요약 일관성
     //   1) tx.SubCompany 직접
