@@ -29879,18 +29879,20 @@ async function savePCToSheets(){
 // SHIFT REPORTS — Pre Departure & End of Shift History (Admin)
 // ═══════════════════════════════════════════════════════════════════════
 
-var _shiftCache = {pre: [], eos: []};
-var _shiftCacheTime = {pre: 0, eos: 0};
+var _shiftCache = {pre: [], eos: [], dr: []};
+var _shiftCacheTime = {pre: 0, eos: 0, dr: 0};
 var _shiftCurrentTab = 'pre';
 var SHIFT_CACHE_TTL = 2 * 60 * 1000;
 
 async function loadShiftReports(force=false) {
-  if (!_shiftCache) _shiftCache = {pre: [], eos: []};
-  if (!_shiftCacheTime) _shiftCacheTime = {pre: 0, eos: 0};
+  if (!_shiftCache) _shiftCache = {pre: [], eos: [], dr: []};
+  if (!_shiftCacheTime) _shiftCacheTime = {pre: 0, eos: 0, dr: 0};
   const now = Date.now();
   const needPre = force || !_shiftCache.pre.length || now - _shiftCacheTime.pre > SHIFT_CACHE_TTL;
   const needEos = force || !_shiftCache.eos.length || now - _shiftCacheTime.eos > SHIFT_CACHE_TTL;
-  if (!needPre && !needEos) { renderShiftTab(); return; }
+  // ★ DR은 '쌍 확인' 탭일 때만 필요 — 다른 탭에서는 fetch 생략
+  const needDr  = (_shiftCurrentTab === 'paired') && (force || !_shiftCache.dr.length || now - _shiftCacheTime.dr > SHIFT_CACHE_TTL);
+  if (!needPre && !needEos && !needDr) { renderShiftTab(); return; }
 
   const listEl = document.getElementById('shift-list');
   if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">⏳ 불러오는 중...</div>';
@@ -29912,6 +29914,15 @@ async function loadShiftReports(force=false) {
       if (json.ok) {
         _shiftCache.eos = (json.rows||[]).map((r,i)=>({...r, _rowIndex:r._row||(i+2)}));
         _shiftCacheTime.eos = Date.now();
+      }
+    }
+    if (needDr) {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      if (!res.ok) throw new Error('DR HTTP ' + res.status);
+      const json = await res.json();
+      if (json.ok) {
+        _shiftCache.dr = (json.rows||[]).map((r,i)=>({...r, _rowIndex:r._row||(i+2)}));
+        _shiftCacheTime.dr = Date.now();
       }
     }
   } catch(e) {
@@ -29961,7 +29972,8 @@ function _finishShiftLoad() {
   _updateShiftWeekLabel();
 
   // 데이터가 비었어도 렌더링 실행 (로딩 표시 제거)
-  renderShiftTab();
+  if (_shiftCurrentTab === 'paired') renderShiftPaired();
+  else renderShiftTab();
 
   // 데이터가 전혀 없으면 안내
   const listEl = document.getElementById('shift-list');
@@ -29996,7 +30008,15 @@ function setShiftTab(tab) {
   document.getElementById('shift-tab-pre')?.classList.toggle('on', tab==='pre');
   document.getElementById('shift-tab-eos')?.classList.toggle('on', tab==='eos');
   document.getElementById('shift-tab-paired')?.classList.toggle('on', tab==='paired');
-  if (tab === 'paired') { renderShiftPaired(); return; }
+  if (tab === 'paired') {
+    // ★ DR 캐시가 비었으면 먼저 로드 → 매칭 검증 가능
+    if (!_shiftCache.dr || !_shiftCache.dr.length) {
+      loadShiftReports(false); // 내부에서 DR도 fetch
+      return;
+    }
+    renderShiftPaired();
+    return;
+  }
   renderShiftTab();
 }
 
@@ -30096,9 +30116,10 @@ function renderShiftTab() {
   }).join('');
 }
 
-// ── 쌍 확인 뷰 (Pre + EOS 매칭) ──
+// ── 쌍 확인 뷰 (Pre + DR + EOS 매칭 + 중복 검출) ──
 function renderShiftPaired() {
-  if (!_shiftCache) _shiftCache = {pre: [], eos: []};
+  if (!_shiftCache) _shiftCache = {pre: [], eos: [], dr: []};
+  if (!_shiftCache.dr) _shiftCache.dr = [];
   const fd = (document.getElementById('shift-filter-driver')?.value||'').trim();
   const fr = (document.getElementById('shift-filter-rego')?.value||'').trim();
   const fw = (document.getElementById('shift-filter-week')?.value||'').trim();
@@ -30116,24 +30137,40 @@ function renderShiftPaired() {
 
   const preFiltered = _shiftCache.pre.filter(filterRow);
   const eosFiltered = _shiftCache.eos.filter(filterRow);
+  const drFiltered  = _shiftCache.dr.filter(filterRow);
 
-  // 날짜+드라이버+차량으로 그룹핑
+  // ★ 매칭 키: Date + Driver + Rego (한 시프트 = 한 키)
+  //   같은 키에 Pre가 2개면 중복, EOS가 2개면 중복
+  //   DR은 1개 이상이면 정상 (여러 개 가능)
   const pairs = {};
   const makeKey = r => {
     const iso = parseToISO(r.Date||'') || r.Date || '';
     return `${iso}|${(r.Driver||'').trim()}|${(r.Rego||'').trim()}`;
   };
+  const ensure = (k, r) => {
+    if (!pairs[k]) pairs[k] = {
+      date: r.Date, driver: r.Driver||'', rego: r.Rego||'',
+      pre: null, preDupes: [],     // pre가 2개 이상이면 첫 번째는 pre, 나머지는 preDupes
+      eos: null, eosDupes: [],
+      drs: []                      // DR은 배열 (여러 개 정상)
+    };
+  };
   preFiltered.forEach(r => {
-    const k = makeKey(r);
-    if (!pairs[k]) pairs[k] = {date:r.Date, driver:r.Driver||'', rego:r.Rego||'', pre:null, eos:null};
-    pairs[k].pre = r;
+    const k = makeKey(r); ensure(k, r);
+    if (pairs[k].pre) pairs[k].preDupes.push(r);
+    else pairs[k].pre = r;
   });
   eosFiltered.forEach(r => {
-    const k = makeKey(r);
-    if (!pairs[k]) pairs[k] = {date:r.Date, driver:r.Driver||'', rego:r.Rego||'', pre:null, eos:null};
-    pairs[k].eos = r;
+    const k = makeKey(r); ensure(k, r);
+    if (pairs[k].eos) pairs[k].eosDupes.push(r);
+    else pairs[k].eos = r;
+  });
+  drFiltered.forEach(r => {
+    const k = makeKey(r); ensure(k, r);
+    pairs[k].drs.push(r);
   });
 
+  // 정렬: 날짜 desc → 드라이버
   const sorted = Object.values(pairs).sort((a,b) => {
     const da = parseToISO(a.date||'')||'', db = parseToISO(b.date||'')||'';
     return db.localeCompare(da) || a.driver.localeCompare(b.driver);
@@ -30142,40 +30179,87 @@ function renderShiftPaired() {
   const container = document.getElementById('shift-list');
   if (!container) return;
 
-  // 요약
-  const totalPairs = sorted.length;
-  const complete = sorted.filter(p=>p.pre&&p.eos).length;
-  const preOnly = sorted.filter(p=>p.pre&&!p.eos).length;
-  const eosOnly = sorted.filter(p=>!p.pre&&p.eos).length;
+  // ── 상태 판정 함수 ──
+  // 우선순위: 중복 → 미완료(Pre만/EOS만) → DR 누락(Pre+EOS는 있지만 DR=0) → 완료
+  const statusOf = p => {
+    const hasDup = (p.preDupes.length > 0) || (p.eosDupes.length > 0);
+    const hasPre = !!p.pre;
+    const hasEos = !!p.eos;
+    const drCount = p.drs.length;
+    if (hasDup) return 'duplicate';
+    if (!hasPre && hasEos) return 'eos_only';
+    if (hasPre && !hasEos) return 'pre_only';
+    if (hasPre && hasEos && drCount === 0) return 'dr_missing';
+    if (hasPre && hasEos && drCount >= 1) return 'complete';
+    return 'unknown';
+  };
 
+  // 카운트
+  const counts = { complete:0, pre_only:0, eos_only:0, dr_missing:0, duplicate:0, unknown:0 };
+  sorted.forEach(p => counts[statusOf(p)]++);
+
+  // 요약 (한 줄 + 두 번째 줄)
   const sumEl = document.getElementById('shift-summary');
-  if (sumEl) sumEl.textContent = `총 ${totalPairs}건 · ✅완료 ${complete} · ⚠️Pre만 ${preOnly} · ⚠️EOS만 ${eosOnly}`;
+  if (sumEl) {
+    sumEl.innerHTML = `총 ${sorted.length}건 · ✅완료 ${counts.complete} · ⚠️Pre만 ${counts.pre_only} · ⚠️EOS만 ${counts.eos_only}` +
+      (counts.dr_missing ? ` · 📋DR누락 ${counts.dr_missing}` : '') +
+      (counts.duplicate ? ` · 🔁중복 ${counts.duplicate}` : '');
+  }
 
   if (!sorted.length) {
     container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)">📋 기록이 없습니다</div>';
     return;
   }
 
-  container.innerHTML = sorted.map(p => {
+  // ── 상태별 색상/라벨 매핑 ──
+  const STATUS_META = {
+    complete:   { bg:'#dcfce7', fg:'#166534', label:'✅ 완료',         border:'#22c55e' },
+    pre_only:   { bg:'#fef3c7', fg:'#92400e', label:'⚠️ Pre만',         border:'#f59e0b' },
+    eos_only:   { bg:'#fef3c7', fg:'#92400e', label:'⚠️ EOS만',         border:'#f59e0b' },
+    dr_missing: { bg:'#fef2f2', fg:'#b91c1c', label:'📋 DR 누락',       border:'#ef4444' },
+    duplicate:  { bg:'#fae8ff', fg:'#86198f', label:'🔁 중복 입력',     border:'#d946ef' },
+    unknown:    { bg:'#f3f4f6', fg:'#4b5563', label:'? 불명',           border:'#9ca3af' }
+  };
+
+  // 상태 필터 (URL 해시 또는 select)
+  const stFilter = (document.getElementById('shift-paired-status-filter')?.value||'').trim();
+  const view = stFilter ? sorted.filter(p => statusOf(p) === stFilter) : sorted;
+
+  container.innerHTML = view.map(p => {
+    const st = statusOf(p);
+    const meta = STATUS_META[st];
     const dateStr = fmtDate(p.date)||p.date||'—';
     const hasPre = !!p.pre;
     const hasEos = !!p.eos;
-    const isComplete = hasPre && hasEos;
+    const drCount = p.drs.length;
 
     // Pre 정보
-    let preInfo = '';
+    let preInfo = '—';
     if (hasPre) {
       const preTime = parseSheetTime(p.pre.Start_Time)||'—';
       const preKM = p.pre.Start_KM ? Number(p.pre.Start_KM).toLocaleString() : '—';
       preInfo = `⏰ ${escH(preTime)} · 🛣 ${escH(preKM)} km`;
     }
     // EOS 정보
-    let eosInfo = '';
+    let eosInfo = '—';
     if (hasEos) {
       const eos = _normalizeEOS({...p.eos});
       const eosTime = parseSheetTime(eos.End_Time)||'—';
       const eosKM = eos.End_KM ? Number(eos.End_KM).toLocaleString() : '—';
       eosInfo = `⏰ ${escH(eosTime)} · 🛣 ${escH(eosKM)} km`;
+    }
+    // DR 정보 (간략)
+    let drInfo = '';
+    if (drCount === 0) {
+      drInfo = '<span style="color:#b91c1c;font-weight:700;">❌ 미작성</span>';
+    } else {
+      const drList = p.drs.map(d => {
+        const tc = (d.Tour_Code || d.TourCode || '').trim();
+        const att = (d.Attraction || '').trim();
+        const label = tc || att || '—';
+        return escH(label);
+      }).join(', ');
+      drInfo = `<span style="color:#166534;font-weight:700;">✅ ${drCount}건</span> · ${drList}`;
     }
     // 총 KM
     let totalKM = '';
@@ -30186,20 +30270,34 @@ function renderShiftPaired() {
       if (start && end) totalKM = `🚗 총 ${(end-start).toLocaleString()} km`;
     }
 
-    const statusBg = isComplete ? '#dcfce7' : '#fef3c7';
-    const statusColor = isComplete ? '#166534' : '#92400e';
-    const statusText = isComplete ? '✅ 완료' : '⚠️ 미완료';
+    // ★ 중복 슬롯 안내 (있으면)
+    let dupHtml = '';
+    if (p.preDupes.length > 0 || p.eosDupes.length > 0) {
+      const items = [];
+      if (p.preDupes.length > 0) items.push(`Pre ${p.preDupes.length + 1}회 입력`);
+      if (p.eosDupes.length > 0) items.push(`EOS ${p.eosDupes.length + 1}회 입력`);
+      dupHtml = `<div style="margin-top:6px;padding:6px 8px;border-radius:8px;background:#fae8ff;border:1px solid #f0abfc;font-size:11px;color:#86198f;font-weight:700;">
+        🔁 중복: ${items.join(' · ')} — 같은 날·기사·차량 키에 여러 건 존재
+      </div>`;
+    }
 
-    return `<div class="crd" style="margin-bottom:8px;border-left:4px solid ${isComplete?'#22c55e':'#f59e0b'};">
+    // 액션 버튼: 상태에 따라
+    const preBtn = hasPre ? `<button class="btn bac sm" onclick="viewShiftPdfAdmin(${p.pre._rowIndex},'pre')" style="font-size:10px;padding:4px 8px;">Pre 보기</button>` : '';
+    const eosBtn = hasEos ? `<button class="btn bac sm" onclick="viewShiftPdfAdmin(${p.eos._rowIndex},'eos')" style="font-size:10px;padding:4px 8px;">EOS 보기</button>` : '';
+    const dupBtns = (p.preDupes.length + p.eosDupes.length) > 0
+      ? `<button class="btn brd sm" onclick='_showShiftDupes(${JSON.stringify({pre:p.preDupes.map(r=>r._rowIndex), eos:p.eosDupes.map(r=>r._rowIndex)}).replace(/'/g,"&apos;")})' style="font-size:10px;padding:4px 8px;">🔁 중복 보기</button>`
+      : '';
+
+    return `<div class="crd" style="margin-bottom:8px;border-left:4px solid ${meta.border};">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
             <span style="font-size:13px;font-weight:700;">${escH(p.driver||'—')}</span>
             <span style="color:var(--ac);font-size:13px;font-weight:700;">· ${escH(p.rego||'—')}</span>
-            <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${statusBg};color:${statusColor};font-weight:700;">${statusText}</span>
+            <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${meta.bg};color:${meta.fg};font-weight:700;">${meta.label}</span>
           </div>
           <div style="font-size:12px;color:var(--t2);margin-bottom:5px;">📅 ${escH(dateStr)}</div>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <div style="flex:1;min-width:140px;padding:6px 8px;border-radius:8px;background:${hasPre?'#f0fdf4':'#fef2f2'};">
               <div style="font-size:10px;font-weight:700;color:${hasPre?'#166534':'#991b1b'};margin-bottom:2px;">🚦 Pre ${hasPre?'✅':'❌ 미작성'}</div>
               ${hasPre?`<div style="font-size:11px;color:var(--t2);">${preInfo}</div>`:''}
@@ -30209,15 +30307,58 @@ function renderShiftPaired() {
               ${hasEos?`<div style="font-size:11px;color:var(--t2);">${eosInfo}</div>`:''}
             </div>
           </div>
+          <div style="margin-top:6px;padding:6px 8px;border-radius:8px;background:${drCount?'#f0fdf4':'#fef2f2'};">
+            <div style="font-size:10px;font-weight:700;color:${drCount?'#166534':'#991b1b'};margin-bottom:2px;">📋 Daily Report (${drCount}건)</div>
+            <div style="font-size:11px;color:var(--t2);">${drInfo}</div>
+          </div>
           ${totalKM?`<div style="font-size:11px;color:var(--ac);font-weight:600;margin-top:4px;">${totalKM}</div>`:''}
+          ${dupHtml}
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
-          ${hasPre?`<button class="btn bac sm" onclick="viewShiftPdfAdmin(${p.pre._rowIndex},'pre')" style="font-size:10px;padding:4px 8px;">Pre 보기</button>`:''}
-          ${hasEos?`<button class="btn bac sm" onclick="viewShiftPdfAdmin(${p.eos._rowIndex},'eos')" style="font-size:10px;padding:4px 8px;">EOS 보기</button>`:''}
+          ${preBtn}
+          ${eosBtn}
+          ${dupBtns}
         </div>
       </div>
     </div>`;
   }).join('');
+
+  // 상태 필터 드롭다운 생성 (한 번만 — 헤더 옆)
+  _ensureShiftPairedFilterUI(counts);
+}
+
+// 상태 필터 UI — 처음 한 번만 생성, 카운트로 라벨 갱신
+function _ensureShiftPairedFilterUI(counts) {
+  const sumEl = document.getElementById('shift-summary');
+  if (!sumEl || !sumEl.parentNode) return;
+  let sel = document.getElementById('shift-paired-status-filter');
+  if (!sel) {
+    sel = document.createElement('select');
+    sel.id = 'shift-paired-status-filter';
+    sel.className = 'csel-input';
+    sel.style.cssText = 'margin-left:8px;font-size:11px;padding:4px 6px;border-radius:8px;border:1px solid var(--bd);background:white;cursor:pointer;';
+    sel.onchange = () => renderShiftPaired();
+    sumEl.parentNode.insertBefore(sel, sumEl.nextSibling);
+  }
+  const opt = (v, label) => `<option value="${v}">${label}</option>`;
+  sel.innerHTML = [
+    opt('', `전체 (${counts.complete + counts.pre_only + counts.eos_only + counts.dr_missing + counts.duplicate + counts.unknown})`),
+    opt('complete',   `✅ 완료 (${counts.complete})`),
+    opt('pre_only',   `⚠️ Pre만 (${counts.pre_only})`),
+    opt('eos_only',   `⚠️ EOS만 (${counts.eos_only})`),
+    opt('dr_missing', `📋 DR 누락 (${counts.dr_missing})`),
+    opt('duplicate',  `🔁 중복 (${counts.duplicate})`)
+  ].join('');
+}
+
+// 중복 상세 보기 — modal로 행 인덱스들 보여주기
+function _showShiftDupes(data) {
+  const parts = [];
+  if (data.pre && data.pre.length) parts.push(`🚦 Pre 중복 행 (추가): ${data.pre.join(', ')}`);
+  if (data.eos && data.eos.length) parts.push(`🏁 EOS 중복 행 (추가): ${data.eos.join(', ')}`);
+  const msg = '같은 날·기사·차량 키에 추가로 입력된 행입니다.\n\n' + parts.join('\n') +
+    '\n\n해당 행은 Pre/EOS 탭에서 직접 열어 확인 또는 삭제할 수 있습니다.';
+  alert(msg);
 }
 
 // ── PDF 보기 ──
