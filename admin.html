@@ -10413,7 +10413,7 @@ async function getSubReportData(from, to) {
     .map(r => {
       const calc = calcSubReport(r);
       const iso = parseToISO(r.Date||'')||r.Date||'';
-      return { ...calc, date: iso, tourCode: r.Tour_Code||'', seats: r.Seats||'',
+      return { ...calc, date: iso, tourCode: r.Tour_Code||'', guide: r.Guide||'', seats: r.Seats||'',
         otHours: calc.subCost.ot > 0 ? (parseFloat(r.OT)||0) / (DB.PD[calc.attraction]?.[calc.capKey]?.ot || (parseInt(calc.capKey)>=40?40:30)) : 0,
         _raw: r };
     });
@@ -11925,16 +11925,68 @@ function _buildSubSettlementHTML(subOwner, from, to, items) {
     driverMap[dr].items.push(d);
   });
 
-  const itemRows = items.sort((a,b)=>a.date.localeCompare(b.date)).map(d => {
-    const sc = d.subCost;
-    const detail = [sc.ot>0?'OT $'+sc.ot:'', sc.hotel>0?'Hotel $'+sc.hotel:'', sc.dist>0?'Dist $'+sc.dist:'', sc.trailer>0?'Trailer $'+sc.trailer:''].filter(Boolean).join(' + ');
-    return `<tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;">${fd(d.date)}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">${escH(d.attraction)}${detail?'<div style="font-size:10px;color:#64748b;">'+detail+'</div>':''}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:center;">${d.rego}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">${escH(d.driver||'—')}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:700;">$${sc.total.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-    </tr>`;
+  // ── 운행 내역을 TourCode별로 그룹핑 (TourCode가 없는 운행은 '_NO_TC_' + 날짜로 단독 그룹) ──
+  //   동일 TourCode = 연속 운행(같은 투어) → 한 그룹에 묶고 그룹 소계 표시
+  const tcGroups = []; // [{ tc, rows:[], total:0 }]
+  const tcIndex = {};
+  items.slice()
+    .sort((a,b) => {
+      // 1차: TourCode (없으면 빈 문자열로 뒤로), 2차: 날짜
+      const ta = (a.tourCode||'').trim();
+      const tb = (b.tourCode||'').trim();
+      if(ta && tb && ta !== tb) return ta.localeCompare(tb);
+      if(ta && !tb) return -1;
+      if(!ta && tb) return 1;
+      return (a.date||'').localeCompare(b.date||'');
+    })
+    .forEach(d => {
+      const tc = (d.tourCode||'').trim();
+      // TourCode 없는 행은 개별 그룹 (병합 안 함)
+      const key = tc ? tc : ('__NOTC__' + (tcGroups.length + 1));
+      if(!(key in tcIndex)){
+        tcIndex[key] = tcGroups.length;
+        tcGroups.push({ tc: tc, rows: [], total: 0 });
+      }
+      const g = tcGroups[tcIndex[key]];
+      g.rows.push(d);
+      g.total += d.subCost.total;
+    });
+
+  const itemRows = tcGroups.map((g, gi) => {
+    const groupAccent = g.tc ? '#6d28d9' : '#94a3b8';
+    // 그룹 헤더 (TourCode가 있고 행이 2개 이상이면 헤더 + 소계, 1개면 헤더만)
+    let html = '';
+    if(g.tc){
+      // 날짜 범위
+      const dates = g.rows.map(r => r.date).filter(Boolean).sort();
+      const dateRange = dates.length > 1 ? (fd(dates[0])+' ~ '+fd(dates[dates.length-1])) : (dates[0]?fd(dates[0]):'');
+      html += `<tr style="background:#f5f3ff;">
+        <td colspan="6" style="padding:6px 8px;border-top:2px solid ${groupAccent};border-bottom:1px solid #ddd6fe;font-size:11px;font-weight:800;color:${groupAccent};">
+          🏷️ ${escH(g.tc)}
+          <span style="font-weight:500;color:#64748b;margin-left:8px;">· ${g.rows.length}일 · ${escH(dateRange)}</span>
+        </td>
+      </tr>`;
+    }
+    g.rows.forEach(d => {
+      const sc = d.subCost;
+      const detail = [sc.ot>0?'OT $'+sc.ot:'', sc.hotel>0?'Hotel $'+sc.hotel:'', sc.dist>0?'Dist $'+sc.dist:'', sc.trailer>0?'Trailer $'+sc.trailer:''].filter(Boolean).join(' + ');
+      html += `<tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;">${fd(d.date)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-family:'SF Mono',Consolas,monospace;font-size:11px;color:#6d28d9;font-weight:600;white-space:nowrap;">${escH(d.tourCode||'—')}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">${escH(d.attraction)}${detail?'<div style="font-size:10px;color:#64748b;">'+detail+'</div>':''}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:center;">${d.rego}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;"><div>${escH(d.driver||'—')}</div>${d.guide?'<div style="font-size:10px;color:#0891b2;">🧭 '+escH(d.guide)+'</div>':''}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:700;">$${sc.total.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      </tr>`;
+    });
+    // 그룹 소계 (TourCode가 있고 행이 2개 이상일 때만)
+    if(g.tc && g.rows.length > 1){
+      html += `<tr style="background:#faf5ff;">
+        <td colspan="5" style="padding:5px 8px;border-bottom:2px solid ${groupAccent};text-align:right;font-size:11px;font-weight:700;color:${groupAccent};">${escH(g.tc)} 소계 (${g.rows.length}일)</td>
+        <td style="padding:5px 8px;border-bottom:2px solid ${groupAccent};text-align:right;font-weight:800;color:${groupAccent};">$${g.total.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      </tr>`;
+    }
+    return html;
   }).join('');
 
   // 드라이버 비용 요약
@@ -12004,9 +12056,10 @@ function _buildSubSettlementHTML(subOwner, from, to, items) {
 <table>
   <thead><tr>
     <th style="width:80px;">Date</th>
+    <th style="width:100px;">Tour Code</th>
     <th>Service / Tour</th>
     <th style="width:70px;text-align:center;">Vehicle</th>
-    <th style="width:100px;">Driver</th>
+    <th style="width:120px;">Driver / Guide</th>
     <th style="width:110px;text-align:right;">Amount</th>
   </tr></thead>
   <tbody>${itemRows}</tbody>
