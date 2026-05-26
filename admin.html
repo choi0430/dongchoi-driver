@@ -16745,7 +16745,7 @@ function _egIsDCEntity(s){
 //   반환: { q2: [], q3: [], q4: [], counts:{q1,q2,q3,q4} }
 //   q1(무관)은 카운트만 (실제 행은 저장 안 함)
 function _egQuadrantMatrix(){
-  const out = { q2: [], q3: [], q4: [], counts: {q1:0, q2:0, q3:0, q4:0} };
+  const out = { q1: [], q2: [], q3: [], q4: [], counts: {q1:0, q2:0, q3:0, q4:0} };
   if(!Array.isArray(_drCache)) return out;
   const vehMap = {};
   (DB.V || []).forEach(v => { if(v.Rego) vehMap[v.Rego] = v; });
@@ -16788,8 +16788,8 @@ function _egQuadrantMatrix(){
 
     // 4구역 분류
     if(isDCBilling && isDCVehicle){
-      // ① DC빌링 + DC차량 — EG와 무관 (Agency가 EG여도 DC 일반 운영으로 본다)
-      out.counts.q1++;
+      // ① DC빌링 + DC차량 — Agency만 EG (또는 빌링 미기재) — DC 자사 운영
+      out.q1.push(r); out.counts.q1++;
     } else if(isDCBilling && isEGVehicle){
       // ② DC빌링 + EG차량 — EG가 서브 (DC가 EG에게 외주비 지급)
       out.q2.push(r); out.counts.q2++;
@@ -16815,6 +16815,7 @@ function _egQuadrantMatrixHTML(){
   const _drOf = r => Number(r.DR_Cost||r.Total||0)||0;
   const _taOf = r => (typeof calcAgencyTA === 'function') ? (Number(calcAgencyTA(r))||0) : 0;
 
+  const q1DR = _sum(m.q1, _drOf), q1TA = _sum(m.q1, _taOf);
   const q2DR = _sum(m.q2, _drOf), q2TA = _sum(m.q2, _taOf);
   const q3DR = _sum(m.q3, _drOf), q3TA = _sum(m.q3, _taOf);
   const q4DR = _sum(m.q4, _drOf), q4TA = _sum(m.q4, _taOf);
@@ -16976,10 +16977,11 @@ function _egQuadrantMatrixHTML(){
       <div style="font-size:9px;font-weight:700;color:#1f2937;background:#f3f4f6;padding:4px;border-radius:4px;display:flex;align-items:center;justify-content:center;">DC<br>빌링</div>
       ${_cell({
         title:'① DC 자사 운영', subtitle:'DC가 청구 + DC가 운행',
-        count: m.counts.q1, drVal:0, taVal:0,
+        count: m.counts.q1, drVal: q1DR, taVal: q1TA,
         accent:'#6b7280',
-        note:'EG와 무관 — 카운트만 표시',
-        rows:[], rowsKey:'q1'
+        drLabel:'드라이버 비용', taLabel:'DC가 청구',
+        note:'DC가 자사 차량으로 운행 + 여행사에 직접 청구',
+        rows: m.q1, rowsKey:'q1'
       })}
       ${_cell({
         title:'② EG가 서브', subtitle:'DC가 청구 + EG 차량 운행',
