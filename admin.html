@@ -16464,6 +16464,11 @@ function _buildWageTxns(){
       type:'DR', driver, date:isoDate,
       desc:(r.Attraction||r.Tour_Code||r.Agency||'운행'),
       amount:earned, source:'dr_report', payer, rego: r.Rego||'',
+      // ★ 상세 표시용 필드 — Agency/TourCode/Guide/Rego
+      agency: String(r.Agency||'').trim(),
+      tourCode: String(r.Tour_Code||'').trim(),
+      guide: String(r.Guide||'').trim(),
+      attraction: String(r.Attraction||'').trim(),
       // ★ SUB 차량 운행 — 차주 지급 확인 추적용
       _rowIndex: r._rowIndex || null,
       subPaidOwner: String(r.SubPaid_Owner||'').toUpperCase() === 'Y',
@@ -19008,20 +19013,48 @@ function renderBalDetail(){
         <span style="color:${(dr-cr)>0?'var(--or)':'var(--gn)'};">잔액 $${(dr-cr).toLocaleString('en',{minimumFractionDigits:2})}</span>
       </div>`;
     const all = [...drRows.map(r=>({...r,_sort:parseToISO(r.date||'')})), ...crRows.map(r=>({...r,_sort:parseToISO(r.date||'')}))].sort((a,b)=>(a._sort||'').localeCompare(b._sort||''));
+    // HTML escape — 사용자 입력(여행사명·가이드명 등)에 특수문자가 들어와도 안전하게 표시
+    const _esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     html = `<table style="width:100%;font-size:11px;border-collapse:collapse;">
       <thead><tr style="border-bottom:1px solid var(--b2);color:var(--t3);font-size:10px;">
         <th style="text-align:left;padding:6px 4px;">Date (날짜)</th>
-        <th style="text-align:left;padding:6px 4px;">내용</th>
+        <th style="text-align:left;padding:6px 4px;">여행사 (Agency)</th>
+        <th style="text-align:left;padding:6px 4px;">투어코드 (Tour Code)</th>
+        <th style="text-align:left;padding:6px 4px;">코스 (Attraction)</th>
+        <th style="text-align:left;padding:6px 4px;">가이드 (Guide)</th>
+        <th style="text-align:left;padding:6px 4px;">차량 (Rego)</th>
         <th style="text-align:right;padding:6px 4px;">발생(DR)</th>
         <th style="text-align:right;padding:6px 4px;">지급(CR)</th>
       </tr></thead><tbody>`;
     all.forEach(r=>{
-      html += `<tr style="border-bottom:1px solid var(--b1);">
-        <td style="padding:6px 4px;white-space:nowrap;">${fmtDate(r.date)||'—'}</td>
-        <td style="padding:6px 4px;">${r.desc||'—'}</td>
-        <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${r.type==='DR'?'$'+Number(r.amount).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
-        <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${r.type==='CR'?'$'+Number(r.amount).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
-      </tr>`;
+      const isDR = r.type === 'DR';
+      const isCR = r.type === 'CR';
+      // CR 행은 desc가 비고/지급방법 — 단일 셀로 합쳐서 표시
+      if(isCR){
+        html += `<tr style="border-bottom:1px solid var(--b1);background:rgba(34,197,94,0.04);">
+          <td style="padding:6px 4px;white-space:nowrap;">${fmtDate(r.date)||'—'}</td>
+          <td colspan="5" style="padding:6px 4px;color:var(--t2);font-style:italic;">${_esc(r.desc||'급여 지급')}</td>
+          <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);"></td>
+          <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">$${Number(r.amount).toLocaleString('en',{minimumFractionDigits:2})}</td>
+        </tr>`;
+      } else {
+        // DR 행 — 운행 상세
+        const _agency = r.agency || '';
+        const _tc = r.tourCode || '';
+        const _attr = r.attraction || r.desc || '';
+        const _guide = r.guide || '';
+        const _rego = r.rego || '';
+        html += `<tr style="border-bottom:1px solid var(--b1);">
+          <td style="padding:6px 4px;white-space:nowrap;">${fmtDate(r.date)||'—'}</td>
+          <td style="padding:6px 4px;color:var(--t1);">${_esc(_agency) || '<span style="color:var(--t3);">—</span>'}</td>
+          <td style="padding:6px 4px;font-family:var(--fn);color:var(--ac);">${_esc(_tc) || '<span style="color:var(--t3);">—</span>'}</td>
+          <td style="padding:6px 4px;">${_esc(_attr) || '<span style="color:var(--t3);">—</span>'}</td>
+          <td style="padding:6px 4px;">${_esc(_guide) || '<span style="color:var(--t3);">—</span>'}</td>
+          <td style="padding:6px 4px;font-family:var(--fn);">${_esc(_rego) || '<span style="color:var(--t3);">—</span>'}</td>
+          <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">$${Number(r.amount).toLocaleString('en',{minimumFractionDigits:2})}</td>
+          <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);"></td>
+        </tr>`;
+      }
     });
     html += '</tbody></table>';
     // Hide add button for wage (uses existing Wage entry system)
