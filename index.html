@@ -3770,6 +3770,11 @@ function _onAuthFailure(reason){
 // ═══════════════════════════════════════════════════════════════════════════
 var _reauthInProgress = false;
 var _reauthPinValue = '';
+// ★ 재인증 안정성을 위한 추가 상태
+var _reauthSubmitting = false;        // PIN submit 중 (응답 대기) — 모달 닫지 않고 다른 401 무시
+var _reauthGraceUntil = 0;            // 재인증 성공 후 N ms 동안 모든 401 무시 (토큰 전파 지연 대비)
+var _reauthLastSubmitTs = 0;          // 마지막 PIN submit 시각 — throttle용
+var _reauthLastShownTs = 0;           // 마지막 모달 표시 시각 — 빠른 재오픈 차단
 
 function _reauthModalEnsure(){
   if(document.getElementById('reauth-modal')) return;
@@ -3828,12 +3833,24 @@ function _reauthModalEnsure(){
 
 function _reauthPinPress(digit){
   if(!_reauthInProgress) return;
+  // ★ submit 응답 대기 중에는 입력 차단 (이중 입력/이중 submit 방지)
+  if(_reauthSubmitting) return;
   if(_reauthPinValue.length >= 4) return;
   _reauthPinValue += digit;
   _reauthUpdateDots();
-  if(_reauthPinValue.length === 4) _reauthSubmit();
+  // ★ 4자리 자동 submit — 짧은 delay로 사용자가 마지막 자리 확인 가능
+  if(_reauthPinValue.length === 4){
+    setTimeout(()=>{
+      // submit 시점에 다시 한번 검증 (그 사이 backspace 했을 수도)
+      if(_reauthInProgress && !_reauthSubmitting && _reauthPinValue.length === 4){
+        _reauthSubmit();
+      }
+    }, 150);
+  }
 }
 function _reauthPinBack(){
+  // submit 중에는 backspace도 무시
+  if(_reauthSubmitting) return;
   _reauthPinValue = _reauthPinValue.slice(0, -1);
   _reauthUpdateDots();
 }
@@ -3861,6 +3878,13 @@ function _reauthShowError(msg){
 }
 
 async function _reauthSubmit(){
+  // ★ 동시 submit 방지 (PIN 빠른 더블탭 등)
+  if(_reauthSubmitting) return;
+  // ★ throttle — 마지막 submit 후 700ms 이내면 무시 (4자리 자동 submit + 사용자 추가 입력 보호)
+  const _now = Date.now();
+  if(_now - _reauthLastSubmitTs < 700) return;
+  _reauthLastSubmitTs = _now;
+
   const driverName = (localStorage.getItem('dc_last_driver') || '').split('|')[0];
   if(!driverName){
     // 드라이버 이름 없으면 부드러운 재인증 불가 → 하드 로그아웃
@@ -3868,7 +3892,17 @@ async function _reauthSubmit(){
     return;
   }
   const pin = _reauthPinValue;
+  if(!pin || pin.length !== 4){
+    _reauthShowError('PIN 4자리를 입력해주세요');
+    return;
+  }
+  _reauthSubmitting = true;
   _reauthShowError(''); // 에러 클리어
+  // 시각적 피드백 — 점들에 깜빡임
+  try {
+    const dots = document.querySelectorAll('.reauth-dot');
+    dots.forEach(d => d.style.opacity = '0.5');
+  } catch(e){}
   try {
     const ua = (navigator.userAgent||'').slice(0,80) + ' [reauth]';
     const res = await fetch(APPS_SCRIPT_URL, {
@@ -3883,6 +3917,15 @@ async function _reauthSubmit(){
       if(j && j.reason === 'too_many_attempts') m = (j.message || '너무 많은 시도. 잠시 후 다시');
       else if(j && j.warning === 'attempts_remaining') m = '틀림 — 남은 시도 ' + (j.attemptsLeft||0) + '회';
       _reauthShowError(m);
+      // PIN 클리어해서 다시 입력하도록
+      _reauthPinValue = '';
+      _reauthUpdateDots();
+      // 점들 시각 복원
+      try {
+        const dots = document.querySelectorAll('.reauth-dot');
+        dots.forEach(d => d.style.opacity = '1');
+      } catch(e){}
+      _reauthSubmitting = false;
       return;
     }
     // 성공 — 토큰 저장하고 모달만 닫음 (앱은 그대로)
@@ -3893,16 +3936,31 @@ async function _reauthSubmit(){
       localStorage.setItem('dc_token_role', j.role||'driver');
       localStorage.setItem('dc_session_' + driverName, '1');
     } catch(e){}
+    // ★ 재인증 성공 직후 3초간 모든 401 응답 무시 — inflight 요청들이 옛 토큰으로 보내져 401이 와도 무시
+    _reauthGraceUntil = Date.now() + 3000;
+    _reauthSubmitting = false;
     _reauthClose();
     try { if(typeof showToast==='function') showToast('세션 갱신 완료','success'); } catch(e){}
   } catch(e) {
     _reauthShowError('네트워크 오류 — 다시 시도');
+    _reauthSubmitting = false;
+    // 점들 시각 복원
+    try {
+      const dots = document.querySelectorAll('.reauth-dot');
+      dots.forEach(d => d.style.opacity = '1');
+    } catch(e){}
   }
 }
 
 function _reauthOpen(reason){
   // 이미 진행 중이면 중복 호출 무시
   if(_reauthInProgress) return;
+  // ★ submit 중이면 무시 (응답 대기 중 다른 401 무시)
+  if(_reauthSubmitting) return;
+  // ★ 재인증 성공 후 grace period 동안 무시 (옛 토큰 inflight 응답 차단)
+  if(Date.now() < _reauthGraceUntil) return;
+  // ★ 빠른 재오픈 차단 — 직전 모달이 닫힌 후 1초 이내면 무시
+  if(_reauthLastShownTs && (Date.now() - _reauthLastShownTs) < 1000) return;
   // admin_only 권한 문제는 PIN 재입력으로 해결 안 됨 → 하드 로그아웃
   if(reason === 'forbidden' || reason === 'admin_only'){
     _onAuthFailure(reason);
@@ -3915,6 +3973,7 @@ function _reauthOpen(reason){
     return;
   }
   _reauthInProgress = true;
+  _reauthLastShownTs = Date.now();
   _reauthPinValue = '';
   _reauthModalEnsure();
   const nameEl = document.getElementById('reauth-driver-name');
@@ -4010,8 +4069,16 @@ function _softReauth(reason){
                 const body = (init && init.body) || '';
                 const isPublic = /"action"\s*:\s*"(login|ping|logout|get_login_names)"/.test(body)
                   || /action=(login|ping|logout|get_login_names)/.test(url);
-                // 재인증 모달 진행 중이면 추가 401 무시 (백그라운드 폴링 중복 트리거 차단)
-                if (!isPublic && !_reauthInProgress) {
+                // ★ 다음 조건들은 모달 재트리거 차단:
+                //   1) 재인증 모달 진행 중 (_reauthInProgress)
+                //   2) PIN submit 응답 대기 중 (_reauthSubmitting)
+                //   3) 재인증 성공 후 grace period 안 (옛 토큰 inflight 응답 무시)
+                //   4) public 액션 (login 등 — 자기 자신의 응답 무한 루프 방지)
+                const inGrace = Date.now() < (typeof _reauthGraceUntil !== 'undefined' ? _reauthGraceUntil : 0);
+                const reauthBlocked = _reauthInProgress
+                  || (typeof _reauthSubmitting !== 'undefined' && _reauthSubmitting)
+                  || inGrace;
+                if (!isPublic && !reauthBlocked) {
                   const r = j.reason || j.error || 'unauthorized';
                   // 부드러운 재인증 사용 (PIN 모달만 띄움, 앱 화면/폼 보존)
                   if (typeof _softReauth === 'function') _softReauth(r);
@@ -6325,7 +6392,6 @@ function _finalizeDailyReportSave(_drBtn){
   renderTodayReports();
   renderStep2SavedReports();
   clearDailyDraft();  // 제출 완료 → draft 삭제
-  clearSchedulePrefill();  // 제출 완료 → schedule prefill 정리 (clearDailyDraft에서 분리됨)
   // ★ 임시 시프트(_synthetic) 정리 — 닫힌 시프트에 DR만 추가한 경우
   //   localStorage에는 저장하지 않았으므로 메모리에서만 제거
   try {
@@ -7167,10 +7233,8 @@ function saveDailyDraft(){
 function clearDailyDraft(){
   try { localStorage.removeItem(_draftKey()); } catch(e) {}
   _clearDraftOnServer();
-  // ★ prefill은 여기서 지우지 않음 — clearDailyDraft는 빈 draft 정리 시점에도
-  //   자동으로 호출되는데(saveDailyDraft 안에서 _hasContent=false일 때 등),
-  //   그 시점에 prefill까지 함께 지워지면 applySchedulePrefill 실행 전 데이터가 사라짐.
-  //   DR 제출 완료 시점에는 별도로 clearSchedulePrefill()을 명시 호출.
+  // ★ DR 제출 완료 — schedule prefill도 정리
+  try { sessionStorage.removeItem('dc_dr_prefill'); } catch(e) {}
 }
 // ═══════════════════════════════════════════════════════
 // PRE DEPARTURE DRAFT — 제거됨 (임시저장/복원 비활성화)
@@ -10006,41 +10070,6 @@ function applySchedulePrefill(){
   if(!data || !data.slot) return;
   const slot = data.slot;
 
-  // ★ 진단 로그 — Schedule에서 받은 데이터 전체 dump
-  //   prefill이 일어났는데 화면이 비어있을 때 원인 파악용
-  try {
-    console.log('[applySchedulePrefill] === DATA DUMP ===');
-    console.log('  data.agency       =', JSON.stringify(data.agency));
-    console.log('  data.guide        =', JSON.stringify(data.guide));
-    console.log('  data.guidePhone   =', JSON.stringify(data.guidePhone));
-    console.log('  data.tourCode     =', JSON.stringify(data.tourCode));
-    console.log('  data.seats        =', JSON.stringify(data.seats));
-    console.log('  data.pax          =', JSON.stringify(data.pax));
-    console.log('  data.billingEntity=', JSON.stringify(data.billingEntity));
-    console.log('  data.date         =', JSON.stringify(data.date));
-    console.log('  data.trailer      =', JSON.stringify(data.trailer));
-    console.log('  data.flightIn     =', JSON.stringify(data.flightIn));
-    console.log('  data.flightOut    =', JSON.stringify(data.flightOut));
-    console.log('  slot.course       =', JSON.stringify(slot.course));
-    console.log('  slot.startPlace   =', JSON.stringify(slot.startPlace));
-    console.log('  slot.endPlace     =', JSON.stringify(slot.endPlace));
-    console.log('  slot.rego         =', JSON.stringify(slot.rego));
-    console.log('  slot.startTime    =', JSON.stringify(slot.startTime));
-    console.log('  slot.endTime      =', JSON.stringify(slot.endTime));
-    console.log('  slot.driver       =', JSON.stringify(slot.driver));
-    console.log('  slot.subDriver    =', JSON.stringify(slot.subDriver));
-    console.log('  slot.mode         =', JSON.stringify(slot.mode));
-    console.log('=== END DUMP ===');
-  } catch(e){}
-
-  // ★ 빈 필드 진단 — 어떤 필드가 빈 값으로 와서 채우지 못했는지 추적
-  const _empty = [];
-  if(!data.agency) _empty.push('Agency');
-  if(!data.guide) _empty.push('Guide');
-  if(!data.tourCode) _empty.push('TourCode');
-  if(!data.seats) _empty.push('Seats');
-  if(!slot.course) _empty.push('Course');
-
   let filled = [];
 
   // 여행사
@@ -10186,14 +10215,9 @@ function applySchedulePrefill(){
   }, 150);
 
   if(filled.length && typeof showToast === 'function'){
-    let msg = `✅ 자동 입력: ${filled.join(', ')} (${filled.length}개)`;
-    if(_empty.length) msg += ` · ⚠️ Schedule에 비어있음: ${_empty.join(', ')}`;
-    showToast(msg, 'success');
+    showToast(`✅ 일정 자동 입력: ${filled.join(', ')} (${filled.length}개)`,'success');
   } else if(filled.length && typeof toast === 'function'){
     toast(`✅ 일정 자동 입력: ${filled.length}개 필드`,'ok');
-  } else if(_empty.length && typeof showToast === 'function'){
-    // 채워진 필드 0 + 빈 필드만 있음 → Schedule 시트의 데이터 자체가 비어있음
-    showToast(`⚠️ Schedule 데이터가 비어있음: ${_empty.join(', ')} — 어드민에서 일정에 정보를 추가하세요`, 'error');
   }
 
   // ★ Billing Entity dropdown 강제 갱신 — prefill 후 일정의 BillingEntity로 잠기도록
