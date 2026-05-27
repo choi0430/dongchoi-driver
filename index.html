@@ -10119,41 +10119,80 @@ function startDRFromSchedule(tourId, date, slotKey){
     sessionStorage.setItem('dc_dr_prefill', JSON.stringify(matched));
   }catch(e){}
   if(typeof toast === 'function') toast('✅ 일정 데이터 적용 중...', 'in');
-  // ★ 날짜 형식 통일: activeShifts.date는 dd/MM/yyyy (getMyShifts→formatDateForSheet),
-  //   인자 date는 YYYY-MM-DD (get_driver_schedule)
-  //   비교 전 양쪽을 dd/MM/yyyy로 정규화한다 (fmtDate는 두 형식 모두 처리)
-  const dateAU = (typeof fmtDate === 'function') ? fmtDate(date) : date;
-  const _shiftDateAU = s => (typeof fmtDate === 'function') ? fmtDate(s.date) : s.date;
+
+  // ─────────────────────────────────────────────────────────────
+  // ★ 시프트 매칭 — 다층 fallback
+  //   activeShifts[i].date: dd/MM/yyyy  (getMyShifts → formatDateForSheet)
+  //   date 인자: YYYY-MM-DD              (get_driver_schedule)
+  //   matched.slot.rego: 일정의 차량
+  //
+  //   매칭 우선순위:
+  //     A. 같은 날짜 + 같은 차량 (가장 정확)
+  //     B. 같은 날짜 (다른 차량이라도)
+  //     C. 같은 차량 (날짜 무관) ← 유성훈 케이스: 26일 Pre 없고 27일만 있어도 27일 시프트에 묶음
+  //     D. 미래 일정만: 가장 최근 시프트
+  //   모두 실패 시: Pre Departure부터 작성하도록 Step 1로
+  // ─────────────────────────────────────────────────────────────
+  const _norm = d => (typeof fmtDate === 'function') ? fmtDate(d) : String(d||'');
+  const dateAU = _norm(date);
+  const _shiftDateAU = s => _norm(s.date);
   const _matchRego = String(matched?.slot?.rego||'').trim().toUpperCase();
   const _shiftRego = s => String(s.rego||'').trim().toUpperCase();
-  // 활성 시프트 우선 처리
-  if(typeof activeShifts !== 'undefined' && activeShifts && activeShifts.length){
-    // ★ 활성 시프트 중 같은 날짜+차량을 우선
-    const sameDayShift = activeShifts.find(s => _shiftDateAU(s) === dateAU && _shiftRego(s) === _matchRego)
-      || activeShifts.find(s => _shiftDateAU(s) === dateAU)
-      || (!isPast ? (activeShifts.find(s => _shiftRego(s) === _matchRego) || activeShifts[0]) : null);
-    if(sameDayShift && typeof addDailyReport === 'function'){
-      addDailyReport(sameDayShift.id);
-      return;
+
+  const hasShifts = (typeof activeShifts !== 'undefined' && activeShifts && activeShifts.length);
+  // 진단 로깅 — 다음에 안 될 때 콘솔에서 즉시 원인 확인
+  try {
+    console.log('[startDRFromSchedule] tourId=' + tourId + ' date=' + date + ' slotKey=' + slotKey,
+      '\n  matched.slot.rego =', _matchRego,
+      '\n  dateAU =', dateAU,
+      '\n  isPast =', isPast,
+      '\n  activeShifts =', hasShifts ? activeShifts.map(s => ({id:s.id, date:s.date, dateAU:_shiftDateAU(s), rego:_shiftRego(s)})) : '(none)');
+  } catch(e){}
+
+  let sameDayShift = null;
+  let matchLayer = '';
+  if(hasShifts){
+    // A. 같은 날짜 + 같은 차량
+    sameDayShift = activeShifts.find(s => _shiftDateAU(s) === dateAU && _shiftRego(s) === _matchRego);
+    if(sameDayShift) matchLayer = 'A: 같은 날짜+차량';
+    // B. 같은 날짜만
+    if(!sameDayShift){
+      sameDayShift = activeShifts.find(s => _shiftDateAU(s) === dateAU);
+      if(sameDayShift) matchLayer = 'B: 같은 날짜 (다른 차량)';
     }
-    // 과거 일정인데 같은 날짜 시프트가 없으면 — Pre부터 시작 안내
-    if(isPast){
-      if(typeof showPage === 'function') showPage('report');
-      if(typeof goStep === 'function') goStep(1);
-      setTimeout(() => {
-        if(typeof toast === 'function') toast(`⚠️ 과거 일정 (${date.slice(8,10)}/${date.slice(5,7)}) — Pre Departure부터 차례로 작성해 주세요`,'in');
-      }, 400);
-      return;
+    // C. 같은 차량만 (날짜 무관) — 핵심 fallback
+    if(!sameDayShift && _matchRego){
+      sameDayShift = activeShifts.find(s => _shiftRego(s) === _matchRego);
+      if(sameDayShift) matchLayer = 'C: 같은 차량 (다른 날짜)';
+    }
+    // D. 미래 일정인 경우만 가장 최근 시프트
+    if(!sameDayShift && !isPast){
+      sameDayShift = activeShifts[activeShifts.length - 1];
+      if(sameDayShift) matchLayer = 'D: 최근 시프트 (미래 일정 fallback)';
     }
   }
-  // 활성 시프트 없음 → Pre-Departure부터
+
+  try { console.log('[startDRFromSchedule] match result =', matchLayer || 'NONE', sameDayShift ? '→ id='+sameDayShift.id : ''); } catch(e){}
+
+  if(sameDayShift && typeof addDailyReport === 'function'){
+    if(typeof toast === 'function') toast(`🚐 ${sameDayShift.rego} 시프트로 DR 작성을 시작합니다`, 'in');
+    addDailyReport(sameDayShift.id);
+    return;
+  }
+
+  // 매칭 시프트가 전혀 없음 → 차량별 안내 후 Pre부터 시작
   if(typeof showPage === 'function') showPage('report');
   if(typeof goStep === 'function') goStep(1);
   setTimeout(() => {
-    if(isPast){
-      if(typeof toast === 'function') toast(`⚠️ 과거 일정 (${date.slice(8,10)}/${date.slice(5,7)}) — Pre Departure부터 차례로 작성해 주세요`,'in');
+    const _dStr = date.length === 10 && date[4]==='-'
+      ? `${date.slice(8,10)}/${date.slice(5,7)}`
+      : date;
+    if(!hasShifts){
+      if(typeof toast === 'function') toast(`🚐 ${_dStr} ${_matchRego||''} — Pre Departure를 먼저 작성하세요. 일정 정보가 자동 입력됩니다.`,'in');
+    } else if(isPast){
+      if(typeof toast === 'function') toast(`⚠️ 과거 일정 (${_dStr}) ${_matchRego||''} — Pre Departure부터 차례로 작성해 주세요`,'in');
     } else {
-      if(typeof toast === 'function') toast('🚐 먼저 Pre-Departure를 작성하세요. 작성 후 일정 정보가 자동 입력됩니다.','in');
+      if(typeof toast === 'function') toast(`🚐 ${_matchRego||''} Pre Departure를 작성하세요. 작성 후 일정 정보가 자동 입력됩니다.`,'in');
     }
   }, 400);
 }
