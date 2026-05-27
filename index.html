@@ -4558,6 +4558,32 @@ function _persistShifts(driverName){
   } catch(e){ console.warn('_persistShifts error:', e); }
 }
 
+// ★ 사용자가 현재 DR/Pre/EOS를 작성/편집 중인지 판단
+//   true면 editingShiftId를 sync/폴링이 덮어쓰면 안 됨 (검증·KM 비교가 잘못된 시프트 기준이 됨)
+function _isReportEditing(){
+  try {
+    // 1) Report 페이지 활성 + Step 2 (Daily Report) → 작성 중
+    const reportPageActive = document.getElementById('page-report')?.classList?.contains('active');
+    if(reportPageActive && typeof currentStep !== 'undefined' && currentStep === 2) return true;
+    // 2) 현재 editing 시프트가 임시(_synthetic) 시프트라면 보호
+    //    (닫힌 시프트 또는 백엔드에서 가져온 시프트로 DR 작성 중)
+    if(editingShiftId && (activeShifts||[]).some(s => s.id === editingShiftId && s._synthetic)) return true;
+  } catch(e){}
+  return false;
+}
+// ★ editingShiftId를 안전하게 마지막 시프트로 설정 — 편집 중이면 건드리지 않음
+function _safeSetEditingToLast(){
+  if(_isReportEditing()) {
+    try { console.log('[editingShiftId] sync ignored — user is editing report; keeping', editingShiftId); } catch(e){}
+    return;
+  }
+  if(activeShifts && activeShifts.length > 0){
+    editingShiftId = activeShifts[activeShifts.length - 1].id;
+  } else {
+    editingShiftId = null;
+  }
+}
+
 // ═══════════════════════════════════════
 // LOGIN / LOGOUT
 // ═══════════════════════════════════════
@@ -4912,8 +4938,8 @@ async function syncShiftsFromServer(driverName) {
     }
 
     // sync 완료 후 항상 저장 & 렌더링 (비동기 완료 시점에 UI 갱신 보장)
-    if (activeShifts.length > 0) editingShiftId = activeShifts[activeShifts.length - 1].id;
-    else editingShiftId = null;
+    // ★ DR 편집 중이면 editingShiftId를 건드리지 않음 (KM 검증이 잘못된 시프트 기준이 되는 것 방지)
+    _safeSetEditingToLast();
     // ★ localStorage에는 임시 시프트(_synthetic) 제외 — 페이지 새로고침 시 자연스럽게 사라짐
     localStorage.setItem('shifts_' + driverName, JSON.stringify(activeShifts.filter(s => !s._synthetic)));
     renderShiftSection();
@@ -6305,9 +6331,37 @@ function _finalizeDailyReportSave(_drBtn){
   const _nightType = document.getElementById('f-night-type')?.value || 'none';
   const _isPrivateNight = _nightType.startsWith('private_');
   const _isPrivateRun = document.getElementById('dr-private')?.checked || false;
-  const shift = activeShifts.find(s=>s.id===editingShiftId);
+  let shift = activeShifts.find(s=>s.id===editingShiftId);
   if(!shift){ _unlockSubmitBtn(_drBtn);showToast('⚠️ Pre Departure를 먼저 완료하세요','error'); return; }
   if(!editingShiftId){ _unlockSubmitBtn(_drBtn);showToast('⚠️ editingShiftId 없음','error'); return; }
+
+  // ★ 안전망: 폼의 날짜+차량과 시프트 데이터가 일치하는지 확인
+  //   폴링/sync로 editingShiftId가 다른 시프트로 바뀌었을 수 있음 (예: 어제 일정 작성 중 오늘 시프트로 변경)
+  //   불일치 시 폼의 날짜+차량으로 올바른 시프트를 다시 찾아 사용
+  try {
+    const _formDate = (document.getElementById('dr-date')?.value || '').trim();  // dd/mm/yyyy
+    const _shiftPageRego = document.getElementById('step2-rego-display')?.textContent || '';
+    const _shiftDate = (typeof fmtDate === 'function') ? fmtDate(shift.date) : shift.date;
+    const _shiftRego = String(shift.rego||'').trim();
+    // 폼 날짜가 시프트 날짜와 다르면 — 올바른 시프트 재선택
+    if(_formDate && _shiftDate && _formDate !== _shiftDate){
+      console.warn('[_finalize] shift date mismatch — form:', _formDate, 'vs shift:', _shiftDate, '. Re-selecting correct shift.');
+      // 같은 차량 + 폼 날짜에 매칭되는 시프트 찾기
+      const correct = activeShifts.find(s => {
+        const sd = (typeof fmtDate === 'function') ? fmtDate(s.date) : s.date;
+        return sd === _formDate && String(s.rego||'').trim().toUpperCase() === _shiftRego.toUpperCase();
+      });
+      if(correct){
+        console.log('[_finalize] re-selected shift:', correct.id, correct.rego, correct.date);
+        editingShiftId = correct.id;
+        shift = correct;
+      } else {
+        // 매칭되는 시프트 없음 — 사용자가 폼의 날짜를 직접 수정했을 수 있음. 현재 시프트 그대로 사용하지만 경고
+        console.warn('[_finalize] no matching shift for form date — using current shift');
+      }
+    }
+  } catch(e){ console.warn('[_finalize] shift verification error:', e); }
+
   // 제출 직전 항상 재계산 (SVC 자동선택 후 calcTotal이 안 불린 경우 대비)
   autoRate();
   calcTotal();
