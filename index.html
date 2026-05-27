@@ -511,7 +511,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 <!-- TOP BAR -->
 <div class="topbar">
   <div>
-    <div class="topbar-logo">🚌 DC FLEET</div>
+    <div class="topbar-logo">🚌 DC FLEET <span style="font-size:9px;color:rgba(255,255,255,0.4);font-weight:500;letter-spacing:0;margin-left:4px;">v2026.05.27c</span></div>
   </div>
   <div class="topbar-right">
     <div class="notif-btn" onclick="showPage('notices')">🔔<div class="notif-dot" id="notif-dot"></div></div>
@@ -5993,7 +5993,10 @@ function addDailyReport(shiftId){
   if(pvtChk && pvtChk.checked){ pvtChk.checked=false; togglePrivateMode(); }
   // ★ Schedule prefill 적용 — prefill이 있으면 무조건 적용 (draft 무시)
   if(_hasPrefill){
-    setTimeout(()=>{ try{ applySchedulePrefill(); }catch(e){ console.warn('prefill error', e); } }, 200);
+    if(typeof showToast === 'function') showToast('🔄 addDailyReport: prefill 분기 진입 (200ms 후 호출)', 'info');
+    setTimeout(()=>{ try{ applySchedulePrefill(); }catch(e){ console.warn('prefill error', e); if(typeof showToast === 'function') showToast('❌ prefill 호출 예외: ' + (e.message||e), 'error'); } }, 200);
+  } else {
+    if(typeof showToast === 'function') showToast('⚠️ addDailyReport: prefill 없음 (sessionStorage 비어있음)', 'error');
   }
 }
 
@@ -10160,12 +10163,30 @@ function _renderMissedScheduleBanner(missedSlots){
 //     유지되어야 함). 실제로 DR 또는 Pre 폼이 제출 완료될 때 clearSchedulePrefill()로 삭제.
 function applySchedulePrefill(){
   const raw = sessionStorage.getItem('dc_dr_prefill');
-  if(!raw) return;
+  if(!raw) {
+    if(typeof showToast === 'function') showToast('❌ prefill 데이터 없음 (sessionStorage 비어있음)', 'error');
+    return;
+  }
   let data;
   try{ data = JSON.parse(raw); }catch(e){ sessionStorage.removeItem('dc_dr_prefill'); return; }
   // ★ 즉시 삭제 제거 — 폼 제출 완료 시점에만 clearSchedulePrefill() 호출
-  if(!data || !data.slot) return;
+  if(!data || !data.slot) {
+    if(typeof showToast === 'function') showToast('❌ prefill 데이터 형식 오류 (slot 없음)', 'error');
+    return;
+  }
   const slot = data.slot;
+
+  // ★ 진단: prefill 데이터에 무엇이 있는지 토스트로 표시
+  const _diagAvailable = [];
+  if(data.agency) _diagAvailable.push('agency=' + data.agency);
+  if(data.seats) _diagAvailable.push('seats=' + data.seats);
+  if(data.guide) _diagAvailable.push('guide=' + data.guide);
+  if(data.tourCode) _diagAvailable.push('tc=' + data.tourCode);
+  if(slot.course) _diagAvailable.push('course=' + slot.course);
+  if(slot.rego) _diagAvailable.push('rego=' + slot.rego);
+  if(typeof showToast === 'function'){
+    showToast('📦 prefill 데이터: ' + (_diagAvailable.length ? _diagAvailable.slice(0,3).join(', ') + (_diagAvailable.length>3?' +' + (_diagAvailable.length-3):'') : '(빈 데이터!)'), 'info');
+  }
 
   let filled = [];
 
