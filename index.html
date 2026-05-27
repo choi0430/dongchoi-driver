@@ -4766,34 +4766,37 @@ async function syncShiftsFromServer(driverName) {
       }
     });
 
-    // 로컬에만 있고 서버에 없는 shift 제거 — 단, dailyReport가 있으면 유지 (데이터 보호)
+    // 로컬에만 있고 서버에 없는 shift 제거 — 단, dailyReport가 있거나 임시(_synthetic) 시프트면 유지
     const serverKeys = new Set(serverShifts.map(s => s.rego + '|' + _normDate(s.date)));
     const before = activeShifts.length;
     activeShifts = activeShifts.filter(ls =>
       serverKeys.has(ls.rego + '|' + _normDate(ls.date)) ||
-      (ls.dailyReports && ls.dailyReports.length > 0)
+      (ls.dailyReports && ls.dailyReports.length > 0) ||
+      ls._synthetic  // ★ 닫힌 시프트용 임시 객체는 sync 영향 받지 않음
     );
     if (activeShifts.length !== before) updated = true;
 
-    // ── 48시간 초과 shift 자동 정리 (서버에서 온 shift는 제외) ──
+    // ── 48시간 초과 shift 자동 정리 (서버 shift와 임시 시프트는 제외) ──
     const _shiftCutoff = 48 * 60 * 60 * 1000;
     const _now = Date.now();
     const _expiredShifts = activeShifts.filter(s => {
       if (s._fromServer) return false; // 서버 shift는 정리하지 않음
+      if (s._synthetic) return false;  // ★ 임시 시프트도 정리하지 않음
       const startStr = `${s.date}T${s.startTime || '00:00'}`;
       const startMs = new Date(startStr.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')).getTime() || 0;
       return startMs > 0 && (_now - startMs) > _shiftCutoff;
     });
     if (_expiredShifts.length > 0) {
       activeShifts = activeShifts.filter(s => !_expiredShifts.includes(s));
-      console.warn('⚠️ 48시간 초과 shift 자동 정리:', _expiredShifts.length, '건 (서버 shift 제외)');
+      console.warn('⚠️ 48시간 초과 shift 자동 정리:', _expiredShifts.length, '건 (서버/임시 shift 제외)');
       updated = true;
     }
 
     // sync 완료 후 항상 저장 & 렌더링 (비동기 완료 시점에 UI 갱신 보장)
     if (activeShifts.length > 0) editingShiftId = activeShifts[activeShifts.length - 1].id;
     else editingShiftId = null;
-    localStorage.setItem('shifts_' + driverName, JSON.stringify(activeShifts));
+    // ★ localStorage에는 임시 시프트(_synthetic) 제외 — 페이지 새로고침 시 자연스럽게 사라짐
+    localStorage.setItem('shifts_' + driverName, JSON.stringify(activeShifts.filter(s => !s._synthetic)));
     renderShiftSection();
 
     // ★ 서버 Daily Report draft prefetch — 로컬에 없을 때만 (앱 재설치/PWA 캐시 정리 대비)
@@ -5549,7 +5552,9 @@ function _attachDraftListeners(){
 // ═══════════════════════════════════════
 function renderShiftSection(){
   const el = document.getElementById('home-shift-section');
-  if(activeShifts.length===0){
+  // ★ 임시 시프트(_synthetic)는 표시 제외 — 닫힌 시프트에 DR 추가용 임시 객체
+  const _visibleShifts = activeShifts.filter(s => !s._synthetic);
+  if(_visibleShifts.length===0){
     el.innerHTML = `
       <div class="shift-no-active">
         <div class="shift-no-icon">🔑</div>
@@ -5558,7 +5563,7 @@ function renderShiftSection(){
       </div>`;
   } else {
     const shiftFrag = document.createDocumentFragment();
-  activeShifts.forEach(s=>{
+  _visibleShifts.forEach(s=>{
     const div = document.createElement('div');
     div.className = 'shift-status';
     div.style.marginTop = '10px';
@@ -6308,6 +6313,19 @@ function _finalizeDailyReportSave(_drBtn){
   renderTodayReports();
   renderStep2SavedReports();
   clearDailyDraft();  // 제출 완료 → draft 삭제
+  // ★ 임시 시프트(_synthetic) 정리 — 닫힌 시프트에 DR만 추가한 경우
+  //   localStorage에는 저장하지 않았으므로 메모리에서만 제거
+  try {
+    const _beforeLen = activeShifts.length;
+    activeShifts = activeShifts.filter(s => !s._synthetic);
+    if(activeShifts.length !== _beforeLen){
+      console.log('[DR submit] removed synthetic shifts:', _beforeLen - activeShifts.length);
+      // editingShiftId가 임시 시프트였으면 초기화
+      if(!activeShifts.find(s => s.id === editingShiftId)){
+        editingShiftId = activeShifts.length ? activeShifts[activeShifts.length-1].id : null;
+      }
+    }
+  } catch(e) { console.warn('synthetic cleanup error:', e); }
   // ★ 폼 리셋 중 auto-save 차단 (빈 값으로 draft 재생성 방지)
   _draftRestoring = true;
   // reset form
@@ -10173,7 +10191,7 @@ function clearSchedulePrefill(){
 }
 
 // 일정 카드 클릭 → 그 일정 데이터를 임시 저장하고 DR로 이동
-function startDRFromSchedule(tourId, date, slotKey){
+async function startDRFromSchedule(tourId, date, slotKey){
   const matched = _driverScheduleCache.find(s => s.tourId === tourId && s.date === date && s.slotKey === slotKey);
   if(!matched){
     if(typeof toast === 'function') toast('일정 정보를 찾을 수 없습니다','er');
@@ -10197,9 +10215,11 @@ function startDRFromSchedule(tourId, date, slotKey){
   //   매칭 우선순위:
   //     A. 같은 날짜 + 같은 차량 (가장 정확)
   //     B. 같은 날짜 (다른 차량이라도)
-  //     C. 같은 차량 (날짜 무관) ← 유성훈 케이스: 26일 Pre 없고 27일만 있어도 27일 시프트에 묶음
+  //     C. 같은 차량 (날짜 무관) ← 같은 차량으로 운행 중인 시프트가 있는 경우
   //     D. 미래 일정만: 가장 최근 시프트
-  //   모두 실패 시: Pre Departure부터 작성하도록 Step 1로
+  //     E. 모두 실패 시 → GAS find_shift_for_dr 호출 (이미 EOS 완료된 닫힌 시프트 포함)
+  //                      찾으면 임시 시프트(_synthetic)로 메모리에만 추가하여 DR 작성 진행
+  //   E도 실패 시: 진짜로 Pre Departure가 없는 일정 — Pre부터 작성
   // ─────────────────────────────────────────────────────────────
   const _norm = d => (typeof fmtDate === 'function') ? fmtDate(d) : String(d||'');
   const dateAU = _norm(date);
@@ -10240,10 +10260,54 @@ function startDRFromSchedule(tourId, date, slotKey){
     }
   }
 
+  // E. 모두 실패 시 — GAS에서 닫힌 시프트(EOS 완료)도 포함해서 검색
+  //    이미 Pre+EOS 다 작성되어 activeShifts에서 빠진 시프트를 위한 fallback
+  if(!sameDayShift && _matchRego){
+    try {
+      if(typeof toast === 'function') toast('🔍 과거 시프트 확인 중...', 'in');
+      const driver = (typeof currentDriver !== 'undefined' && currentDriver) ? (currentDriver.name || '') : '';
+      const url = APPS_SCRIPT_URL + '?action=find_shift_for_dr'
+        + '&driver=' + encodeURIComponent(driver)
+        + '&rego=' + encodeURIComponent(_matchRego)
+        + '&date=' + encodeURIComponent(date);
+      const res = await fetch(url);
+      const json = await res.json();
+      try { console.log('[startDRFromSchedule] find_shift_for_dr →', json); } catch(e){}
+      if(json?.ok && json.shift){
+        // 임시 시프트(synthetic) 생성 — localStorage 저장 안 함, 메모리만
+        const sv = json.shift;
+        const syntheticId = '_synth_' + sv.rego + '_' + sv.date.replace(/\//g,'') + '_' + Date.now();
+        const syntheticShift = {
+          id: syntheticId,
+          rego: sv.rego,
+          date: sv.date,
+          seats: sv.seats,
+          startKm: sv.startKm,
+          startTime: sv.startTime,
+          fuel: sv.fuel,
+          dailyReports: [],
+          _synthetic: true,        // 마커: DR 제출 후 메모리에서만 제거
+          _closed: !!sv.closed     // EOS까지 완료된 닫힌 시프트인지
+        };
+        // activeShifts에 메모리만 추가 (localStorage 저장 X)
+        activeShifts.push(syntheticShift);
+        sameDayShift = syntheticShift;
+        matchLayer = sv.closed
+          ? 'E: 닫힌 시프트 (Pre+EOS 완료, DR만 추가)'
+          : 'E: 백엔드 시프트 (서버 측 검색)';
+      }
+    } catch(e) {
+      console.warn('[startDRFromSchedule] find_shift_for_dr fetch failed:', e);
+    }
+  }
+
   try { console.log('[startDRFromSchedule] match result =', matchLayer || 'NONE', sameDayShift ? '→ id='+sameDayShift.id : ''); } catch(e){}
 
   if(sameDayShift && typeof addDailyReport === 'function'){
-    if(typeof toast === 'function') toast(`🚐 ${sameDayShift.rego} 시프트로 DR 작성을 시작합니다`, 'in');
+    const _closedMsg = sameDayShift._closed
+      ? ` (Pre+EOS 이미 완료 — Daily Report만 추가)`
+      : '';
+    if(typeof toast === 'function') toast(`🚐 ${sameDayShift.rego} 시프트로 DR 작성을 시작합니다${_closedMsg}`, 'in');
     addDailyReport(sameDayShift.id);
     return;
   }
