@@ -5420,6 +5420,8 @@ function goStep(n){
   setTimeout(()=>{const s=document.getElementById('page-report');if(s){s.scrollTop=0;s.scrollTo({top:0,behavior:'instant'});}},50);
   if(n===1){
     // Pre Departure 페이지 진입 시 초기화만 수행 (임시저장/복원 없음)
+    // ★ 일정에서 진입한 경우(sessionStorage.dc_dr_prefill 존재) Pre 폼에 자동 채움
+    setTimeout(()=>{ try{ applyScheduleToPreForm(); }catch(e){ console.warn('pre prefill error', e); } }, 250);
   }
   if(n===2){
     renderStep2SavedReports();
@@ -5427,6 +5429,16 @@ function goStep(n){
     _attachDraftListeners();
     // Daily Report draft 복원 — MASTER 준비 완료 보장 후 실행
     _restoreDailyDraftWhenReady();
+    // ★ Schedule prefill — addDailyReport에서 이미 호출되지만, 수동 step 이동에도 작동하도록
+    //   draft가 없을 때만 prefill 적용 (draft 우선)
+    setTimeout(()=>{
+      try{
+        const _hasDraft = !!localStorage.getItem(_draftKey());
+        if(!_hasDraft && sessionStorage.getItem('dc_dr_prefill')){
+          applySchedulePrefill();
+        }
+      }catch(e){ console.warn('step2 prefill error', e); }
+    }, 400);
   }
   if(n===3){
     renderShiftSummary();
@@ -7124,6 +7136,8 @@ function saveDailyDraft(){
 function clearDailyDraft(){
   try { localStorage.removeItem(_draftKey()); } catch(e) {}
   _clearDraftOnServer();
+  // ★ DR 제출 완료 — schedule prefill도 정리
+  try { sessionStorage.removeItem('dc_dr_prefill'); } catch(e) {}
 }
 // ═══════════════════════════════════════════════════════
 // PRE DEPARTURE DRAFT — 제거됨 (임시저장/복원 비활성화)
@@ -9926,13 +9940,14 @@ function _renderMissedScheduleBanner(missedSlots){
 }
 
 // Schedule prefill 적용 — sessionStorage의 일정 데이터를 DR 폼에 자동 채움
+//   ★ prefill 데이터는 즉시 삭제하지 않음 (사용자가 Pre→DR로 이동하거나 페이지를 새로고침해도
+//     유지되어야 함). 실제로 DR 또는 Pre 폼이 제출 완료될 때 clearSchedulePrefill()로 삭제.
 function applySchedulePrefill(){
   const raw = sessionStorage.getItem('dc_dr_prefill');
   if(!raw) return;
   let data;
   try{ data = JSON.parse(raw); }catch(e){ sessionStorage.removeItem('dc_dr_prefill'); return; }
-  // 사용 후 즉시 제거 (한 번만 적용 — 다른 DR에 새는 것 방지)
-  sessionStorage.removeItem('dc_dr_prefill');
+  // ★ 즉시 삭제 제거 — 폼 제출 완료 시점에만 clearSchedulePrefill() 호출
   if(!data || !data.slot) return;
   const slot = data.slot;
 
@@ -10102,6 +10117,59 @@ function applySchedulePrefill(){
       }
     } catch(e){ console.warn('[prefill] BE refresh:', e); }
   }, 300);
+}
+
+// ★ Pre Departure 폼에도 일정 정보 자동 채움 (date, time, rego)
+//   → 일정 카드에서 진입 시 Pre 작성을 빠르게 시작할 수 있도록
+function applyScheduleToPreForm(){
+  const raw = sessionStorage.getItem('dc_dr_prefill');
+  if(!raw) return;
+  let data;
+  try{ data = JSON.parse(raw); }catch(e){ return; }
+  if(!data || !data.slot) return;
+  const slot = data.slot;
+
+  let filled = [];
+  // 날짜 (YYYY-MM-DD → dd/mm/yyyy)
+  const preDate = document.getElementById('pre-date');
+  if(preDate && data.date && !preDate.value){
+    const [y,m,d] = String(data.date).slice(0,10).split('-');
+    if(y && m && d){
+      preDate.value = `${d}/${m}/${y}`;
+      filled.push('날짜');
+    }
+  }
+  // 시작 시간 (slot.startTime: "HH:MM")
+  const preTime = document.getElementById('pre-time');
+  if(preTime && slot.startTime && !preTime.value){
+    // HH:MM 형식만 사용 (HH:MM:SS이면 잘라냄)
+    const t = String(slot.startTime).slice(0,5);
+    if(/^\d{2}:\d{2}$/.test(t)){
+      preTime.value = t;
+      filled.push('시간');
+    }
+  }
+  // 차량 (rego)
+  const preRego = document.getElementById('pre-rego');
+  if(preRego && slot.rego && !preRego.value){
+    preRego.value = slot.rego;
+    // sdd-input은 search 위젯이므로 change/input 이벤트로 mounted dropdown에도 반영
+    try { preRego.dispatchEvent(new Event('input', {bubbles:true})); } catch(e){}
+    try { preRego.dispatchEvent(new Event('change', {bubbles:true})); } catch(e){}
+    filled.push('차량');
+  }
+
+  if(filled.length){
+    try { console.log('[applyScheduleToPreForm] filled:', filled.join(', ')); } catch(e){}
+    if(typeof showToast === 'function'){
+      showToast(`✅ 일정에서 자동 입력: ${filled.join(', ')} — KM을 입력하고 제출하면 DR로 진행됩니다`, 'success');
+    }
+  }
+}
+
+// ★ prefill 데이터 명시적 삭제 — DR/Pre 폼 제출 완료 시 호출
+function clearSchedulePrefill(){
+  try { sessionStorage.removeItem('dc_dr_prefill'); } catch(e){}
 }
 
 // 일정 카드 클릭 → 그 일정 데이터를 임시 저장하고 DR로 이동
