@@ -10,7 +10,7 @@
  *   • API 호출은 캐시 안 함 (실시간 데이터)
  */
 
-const CACHE_NAME = 'dc-fleet-v21';
+const CACHE_NAME = 'dc-fleet-v22';
 const STATIC_ASSETS = [
   // GitHub Pages 환경에서 절대경로
   // 실제 캐시는 첫 방문 후 자동으로
@@ -18,23 +18,38 @@ const STATIC_ASSETS = [
 
 // 설치 — 즉시 활성화
 self.addEventListener('install', (event) => {
-  console.log('[SW] Install');
+  console.log('[SW v22] Install');
   self.skipWaiting();
 });
 
-// 활성화 — 오래된 캐시 삭제
+// 활성화 — 모든 오래된 캐시 강제 삭제 + 연결된 클라이언트 강제 새로고침
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activate');
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-      )
-    ).then(() => self.clients.claim())
-  );
+  console.log('[SW v22] Activate — clearing all old caches');
+  event.waitUntil((async () => {
+    // 1) 모든 캐시 삭제 (CACHE_NAME 포함 — 완전 클린 슬레이트)
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+      console.log('[SW v22] Deleted caches:', keys);
+    } catch(e) { console.warn('[SW v22] cache delete error', e); }
+
+    // 2) 현재 SW가 클라이언트 제어 권한 가져옴
+    await self.clients.claim();
+
+    // 3) 모든 열린 클라이언트에 강제 새로고침 메시지 전송
+    try {
+      const clients = await self.clients.matchAll({ type: 'window' });
+      clients.forEach(c => {
+        try {
+          c.postMessage({ type: 'SW_UPDATED', version: 'v22' });
+        } catch(e) {}
+      });
+      console.log('[SW v22] Notified clients:', clients.length);
+    } catch(e) { console.warn('[SW v22] client notify error', e); }
+  })());
 });
 
-// 네트워크 요청 처리 (현재는 통과만 — 캐시 비활성)
+// 네트워크 요청 처리 — 항상 네트워크 우선 (캐시는 오프라인 fallback 전용)
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   // GAS API 호출은 캐시 안 함
