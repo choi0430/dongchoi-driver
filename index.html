@@ -5441,12 +5441,11 @@ function goStep(n){
     _attachDraftListeners();
     // Daily Report draft 복원 — MASTER 준비 완료 보장 후 실행
     _restoreDailyDraftWhenReady();
-    // ★ Schedule prefill — addDailyReport에서 이미 호출되지만, 수동 step 이동에도 작동하도록
-    //   draft가 없을 때만 prefill 적용 (draft 우선)
+    // ★ Schedule prefill — prefill이 있으면 draft 여부와 상관없이 적용
+    //   (restoreDailyDraft도 prefill 있으면 자동으로 skip하므로 충돌 없음)
     setTimeout(()=>{
       try{
-        const _hasDraft = !!localStorage.getItem(_draftKey());
-        if(!_hasDraft && sessionStorage.getItem('dc_dr_prefill')){
+        if(sessionStorage.getItem('dc_dr_prefill')){
           applySchedulePrefill();
         }
       }catch(e){ console.warn('step2 prefill error', e); }
@@ -5829,13 +5828,17 @@ function addDailyReport(shiftId){
   }
   // draft가 있으면 복원 후에 힌트/서차지 재계산하므로 여기서는 건너뜀
   const _hasDraft = !!localStorage.getItem(_draftKey());
-  if(!_hasDraft){
+  // ★ prefill이 sessionStorage에 있으면 draft를 무시하고 prefill 우선 적용
+  //   (임시 시프트로 진입 또는 일정 카드 탭으로 진입한 경우)
+  const _hasPrefill = !!sessionStorage.getItem('dc_dr_prefill');
+  const _useDraft = _hasDraft && !_hasPrefill && !shift?._synthetic;
+  if(!_useDraft){
     // 인승 유무와 관계없이 항상 서차지 옵션 초기화 (OT 버튼 렌더링 포함)
     updateSurchargeOptions();
   }
   updateStep2UI();
   // draft가 없을 때만 autoFill — draft 있으면 restoreDailyDraft()가 처리
-  if(!_hasDraft){
+  if(!_useDraft){
     setTimeout(()=>{
       updateManualHint();
       updateSvcHint();
@@ -5852,8 +5855,8 @@ function addDailyReport(shiftId){
   // Private 초기화
   const pvtChk = document.getElementById('dr-private');
   if(pvtChk && pvtChk.checked){ pvtChk.checked=false; togglePrivateMode(); }
-  // ★ Schedule prefill 적용 (홈에서 일정 카드 탭으로 진입한 경우)
-  if(!_hasDraft){
+  // ★ Schedule prefill 적용 — prefill이 있으면 무조건 적용 (draft 무시)
+  if(_hasPrefill){
     setTimeout(()=>{ try{ applySchedulePrefill(); }catch(e){ console.warn('prefill error', e); } }, 200);
   }
 }
@@ -7315,10 +7318,32 @@ function restoreDailyDraft(){
     // ★ 빈 draft는 복원하지 않음 (제출 후 빈 값으로 저장된 잔여 draft 방지)
     const _hasContent = !!(d.agency || d.attraction || d.pickup || d.dropoff || d.tourcode || d.kmStart || d.kmEnd || d.timeStart || d.timeEnd || (d.toll && d.toll!=='0') || (d.fuel && d.fuel!=='0') || (d.tip && d.tip!=='0'));
     if(!_hasContent){ clearDailyDraft(); _draftRestoring = false; return false; }
+
+    // ★ 일정 카드 탭으로 진입한 경우 (sessionStorage prefill 존재) — draft 복원 건너뜀
+    //   이유: draft는 이전 시프트 작업 중 자동저장된 것일 가능성이 크고,
+    //         사용자는 지금 다른 일정(prefill)을 작성하려고 진입한 상태.
+    //         draft가 prefill을 덮어쓰면 안 됨.
+    const _hasPrefill = !!sessionStorage.getItem('dc_dr_prefill');
+    if(_hasPrefill){
+      console.log('[restoreDailyDraft] schedule prefill present — skipping draft restore');
+      _draftRestoring = false;
+      return false;
+    }
+
+    // ★ 임시(_synthetic) 시프트로 진입한 경우도 draft 복원 건너뜀
+    //   임시 시프트는 닫힌 시프트에 DR 추가용이므로, 다른 시프트의 draft를 끌어오면 안 됨
+    const _curShift = activeShifts.find(s => s.id === editingShiftId);
+    if(_curShift && _curShift._synthetic){
+      console.log('[restoreDailyDraft] synthetic shift — skipping draft restore');
+      _draftRestoring = false;
+      return false;
+    }
+
     // shiftId가 다르면 editingShiftId를 맞춰줌 (같은 드라이버의 이어쓰기)
     if(d._shiftId && d._shiftId !== editingShiftId){
       const matchShift = activeShifts.find(s=>s.id===d._shiftId);
-      if(matchShift) editingShiftId = d._shiftId;
+      // ★ 임시 시프트는 draft 매칭 대상에서 제외 (이전 정상 시프트로만 복원)
+      if(matchShift && !matchShift._synthetic) editingShiftId = d._shiftId;
       else { clearDailyDraft(); _draftRestoring = false; return false; } // 해당 shift가 없으면 draft 무효
     }
 
@@ -10248,30 +10273,31 @@ async function startDRFromSchedule(tourId, date, slotKey){
 
   let sameDayShift = null;
   let matchLayer = '';
+
+  // ★ 매칭 우선순위 (수정됨):
+  //   A. 같은 날짜 + 같은 차량 (메모리, 가장 정확)
+  //   ──── 여기서 매칭되면 즉시 종료 ────
+  //   과거 일정인 경우:
+  //     E_past. GAS find_shift_for_dr — 그 날짜의 정확한 Pre를 찾음 (닫힌 시프트 포함)
+  //     B.    같은 날짜만 (다른 차량) — 메모리
+  //     C.    같은 차량 (다른 날짜) — 메모리, 임시 사용
+  //   미래 일정인 경우:
+  //     B. 같은 날짜
+  //     C. 같은 차량
+  //     D. 가장 최근 시프트
+  //     E. GAS find_shift_for_dr (최후 fallback)
+
   if(hasShifts){
-    // A. 같은 날짜 + 같은 차량
+    // A. 같은 날짜 + 같은 차량 (정확 매칭 — 메모리에서 즉시)
     sameDayShift = activeShifts.find(s => _shiftDateAU(s) === dateAU && _shiftRego(s) === _matchRego);
-    if(sameDayShift) matchLayer = 'A: 같은 날짜+차량';
-    // B. 같은 날짜만
-    if(!sameDayShift){
-      sameDayShift = activeShifts.find(s => _shiftDateAU(s) === dateAU);
-      if(sameDayShift) matchLayer = 'B: 같은 날짜 (다른 차량)';
-    }
-    // C. 같은 차량만 (날짜 무관) — 핵심 fallback
-    if(!sameDayShift && _matchRego){
-      sameDayShift = activeShifts.find(s => _shiftRego(s) === _matchRego);
-      if(sameDayShift) matchLayer = 'C: 같은 차량 (다른 날짜)';
-    }
-    // D. 미래 일정인 경우만 가장 최근 시프트
-    if(!sameDayShift && !isPast){
-      sameDayShift = activeShifts[activeShifts.length - 1];
-      if(sameDayShift) matchLayer = 'D: 최근 시프트 (미래 일정 fallback)';
-    }
+    if(sameDayShift) matchLayer = 'A: 같은 날짜+차량 (메모리)';
   }
 
-  // E. 모두 실패 시 — GAS에서 닫힌 시프트(EOS 완료)도 포함해서 검색
-  //    이미 Pre+EOS 다 작성되어 activeShifts에서 빠진 시프트를 위한 fallback
-  if(!sameDayShift && _matchRego){
+  // ★ 과거 일정 + 정확 매칭 실패 시 → GAS에서 그 날짜의 정확한 시프트 검색
+  //   이유: activeShifts에 같은 차량의 다른 날짜 시프트가 있어도 (예: 오늘 27일 TV9951),
+  //         사용자가 원한 건 과거(예: 26일) 시프트일 가능성이 큼.
+  //         GAS는 Pre_Departure 시트에서 해당 날짜의 Pre를 찾아줌 (closed든 open이든).
+  if(!sameDayShift && isPast && _matchRego){
     try {
       if(typeof toast === 'function') toast('🔍 과거 시프트 확인 중...', 'in');
       const driver = (typeof currentDriver !== 'undefined' && currentDriver) ? (currentDriver.name || '') : '';
@@ -10281,9 +10307,75 @@ async function startDRFromSchedule(tourId, date, slotKey){
         + '&date=' + encodeURIComponent(date);
       const res = await fetch(url);
       const json = await res.json();
-      try { console.log('[startDRFromSchedule] find_shift_for_dr →', json); } catch(e){}
+      try { console.log('[startDRFromSchedule] find_shift_for_dr (past) →', json); } catch(e){}
       if(json?.ok && json.shift){
-        // 임시 시프트(synthetic) 생성 — localStorage 저장 안 함, 메모리만
+        const sv = json.shift;
+        // ★ 정확한 날짜 매칭만 인정 — 다른 날짜의 Pre가 반환됐으면 무시하고 다음 단계로
+        if(sv.exactDateMatch){
+          // 이미 activeShifts에 같은 (rego, date)가 있으면 그걸 사용 (중복 생성 방지)
+          const existing = activeShifts.find(s => _shiftRego(s) === _matchRego && _shiftDateAU(s) === sv.date);
+          if(existing){
+            sameDayShift = existing;
+            matchLayer = 'A2: 정확 매칭 (GAS 확인 후 메모리 재사용)';
+          } else {
+            const syntheticId = '_synth_' + sv.rego + '_' + sv.date.replace(/\//g,'') + '_' + Date.now();
+            const syntheticShift = {
+              id: syntheticId,
+              rego: sv.rego,
+              date: sv.date,
+              seats: sv.seats,
+              startKm: sv.startKm,
+              startTime: sv.startTime,
+              fuel: sv.fuel,
+              dailyReports: [],
+              _synthetic: true,
+              _closed: !!sv.closed
+            };
+            activeShifts.push(syntheticShift);
+            sameDayShift = syntheticShift;
+            matchLayer = sv.closed
+              ? 'E_past: 닫힌 시프트 (Pre+EOS 완료)'
+              : 'E_past: 백엔드 Pre (정확 날짜)';
+          }
+        } else {
+          try { console.log('[startDRFromSchedule] GAS returned non-exact date — falling through'); } catch(e){}
+        }
+      }
+    } catch(e) {
+      console.warn('[startDRFromSchedule] find_shift_for_dr fetch failed (past):', e);
+    }
+  }
+
+  // 정확 매칭(또는 과거 GAS 매칭) 실패 시 — fallback 시도
+  if(!sameDayShift && hasShifts){
+    // B. 같은 날짜만
+    sameDayShift = activeShifts.find(s => _shiftDateAU(s) === dateAU);
+    if(sameDayShift) matchLayer = 'B: 같은 날짜 (다른 차량)';
+    // C. 같은 차량만 (날짜 무관) — 단, 과거 일정에서는 위험하므로 미래 일정만
+    if(!sameDayShift && _matchRego && !isPast){
+      sameDayShift = activeShifts.find(s => _shiftRego(s) === _matchRego);
+      if(sameDayShift) matchLayer = 'C: 같은 차량 (다른 날짜, 미래만)';
+    }
+    // D. 미래 일정인 경우만 가장 최근 시프트
+    if(!sameDayShift && !isPast){
+      sameDayShift = activeShifts[activeShifts.length - 1];
+      if(sameDayShift) matchLayer = 'D: 최근 시프트 (미래 일정 fallback)';
+    }
+  }
+
+  // E (미래용). 미래 일정인데 메모리에 아무것도 없으면 GAS 시도
+  if(!sameDayShift && !isPast && _matchRego){
+    try {
+      if(typeof toast === 'function') toast('🔍 시프트 확인 중...', 'in');
+      const driver = (typeof currentDriver !== 'undefined' && currentDriver) ? (currentDriver.name || '') : '';
+      const url = APPS_SCRIPT_URL + '?action=find_shift_for_dr'
+        + '&driver=' + encodeURIComponent(driver)
+        + '&rego=' + encodeURIComponent(_matchRego)
+        + '&date=' + encodeURIComponent(date);
+      const res = await fetch(url);
+      const json = await res.json();
+      try { console.log('[startDRFromSchedule] find_shift_for_dr (future) →', json); } catch(e){}
+      if(json?.ok && json.shift && json.shift.exactDateMatch){
         const sv = json.shift;
         const syntheticId = '_synth_' + sv.rego + '_' + sv.date.replace(/\//g,'') + '_' + Date.now();
         const syntheticShift = {
@@ -10295,18 +10387,15 @@ async function startDRFromSchedule(tourId, date, slotKey){
           startTime: sv.startTime,
           fuel: sv.fuel,
           dailyReports: [],
-          _synthetic: true,        // 마커: DR 제출 후 메모리에서만 제거
-          _closed: !!sv.closed     // EOS까지 완료된 닫힌 시프트인지
+          _synthetic: true,
+          _closed: !!sv.closed
         };
-        // activeShifts에 메모리만 추가 (localStorage 저장 X)
         activeShifts.push(syntheticShift);
         sameDayShift = syntheticShift;
-        matchLayer = sv.closed
-          ? 'E: 닫힌 시프트 (Pre+EOS 완료, DR만 추가)'
-          : 'E: 백엔드 시프트 (서버 측 검색)';
+        matchLayer = 'E: 백엔드 시프트 (미래)';
       }
     } catch(e) {
-      console.warn('[startDRFromSchedule] find_shift_for_dr fetch failed:', e);
+      console.warn('[startDRFromSchedule] find_shift_for_dr fetch failed (future):', e);
     }
   }
 
