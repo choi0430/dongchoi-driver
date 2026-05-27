@@ -10250,7 +10250,17 @@ async function startDRFromSchedule(tourId, date, slotKey){
   try{
     sessionStorage.setItem('dc_dr_prefill', JSON.stringify(matched));
   }catch(e){}
-  if(typeof toast === 'function') toast('✅ 일정 데이터 적용 중...', 'in');
+
+  // ★ 진단 정보 — 사용자에게 어떤 일이 일어나는지 토스트로 표시
+  const _matchRegoForDiag = String(matched?.slot?.rego||'').trim().toUpperCase();
+  const _dateAUForDiag = (typeof fmtDate === 'function') ? fmtDate(date) : date;
+  const _shiftCountForDiag = (typeof activeShifts !== 'undefined' && activeShifts) ? activeShifts.length : 0;
+  const _shiftListForDiag = (typeof activeShifts !== 'undefined' && activeShifts)
+    ? activeShifts.map(s => `${s.rego}@${(typeof fmtDate==='function'?fmtDate(s.date):s.date)}`).join(', ')
+    : '(없음)';
+  if(typeof showToast === 'function'){
+    showToast(`🔍 ${_dateAUForDiag} ${_matchRegoForDiag} — 활성시프트 ${_shiftCountForDiag}개: ${_shiftListForDiag}`, 'info');
+  }
 
   // ─────────────────────────────────────────────────────────────
   // ★ 시프트 매칭 — 다층 fallback
@@ -10412,6 +10422,11 @@ async function startDRFromSchedule(tourId, date, slotKey){
   }
 
   try { console.log('[startDRFromSchedule] match result =', matchLayer || 'NONE', sameDayShift ? '→ id='+sameDayShift.id : ''); } catch(e){}
+
+  // ★ 매칭 결과를 사용자에게 토스트로 알림 (진단용)
+  if(typeof showToast === 'function'){
+    showToast(`📍 매칭결과: ${matchLayer || 'NONE'}`, sameDayShift ? 'success' : 'error');
+  }
 
   if(sameDayShift && typeof addDailyReport === 'function'){
     const _closedMsg = sameDayShift._closed
