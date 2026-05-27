@@ -4152,7 +4152,7 @@ function postToSheetsWithRetry(action, data) {
         // 로컬 활성 shift 제거 (서버에서 거부됐으므로)
         if(action === 'save_predeparture' && data.Rego && currentDriver?.name){
           activeShifts = activeShifts.filter(s => !(s.rego === data.Rego && s.date === data.Date));
-          localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+          _persistShifts(currentDriver.name);
           editingShiftId = null;
           if(typeof renderShiftSection === 'function') renderShiftSection();
           // Pre Departure 화면으로 되돌림
@@ -4438,6 +4438,15 @@ let currentStep = 1;
 let editingShiftId = null;
 let contactFilter = 'all';
 let _masterReady = false; // MASTER 데이터 준비 완료 플래그
+
+// ★ 시프트를 localStorage에 저장하는 공통 헬퍼 — 임시(_synthetic) 시프트는 영속화하지 않음
+function _persistShifts(driverName){
+  if(!driverName) return;
+  try {
+    const persistable = (activeShifts || []).filter(s => !s._synthetic);
+    localStorage.setItem('shifts_' + driverName, JSON.stringify(persistable));
+  } catch(e){ console.warn('_persistShifts error:', e); }
+}
 
 // ═══════════════════════════════════════
 // LOGIN / LOGOUT
@@ -4833,7 +4842,7 @@ async function syncShiftsFromServer(driverName) {
     });
     if (_expiredLocal.length > 0) {
       activeShifts = activeShifts.filter(s => !_expiredLocal.includes(s));
-      localStorage.setItem('shifts_' + driverName, JSON.stringify(activeShifts));
+      _persistShifts(driverName);
       renderShiftSection();
     }
   }
@@ -4875,7 +4884,7 @@ function doLogout() {
   clearAuthToken();
   // 로그아웃 전 현재 드라이버 데이터 저장
   if(currentDriver?.name) {
-    localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+    _persistShifts(currentDriver.name);
     localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
   }
   // 세션 삭제 (다음 시작 시 자동 로그인 안 됨)
@@ -5763,7 +5772,7 @@ async function completePre(){
   editingShiftId = id;
   // Pre-Departure 완료 즉시 localStorage 저장
   if(currentDriver?.name) {
-    localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+    _persistShifts(currentDriver.name);
   }
   // ★ 성공 — 버튼을 "완료" 상태로 마킹 (중복 제출 방지)
   _markBtnDone(_preBtn, '✅ 완료');
@@ -5863,7 +5872,7 @@ function startEndShift(shiftId){
   // EOS 시작 플래그 설정
   shift.eosStarted = true;
   if(currentDriver && currentDriver.name){
-    localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+    _persistShifts(currentDriver.name);
   }
   editingShiftId = shiftId;
   showPage('report');
@@ -6261,9 +6270,9 @@ function _finalizeDailyReportSave(_drBtn){
   if(report.tourcode) tcSaveCode(report.tourcode);
   _markBtnDone(_drBtn, '✅ Daily Report 저장 완료');
   showToast(`✅ Daily Report 저장됨 (지급액 $${_drPay})`,'success');
-  // 드라이버별 localStorage 저장
+  // 드라이버별 localStorage 저장 — 임시 시프트(_synthetic)는 제외
   if(currentDriver?.name) {
-    localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+    _persistShifts(currentDriver.name);
     localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
   }
   // ── Google Sheets 자동 전송 ──
@@ -6987,7 +6996,7 @@ function submitEndShift(){
   showToast(`🏁 ${shift.rego} End of Shift 완료`,'success');
   // 드라이버별 저장
   if(currentDriver?.name) {
-    localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+    _persistShifts(currentDriver.name);
     localStorage.setItem('reports_'+currentDriver.name, JSON.stringify(todayReports));
     // 마지막 완료 시프트 저장 (PDF 재생성 대비)
     localStorage.setItem('lastShift_'+currentDriver.name, JSON.stringify(completedShiftSnapshot));
@@ -12241,7 +12250,7 @@ async function releaseTrailerFromShift(shiftId){
       // 로컬 shift에서도 trailerNumber 비우기
       shift.trailerNumber = '';
       if(currentDriver?.name){
-        localStorage.setItem('shifts_'+currentDriver.name, JSON.stringify(activeShifts));
+        _persistShifts(currentDriver.name);
       }
       showToast(`✅ 트레일러 ${trailerNum} 반납 완료`,'success');
       renderShiftSection();
