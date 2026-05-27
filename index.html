@@ -14512,6 +14512,19 @@ function renderExpiryAlerts(){
 <!-- ★ PWA Service Worker 등록 + 알림 권한 ─── -->
 <script>
 (function(){
+  // ★ SW로부터 업데이트 알림 받으면 즉시 새로고침 — 새 코드 강제 적용
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function(event){
+      try {
+        if(event.data && event.data.type === 'SW_UPDATED'){
+          console.log('[PWA] SW updated to', event.data.version, '— reloading');
+          // 사용자가 폼 작성 중일 수 있으니 약간의 지연
+          setTimeout(()=>{ try{ location.reload(); }catch(e){} }, 500);
+        }
+      } catch(e) {}
+    });
+  }
+
   // Service Worker 등록 (HTTPS 또는 localhost에서만)
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function() {
@@ -14524,10 +14537,14 @@ function renderExpiryAlerts(){
             newWorker.addEventListener('statechange', function(){
               if(newWorker.state === 'installed' && navigator.serviceWorker.controller){
                 console.log('[PWA] New version available — will update on next reload');
+                // ★ 새 SW를 즉시 활성화 (waiting 단계 건너뜀)
+                try { newWorker.postMessage({type: 'SKIP_WAITING'}); } catch(e){}
               }
             });
           }
         });
+        // 페이지 로드 시 업데이트 체크 강제 실행
+        try { reg.update(); } catch(e){}
       }).catch(function(err){
         console.warn('[PWA] SW registration failed:', err);
       });
