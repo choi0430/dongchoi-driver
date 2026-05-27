@@ -4681,14 +4681,29 @@ function sendInvoiceEmail(payload) {
     if (replyTo) options.replyTo = replyTo;
 
     // ★ PDF 첨부: docHtml 우선 (서버사이드 변환), base64는 폴백
+    //   pdfAttached 플래그를 추적해서 클라이언트 토스트가 정확히 표시되도록 한다
+    let pdfAttached = false;
+    let pdfError = '';
     if (docHtml) {
-      var htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
-      var pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
-      options.attachments = [pdfBlob];
+      try {
+        var htmlBlob = Utilities.newBlob(docHtml, 'text/html', 'invoice.html');
+        var pdfBlob  = htmlBlob.getAs('application/pdf').setName(pdfName);
+        options.attachments = [pdfBlob];
+        pdfAttached = true;
+      } catch (pdfErr) {
+        pdfError = 'HTML→PDF 변환 실패: ' + pdfErr;
+      }
     } else if (pdfBase64) {
-      var pdfBytes = Utilities.base64Decode(pdfBase64);
-      var pdfBlob2 = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
-      options.attachments = [pdfBlob2];
+      try {
+        var pdfBytes = Utilities.base64Decode(pdfBase64);
+        var pdfBlob2 = Utilities.newBlob(pdfBytes, 'application/pdf', pdfName);
+        options.attachments = [pdfBlob2];
+        pdfAttached = true;
+      } catch (pdfErr2) {
+        pdfError = 'base64 디코딩 실패: ' + pdfErr2;
+      }
+    } else {
+      pdfError = 'PDF 데이터 없음 (docHtml/pdfBase64 둘 다 비어있음)';
     }
 
     // GmailApp 우선 시도, 실패 시 MailApp 폴백
@@ -4709,9 +4724,9 @@ function sendInvoiceEmail(payload) {
 
     // 감사 로그
     appendAuditLog(payload._user, 'send_invoice_email', '—', '—',
-      `인보이스 이메일 발송 (PDF 첨부) → ${to} | ${subject}`);
+      `인보이스 이메일 발송 ${pdfAttached?'(PDF 첨부 ✅)':'(PDF 첨부 실패: '+pdfError+')'} → ${to} | ${subject}`);
 
-    return { ok: true, to: to };
+    return { ok: true, to: to, pdfAttached: pdfAttached, pdfError: pdfError };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
