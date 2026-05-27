@@ -1520,6 +1520,13 @@ function doGet(e) {
       case 'get_my_shifts':
         return cors(getMyShifts(effectiveDriver));
 
+      case 'find_shift_for_dr':
+        return cors(findShiftForDR(
+          effectiveDriver,
+          e.parameter.rego,
+          e.parameter.date
+        ));
+
       case 'get_max_km':
         return cors(getMaxKMPerRego());
 
@@ -3107,6 +3114,120 @@ function getMyShifts(driverName) {
     });
 
     return {ok: true, shifts};
+  } catch (err) {
+    return {ok: false, error: err.toString()};
+  }
+}
+
+/**
+ * findShiftForDR — Daily Report 누락 일정용 시프트 검색
+ *
+ * 목적: 특정 드라이버가 특정 차량+날짜로 Pre_Departure를 작성한 적이 있는지 확인.
+ *       EOS 완료 여부와 무관하게 반환 (이미 닫힌 시프트에도 Daily Report만 추가할 수 있도록).
+ *
+ * 매칭 우선순위:
+ *   1. 같은 드라이버 + 같은 차량 + 같은 날짜의 Pre_Departure (정확 매칭)
+ *   2. 같은 드라이버 + 같은 차량 (날짜 무관) — 가장 가까운 날짜의 Pre 반환
+ *
+ * 반환: { ok, shift: {rego, date, seats, startKm, startTime, fuel, closed} }
+ *       closed: true면 이미 EOS까지 완료된 시프트 (Daily Report만 추가 가능)
+ */
+function findShiftForDR(driverName, rego, date) {
+  try {
+    if (!driverName) return {ok: false, msg: 'driver param required'};
+    if (!rego) return {ok: false, msg: 'rego param required'};
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const preSheet = ss.getSheetByName('Pre_Departure');
+    const eosSheet = ss.getSheetByName('End_of_Shift');
+    if (!preSheet) return {ok: true, shift: null};
+
+    const preData = preSheet.getDataRange().getValues();
+    if (preData.length < 2) return {ok: true, shift: null};
+    const preH = preData[0];
+
+    const fmtD = v => (v instanceof Date) ? formatDateForSheet(v) : String(v||'').trim();
+    const fmtT = v => {
+      if (v instanceof Date) return Utilities.formatDate(v, 'Australia/Sydney', 'HH:mm');
+      return String(v||'').trim();
+    };
+
+    const targetDriver = String(driverName).trim();
+    const targetRego = String(rego).trim().toUpperCase();
+    // date 입력은 dd/MM/yyyy 또는 YYYY-MM-DD 모두 가능 — 정규화
+    let targetDate = String(date||'').trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(targetDate)) {
+      // YYYY-MM-DD → dd/MM/yyyy
+      const parts = targetDate.slice(0, 10).split('-');
+      targetDate = parts[2] + '/' + parts[1] + '/' + parts[0];
+    }
+
+    // 해당 드라이버의 Pre_Departure 기록 추출
+    const myPres = preData.slice(1).map(row => {
+      const obj = {};
+      preH.forEach((h, i) => obj[h] = row[i]);
+      return obj;
+    }).filter(r =>
+      String(r.Driver||'').trim() === targetDriver &&
+      String(r.Rego||'').trim().toUpperCase() === targetRego
+    );
+
+    if (!myPres.length) return {ok: true, shift: null};
+
+    // 정확 매칭 우선
+    let match = null;
+    if (targetDate) {
+      match = myPres.find(r => fmtD(r.Date) === targetDate);
+    }
+    // Fallback: 가장 가까운 날짜의 Pre (날짜 미입력 또는 매칭 실패)
+    if (!match) {
+      // 날짜순 정렬 (최신 우선)
+      myPres.sort((a, b) => {
+        const da = fmtD(a.Date), db = fmtD(b.Date);
+        // dd/MM/yyyy를 YYYYMMDD로 변환해 비교
+        const _conv = s => {
+          const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+          return m ? (m[3] + m[2] + m[1]) : '';
+        };
+        return _conv(db).localeCompare(_conv(da));
+      });
+      match = myPres[0];
+    }
+
+    if (!match) return {ok: true, shift: null};
+
+    const matchDateStr = fmtD(match.Date);
+
+    // EOS 완료 여부 확인
+    let closed = false;
+    if (eosSheet && eosSheet.getLastRow() > 1) {
+      const eosData = eosSheet.getDataRange().getValues();
+      const eosH = eosData[0];
+      for (let i = 1; i < eosData.length; i++) {
+        const row = eosData[i];
+        const obj = {};
+        eosH.forEach((h, idx) => obj[h] = row[idx]);
+        if (String(obj.Driver||'').trim() === targetDriver &&
+            String(obj.Rego||'').trim().toUpperCase() === targetRego &&
+            fmtD(obj.Date) === matchDateStr) {
+          closed = true;
+          break;
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      shift: {
+        rego: String(match.Rego).trim(),
+        date: matchDateStr,
+        seats: String(match.Seats || '').trim(),
+        startKm: Number(match.Start_KM) || 0,
+        startTime: fmtT(match.Start_Time),
+        fuel: String(match.Fuel || '').trim(),
+        closed: closed,
+        exactDateMatch: matchDateStr === targetDate
+      }
+    };
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
