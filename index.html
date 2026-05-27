@@ -6325,6 +6325,7 @@ function _finalizeDailyReportSave(_drBtn){
   renderTodayReports();
   renderStep2SavedReports();
   clearDailyDraft();  // 제출 완료 → draft 삭제
+  clearSchedulePrefill();  // 제출 완료 → schedule prefill 정리 (clearDailyDraft에서 분리됨)
   // ★ 임시 시프트(_synthetic) 정리 — 닫힌 시프트에 DR만 추가한 경우
   //   localStorage에는 저장하지 않았으므로 메모리에서만 제거
   try {
@@ -7166,8 +7167,10 @@ function saveDailyDraft(){
 function clearDailyDraft(){
   try { localStorage.removeItem(_draftKey()); } catch(e) {}
   _clearDraftOnServer();
-  // ★ DR 제출 완료 — schedule prefill도 정리
-  try { sessionStorage.removeItem('dc_dr_prefill'); } catch(e) {}
+  // ★ prefill은 여기서 지우지 않음 — clearDailyDraft는 빈 draft 정리 시점에도
+  //   자동으로 호출되는데(saveDailyDraft 안에서 _hasContent=false일 때 등),
+  //   그 시점에 prefill까지 함께 지워지면 applySchedulePrefill 실행 전 데이터가 사라짐.
+  //   DR 제출 완료 시점에는 별도로 clearSchedulePrefill()을 명시 호출.
 }
 // ═══════════════════════════════════════════════════════
 // PRE DEPARTURE DRAFT — 제거됨 (임시저장/복원 비활성화)
