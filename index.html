@@ -511,7 +511,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 <!-- TOP BAR -->
 <div class="topbar">
   <div>
-    <div class="topbar-logo">🚌 DC FLEET <span style="font-size:9px;color:rgba(255,255,255,0.4);font-weight:500;letter-spacing:0;margin-left:4px;">v2026.05.27c</span></div>
+    <div class="topbar-logo">🚌 DC FLEET <span style="font-size:9px;color:rgba(255,255,255,0.4);font-weight:500;letter-spacing:0;margin-left:4px;">v2026.05.27d</span></div>
   </div>
   <div class="topbar-right">
     <div class="notif-btn" onclick="showPage('notices')">🔔<div class="notif-dot" id="notif-dot"></div></div>
@@ -5966,7 +5966,45 @@ function addDailyReport(shiftId){
   const _hasDraft = !!localStorage.getItem(_draftKey());
   // ★ prefill이 sessionStorage에 있으면 draft를 무시하고 prefill 우선 적용
   //   (임시 시프트로 진입 또는 일정 카드 탭으로 진입한 경우)
-  const _hasPrefill = !!sessionStorage.getItem('dc_dr_prefill');
+  let _hasPrefill = !!sessionStorage.getItem('dc_dr_prefill');
+
+  // ★ prefill이 없는데 시프트의 rego/date로 일정을 자동 찾아 prefill로 사용
+  //   ("+ Daily Report" 버튼 등 일정 카드 외 경로로 진입한 경우에도 자동 매칭)
+  if(!_hasPrefill && shift?.rego && shift?.date && typeof _driverScheduleCache !== 'undefined' && _driverScheduleCache){
+    try {
+      // shift.date는 dd/MM/yyyy, _driverScheduleCache의 date는 YYYY-MM-DD — 형식 변환
+      const _shiftDateISO = (() => {
+        const s = String(shift.date||'');
+        // dd/MM/yyyy → YYYY-MM-DD
+        const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if(m) return m[3] + '-' + m[2] + '-' + m[1];
+        // 이미 ISO면 그대로
+        if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        return '';
+      })();
+      const _shiftRegoUC = String(shift.rego||'').trim().toUpperCase();
+      // 같은 날짜 + 같은 차량 일정 찾기 (이미 reported된 슬롯은 제외)
+      const candidates = _driverScheduleCache.filter(sc => {
+        if(sc.date !== _shiftDateISO) return false;
+        const slotRego = String(sc.slot?.rego||'').trim().toUpperCase();
+        return slotRego === _shiftRegoUC;
+      });
+      // todayReports에 이미 그 일정의 DR이 있는지 (tourId 기반) 확인 — 있으면 사용 안 함
+      const unreported = candidates.filter(sc => {
+        return !(todayReports||[]).some(r => r.scheduleTourId === sc.tourId && r.scheduleSlotKey === sc.slotKey);
+      });
+      const pick = unreported.length ? unreported[0] : candidates[0];
+      if(pick){
+        sessionStorage.setItem('dc_dr_prefill', JSON.stringify(pick));
+        _hasPrefill = true;
+        if(typeof showToast === 'function') showToast('🎯 오늘 일정 자동 매칭: ' + (pick.agency || pick.tourCode || '일정'), 'info');
+        console.log('[addDailyReport] auto-matched schedule for + Daily Report path:', pick);
+      } else {
+        console.log('[addDailyReport] no matching schedule for shift', _shiftDateISO, _shiftRegoUC);
+      }
+    } catch(e) { console.warn('[addDailyReport] auto-match error:', e); }
+  }
+
   const _useDraft = _hasDraft && !_hasPrefill && !shift?._synthetic;
   if(!_useDraft){
     // 인승 유무와 관계없이 항상 서차지 옵션 초기화 (OT 버튼 렌더링 포함)
@@ -5996,7 +6034,7 @@ function addDailyReport(shiftId){
     if(typeof showToast === 'function') showToast('🔄 addDailyReport: prefill 분기 진입 (200ms 후 호출)', 'info');
     setTimeout(()=>{ try{ applySchedulePrefill(); }catch(e){ console.warn('prefill error', e); if(typeof showToast === 'function') showToast('❌ prefill 호출 예외: ' + (e.message||e), 'error'); } }, 200);
   } else {
-    if(typeof showToast === 'function') showToast('⚠️ addDailyReport: prefill 없음 (sessionStorage 비어있음)', 'error');
+    if(typeof showToast === 'function') showToast('⚠️ 일정 매칭 실패 — 수동으로 입력해 주세요', 'error');
   }
 }
 
