@@ -10119,12 +10119,19 @@ function startDRFromSchedule(tourId, date, slotKey){
     sessionStorage.setItem('dc_dr_prefill', JSON.stringify(matched));
   }catch(e){}
   if(typeof toast === 'function') toast('✅ 일정 데이터 적용 중...', 'in');
+  // ★ 날짜 형식 통일: activeShifts.date는 dd/MM/yyyy (getMyShifts→formatDateForSheet),
+  //   인자 date는 YYYY-MM-DD (get_driver_schedule)
+  //   비교 전 양쪽을 dd/MM/yyyy로 정규화한다 (fmtDate는 두 형식 모두 처리)
+  const dateAU = (typeof fmtDate === 'function') ? fmtDate(date) : date;
+  const _shiftDateAU = s => (typeof fmtDate === 'function') ? fmtDate(s.date) : s.date;
+  const _matchRego = String(matched?.slot?.rego||'').trim().toUpperCase();
+  const _shiftRego = s => String(s.rego||'').trim().toUpperCase();
   // 활성 시프트 우선 처리
   if(typeof activeShifts !== 'undefined' && activeShifts && activeShifts.length){
     // ★ 활성 시프트 중 같은 날짜+차량을 우선
-    const sameDayShift = activeShifts.find(s => s.date === date && s.rego === matched.slot.rego)
-      || activeShifts.find(s => s.date === date)
-      || (!isPast ? (activeShifts.find(s => s.rego === matched.slot.rego) || activeShifts[0]) : null);
+    const sameDayShift = activeShifts.find(s => _shiftDateAU(s) === dateAU && _shiftRego(s) === _matchRego)
+      || activeShifts.find(s => _shiftDateAU(s) === dateAU)
+      || (!isPast ? (activeShifts.find(s => _shiftRego(s) === _matchRego) || activeShifts[0]) : null);
     if(sameDayShift && typeof addDailyReport === 'function'){
       addDailyReport(sameDayShift.id);
       return;
