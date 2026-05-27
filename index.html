@@ -10003,6 +10003,41 @@ function applySchedulePrefill(){
   if(!data || !data.slot) return;
   const slot = data.slot;
 
+  // ★ 진단 로그 — Schedule에서 받은 데이터 전체 dump
+  //   prefill이 일어났는데 화면이 비어있을 때 원인 파악용
+  try {
+    console.log('[applySchedulePrefill] === DATA DUMP ===');
+    console.log('  data.agency       =', JSON.stringify(data.agency));
+    console.log('  data.guide        =', JSON.stringify(data.guide));
+    console.log('  data.guidePhone   =', JSON.stringify(data.guidePhone));
+    console.log('  data.tourCode     =', JSON.stringify(data.tourCode));
+    console.log('  data.seats        =', JSON.stringify(data.seats));
+    console.log('  data.pax          =', JSON.stringify(data.pax));
+    console.log('  data.billingEntity=', JSON.stringify(data.billingEntity));
+    console.log('  data.date         =', JSON.stringify(data.date));
+    console.log('  data.trailer      =', JSON.stringify(data.trailer));
+    console.log('  data.flightIn     =', JSON.stringify(data.flightIn));
+    console.log('  data.flightOut    =', JSON.stringify(data.flightOut));
+    console.log('  slot.course       =', JSON.stringify(slot.course));
+    console.log('  slot.startPlace   =', JSON.stringify(slot.startPlace));
+    console.log('  slot.endPlace     =', JSON.stringify(slot.endPlace));
+    console.log('  slot.rego         =', JSON.stringify(slot.rego));
+    console.log('  slot.startTime    =', JSON.stringify(slot.startTime));
+    console.log('  slot.endTime      =', JSON.stringify(slot.endTime));
+    console.log('  slot.driver       =', JSON.stringify(slot.driver));
+    console.log('  slot.subDriver    =', JSON.stringify(slot.subDriver));
+    console.log('  slot.mode         =', JSON.stringify(slot.mode));
+    console.log('=== END DUMP ===');
+  } catch(e){}
+
+  // ★ 빈 필드 진단 — 어떤 필드가 빈 값으로 와서 채우지 못했는지 추적
+  const _empty = [];
+  if(!data.agency) _empty.push('Agency');
+  if(!data.guide) _empty.push('Guide');
+  if(!data.tourCode) _empty.push('TourCode');
+  if(!data.seats) _empty.push('Seats');
+  if(!slot.course) _empty.push('Course');
+
   let filled = [];
 
   // 여행사
@@ -10148,9 +10183,14 @@ function applySchedulePrefill(){
   }, 150);
 
   if(filled.length && typeof showToast === 'function'){
-    showToast(`✅ 일정 자동 입력: ${filled.join(', ')} (${filled.length}개)`,'success');
+    let msg = `✅ 자동 입력: ${filled.join(', ')} (${filled.length}개)`;
+    if(_empty.length) msg += ` · ⚠️ Schedule에 비어있음: ${_empty.join(', ')}`;
+    showToast(msg, 'success');
   } else if(filled.length && typeof toast === 'function'){
     toast(`✅ 일정 자동 입력: ${filled.length}개 필드`,'ok');
+  } else if(_empty.length && typeof showToast === 'function'){
+    // 채워진 필드 0 + 빈 필드만 있음 → Schedule 시트의 데이터 자체가 비어있음
+    showToast(`⚠️ Schedule 데이터가 비어있음: ${_empty.join(', ')} — 어드민에서 일정에 정보를 추가하세요`, 'error');
   }
 
   // ★ Billing Entity dropdown 강제 갱신 — prefill 후 일정의 BillingEntity로 잠기도록
