@@ -6597,7 +6597,7 @@ function getPayoutOverrides() {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
 
-    // 1) Schedule에서 TourCode → BillingEntity 맵 추출 (1차 소스)
+    // 1) Schedule에서 TourCode → BillingEntity 맵 추출
     const scheduleSheet = ss.getSheetByName('Schedule');
     const billingEntities = {};
     if (scheduleSheet) {
@@ -6618,51 +6618,6 @@ function getPayoutOverrides() {
           });
         }
       }
-    }
-
-    // 1-b) Daily_Report에서 추가 추출 (2차 소스)
-    //   Schedule에 미등록된 TourCode 또는 BillingEntity가 비어있는 경우를 보완.
-    //   Daily_Report의 Billing_Entity가 명확하면 그 값을 사용.
-    //   ★ Schedule에 'DC'로 명시된 경우는 덮어쓰지 않음 (의도적 설정 보호).
-    //      단 Schedule에 키가 아예 없거나, 빈 값/DC인데 DR이 모두 같은 비-DC BE를 가지면 DR을 따른다.
-    //      → 안전하게: Schedule에 키가 없는 경우만 DR로 보충
-    try {
-      const drSheet = ss.getSheetByName('Daily_Report');
-      if (drSheet) {
-        const drLastRow = drSheet.getLastRow();
-        const drLastCol = drSheet.getLastColumn();
-        if (drLastRow >= 2 && drLastCol >= 1) {
-          const drHeaders = drSheet.getRange(1, 1, 1, drLastCol).getValues()[0];
-          const dTC = drHeaders.indexOf('Tour_Code');
-          const dBE = drHeaders.indexOf('Billing_Entity');
-          if (dTC >= 0 && dBE >= 0) {
-            const drData = drSheet.getRange(2, 1, drLastRow - 1, drLastCol).getValues();
-            // 각 TourCode가 가지는 BE 집합 수집
-            const drBEMap = {};   // tc -> Set of BE (uppercased)
-            drData.forEach(row => {
-              const tc = String(row[dTC] || '').trim();
-              if (!tc) return;
-              const be = String(row[dBE] || '').trim().toUpperCase();
-              if (!be) return;
-              if (!drBEMap[tc]) drBEMap[tc] = new Set();
-              drBEMap[tc].add(be);
-            });
-            // Schedule에 키가 없는 TourCode만 보충 (Schedule 명시값 보호)
-            Object.keys(drBEMap).forEach(tc => {
-              if (billingEntities[tc]) return; // Schedule에 이미 있음 — 보호
-              const beSet = drBEMap[tc];
-              // DR에 단일 BE만 있을 때 그 값으로 채움
-              if (beSet.size === 1) {
-                const single = Array.from(beSet)[0];
-                billingEntities[tc] = single;
-              }
-              // 여러 BE가 섞여 있으면 채우지 않음 (수동 확인 필요)
-            });
-          }
-        }
-      }
-    } catch(drErr) {
-      Logger.log('[getPayoutOverrides] DR supplement failed: ' + drErr);
     }
 
     // 2) PayoutOverrides 시트에서 수동 오버라이드 로드 (없으면 자동 생성)
