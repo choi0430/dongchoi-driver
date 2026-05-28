@@ -7334,7 +7334,7 @@ function saveDailyDraft(){
 
     // ★ 내용이 전혀 없으면 저장하지 않음 (빈 draft 방지)
     const _hasContent = !!(agency || attraction || pickup || dropoff || tourcode || kmStart || kmEnd || timeStart || timeEnd || (toll && toll!=='0') || (fuel && fuel!=='0') || (tip && tip!=='0'));
-    if(!_hasContent){ clearDailyDraft(); return; }
+    if(!_hasContent){ clearDailyDraft({preservePrefill:true}); return; }
 
     const draft = {
       agency, attraction, pickup, dropoff, kmStart, kmEnd, timeStart, timeEnd, tourcode,
@@ -7368,11 +7368,18 @@ function saveDailyDraft(){
   } catch(e) {}
 }
 
-function clearDailyDraft(){
+function clearDailyDraft(opts){
   try { localStorage.removeItem(_draftKey()); } catch(e) {}
   _clearDraftOnServer();
   // ★ DR 제출 완료 — schedule prefill도 정리
-  try { sessionStorage.removeItem('dc_dr_prefill'); } catch(e) {}
+  //   단, 호출자가 preservePrefill=true 를 주면 prefill 은 건드리지 않는다.
+  //   이유: restoreDailyDraft 에서 "빈 draft" 정리 시 schedule prefill 까지 함께 지워지면
+  //         addDailyReport 의 setTimeout 200ms 안에 sessionStorage 가 비어버려
+  //         "❌ prefill 데이터 없음" 배너가 잘못 뜨고 자동 채움이 동작하지 않음.
+  const _preserve = opts && opts.preservePrefill;
+  if(!_preserve){
+    try { sessionStorage.removeItem('dc_dr_prefill'); } catch(e) {}
+  }
 }
 // ═══════════════════════════════════════════════════════
 // PRE DEPARTURE DRAFT — 제거됨 (임시저장/복원 비활성화)
@@ -7519,10 +7526,10 @@ function restoreDailyDraft(){
     if(!raw){ _draftRestoring = false; return false; }
     const d = JSON.parse(raw);
     // 48시간 이상 지난 draft는 무시
-    if(Date.now() - (d._ts || 0) > 48*60*60*1000){ clearDailyDraft(); _draftRestoring = false; return false; }
+    if(Date.now() - (d._ts || 0) > 48*60*60*1000){ clearDailyDraft({preservePrefill:true}); _draftRestoring = false; return false; }
     // ★ 빈 draft는 복원하지 않음 (제출 후 빈 값으로 저장된 잔여 draft 방지)
     const _hasContent = !!(d.agency || d.attraction || d.pickup || d.dropoff || d.tourcode || d.kmStart || d.kmEnd || d.timeStart || d.timeEnd || (d.toll && d.toll!=='0') || (d.fuel && d.fuel!=='0') || (d.tip && d.tip!=='0'));
-    if(!_hasContent){ clearDailyDraft(); _draftRestoring = false; return false; }
+    if(!_hasContent){ clearDailyDraft({preservePrefill:true}); _draftRestoring = false; return false; }
 
     // ★ 일정 카드 탭으로 진입한 경우 (sessionStorage prefill 존재) — draft 복원 건너뜀
     //   이유: draft는 이전 시프트 작업 중 자동저장된 것일 가능성이 크고,
@@ -7549,7 +7556,7 @@ function restoreDailyDraft(){
       const matchShift = activeShifts.find(s=>s.id===d._shiftId);
       // ★ 임시 시프트는 draft 매칭 대상에서 제외 (이전 정상 시프트로만 복원)
       if(matchShift && !matchShift._synthetic) editingShiftId = d._shiftId;
-      else { clearDailyDraft(); _draftRestoring = false; return false; } // 해당 shift가 없으면 draft 무효
+      else { clearDailyDraft({preservePrefill:true}); _draftRestoring = false; return false; } // 해당 shift가 없으면 draft 무효
     }
 
     // 1) 텍스트 / 숫자 필드
