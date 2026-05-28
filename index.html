@@ -511,7 +511,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 <!-- TOP BAR -->
 <div class="topbar">
   <div>
-    <div class="topbar-logo">🚌 DC FLEET <span style="font-size:9px;color:rgba(255,255,255,0.4);font-weight:500;letter-spacing:0;margin-left:4px;">v2026.05.27d</span></div>
+    <div class="topbar-logo">🚌 DC FLEET <span style="font-size:9px;color:rgba(255,255,255,0.4);font-weight:500;letter-spacing:0;margin-left:4px;">v2026.05.28a</span></div>
   </div>
   <div class="topbar-right">
     <div class="notif-btn" onclick="showPage('notices')">🔔<div class="notif-dot" id="notif-dot"></div></div>
@@ -2140,6 +2140,37 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 </div>
 
 <script>
+
+// ============================================================================
+// SESSIONSTORAGE PREFILL MONITOR (DIAG) — 2026-05-28
+// dc_dr_prefill 이 언제 set/remove 되는지 콘솔에 캡처해서 자동완성 실패 원인 추적
+// ============================================================================
+(function(){
+  try {
+    const _origRemove = sessionStorage.removeItem.bind(sessionStorage);
+    const _origSet    = sessionStorage.setItem.bind(sessionStorage);
+    const _origClear  = sessionStorage.clear.bind(sessionStorage);
+    sessionStorage.removeItem = function(k){
+      if(k === 'dc_dr_prefill'){
+        const stack = (new Error()).stack || '(no stack)';
+        try { console.warn('[PREFILL-MON] removeItem(dc_dr_prefill) called\n', stack); } catch(e){}
+        try { window.__prefillEvents = window.__prefillEvents || []; window.__prefillEvents.push({ t: Date.now(), op:'remove', stack }); } catch(e){}
+      }
+      return _origRemove(k);
+    };
+    sessionStorage.setItem = function(k, v){
+      if(k === 'dc_dr_prefill'){
+        try { console.warn('[PREFILL-MON] setItem(dc_dr_prefill) len=' + (v||'').length); } catch(e){}
+        try { window.__prefillEvents = window.__prefillEvents || []; window.__prefillEvents.push({ t: Date.now(), op:'set', len:(v||'').length }); } catch(e){}
+      }
+      return _origSet(k, v);
+    };
+    sessionStorage.clear = function(){
+      try { console.warn('[PREFILL-MON] sessionStorage.clear() called', (new Error()).stack); } catch(e){}
+      return _origClear();
+    };
+  } catch(e) { /* noop */ }
+})();
 
 // ============================================================================
 // UTILITY FUNCTIONS (ADDED FOR BUG FIXES)
@@ -10209,7 +10240,14 @@ function _renderMissedScheduleBanner(missedSlots){
 function applySchedulePrefill(){
   const raw = sessionStorage.getItem('dc_dr_prefill');
   if(!raw) {
-    if(typeof showToast === 'function') showToast('❌ prefill 데이터 없음 (sessionStorage 비어있음)', 'error');
+    // ★ 진단 — 최근 prefill 이벤트 로그를 토스트로 함께 노출
+    let _evtTrail = '';
+    try {
+      const evts = (window.__prefillEvents||[]).slice(-4);
+      _evtTrail = evts.length ? ' | trail: ' + evts.map(e => e.op + (e.op==='set' ? '('+e.len+')' : '')).join('→') : ' | trail: (없음)';
+    } catch(e){}
+    if(typeof showToast === 'function') showToast('❌ prefill 데이터 없음 (sessionStorage 비어있음)' + _evtTrail, 'error');
+    try { console.warn('[applySchedulePrefill] empty. event trail:', window.__prefillEvents); } catch(e){}
     return;
   }
   let data;
