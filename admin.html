@@ -18862,13 +18862,48 @@ function renderBalDetail(){
       return '';
     }
 
+    // ★ SUB 거래 행의 BillingEntity 판정
+    //   DRSUB/LEDGER 행은 Daily_Report에 매칭되는 행이 있고 그 BillingEntity로 판정한다.
+    //   BillingEntity = DC (또는 빈 값) → DC 회계 (정상 지급 대상)
+    //   BillingEntity = SubCompany 자기 자신 → 외부 빌링 (DC 지급 의무 없음)
+    //   BillingEntity = 그 외 회사 → DC 회계 외 (그 회사가 직접 빌링)
+    function _detectBillingEntity(r){
+      const desc = String(r.Description||'');
+      const m = desc.match(/^(?:DRSUB|LEDGER):(\d{4}-\d{2}-\d{2})_([^_]+)_(.+)$/);
+      if(!m) return { be: '', drFound: false };
+      const isoDate = m[1];
+      const rego = m[2];
+      const tc = m[3].trim();
+      // Daily_Report에서 같은 (날짜+차량+투어코드) 행 찾기
+      const dr = (_reportsCache||[]).find(x => {
+        const xDate = x._isoDate || parseToISO(x.Date||'');
+        return xDate === isoDate &&
+               String(x.Rego||'').trim().toUpperCase() === rego.toUpperCase() &&
+               String(x.Tour_Code||'').trim() === tc;
+      });
+      if(!dr) return { be: '', drFound: false };
+      const beRaw = String(dr.Billing_Entity || dr.BillingEntity || '').trim();
+      return { be: beRaw, drFound: true, dr };
+    }
+    // SubCompany 자기 자신이 빌링하는지 (정규화 비교)
+    function _isSelfBilled(beNormalized, subCompanyName){
+      const a = String(beNormalized||'').toLowerCase().replace(/\s+/g,' ').trim();
+      const b = String(subCompanyName||'').toLowerCase().replace(/\s+/g,' ').trim();
+      return a && b && a === b;
+    }
+    function _isDCBilled(beNormalized){
+      if(!beNormalized) return true; // 빈 값 = DC 자사
+      const u = String(beNormalized).trim().toUpperCase();
+      return u === 'DC' || u === 'DONG CHOI PTY LTD' || u === '자사';
+    }
+
     // ★ 행을 투어코드별로 그룹화
     const groups = {};       // tourCode → { rows:[], dr, cr, lastDate, guideSet }
     const ungrouped = [];    // 투어코드 추출 실패한 행들
     rows.forEach(r => {
       const tc = _extractTourCode(r);
       if(!tc){ ungrouped.push(r); return; }
-      if(!groups[tc]) groups[tc] = { tourCode: tc, rows: [], dr: 0, cr: 0, lastISO: '', guideSet: new Set() };
+      if(!groups[tc]) groups[tc] = { tourCode: tc, rows: [], dr: 0, cr: 0, lastISO: '', guideSet: new Set(), beSet: new Set(), beStatus: 'unknown' };
       groups[tc].rows.push(r);
       groups[tc].dr += Number(r.DR)||0;
       groups[tc].cr += Number(r.CR)||0;
@@ -18877,9 +18912,42 @@ function renderBalDetail(){
       // ★ 가이드 추출 (전역 헬퍼 사용)
       const gd = _extractSubGuide(r);
       if(gd) groups[tc].guideSet.add(gd);
+      // ★ BillingEntity 추출 — 행에 _be를 저장해서 행 렌더링에서도 사용
+      const _beInfo = _detectBillingEntity(r);
+      r._beDetected = _beInfo.be;
+      r._beFound = _beInfo.drFound;
+      if(_beInfo.drFound && _beInfo.be){
+        groups[tc].beSet.add(_beInfo.be);
+      }
+    });
+    // 그룹마다 BillingEntity 상태 판정
+    Object.values(groups).forEach(g => {
+      const bes = Array.from(g.beSet);
+      if(bes.length === 0) g.beStatus = 'unknown';            // DR 매칭 못 함
+      else if(bes.every(be => _isDCBilled(be))) g.beStatus = 'dc';     // 모두 DC 빌링
+      else if(bes.every(be => _isSelfBilled(be, name))) g.beStatus = 'self';  // SubCompany가 직접 빌링
+      else if(bes.every(be => !_isDCBilled(be))) g.beStatus = 'other'; // 다른 회사가 빌링
+      else g.beStatus = 'mixed';                              // 혼합
+      g.billingEntities = bes;
     });
     // 그룹 정렬: 마지막 날짜 기준 (오래된 것부터)
     const sortedGroups = Object.values(groups).sort((a,b) => (a.lastISO||'').localeCompare(b.lastISO||''));
+
+    // ★ DC 실제 지급 의무 분리 — 빌링 주체별 합계
+    let _dcDR=0, _dcCR=0, _excludedDR=0, _excludedCR=0, _excludedCount=0;
+    Object.values(groups).forEach(g => {
+      if(g.beStatus === 'self' || g.beStatus === 'other'){
+        _excludedDR += g.dr;
+        _excludedCR += g.cr;
+        _excludedCount += g.rows.length;
+      } else {
+        // dc, mixed, unknown은 일단 DC 회계에 포함 (mixed/unknown은 확인 필요)
+        _dcDR += g.dr;
+        _dcCR += g.cr;
+      }
+    });
+    // ungrouped은 BE 판정 불가 — DC 회계로 가정
+    ungrouped.forEach(r => { _dcDR += Number(r.DR)||0; _dcCR += Number(r.CR)||0; });
 
     document.getElementById('bal-detail-summary').innerHTML = `
       <div style="display:flex;gap:10px;font-size:12px;font-family:var(--fn);flex-wrap:wrap;">
@@ -18888,6 +18956,13 @@ function renderBalDetail(){
         <span style="color:${(dr-cr)>0?'var(--rd)':'var(--gn)'};">잔액 $${(dr-cr).toLocaleString('en',{minimumFractionDigits:2})}</span>
         <span style="color:var(--t3);font-size:11px;">📦 ${sortedGroups.length}\uAC1C \uD22C\uC5B4\ucf54\ub4dc</span>
       </div>
+      ${_excludedCount > 0 ? `
+      <div style="margin-top:6px;padding:6px 10px;background:#fef3c7;border-left:3px solid #fbbf24;border-radius:4px;font-size:11px;color:#92400e;">
+        <strong>\u26A0\uFE0F DC \uC9C0\uAE09 \uC758\uBB34 \uC788\uB294 \uAE08\uC561 (DC \uBE4C\uB9C1\uB9CC):</strong>
+        <span style="font-family:var(--fn);font-weight:700;color:#dc2626;margin-left:4px;">$${(_dcDR-_dcCR).toLocaleString('en',{minimumFractionDigits:2})}</span>
+        <span style="margin:0 6px;">·</span>
+        \uC678\uBD80 \uBE4C\uB9C1\uC73C\uB85C \uC81C\uC678\uB41C \uAE08\uC561: <span style="font-family:var(--fn);font-weight:700;">$${(_excludedDR-_excludedCR).toLocaleString('en',{minimumFractionDigits:2})}</span> (${_excludedCount}\uAC74)
+      </div>` : ''}
       ${suppressedCount > 0 ? `<div style="font-size:10px;color:#7c3aed;margin-top:4px;">ℹ️ SUBINV/DRSUB 우선 정책으로 ${suppressedCount}건 가려짐 (중복 방지)</div>` : ''}`;
 
     html = `<table style="width:100%;font-size:11px;border-collapse:collapse;">
@@ -18918,14 +18993,43 @@ function renderBalDetail(){
       // 그룹 헤더
       const groupGuides = Array.from(g.guideSet || []);
       const groupGuideHtml = groupGuides.length ? `<span style="font-size:10px;font-weight:600;color:#0891b2;background:#ecfeff;padding:1px 6px;border-radius:3px;margin-left:6px;">\uD83D\uDC64 ${groupGuides.map(escH).join(', ')}</span>` : '';
-      html += `<tr style="background:#faf5ff;border-bottom:1px solid #c4b5fd;">
+      // ★ BillingEntity 배지 — 그룹의 빌링 주체 시각화
+      //   - dc: 정상 (DC가 SUB에 지급해야 함)
+      //   - self: SubCompany 본인이 직접 빌링 (DC 지급 의무 없음 — 회색 처리)
+      //   - other: 다른 회사가 직접 빌링 (DC 지급 의무 없음)
+      //   - mixed: 같은 투어코드에 BE가 섞임 (주의)
+      //   - unknown: DR 매칭 못 함 (정보 부족)
+      let beBadgeHtml = '';
+      let _groupHeaderBg = '#faf5ff';   // 기본: 보라 (DC 빌링)
+      let _groupHeaderBorder = '#c4b5fd';
+      let _groupHeaderText = '#6d28d9';
+      let _groupRowsOpacity = '';        // DC 외 빌링 그룹은 약간 흐리게
+      if(g.beStatus === 'self'){
+        beBadgeHtml = `<span style="font-size:10px;font-weight:700;color:#6b7280;background:#f3f4f6;padding:1px 6px;border-radius:4px;margin-left:6px;border:1px solid #d1d5db;">\u26A0\uFE0F ${escH(name)} \uC9C1\uC811 \uBE4C\uB9C1 \u2014 DC \uC9C0\uAE09 \uC758\uBB34 \uC5C6\uC74C</span>`;
+        _groupHeaderBg = '#f9fafb';
+        _groupHeaderBorder = '#d1d5db';
+        _groupHeaderText = '#6b7280';
+        _groupRowsOpacity = 'opacity:0.6;';
+      } else if(g.beStatus === 'other'){
+        const otherBe = g.billingEntities.find(b => !_isDCBilled(b) && !_isSelfBilled(b, name)) || g.billingEntities[0];
+        beBadgeHtml = `<span style="font-size:10px;font-weight:700;color:#92400e;background:#fef3c7;padding:1px 6px;border-radius:4px;margin-left:6px;border:1px solid #fbbf24;">\u26A0\uFE0F ${escH(otherBe)} \uBE4C\uB9C1 \u2014 DC \uD68C\uACC4 \uC678</span>`;
+        _groupHeaderBg = '#fffbeb';
+        _groupHeaderBorder = '#fbbf24';
+        _groupHeaderText = '#92400e';
+        _groupRowsOpacity = 'opacity:0.65;';
+      } else if(g.beStatus === 'mixed'){
+        beBadgeHtml = `<span style="font-size:10px;font-weight:700;color:#7c2d12;background:#fee2e2;padding:1px 6px;border-radius:4px;margin-left:6px;border:1px solid #ef4444;">\u26A0\uFE0F BE \uD63C\uD569 \u2014 \uD655\uC778 \uD544\uC694</span>`;
+      } else if(g.beStatus === 'unknown'){
+        // DR 매칭 못한 경우는 배지 생략 (조용히)
+      }
+      html += `<tr style="background:${_groupHeaderBg};border-bottom:1px solid ${_groupHeaderBorder};">
         <td colspan="7" style="padding:6px 8px;">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
-            <div style="font-size:11px;font-weight:700;color:#6d28d9;">
-              \uD83C\uDFF7 ${escH(g.tourCode)}${groupGuideHtml}
+            <div style="font-size:11px;font-weight:700;color:${_groupHeaderText};">
+              \uD83C\uDFF7 ${escH(g.tourCode)}${groupGuideHtml}${beBadgeHtml}
               <span style="font-size:10px;font-weight:600;color:var(--t3);margin-left:6px;">(${g.rows.length}\uAC74)</span>
               ${g.lastISO ? `<span style="font-size:10px;font-weight:600;color:var(--t3);margin-left:6px;">\uB9C8\uC9C0\uB9C9 ${fmtDate(g.lastISO)}</span>` : ''}
-              ${dueStr ? `<span style="font-size:10px;font-weight:700;color:#dc2626;margin-left:6px;background:#fef2f2;padding:1px 6px;border-radius:4px;">\uD83D\uDCC5 \uC9C0\uAE09 \uC608\uC815: ${fmtDate(dueStr)}</span>` : ''}
+              ${dueStr && (g.beStatus === 'dc' || g.beStatus === 'unknown') ? `<span style="font-size:10px;font-weight:700;color:#dc2626;margin-left:6px;background:#fef2f2;padding:1px 6px;border-radius:4px;">\uD83D\uDCC5 \uC9C0\uAE09 \uC608\uC815: ${fmtDate(dueStr)}</span>` : ''}
             </div>
             <div style="font-size:11px;font-family:var(--fn);">
               <span style="color:var(--ac);">DR $${g.dr.toLocaleString('en',{minimumFractionDigits:2})}</span>
@@ -18943,13 +19047,16 @@ function renderBalDetail(){
         const realIdx = _balSubTxns.indexOf(r);
         const cat = r.Category==='Wage'?'급여':'외주';
         const remark = r.Remark || '—';
-        html += `<tr style="border-bottom:1px solid var(--b1);">
+        // ★ DC 회계 외 그룹 — 금액에 취소선 + 흐림 표시 (지급 의무 없음)
+        const _isExcluded = g.beStatus === 'self' || g.beStatus === 'other';
+        const _amtStyle = _isExcluded ? 'text-decoration:line-through;color:var(--t3) !important;' : '';
+        html += `<tr style="border-bottom:1px solid var(--b1);${_groupRowsOpacity}">
           <td style="padding:6px 4px;white-space:nowrap;padding-left:18px;">${fmtDate(r.Date)||'—'}</td>
           <td style="padding:6px 4px;"><span style="background:${r.Category==='Wage'?'var(--pud)':'var(--acd)'};padding:1px 6px;border-radius:4px;font-size:9px;">${cat}</span></td>
           <td style="padding:6px 4px;">${r.Description||r.InvoiceNo||'—'}</td>
           <td style="padding:6px 4px;font-size:10px;color:var(--t3);">${escH(remark)}</td>
-          <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
-          <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+          <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);${_amtStyle}">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
+          <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);${_amtStyle}">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
           <td style="padding:6px 2px;text-align:center;">
             <span onclick="event.stopPropagation();openBalTxnModal('sub',${realIdx})" style="cursor:pointer;">✏️</span>
             <span onclick="event.stopPropagation();deleteBalTxn('sub',${realIdx})" style="cursor:pointer;margin-left:2px;">🗑</span>
