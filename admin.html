@@ -21688,7 +21688,9 @@ function calcInvRow(r) {
   function _ovGet(type){ const k=_ovKey(type); return (window._invoiceOverrides && window._invoiceOverrides[k] !== undefined) ? window._invoiceOverrides[k] : null; }
 
   // ── Trailer Surcharge (DR→TA 역산) ──
-  // ★ BLUESKY 특수 규칙: 트레일러 사용 시 $50 고정 청구 (사용자 요청, 2026-05-30)
+  // ★ BLUESKY 특수 규칙: 21/25석에서 트레일러 사용 시 $50 고정 (사용자 요청, 2026-05-30)
+  //   - 40/50석 대형 차량은 트레일러 없음 → $0
+  //   - 트레일러 DR이 0이면 사용 안 함 → $0
   const trailerDR = parseFloat(r.Trailer) || 0;
   function trailerDRtoTA(dr, sn) {
     if(dr===0) return 0;
@@ -21696,7 +21698,7 @@ function calcInvRow(r) {
     return dr===30?80:Math.round(dr*2.67);
   }
   // _isBluesky는 위에서 earlyTA 섹션에서 이미 선언됨
-  const _trailerAuto = (_isBluesky && trailerDR > 0)
+  const _trailerAuto = (_isBluesky && trailerDR > 0 && seatNum < 40)
     ? 50
     : trailerDRtoTA(trailerDR, seatNum);
   const trailerVal = _ovGet('trailer') === '0' ? 0 : _trailerAuto;
