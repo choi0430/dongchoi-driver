@@ -20830,21 +20830,64 @@ function _renderInvScheduleImportModal(){
 }
 
 function applyInvScheduleImport(){
-  const selected = _invSchImportData.filter(it => it.selected);
-  if(!selected.length){ toast('선택된 항목 없음','er'); return; }
+  // ★ 더블클릭/중복 실행 방지 락 (사용자 요청, 2026-05-30)
+  if(window._applyInvScheduleImportRunning){
+    console.log('[Schedule Import] 이미 실행 중 — 중복 실행 차단');
+    return;
+  }
+  window._applyInvScheduleImportRunning = true;
 
-  const key = _invManualKey();
-  const items = _getInvManualItems(key).slice();
-  const agency = (document.getElementById('inv-agency')?.value || '').trim();
-  const period = (document.getElementById('inv-from')?.value || '').slice(0,7);
+  // 버튼 비활성화 (UI 차단)
+  const _btn = document.querySelector('#inv-sch-modal button[onclick*="applyInvScheduleImport"]');
+  const _btnOrigText = _btn ? _btn.textContent : '';
+  if(_btn){
+    _btn.disabled = true;
+    _btn.style.opacity = '0.6';
+    _btn.style.cursor = 'not-allowed';
+    _btn.textContent = '처리 중...';
+  }
 
-  let added = 0;
-  let subAdded = 0;
-  let dayTrailerSeen = {}; // 같은 날 트레일러 중복 방지
-  const subTxnsToCreate = [];
+  try {
+    const selected = _invSchImportData.filter(it => it.selected);
+    if(!selected.length){ toast('선택된 항목 없음','er'); return; }
 
-  selected.forEach(it => {
-    const c = it.calc || {};
+    // ★ selected 자체 중복 제거 — 같은 (date+tourcode+slot)이 두 번 들어왔을 가능성 방어
+    const _seenSel = new Set();
+    const dedupedSelected = [];
+    selected.forEach(it => {
+      const slotKey = (it.slot && (it.slot.startTime||'')) + '|' + (it.slot && (it.slot.endTime||''));
+      const k = it.date + '|' + (it.tourCode||'') + '|' + slotKey + '|' + (it.isSubMode?'S':'D');
+      if(_seenSel.has(k)){
+        console.warn('[Schedule Import] selected에 중복 발견, skip:', k);
+        return;
+      }
+      _seenSel.add(k);
+      dedupedSelected.push(it);
+    });
+
+    const key = _invManualKey();
+    const items = _getInvManualItems(key).slice();
+    const agency = (document.getElementById('inv-agency')?.value || '').trim();
+    const period = (document.getElementById('inv-from')?.value || '').slice(0,7);
+
+    let added = 0;
+    let subAdded = 0;
+    let dayTrailerSeen = {}; // 같은 날 트레일러 중복 방지
+    const subTxnsToCreate = [];
+    // ★ subTxnsToCreate 내부 중복 추적용 키 Set
+    const _subTxnKeys = new Set();
+    // ★ 이미 SUB_Txn에 있는 거래 키 Set (서버 비교 중복 방지)
+    const _existingSubTxnKeys = new Set();
+    (_balSubTxns||[]).forEach(t => {
+      // 키: Date|SubCompany|Description
+      const k = String(t.Date||'').slice(0,10) + '|' +
+                String(t.SubCompany||'').trim().toUpperCase() + '|' +
+                String(t.Description||'').trim();
+      _existingSubTxnKeys.add(k);
+    });
+
+    dedupedSelected.forEach(it => {
+      const c = it.calc || {};
     const slot = it.slot;
     const day = it.day;
     const tourCode = it.tourCode;
@@ -20920,17 +20963,29 @@ function applyInvScheduleImport(){
       if(trAdj !== 0 && trInfo){
         descSuffix += ` (트레일러 ${trInfo.trailerNumber} ${trInfo.trailerOwner} 빌림: ${trAdj > 0 ? '+' : ''}$${trAdj})`;
       }
-      subTxnsToCreate.push({
-        SubCompany: it.subCalc.subCo,
-        Category: 'service',
-        Date: it.date,
-        InvoiceNo: '',  // SUB가 인보이스 발행 시 채워짐, 또는 수동 입력
-        Description: `${item.tour} (${tourCode}) - ${it.subCalc.seats}S` + descSuffix,
-        DR: finalAmount,
-        CR: 0,
-        Remark: `Schedule 자동 (${it.tour.TourID||''})${trAdj !== 0 ? ' · 트레일러 정산 포함' : ''}`
-      });
-      subAdded++;
+      const _txnDesc = `${item.tour} (${tourCode}) - ${it.subCalc.seats}S` + descSuffix;
+      // ★ 중복 체크: 같은 Date|SubCompany|Description 거래가 이미 있으면 skip
+      const _txnKey = String(it.date).slice(0,10) + '|' +
+                      String(it.subCalc.subCo||'').trim().toUpperCase() + '|' +
+                      _txnDesc;
+      if(_subTxnKeys.has(_txnKey)){
+        console.warn('[Schedule Import] 이번 import 내 SUB 거래 중복, skip:', _txnKey);
+      } else if(_existingSubTxnKeys.has(_txnKey)){
+        console.warn('[Schedule Import] SUB_Txn에 이미 있음, skip:', _txnKey);
+      } else {
+        _subTxnKeys.add(_txnKey);
+        subTxnsToCreate.push({
+          SubCompany: it.subCalc.subCo,
+          Category: 'service',
+          Date: it.date,
+          InvoiceNo: '',  // SUB가 인보이스 발행 시 채워짐, 또는 수동 입력
+          Description: _txnDesc,
+          DR: finalAmount,
+          CR: 0,
+          Remark: `Schedule 자동 (${it.tour.TourID||''})${trAdj !== 0 ? ' · 트레일러 정산 포함' : ''}`
+        });
+        subAdded++;
+      }
     } else if(!it.subCalc) {
       // ★ 자사 운행이지만 트레일러는 SUB 소유인 경우 → SUB에게 +Rental_Fee 지급 거래 생성
       // 사용자가 toggleTrailerAdj()로 끈 경우 거래 생성 안 함
@@ -20944,17 +20999,26 @@ function applyInvScheduleImport(){
             const trFee = Number(tr.Rental_Fee) || 30;
             // 트레일러 소유주가 자사가 아니면 SUB에게 지급
             if(trOwner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(trOwner)){
-              subTxnsToCreate.push({
-                SubCompany: trOwner,
-                Category: 'service',
-                Date: it.date,
-                InvoiceNo: '',
-                Description: `트레일러 ${tr.Trailer_Number} 사용료 (${item.tour} ${tourCode})`,
-                DR: trFee,
-                CR: 0,
-                Remark: `Schedule 자동 (${it.tour.TourID||''}) · 트레일러 빌림 정산`
-              });
-              subAdded++;
+              const _trDesc = `트레일러 ${tr.Trailer_Number} 사용료 (${item.tour} ${tourCode})`;
+              const _trKey = String(it.date).slice(0,10) + '|' + trOwner.toUpperCase() + '|' + _trDesc;
+              if(_subTxnKeys.has(_trKey)){
+                console.warn('[Schedule Import] 트레일러 거래 중복(이번 import), skip:', _trKey);
+              } else if(_existingSubTxnKeys.has(_trKey)){
+                console.warn('[Schedule Import] 트레일러 거래 이미 SUB_Txn에 있음, skip:', _trKey);
+              } else {
+                _subTxnKeys.add(_trKey);
+                subTxnsToCreate.push({
+                  SubCompany: trOwner,
+                  Category: 'service',
+                  Date: it.date,
+                  InvoiceNo: '',
+                  Description: _trDesc,
+                  DR: trFee,
+                  CR: 0,
+                  Remark: `Schedule 자동 (${it.tour.TourID||''}) · 트레일러 빌림 정산`
+                });
+                subAdded++;
+              }
             }
           }
         }
@@ -20981,11 +21045,24 @@ function applyInvScheduleImport(){
     });
   }
 
-  document.getElementById('inv-sch-modal').style.display = 'none';
-  if(typeof renderInvManualList === 'function') renderInvManualList();
-  if(typeof _refreshInvPreview === 'function') _refreshInvPreview();
-  const subMsg = subAdded > 0 ? ` (+ SUB 거래 ${subAdded}건 자동 생성)` : '';
-  toast(`✅ ${added}건 추가됨${subMsg}`,'ok');
+    document.getElementById('inv-sch-modal').style.display = 'none';
+    if(typeof renderInvManualList === 'function') renderInvManualList();
+    if(typeof _refreshInvPreview === 'function') _refreshInvPreview();
+    const subMsg = subAdded > 0 ? ` (+ SUB 거래 ${subAdded}건 자동 생성)` : '';
+    toast(`✅ ${added}건 추가됨${subMsg}`,'ok');
+  } catch(impErr) {
+    console.error('[Schedule Import] error:', impErr);
+    toast('⚠️ Schedule 가져오기 오류: ' + impErr.message, 'er');
+  } finally {
+    // 락 해제 + 버튼 복구 (성공/실패 무관)
+    window._applyInvScheduleImportRunning = false;
+    if(_btn){
+      _btn.disabled = false;
+      _btn.style.opacity = '';
+      _btn.style.cursor = 'pointer';
+      _btn.textContent = _btnOrigText;
+    }
+  }
 }
 
 
