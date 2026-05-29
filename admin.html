@@ -21637,9 +21637,12 @@ function calcInvRow(r) {
 
   // ── Early/Late Surcharge TA ──
   // - Tour Hojuro / Plus Australia 21/25S: $80 고정
+  // - Bluesky tours & overseas consulting pty ltd: 청구 안 함 ($0)
   // - 그 외: Airport Transfer 요금 × 30%
   let earlyTA = 0;
-  if (earlyDR > 0) {
+  // ★ BLUESKY 특수 규칙: Early surcharge 청구 안 함 (사용자 요청, 2026-05-30)
+  const _isBluesky = /bluesky/i.test(agency);
+  if (earlyDR > 0 && !_isBluesky) {
     // 1) Tour Hojuro / Plus Australia 21/25S 우선 체크 → $80 고정
     const _isHojuroEarly = /호주로|hojuro|plus\s*australia/i.test(agency);
     if (_isHojuroEarly && seatNum < 40) {
@@ -21685,13 +21688,17 @@ function calcInvRow(r) {
   function _ovGet(type){ const k=_ovKey(type); return (window._invoiceOverrides && window._invoiceOverrides[k] !== undefined) ? window._invoiceOverrides[k] : null; }
 
   // ── Trailer Surcharge (DR→TA 역산) ──
+  // ★ BLUESKY 특수 규칙: 트레일러 사용 시 $50 고정 청구 (사용자 요청, 2026-05-30)
   const trailerDR = parseFloat(r.Trailer) || 0;
   function trailerDRtoTA(dr, sn) {
     if(dr===0) return 0;
     if(sn>=40) return 0;
     return dr===30?80:Math.round(dr*2.67);
   }
-  const _trailerAuto = trailerDRtoTA(trailerDR, seatNum);
+  // _isBluesky는 위에서 earlyTA 섹션에서 이미 선언됨
+  const _trailerAuto = (_isBluesky && trailerDR > 0)
+    ? 50
+    : trailerDRtoTA(trailerDR, seatNum);
   const trailerVal = _ovGet('trailer') === '0' ? 0 : _trailerAuto;
 
   // ── Night Tour TA ──
