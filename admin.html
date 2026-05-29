@@ -16452,10 +16452,15 @@ function _buildWageTxns(){
   // ① Daily_Report 기반 드라이버 발생 수당 (표준 API 사용)
   //    ★ 마이너스(개인 야경 납입) 포함 — 집계 시 자동으로 차감 효과
   //    ★ payer 정보 — 자사 차량은 자사가, SUB 차량은 차주가 지급 주체
+  //    ★ FIX 2026-05-30: SUB 차량 운행은 자사 지급 대상이 아니므로 DR에서 제외.
+  //      자사 차량(isDirectPayDR===true)만 wage 잔액 계산에 포함.
+  //      SUB 차량 운행 수당은 화면 "SUB 차량 운행 받을 돈" 별도 섹션에서 표시됨.
   const drRows = _reportsCache || [];
   drRows.forEach(r=>{
     const driver = String(r.Driver||'').trim();
     if(!driver) return;
+    // ★ SUB 차량 운행 제외 — 자사 직접 지급 DR만 wage txn으로 등록
+    if(typeof isDirectPayDR === 'function' && !isDirectPayDR(r)) return;
     const earned = calcDriverNetPay(r);
     if(earned === 0) return;  // 0은 건너뜀, 음수는 포함 (납입 차감)
     const isoDate = r._isoDate || parseToISO(r.Date||'');
