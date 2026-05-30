@@ -95,7 +95,7 @@ const MASTER_HEADERS = {
   // ── 인보이스 공제 항목 ──
   'Invoice_Deductions': ['ID','Agency','Period','Type','Amount','Note'],
   // ── 인보이스 수동 항목 ──
-  'Invoice_Manual_Items': ['ID','Agency','Period','Date','Rego','Tour','Seats','TourCode','Note','Amount','OT','Hotel','Dist','Trailer','Toll','Start','End','Driver','Guide','Pickup','Dropoff'],
+  'Invoice_Manual_Items': ['ID','Agency','Period','Date','Rego','Tour','Seats','TourCode','Note','Amount','OT','Hotel','Dist','Trailer','Toll','Early','Start','End','Driver','Guide','Pickup','Dropoff'],
   // ── 인증 토큰 (세션 관리) ──
   'Active_Tokens': ['Token','User','Role','IssuedAt','ExpiresAt','LastUsed','UserAgent'],
   // ── 로그인 실패 추적 (rate limiting) ──
@@ -2440,7 +2440,33 @@ function getNoticesSheet() {
 function getSheetRows(sheetName) {
   try {
     const r = getMaster(sheetName);
-    return {ok: r.ok, rows: r.rows || []};
+    const rows = r.rows || [];
+    // ★ Date 컬럼 정규화 — SUB_Txn/Agency_Txn은 Date/FinishDate 컬럼이 Date 객체로 저장되어 있을 수 있음
+    //   클라이언트가 일관된 YYYY-MM-DD 문자열을 받도록 강제 변환 (UTC ISO 직렬화 방지)
+    if ((sheetName === 'SUB_Txn' || sheetName === 'Agency_Txn') && rows.length > 0) {
+      const dateFields = ['Date', 'FinishDate'];
+      rows.forEach(row => {
+        dateFields.forEach(f => {
+          if (row[f] !== undefined && row[f] !== null && row[f] !== '') {
+            const v = row[f];
+            if (v instanceof Date) {
+              // 시드니 로컬 날짜로 변환 (UTC 직렬화 회피)
+              row[f] = Utilities.formatDate(v, 'Australia/Sydney', 'yyyy-MM-dd');
+            } else if (typeof v === 'string') {
+              // ISO 타임스탬프 (2026-05-11T14:00:00.000Z) → 시드니 날짜
+              const m = v.match(/^(\d{4}-\d{2}-\d{2})T/);
+              if (m) {
+                const d = new Date(v);
+                if (!isNaN(d.getTime())) {
+                  row[f] = Utilities.formatDate(d, 'Australia/Sydney', 'yyyy-MM-dd');
+                }
+              }
+            }
+          }
+        });
+      });
+    }
+    return {ok: r.ok, rows: rows};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
@@ -3483,9 +3509,52 @@ function addMasterRow(sheetName, data) {
       }
     }
 
-    sheet.appendRow(row);
+    // ★ Date/FinishDate 컬럼은 셀이 "Automatic" 포맷이면 YYYY-MM-DD 문자열을 Date 객체로 자동 변환해버림.
+    //   이걸 막기 위해 (1) 값을 명시적으로 문자열로 변환, (2) 추가 후 해당 셀을 plain text 포맷으로 강제.
+    //   영향 시트: SUB_Txn, Agency_Txn (Date 컬럼 사용하는 거래 시트)
+    const _DATE_COLS_TO_PROTECT = ['Date', 'FinishDate'];
+    const _dateColIdxs = [];
+    if (sheetName === 'SUB_Txn' || sheetName === 'Agency_Txn') {
+      _DATE_COLS_TO_PROTECT.forEach(colName => {
+        const idx = headers.indexOf(colName);
+        if (idx >= 0) {
+          _dateColIdxs.push(idx);
+          // 값이 YYYY-MM-DD 형식 문자열이면 그대로 두되, Date 객체로 들어왔으면 문자열로 변환
+          const v = row[idx];
+          if (v instanceof Date) {
+            // Date 객체를 시드니 로컬 YYYY-MM-DD로
+            row[idx] = Utilities.formatDate(v, 'Australia/Sydney', 'yyyy-MM-dd');
+          } else if (v && typeof v === 'string') {
+            // ISO 타임스탬프 형식(2026-05-11T14:00:00.000Z)이면 시드니 날짜로 정규화
+            const m = v.match(/^(\d{4}-\d{2}-\d{2})T/);
+            if (m) {
+              const d = new Date(v);
+              if (!isNaN(d.getTime())) {
+                row[idx] = Utilities.formatDate(d, 'Australia/Sydney', 'yyyy-MM-dd');
+              }
+            }
+            // 이미 YYYY-MM-DD면 그대로 두기 (변경 없음)
+          }
+        }
+      });
+    }
 
-    return {ok: true, row: sheet.getLastRow()};
+    sheet.appendRow(row);
+    const newRowNum = sheet.getLastRow();
+
+    // ★ 새로 추가된 행의 Date 컬럼을 plain text 포맷으로 강제 (다음번에 읽을 때 Date 객체로 변환 안 됨)
+    if (_dateColIdxs.length > 0) {
+      _dateColIdxs.forEach(idx => {
+        try {
+          sheet.getRange(newRowNum, idx + 1).setNumberFormat('@');
+        } catch(fmtErr) {
+          // 포맷 설정 실패는 치명적이지 않음 — 로그만
+          Logger.log('[addMasterRow] setNumberFormat failed: ' + fmtErr);
+        }
+      });
+    }
+
+    return {ok: true, row: newRowNum};
   } catch (err) {
     return {ok: false, error: err.toString()};
   }
@@ -6597,7 +6666,7 @@ function getPayoutOverrides() {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
 
-    // 1) Schedule에서 TourCode → BillingEntity 맵 추출
+    // 1) Schedule에서 TourCode → BillingEntity 맵 추출 (1차 소스)
     const scheduleSheet = ss.getSheetByName('Schedule');
     const billingEntities = {};
     if (scheduleSheet) {
@@ -6618,6 +6687,51 @@ function getPayoutOverrides() {
           });
         }
       }
+    }
+
+    // 1-b) Daily_Report에서 추가 추출 (2차 소스)
+    //   Schedule에 미등록된 TourCode 또는 BillingEntity가 비어있는 경우를 보완.
+    //   Daily_Report의 Billing_Entity가 명확하면 그 값을 사용.
+    //   ★ Schedule에 'DC'로 명시된 경우는 덮어쓰지 않음 (의도적 설정 보호).
+    //      단 Schedule에 키가 아예 없거나, 빈 값/DC인데 DR이 모두 같은 비-DC BE를 가지면 DR을 따른다.
+    //      → 안전하게: Schedule에 키가 없는 경우만 DR로 보충
+    try {
+      const drSheet = ss.getSheetByName('Daily_Report');
+      if (drSheet) {
+        const drLastRow = drSheet.getLastRow();
+        const drLastCol = drSheet.getLastColumn();
+        if (drLastRow >= 2 && drLastCol >= 1) {
+          const drHeaders = drSheet.getRange(1, 1, 1, drLastCol).getValues()[0];
+          const dTC = drHeaders.indexOf('Tour_Code');
+          const dBE = drHeaders.indexOf('Billing_Entity');
+          if (dTC >= 0 && dBE >= 0) {
+            const drData = drSheet.getRange(2, 1, drLastRow - 1, drLastCol).getValues();
+            // 각 TourCode가 가지는 BE 집합 수집
+            const drBEMap = {};   // tc -> Set of BE (uppercased)
+            drData.forEach(row => {
+              const tc = String(row[dTC] || '').trim();
+              if (!tc) return;
+              const be = String(row[dBE] || '').trim().toUpperCase();
+              if (!be) return;
+              if (!drBEMap[tc]) drBEMap[tc] = new Set();
+              drBEMap[tc].add(be);
+            });
+            // Schedule에 키가 없는 TourCode만 보충 (Schedule 명시값 보호)
+            Object.keys(drBEMap).forEach(tc => {
+              if (billingEntities[tc]) return; // Schedule에 이미 있음 — 보호
+              const beSet = drBEMap[tc];
+              // DR에 단일 BE만 있을 때 그 값으로 채움
+              if (beSet.size === 1) {
+                const single = Array.from(beSet)[0];
+                billingEntities[tc] = single;
+              }
+              // 여러 BE가 섞여 있으면 채우지 않음 (수동 확인 필요)
+            });
+          }
+        }
+      }
+    } catch(drErr) {
+      Logger.log('[getPayoutOverrides] DR supplement failed: ' + drErr);
     }
 
     // 2) PayoutOverrides 시트에서 수동 오버라이드 로드 (없으면 자동 생성)
