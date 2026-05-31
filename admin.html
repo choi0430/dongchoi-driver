@@ -17909,68 +17909,6 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     });
   });
 
-  // ★★ 시나리오 3: BillingEntity≠DC + DC 차량 운행 → 운행 단위로 여행사 수금 예정
-  //   인보이스 없이 운행 단위 직접 정산 — BillingEntity 회사를 여행사로 취급
-  //   예: EG가 인보이스 발행 + DC 차량 → DC가 EG에서 받을 돈
-  if(Array.isArray(_drCache) && Array.isArray(DB?.V)){
-    (_drCache || []).forEach(r => {
-      // BillingEntity가 DC면 시나리오 1/2 → 통과 (인보이스 기반으로 이미 처리)
-      if(isBillingEntityDC(r.Billing_Entity || r.BillingEntity || '')) return;
-      // 차량 owner 체크
-      const rego = String(r.Rego||'').trim();
-      const veh = DB.V.find(v => v.Rego === rego);
-      const owner = veh ? String(veh.Owner||'').trim() : '';
-      const isDCVehicle = !owner || DC_OWNERS.includes(owner);
-      // DC 차량이 아니면 시나리오 4 — 통과 (참고용만)
-      if(!isDCVehicle) return;
-
-      // 시나리오 3 — 운행 단위로 수금 예정에 추가
-      const dateISO = parseToISO(r.Date||'');
-      if(!dateISO) return;
-      // 운행일 + 14일 = 수금 예정일
-      const dd = new Date(dateISO + 'T00:00:00');
-      dd.setDate(dd.getDate() + 14);
-      let dueISO = _localISO(dd);
-      // ★ 토/일 → 다음 주 월요일
-      dueISO = _adjustWeekendToMonday(dueISO);
-
-      // TA 금액 — calcAgencyTA로 계산
-      let amount = 0;
-      try {
-        if(typeof calcAgencyTA === 'function') amount = calcAgencyTA(r) || 0;
-      } catch(e){}
-      if(amount <= 0) return;
-
-      const tourCode = typeof pickTourCode === 'function' ? pickTourCode(r) : String(r.Tour_Code||'');
-      const guide = String(r.Guide||'').trim();
-
-      // ★ 시나리오3도 매칭 맵에 등록 (주간 필터 적용 전)
-      if (tourCode) {
-        const tcKey = tourCode.toUpperCase();
-        const prev = _tourCodeReceivableDue[tcKey];
-        if (!prev || dueISO > prev) _tourCodeReceivableDue[tcKey] = dueISO;
-      }
-
-      if(dueISO < filterStartS || dueISO > sunS) return;
-
-      // 운행 단위 InvoiceID (가상) — TC 기반으로 그룹화 가능하도록
-      const virtualInvoiceId = 'TRIP:' + dateISO + '_' + rego + '_' + tourCode;
-
-      receivables.push({
-        agency: be,             // BillingEntity를 여행사로 취급
-        invoiceId: virtualInvoiceId,
-        amount: amount,
-        paid: 0,                // 운행 단위 정산은 별도 CR 매칭 안 함 (수동 처리)
-        balance: amount,
-        isPaid: false,
-        dueDate: dueISO,
-        tourCode: tourCode,
-        guide: guide,
-        isScenario3: true        // 시나리오 3 식별용 (UI에서 구분 가능)
-      });
-    });
-  }
-
   // ── 2. Sub Payables — 잔액 탭 _subBalances() 결과 직접 사용 ──
   //   _subBalances는 SUBINV 우선/DRSUB 우선/자동 제외/수동 override 모두 적용한 결과 반환
   //   tourGroups: [{ tourCode, count, dr, cr, balance, dueDate, excluded, ... }]
