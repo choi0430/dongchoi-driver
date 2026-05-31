@@ -20967,15 +20967,25 @@ async function applyInvScheduleImport(){
       } else {
         _subTxnKeys.add(_txnKey);
         console.log('[Schedule Import] SUB 거래 추가 예정:', _txnKey, '$'+finalAmount);
+        // ★ FIX 2026-05-31: TourCode 채우기 + 풍부한 Remark (다른 sub_txn 형식과 일관성)
+        const _attraction = String(c.tour || slot.course || item.tour || '').trim();
+        const _rego = it.isSubMode ? '' : String(slot.rego || item.rego || '').trim();
+        const _remarkParts = [`Schedule 자동 (${it.tour.TourID||''})`];
+        if(trAdj !== 0) _remarkParts[0] += ' · 트레일러 정산 포함';
+        if(_attraction) _remarkParts.push(_attraction);
+        if(_rego) _remarkParts.push(_rego);
+        if(driver) _remarkParts.push('D:' + driver);
+        if(guide) _remarkParts.push('G:' + guide);
         subTxnsToCreate.push({
           SubCompany: it.subCalc.subCo,
           Category: 'service',
           Date: it.date,
           InvoiceNo: '',  // SUB가 인보이스 발행 시 채워짐, 또는 수동 입력
+          TourCode: tourCode || '',  // ★ NEW: 투어코드 채우기 (미식별 분류 방지)
           Description: _txnDesc,
           DR: finalAmount,
           CR: 0,
-          Remark: `Schedule 자동 (${it.tour.TourID||''})${trAdj !== 0 ? ' · 트레일러 정산 포함' : ''}`
+          Remark: _remarkParts.join(' / ')
         });
         subAdded++;
       }
@@ -21005,6 +21015,7 @@ async function applyInvScheduleImport(){
                   Category: 'service',
                   Date: it.date,
                   InvoiceNo: '',
+                  TourCode: tourCode || '',  // ★ NEW: 투어코드 채우기 (미식별 분류 방지)
                   Description: _trDesc,
                   DR: trFee,
                   CR: 0,
