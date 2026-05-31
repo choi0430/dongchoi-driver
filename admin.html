@@ -16232,6 +16232,50 @@ async function _syncDailyReportSubToSubTxn(){
         .filter(Boolean)
     );
 
+    // ★ FIX 2026-05-31: Schedule Import 행을 Daily Report sync 시 자동 삭제
+    //   Description이 ' [SUB통째]' 또는 ' [DC운행]'로 끝나는 service 카테고리 행을 인덱싱.
+    //   같은 (Date+TourCode+SubCompany) 조합의 새 DRSUB가 생성되면 Schedule Import 행 삭제.
+    //   안전 가드: 같은 (SubCompany + TourCode) 그룹에 CR이 있으면 보존 (이미 결제된 행).
+    //
+    //   인덱스 키: `YYYY-MM-DD|SUBCOMPANY_UPPER|TOURCODE_UPPER` → {row, rowIndex}
+    const _schImportRowsByKey = new Map();
+    // CR 그룹 식별 — (SubCompany + TourCode) 단위로 CR 있는지
+    const _grpHasCR = new Set();
+    (_balSubTxns || []).forEach(t => {
+      const cr = Number(t.CR) || 0;
+      if(cr > 0){
+        const sc = String(t.SubCompany||'').trim().toUpperCase();
+        let tc = String(t.TourCode||'').trim().toUpperCase();
+        // PAID_TC: prefix 파싱
+        if(!tc){
+          const desc = String(t.Description||'');
+          const mp = desc.match(/^PAID_TC:(.+)$/);
+          if(mp) tc = mp[1].trim().toUpperCase();
+        }
+        if(tc) _grpHasCR.add(sc + '|' + tc);
+      }
+    });
+    // Schedule Import 행 인덱싱
+    (_balSubTxns || []).forEach(t => {
+      const cat = String(t.Category||'').trim().toLowerCase();
+      if(cat !== 'service') return;
+      const desc = String(t.Description||'');
+      if(!(desc.includes(' [SUB통째]') || desc.includes(' [DC운행]'))) return;
+      if(!t._rowIndex) return; // rowIndex 없으면 GAS에서 삭제 불가 — skip
+      const dt = String(t.Date||'').slice(0,10).match(/(\d{4}-\d{2}-\d{2})/)?.[1] || '';
+      const sc = String(t.SubCompany||'').trim().toUpperCase();
+      const tc = String(t.TourCode||'').trim().toUpperCase();
+      if(!dt || !sc || !tc) return;
+      const k = dt + '|' + sc + '|' + tc;
+      // 같은 키에 여러 행 있을 수 있음 (트레일러 빌림 등) — 배열로 저장
+      if(!_schImportRowsByKey.has(k)) _schImportRowsByKey.set(k, []);
+      _schImportRowsByKey.get(k).push(t);
+    });
+    console.log('[SUB Sync] Schedule Import 행 인덱싱:', _schImportRowsByKey.size, '키');
+
+    // 삭제 큐 — 매칭된 Schedule Import 행
+    const _schImportRowsToDelete = [];
+
     const vehicles = DB.V || [];
     const newTxns = [];
     const _pushedKeys = new Set();  // ★ 이번 sync 안에서 이미 push한 키 추적 — 중복 push 방지
@@ -16287,6 +16331,30 @@ async function _syncDailyReportSubToSubTxn(){
       }
       _pushedKeys.add(drsubKey);
 
+      // ★ FIX 2026-05-31: 같은 (Date+SubCompany+TourCode) 조합의 Schedule Import 행이 있으면 삭제 큐에 추가
+      //   DRSUB가 곧 새로 생성되므로 Schedule Import 행은 stale (대체됨).
+      //   CR이 있는 그룹은 보존 (이미 결제된 행은 절대 삭제 안 함).
+      const _schKey = dateISO + '|' + String(owner).trim().toUpperCase() + '|' + String(tourCode).trim().toUpperCase();
+      const _grpKey = String(owner).trim().toUpperCase() + '|' + String(tourCode).trim().toUpperCase();
+      const _matchedSchRows = _schImportRowsByKey.get(_schKey);
+      if(_matchedSchRows && _matchedSchRows.length > 0){
+        if(_grpHasCR.has(_grpKey)){
+          // CR 있음 → 보존, 로그만 남김
+          console.log('[SUB Sync] Schedule Import 행 보존 (CR 있음):', _schKey, _matchedSchRows.length, '건');
+        } else {
+          // 삭제 큐에 추가
+          _matchedSchRows.forEach(row => {
+            if(row._rowIndex && !_schImportRowsToDelete.some(x => x.rowIndex === row._rowIndex)){
+              _schImportRowsToDelete.push({
+                rowIndex: row._rowIndex,
+                desc: row.Description,
+                schKey: _schKey
+              });
+            }
+          });
+        }
+      }
+
       // 풍부한 정보 수집 — 가이드, 드라이버, 어트랙션
       const driver = String(r.Driver||'').trim();
       const guide = String(r.Guide||'').trim();
@@ -16319,6 +16387,32 @@ async function _syncDailyReportSubToSubTxn(){
     }
     if(newTxns.length === 0) return;
     console.log('[SUB Sync] DailyReport→SUB_Txn 자동 등록:', newTxns.length, '건', newTxns.map(t=>t.Description));
+
+    // ★ FIX 2026-05-31: 매칭된 Schedule Import 행 자동 삭제 (DRSUB 생성 직전)
+    //   같은 운행에 대해 사전 등록된 Schedule Import 행이 있으면 stale 처리.
+    //   CR 있는 그룹은 이미 위에서 보존 처리됨.
+    if(_schImportRowsToDelete.length > 0){
+      console.log('[SUB Sync] Schedule Import 행 자동 삭제 시도:', _schImportRowsToDelete.length, '건');
+      for(const item of _schImportRowsToDelete){
+        try {
+          const res = await fetch(APPS_SCRIPT_URL, {
+            method: 'POST', headers: {'Content-Type':'text/plain'},
+            body: JSON.stringify({action:'delete_sub_txn', rowIndex: item.rowIndex, _user: getAdminUser()})
+          });
+          const j = await res.json();
+          if(j.ok){
+            console.log('[SUB Sync] Schedule Import 행 삭제 완료:', item.desc);
+            // 로컬 캐시에서도 제거
+            const idx = _balSubTxns.findIndex(x => x._rowIndex === item.rowIndex);
+            if(idx >= 0) _balSubTxns.splice(idx, 1);
+          } else {
+            console.warn('[SUB Sync] Schedule Import 행 삭제 실패:', item.desc, j);
+          }
+        } catch(e){
+          console.warn('[SUB Sync] Schedule Import 행 삭제 에러:', item.desc, e);
+        }
+      }
+    }
 
     for(const txn of newTxns) {
       try {
