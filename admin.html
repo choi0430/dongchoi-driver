@@ -20777,7 +20777,7 @@ function _renderInvScheduleImportModal(){
   el.style.display = 'flex';
 }
 
-function applyInvScheduleImport(){
+async function applyInvScheduleImport(){
   // ★ 더블클릭/중복 실행 방지 락 (사용자 요청, 2026-05-30)
   if(window._applyInvScheduleImportRunning){
     console.log('[Schedule Import] 이미 실행 중 — 중복 실행 차단');
@@ -20847,6 +20847,25 @@ function applyInvScheduleImport(){
     const subTxnsToCreate = [];
     // ★ subTxnsToCreate 내부 중복 추적용 키 Set
     const _subTxnKeys = new Set();
+
+    // ★★ FIX 2026-05-31: SUB_Txn 강제 fresh fetch — 이전 import의 결과를 반영
+    //   문제: 어제 또 중복 발생. 시트에 같은 내용이 다른 행 번호로 1세트씩 따로 등록됨.
+    //   원인: _balSubTxns가 stale 상태에서 2차 실행이 시작되어 _existingSubTxnKeys에 1차 결과가 없었음.
+    //   해결: 매번 import 시작 시 GAS에서 최신 SUB_Txn 다시 로드.
+    try {
+      console.log('[Schedule Import] SUB_Txn fresh fetch...');
+      const _stRes = await fetch(APPS_SCRIPT_URL + '?action=get_sub_txn');
+      const _stJson = await _stRes.json();
+      if(_stJson.ok && Array.isArray(_stJson.rows)){
+        _balSubTxns = _stJson.rows;
+        console.log('[Schedule Import] SUB_Txn fresh loaded:', _balSubTxns.length, '건');
+      } else {
+        console.warn('[Schedule Import] SUB_Txn fresh fetch 실패 — 기존 캐시 사용:', _stJson);
+      }
+    } catch(e) {
+      console.warn('[Schedule Import] SUB_Txn fresh fetch 오류 — 기존 캐시 사용:', e);
+    }
+
     // ★ 이미 SUB_Txn에 있는 거래 키 Set (서버 비교 중복 방지)
     const _existingSubTxnKeys = new Set();
     (_balSubTxns||[]).forEach(t => {
@@ -21010,9 +21029,16 @@ function applyInvScheduleImport(){
       fetch(APPS_SCRIPT_URL, {
         method:'POST', headers:{'Content-Type':'text/plain'},
         body: JSON.stringify({action:'add_sub_txn', data: txn, _user: getAdminUser()})
-      }).then(r => r.json()).catch(e => { console.warn('add_sub_txn failed:', e); return {ok:false}; })
+      }).then(r => r.json()).then(j => ({j, txn})).catch(e => { console.warn('add_sub_txn failed:', e); return {j:{ok:false}, txn}; })
     )).then(results => {
-      const okCount = results.filter(r => r.ok).length;
+      // ★ FIX 2026-05-31: 성공한 거래를 _balSubTxns에 즉시 반영 (다음 import 시 stale 방지)
+      results.forEach(({j, txn}) => {
+        if(j && j.ok){
+          if(!Array.isArray(_balSubTxns)) _balSubTxns = [];
+          _balSubTxns.push({...txn, _rowIndex: j.row || j.rowIndex});
+        }
+      });
+      const okCount = results.filter(r => r.j && r.j.ok).length;
       if(okCount > 0){
         toast(`✅ SUB 거래 ${okCount}건 자동 생성됨 (Sub Contract → 정산 탭에서 확인)`,'ok');
       }
