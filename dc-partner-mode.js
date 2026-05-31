@@ -78,7 +78,7 @@
     _hookRenderScheduleList();
     _injectScheduleFilters();
     _detectPartnerMode();
-    _hookBalDetailEGGroup();
+    // _hookBalDetailEGGroup() — disabled: depends on _getScheduleCache which doesn't exist after BillingEntity revert
   }
 
   // ─── 일정 모달 — BillingEntity 탭 주입 ─────────────────────────────────
