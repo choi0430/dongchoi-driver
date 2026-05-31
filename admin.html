@@ -20800,18 +20800,41 @@ function applyInvScheduleImport(){
     if(!selected.length){ toast('선택된 항목 없음','er'); return; }
 
     // ★ selected 자체 중복 제거 — 같은 (date+tourcode+slot)이 두 번 들어왔을 가능성 방어
+    //   FIX 2026-05-31: 날짜 정규화 강화 (Date 객체 / ISO 문자열 / 'YYYY-MM-DD' 모두 처리)
+    function _normalizeDate(d){
+      if(!d) return '';
+      // Date 객체
+      if(d instanceof Date){
+        const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dy=String(d.getDate()).padStart(2,'0');
+        return `${y}-${m}-${dy}`;
+      }
+      // 문자열 — 첫 10자리만
+      const s = String(d).trim();
+      // ISO YYYY-MM-DDTxxx 또는 YYYY-MM-DD
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+      // DD/MM/YYYY 등 다른 형식 fallback
+      return s.slice(0,10);
+    }
+    function _normalizeSubCo(s){
+      return String(s||'').replace(/\s+/g,' ').trim().toUpperCase();
+    }
+
     const _seenSel = new Set();
     const dedupedSelected = [];
-    selected.forEach(it => {
+    selected.forEach((it, idx) => {
       const slotKey = (it.slot && (it.slot.startTime||'')) + '|' + (it.slot && (it.slot.endTime||''));
-      const k = it.date + '|' + (it.tourCode||'') + '|' + slotKey + '|' + (it.isSubMode?'S':'D');
+      const dt = _normalizeDate(it.date);
+      const tcKey = String(it.tourCode||it.tour?.TourCode||'').trim().toUpperCase();
+      const k = dt + '|' + tcKey + '|' + slotKey + '|' + (it.isSubMode?'S':'D');
       if(_seenSel.has(k)){
-        console.warn('[Schedule Import] selected에 중복 발견, skip:', k);
+        console.warn('[Schedule Import] selected에 중복 발견 #'+idx+', skip:', k);
         return;
       }
       _seenSel.add(k);
       dedupedSelected.push(it);
     });
+    console.log('[Schedule Import] selected:', selected.length, '→ dedup 후:', dedupedSelected.length);
 
     const key = _invManualKey();
     const items = _getInvManualItems(key).slice();
@@ -20827,12 +20850,13 @@ function applyInvScheduleImport(){
     // ★ 이미 SUB_Txn에 있는 거래 키 Set (서버 비교 중복 방지)
     const _existingSubTxnKeys = new Set();
     (_balSubTxns||[]).forEach(t => {
-      // 키: Date|SubCompany|Description
-      const k = String(t.Date||'').slice(0,10) + '|' +
-                String(t.SubCompany||'').trim().toUpperCase() + '|' +
+      // 키: Date|SubCompany|Description (정규화 동일)
+      const k = _normalizeDate(t.Date) + '|' +
+                _normalizeSubCo(t.SubCompany) + '|' +
                 String(t.Description||'').trim();
       _existingSubTxnKeys.add(k);
     });
+    console.log('[Schedule Import] 기존 SUB_Txn 키:', _existingSubTxnKeys.size, '건');
 
     dedupedSelected.forEach(it => {
       const c = it.calc || {};
@@ -20913,15 +20937,17 @@ function applyInvScheduleImport(){
       }
       const _txnDesc = `${item.tour} (${tourCode}) - ${it.subCalc.seats}S` + descSuffix;
       // ★ 중복 체크: 같은 Date|SubCompany|Description 거래가 이미 있으면 skip
-      const _txnKey = String(it.date).slice(0,10) + '|' +
-                      String(it.subCalc.subCo||'').trim().toUpperCase() + '|' +
-                      _txnDesc;
+      //   FIX 2026-05-31: 동일 정규화 함수 사용 (_normalizeDate, _normalizeSubCo)
+      const _txnKey = _normalizeDate(it.date) + '|' +
+                      _normalizeSubCo(it.subCalc.subCo) + '|' +
+                      _txnDesc.trim();
       if(_subTxnKeys.has(_txnKey)){
         console.warn('[Schedule Import] 이번 import 내 SUB 거래 중복, skip:', _txnKey);
       } else if(_existingSubTxnKeys.has(_txnKey)){
         console.warn('[Schedule Import] SUB_Txn에 이미 있음, skip:', _txnKey);
       } else {
         _subTxnKeys.add(_txnKey);
+        console.log('[Schedule Import] SUB 거래 추가 예정:', _txnKey, '$'+finalAmount);
         subTxnsToCreate.push({
           SubCompany: it.subCalc.subCo,
           Category: 'service',
@@ -20948,7 +20974,7 @@ function applyInvScheduleImport(){
             // 트레일러 소유주가 자사가 아니면 SUB에게 지급
             if(trOwner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(trOwner)){
               const _trDesc = `트레일러 ${tr.Trailer_Number} 사용료 (${item.tour} ${tourCode})`;
-              const _trKey = String(it.date).slice(0,10) + '|' + trOwner.toUpperCase() + '|' + _trDesc;
+              const _trKey = _normalizeDate(it.date) + '|' + _normalizeSubCo(trOwner) + '|' + _trDesc.trim();
               if(_subTxnKeys.has(_trKey)){
                 console.warn('[Schedule Import] 트레일러 거래 중복(이번 import), skip:', _trKey);
               } else if(_existingSubTxnKeys.has(_trKey)){
