@@ -6059,26 +6059,31 @@ function saveInvoiceManualItem(data) {
     if (!data || !data.ID) return { ok: false, error: 'Missing ID' };
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, 'Invoice_Manual_Items');
-    const headers = MASTER_HEADERS['Invoice_Manual_Items'];
 
     const lastRow = sheet.getLastRow();
+    // ★ FIX 2026-06-01: 시트의 실제 헤더 순서로 데이터 매핑
+    //   기존 버그: MASTER_HEADERS 순서 사용 → 시트와 순서가 다르면 컬럼 어긋남.
+    //   특히 ensureSheet가 새 컬럼을 시트 끝에 추가하므로,
+    //   MASTER_HEADERS에 새 컬럼이 중간에 들어가면 시트의 실제 위치와 불일치.
+    const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+    const idCol = sheetHeaders.indexOf('ID');
+    if (idCol < 0) return { ok: false, error: 'ID column not found in Invoice_Manual_Items' };
+
     let found = false;
     if (lastRow > 1) {
-      const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-      const idCol = sheetHeaders.indexOf('ID');
-      if (idCol < 0) return { ok: false, error: 'ID column not found in Invoice_Manual_Items' };
       const ids = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
       for (let i = 0; i < ids.length; i++) {
         if (String(ids[i][0]) === String(data.ID)) {
-          const row = headers.map(h => data[h] !== undefined ? data[h] : '');
-          sheet.getRange(i + 2, 1, 1, headers.length).setValues([row]);
+          // 시트의 실제 컬럼 순서로 행 구성
+          const row = sheetHeaders.map(h => data[h] !== undefined ? data[h] : '');
+          sheet.getRange(i + 2, 1, 1, sheetHeaders.length).setValues([row]);
           found = true;
           break;
         }
       }
     }
     if (!found) {
-      const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+      const row = sheetHeaders.map(h => data[h] !== undefined ? data[h] : '');
       sheet.appendRow(row);
     }
     return { ok: true };
@@ -6091,15 +6096,15 @@ function saveInvoiceManualItemsBulk(agency, period, items) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureSheet(ss, 'Invoice_Manual_Items');
-    const headers = MASTER_HEADERS['Invoice_Manual_Items'];
+    // ★ FIX 2026-06-01: 시트의 실제 헤더 순서 사용 (MASTER_HEADERS 순서와 다를 수 있음)
+    const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
 
     // 해당 agency+period 기존 행 삭제 (역순)
     const lastRow = sheet.getLastRow();
     if (lastRow > 1) {
-      const hdr = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-      const agIdx = hdr.indexOf('Agency');
-      const prIdx = hdr.indexOf('Period');
-      const data = sheet.getRange(2, 1, lastRow - 1, hdr.length).getValues();
+      const agIdx = sheetHeaders.indexOf('Agency');
+      const prIdx = sheetHeaders.indexOf('Period');
+      const data = sheet.getRange(2, 1, lastRow - 1, sheetHeaders.length).getValues();
       for (let i = data.length - 1; i >= 0; i--) {
         if (String(data[i][agIdx]) === String(agency) && String(data[i][prIdx]) === String(period)) {
           sheet.deleteRow(i + 2);
@@ -6107,13 +6112,13 @@ function saveInvoiceManualItemsBulk(agency, period, items) {
       }
     }
 
-    // 새 항목 추가
+    // 새 항목 추가 — 시트의 실제 컬럼 순서로
     if (items && items.length) {
       items.forEach(item => {
         item.Agency = agency;
         item.Period = period;
         if (!item.ID) item.ID = Date.now().toString() + Math.random().toString(36).slice(2, 6);
-        const row = headers.map(h => item[h] !== undefined ? item[h] : '');
+        const row = sheetHeaders.map(h => item[h] !== undefined ? item[h] : '');
         sheet.appendRow(row);
       });
     }
