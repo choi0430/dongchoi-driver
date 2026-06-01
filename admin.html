@@ -20938,6 +20938,24 @@ async function applyInvScheduleImport(){
       _manual: true
     };
 
+    // ★ FIX 2026-06-01: items 자체에 같은 (Date+TourCode+isSubMode) 항목이 이미 있으면 skip
+    //   문제: 154번 행, 155번 행이 152, 153과 동일 내용 중복 등록되어 인보이스 금액이 2배.
+    //   원인: items.push 시 중복 체크가 없어서 selected가 두 번 들어오면 두 행 다 push됨.
+    //   해결: 이미 같은 키의 항목이 있으면 skip.
+    const _itemDupKey = String(it.date).slice(0,10) + '|' +
+                        String(tourCode||'').trim().toUpperCase() + '|' +
+                        (it.isSubMode ? 'S' : 'D');
+    const _itemDupExists = items.some(existing => {
+      const k = String(existing.date||'').slice(0,10) + '|' +
+                String(existing.tourcode||'').trim().toUpperCase() + '|' +
+                (String(existing.note||'').includes('[SUB:') ? 'S' : 'D');
+      return k === _itemDupKey;
+    });
+    if(_itemDupExists){
+      console.warn('[Schedule Import] items에 같은 키 이미 있음, skip:', _itemDupKey);
+      return;
+    }
+
     items.push(item);
     added++;
 
