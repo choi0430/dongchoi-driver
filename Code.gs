@@ -2566,10 +2566,14 @@ function _autoCreateTrailerRentalTxn(data) {
   const isVehDC = DC_NAMES.indexOf(vehOwner) >= 0;
   const isTrDC = DC_NAMES.indexOf(trOwner) >= 0;
 
-  // 중복 방지: 같은 날짜 + 같은 트레일러 + 같은 driver의 거래가 이미 있으면 스킵
+  // 중복 방지: 같은 날짜 + 같은 트레일러 + 같은 driver + 같은 TourCode의 거래가 이미 있으면 스킵
+  //   ★ FIX 2026-06-01: 정책 변경 — 운행 단위로 정산 (같은 날 같은 트레일러로 여러 운행이면 각각 청구)
+  //   기존: sourceId = date + trailer + driver → 하루 한 번만 등록됨 (운행 여러 건 중 1번만 청구)
+  //   현재: sourceId = date + trailer + driver + tourCode → 운행별 분리
   const txnSheet = ss.getSheetByName('SUB_Txn') || ss.getSheetByName('Sub_Txn');
   if (!txnSheet) return;
-  const sourceId = 'DR-trailer-' + (data.Date || '') + '-' + trailerNum + '-' + (data.Driver || '');
+  const tourCodeForId = String(data.Tour_Code || data.TourCode || '').trim();
+  const sourceId = 'DR-trailer-' + (data.Date || '') + '-' + trailerNum + '-' + (data.Driver || '') + '-' + tourCodeForId;
   if (txnSheet.getLastRow() > 1) {
     const tData = txnSheet.getDataRange().getValues();
     const tH = tData[0];
@@ -2606,12 +2610,14 @@ function _autoCreateTrailerRentalTxn(data) {
   }
 
   const dateISO = _normalizeDateISO(data.Date) || data.Date;
+  const tcForDesc = tourCodeForId ? ' [' + tourCodeForId + ']' : '';
   const txnData = {
     SubCompany: subCo,
     Category: 'trailer',
     Date: dateISO,
     InvoiceNo: '',
-    Description: descPrefix + ' · DR(' + (data.Driver || '') + ' / ' + rego + ')',
+    TourCode: tourCodeForId,
+    Description: descPrefix + tcForDesc + ' · DR(' + (data.Driver || '') + ' / ' + rego + ')',
     DR: dr,
     CR: dr === 0 ? trFee : 0,  // SUB 차량 + DC 트레일러일 때 CR=trFee (받을 돈)
     Remark: 'DR 자동 · ' + sourceId
@@ -2637,8 +2643,9 @@ function _deleteTrailerRentalTxn(oldData) {
   if (!oldData) return 0;
   const trailerNum = String(oldData.Trailer_Number || '').trim();
   if (!trailerNum) return 0;
-  // 식별자 — saveReport에서 만든 것과 동일 형식
-  const sourceId = 'DR-trailer-' + (oldData.Date || '') + '-' + trailerNum + '-' + (oldData.Driver || '');
+  // 식별자 — saveReport에서 만든 것과 동일 형식 (TourCode 포함, 운행 단위 정산)
+  const tourCodeForId = String(oldData.Tour_Code || oldData.TourCode || '').trim();
+  const sourceId = 'DR-trailer-' + (oldData.Date || '') + '-' + trailerNum + '-' + (oldData.Driver || '') + '-' + tourCodeForId;
 
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const txnSheet = ss.getSheetByName('SUB_Txn') || ss.getSheetByName('Sub_Txn');
