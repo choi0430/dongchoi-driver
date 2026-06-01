@@ -10205,27 +10205,6 @@ function calcSubReport(r) {
   // ── TA 금액 (여행사 청구) ──
   const taAmount = calcAgencyTA(r);
 
-  // ★★ BillingEntity 분기
-  //   - BillingEntity = DC (또는 비어있음) → DC가 인보이스 발행 → 정상 SUB 계산
-  //   - BillingEntity = 다른 회사 (EG TRAVEL 등) → 그 회사가 인보이스 발행
-  //       → DC는 SUB 지급 의무 없음 (운행기록만 보존)
-  //       → TA도 DC 수입 아님 (다른 회사가 직접 청구)
-  const billingEntity = String(r.Billing_Entity||r.BillingEntity||'').trim().toUpperCase();
-  const _isBEDC = isBillingEntityDC(r.Billing_Entity || r.BillingEntity || '');
-  if(!_isBEDC){
-    // BillingEntity가 다른 회사 → 회계 무관, 표시용 정보만 반환
-    return {
-      isSub: false, isPrivate: false,
-      subOwner: owner, rego, capKey, attraction, agency, driver,
-      taAmount: 0,  // DC 수입 아님
-      subCost: { base:0, ot:0, hotel:0, dist:0, trailer:0, parking:0, night:0, total:0 },
-      drCost: 0,
-      profit: 0,
-      billingEntity: billingEntity,
-      excludedReason: 'BillingEntity=' + billingEntity + ' (DC 회계 외)'
-    };
-  }
-
   if(!isSub || isPrivate) {
     const drCost = parseFloat(r.DR_Cost||r.SVC_Charge)||0;
     return { isSub: isSub && !isPrivate, isPrivate, subOwner: (isSub && isPrivate) ? owner : '', rego, capKey, attraction, agency, driver,
