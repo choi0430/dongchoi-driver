@@ -1639,6 +1639,21 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
           <input type="number" id="iim-early" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
         </div>
       </div>
+      <!-- ★ Meals Allowance / Etc -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">Meals Allowance ($)</div>
+          <input type="number" id="iim-meal" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">Etc ($)</div>
+          <input type="number" id="iim-etc" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
+        </div>
+      </div>
+      <div style="margin-bottom:8px;">
+        <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">Etc Details (기타 내역)</div>
+        <input type="text" id="iim-etc-desc" class="profit-finp" style="width:100%;" placeholder="기타 항목 설명 (예: 주차비, 입장료)">
+      </div>
       <div style="margin-bottom:12px;">
         <div style="font-size:10px;font-weight:700;color:var(--t3);margin-bottom:3px;">Remarks (비고)</div>
         <input type="text" id="iim-note" class="profit-finp" style="width:100%;" placeholder="메모 (선택)">
@@ -5141,6 +5156,32 @@ function _schBuildDRMatchIndex(){
 //   → $60 OT = 4 UNITs × $15 = 4 × 0.5HR = 2HR
 //   ※ 이전 버전은 $15를 시간당 요율로 잘못 처리해 $60 → 4HR로 표시. 수정.
 // canonical 참조: line ~10324 인보이스 OT TA 계산
+// ★ 실제 시작/종료 시간 기준 OT 시간 계산 (표시용)
+//   worked = end - start, 표준 코스시간(maxHrs) 초과분 = OT
+//   30분 단위 반올림. maxHrs 없으면 null 반환 (호출측에서 금액 역산 폴백)
+function _otHrsFromTimes(startT, endT, course, agency, seats){
+  const s = parseSheetTime(startT), e = parseSheetTime(endT);
+  if(!s || !e) return null;
+  const t2m = hhmm => { const [h,m]=hhmm.split(':').map(Number); return h*60+m; };
+  let workedMin = t2m(e) - t2m(s);
+  if(workedMin < 0) workedMin += 24*60; // 자정 넘김 방어
+  if(workedMin <= 0) return null;
+  // 표준 코스 시간(maxHrs) 조회 — M_PriceClient[agency][course].max_hours
+  let maxHrs = null;
+  try {
+    const ag = (typeof DB !== 'undefined' && DB.PC && DB.PC[agency]) ? DB.PC[agency] : null;
+    if(ag && ag[course]){
+      const mh = parseFloat(ag[course].max_hours);
+      if(!isNaN(mh) && mh > 0) maxHrs = mh;
+    }
+  } catch(e2){}
+  if(!maxHrs) return null;
+  const otMin = workedMin - maxHrs*60;
+  if(otMin <= 0) return 0;
+  // 30분 단위 반올림
+  return Math.round((otMin/60) * 2) / 2;
+}
+
 function _otAmountToHours(otAmount, seats, agency){
   const amt = parseFloat(otAmount)||0;
   if(amt <= 0) return 0;
@@ -20295,10 +20336,13 @@ function openInvItemModal(id) {
       document.getElementById('iim-toll').value     = item.toll     || '';
       document.getElementById('iim-dist').value     = item.dist     || '';
       document.getElementById('iim-early').value    = item.early    || '';
+      document.getElementById('iim-meal').value     = item.meal     || '';
+      document.getElementById('iim-etc').value      = item.etc      || '';
+      document.getElementById('iim-etc-desc').value = item.etcDesc  || '';
       document.getElementById('iim-note').value     = item.note     || '';
     }
   } else {
-    ['iim-date','iim-start','iim-end','iim-tourcode','iim-driver','iim-guide','iim-rego','iim-pickup','iim-dropoff','iim-amount','iim-ot','iim-hotel','iim-trailer','iim-toll','iim-dist','iim-early','iim-note'].forEach(id=>{
+    ['iim-date','iim-start','iim-end','iim-tourcode','iim-driver','iim-guide','iim-rego','iim-pickup','iim-dropoff','iim-amount','iim-ot','iim-hotel','iim-trailer','iim-toll','iim-dist','iim-early','iim-meal','iim-etc','iim-etc-desc','iim-note'].forEach(id=>{
       const el=document.getElementById(id); if(el) el.value='';
     });
     document.getElementById('iim-tour').value = '';
@@ -21120,6 +21164,9 @@ function saveInvItem() {
     toll:     parseFloat(document.getElementById('iim-toll')?.value) || 0,
     dist:     parseFloat(document.getElementById('iim-dist')?.value) || 0,
     early:    parseFloat(document.getElementById('iim-early')?.value)|| 0,
+    meal:     parseFloat(document.getElementById('iim-meal')?.value) || 0,
+    etc:      parseFloat(document.getElementById('iim-etc')?.value)  || 0,
+    etcDesc:  document.getElementById('iim-etc-desc')?.value?.trim() || '',
     note:     document.getElementById('iim-note')?.value?.trim()     || '',
     _manual:  true,
   };
@@ -21148,6 +21195,7 @@ function saveInvItem() {
         Tour:item.tour, Seats:item.seats||'', TourCode:item.tourcode||'', Note:item.note||'',
         Amount:item.amount, OT:item.ot||0, Hotel:item.hotel||0, Dist:item.dist||0,
         Trailer:item.trailer||0, Toll:item.toll||0, Early:item.early||0, Start:item.start||'', End:item.end||'',
+        Meal:item.meal||0, Etc:item.etc||0, Etc_Desc:item.etcDesc||'',
         Driver:item.driver||'', Guide:item.guide||'', Pickup:item.pickup||'', Dropoff:item.dropoff||''
       }})}).catch(e => console.warn('Manual item save failed:', e));
   }
@@ -21221,6 +21269,10 @@ function _editInvRowAsManual(ri) {
   document.getElementById('iim-trailer').value  = c.trailerVal || '';
   document.getElementById('iim-toll').value     = c.tollVal || '';
   document.getElementById('iim-dist').value     = c.dist || '';
+  document.getElementById('iim-early').value    = c.earlyTA || '';
+  document.getElementById('iim-meal').value     = c.mealVal || '';
+  document.getElementById('iim-etc').value      = c.etcTA || '';
+  document.getElementById('iim-etc-desc').value = c.etcDesc || '';
   document.getElementById('iim-note').value     = '';
 
   // 원본 행을 자동 제외 (수동 복사본이 대체)
@@ -21472,6 +21524,9 @@ function _manualItemsToRows(agency, from) {
     Trailer:        item.trailer  || 0,
     Toll:           item.toll     || 0,
     Early:          item.early    || 0,
+    Meal:           item.meal     || 0,
+    Etc:            item.etc      || 0,
+    Etc_Desc:       item.etcDesc  || '',
     SVC_Charge:     item.amount   || 0,
     _timeStart:     item.start    || '',
     _timeEnd:       item.end      || '',
@@ -23638,6 +23693,7 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
           amount: Number(m.amount)||0, ot: Number(m.ot)||0, hotel: Number(m.hotel)||0,
           dist: Number(m.dist)||0, trailer: Number(m.trailer)||0, toll: Number(m.toll)||0,
           early: Number(m.early)||0,
+          meal: Number(m.meal)||0, etc: Number(m.etc)||0, etcDesc: m.etcDesc||'',
           start: m.start||'', end: m.end||'', driver: m.driver||'',
           guide: m.guide||'', pickup: m.pickup||'', dropoff: m.dropoff||''
         }));
@@ -23705,7 +23761,7 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
         SVC_Charge: Number(m.amount)||0, OT: Number(m.ot)||0,
         Hotel_Surcharge: Number(m.hotel)||0, Dist_Surcharge: Number(m.dist)||0,
         Trailer: Number(m.trailer)||0, Toll: Number(m.toll)||0,
-        Early: Number(m.early)||0, Parking: 0, Night_DR: 0, Night_Type: '', Tip: 0, Meal: 0, Etc: 0, Etc_Desc: '',
+        Early: Number(m.early)||0, Parking: 0, Night_DR: 0, Night_Type: '', Tip: 0, Meal: Number(m.meal)||0, Etc: Number(m.etc)||0, Etc_Desc: m.etcDesc||'',
         _agency: agency, Agency: agency,
         _manual: true, _manualId: m.id, _fromSaved: true, _rateSource: 'manual',
       }));
@@ -24763,7 +24819,9 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     const surLines = [];
     // OT: show hours + start/end time
     if (oOT > 0) {
-      const otHrs = c._otHrs || 0;
+      // ★ 실제 시작/종료 시간 기준 OT 시간 우선 (금액은 수동값 그대로 유지, 표시 시간만 정확히)
+      const _timeBasedHrs = _otHrsFromTimes(r._timeStart, r._timeEnd, String(r.Attraction||'').trim(), (r._agency||String(r.Agency||'')).trim(), r.Seats);
+      const otHrs = (_timeBasedHrs !== null && _timeBasedHrs > 0) ? _timeBasedHrs : (c._otHrs || 0);
       const hrsStr = otHrs > 0 ? otHrs.toFixed(1)+'h' : '';
       const timeRange = (r._timeStart || r._timeEnd) ? ' ('+( r._timeStart||'')+(r._timeEnd?' - '+r._timeEnd:'') +')' : '';
       surLines.push({label: 'OT' + (hrsStr ? ' '+hrsStr : '') + timeRange, amount: oOT});
@@ -29407,6 +29465,7 @@ async function _applyAdminBundle(bundle){
         seats: r.Seats||'', tourcode: r.TourCode||'', note: r.Note||'',
         amount: Number(r.Amount)||0, ot: Number(r.OT)||0, hotel: Number(r.Hotel)||0,
         dist: Number(r.Dist)||0, trailer: Number(r.Trailer)||0, toll: Number(r.Toll)||0,
+        early: Number(r.Early)||0, meal: Number(r.Meal)||0, etc: Number(r.Etc)||0, etcDesc: r.Etc_Desc||'',
         start: r.Start||'', end: r.End||'', driver: r.Driver||'',
         guide: r.Guide||'', pickup: r.Pickup||'', dropoff: r.Dropoff||''
       });
@@ -29706,6 +29765,7 @@ async function loadAllFromSheets(){
           seats: r.Seats||'', tourcode: r.TourCode||'', note: r.Note||'',
           amount: Number(r.Amount)||0, ot: Number(r.OT)||0, hotel: Number(r.Hotel)||0,
           dist: Number(r.Dist)||0, trailer: Number(r.Trailer)||0, toll: Number(r.Toll)||0,
+          early: Number(r.Early)||0, meal: Number(r.Meal)||0, etc: Number(r.Etc)||0, etcDesc: r.Etc_Desc||'',
           start: r.Start||'', end: r.End||'', driver: r.Driver||'',
           guide: r.Guide||'', pickup: r.Pickup||'', dropoff: r.Dropoff||''
         });
