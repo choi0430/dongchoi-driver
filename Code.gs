@@ -95,7 +95,7 @@ const MASTER_HEADERS = {
   // ── 인보이스 공제 항목 ──
   'Invoice_Deductions': ['ID','Agency','Period','Type','Amount','Note'],
   // ── 인보이스 수동 항목 ──
-  'Invoice_Manual_Items': ['ID','Agency','Period','Date','Rego','Tour','Seats','TourCode','Note','Amount','OT','Hotel','Dist','Trailer','Toll','Early','Start','End','Driver','Guide','Pickup','Dropoff'],
+  'Invoice_Manual_Items': ['ID','Agency','Period','Date','Rego','Tour','Seats','TourCode','Note','Amount','OT','Hotel','Dist','Trailer','Toll','Early','Start','End','Driver','Guide','Pickup','Dropoff','Meal','Etc','Etc_Desc'],
   // ── 인증 토큰 (세션 관리) ──
   'Active_Tokens': ['Token','User','Role','IssuedAt','ExpiresAt','LastUsed','UserAgent'],
   // ── 로그인 실패 추적 (rate limiting) ──
