@@ -5170,9 +5170,19 @@ function _otHrsFromTimes(startT, endT, course, agency, seats){
   let maxHrs = null;
   try {
     const ag = (typeof DB !== 'undefined' && DB.PC && DB.PC[agency]) ? DB.PC[agency] : null;
-    if(ag && ag[course]){
-      const mh = parseFloat(ag[course].max_hours);
-      if(!isNaN(mh) && mh > 0) maxHrs = mh;
+    if(ag){
+      const norm = x => String(x||'').replace(/\s*\([^)]*\)\s*$/,'').trim().toLowerCase();
+      const wantC = norm(course);
+      // 1) 정확 일치  2) 정규화(괄호제거·소문자) 일치
+      let entry = ag[course];
+      if(!entry || entry.max_hours === undefined || entry.max_hours === ''){
+        const k = Object.keys(ag).find(key => norm(key) === wantC);
+        if(k) entry = ag[k];
+      }
+      if(entry){
+        const mh = parseFloat(entry.max_hours);
+        if(!isNaN(mh) && mh > 0) maxHrs = mh;
+      }
     }
   } catch(e2){}
   if(!maxHrs) return null;
@@ -24820,7 +24830,11 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     // OT: show hours + start/end time
     if (oOT > 0) {
       // ★ 실제 시작/종료 시간 기준 OT 시간 우선 (금액은 수동값 그대로 유지, 표시 시간만 정확히)
-      const _timeBasedHrs = _otHrsFromTimes(r._timeStart, r._timeEnd, String(r.Attraction||'').trim(), (r._agency||String(r.Agency||'')).trim(), r.Seats);
+      //   agency: 저장행엔 _agency/Agency가 없으므로 함수 인자 agency로 폴백
+      //   course: "City Tour (50S)" 같은 표시 접미사 제거
+      const _otAgency = (r._agency || String(r.Agency||'').trim() || agency || '');
+      const _otCourse = String(r.Attraction||'').replace(/\s*\([^)]*\)\s*$/,'').trim();
+      const _timeBasedHrs = _otHrsFromTimes(r._timeStart, r._timeEnd, _otCourse, _otAgency, r.Seats);
       const otHrs = (_timeBasedHrs !== null && _timeBasedHrs > 0) ? _timeBasedHrs : (c._otHrs || 0);
       const hrsStr = otHrs > 0 ? otHrs.toFixed(1)+'h' : '';
       const timeRange = (r._timeStart || r._timeEnd) ? ' ('+( r._timeStart||'')+(r._timeEnd?' - '+r._timeEnd:'') +')' : '';
