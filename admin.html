@@ -10867,8 +10867,17 @@ function calcAgencyTA(r){
   const findCourse = (pc,cn)=>{if(!pc||!cn)return null;let e=pc[cn];if(!e){const lc=cn.toLowerCase();const k=Object.keys(pc).find(x=>x.toLowerCase()===lc);if(k)e=pc[k];}return e||null;};
   const ce = agPC ? findCourse(agPC, attraction) : null;
   let taBase = 0;
+  let _rateMissing = false;
   if(ce){ const sd=ce[capKey]||ce['21']; taBase=parseFloat(sd?.rate)||0; }
-  if(taBase===0) taBase = svc;
+  // ★ 단가 미설정 감지: agency/course 매칭은 됐지만 rate 칸이 공란이면 taBase===0.
+  //   과거엔 조용히 taBase=svc(드라이버 비용)로 덮어 DR===TA 가 되어 틀린 청구가
+  //   눈에 안 띄었음. 이제 누락 여부를 플래그로 노출해 렌더에서 경고 뱃지를 띄움.
+  if(taBase===0){
+    _rateMissing = true;   // 청구 단가 없음 — 데이터 보정 필요
+    taBase = svc;          // 합계 폭주 방지용 임시값 (화면엔 ⚠️ 로 표시)
+  }
+  // 마지막 호출의 누락 여부를 side-channel 로 노출 (렌더가 calcAgencyTA 직후 확인)
+  calcAgencyTA._lastMissing = _rateMissing;
 
   // 2) 서차지 DR→TA 역산
   const htl = parseFloat(r.Hotel_Surcharge||r.hotel||0);
@@ -10917,6 +10926,24 @@ function calcAgencyTA(r){
   const trlTA = _trailerDRtoTA(trl, capNum);
 
   return taBase + otTA + htlTA + dstTA + erlTA + parking + tollTA + trlTA;
+}
+
+// ── 청구 단가 누락 판정 (call-order 의존 없는 독립 헬퍼) ──
+// agency/course 매칭은 되지만 해당 좌석수 rate 가 공란이면 true.
+// calcAgencyTA 의 silent svc fallback 이 작동하는 케이스와 동일.
+function _taRateMissing(r){
+  const agency     = String(r.Agency||r.agency||'').trim();
+  const attraction = String(r.Attraction||r.tour||'').trim();
+  const seatsRaw   = String(r.Seats||r.seats||'').replace('S','').trim();
+  const capNum     = parseInt(seatsRaw)||25;
+  const capKey     = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
+  const agPC = DB.PC[agency];
+  if(!agPC) return true; // 여행사 가격표 자체 없음
+  const findCourse = (pc,cn)=>{if(!pc||!cn)return null;let e=pc[cn];if(!e){const lc=cn.toLowerCase();const k=Object.keys(pc).find(x=>x.toLowerCase()===lc);if(k)e=pc[k];}return e||null;};
+  const ce = findCourse(agPC, attraction);
+  if(!ce) return true; // 코스 없음
+  const sd = ce[capKey]||ce['21'];
+  return (parseFloat(sd?.rate)||0) === 0; // rate 공란 → 누락
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -12911,7 +12938,13 @@ async function loadSubCompanies(force=false){
     // get_master&sheet=M_SUB 사용 (get_subs action은 GAS에 존재하지 않음)
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_master&sheet=M_SUB');
     const json = await res.json();
-    _subCompanies = (json.rows||json.data||json||[]).filter(r=>r.SubName);
+    // ★ json.rows / json.data 가 배열일 때만 사용. json 자체가 객체({ok:false,...})면
+    //   기존 `||json||[]` 가 truthy 객체를 그대로 넘겨 `.filter` 에서 터졌음 → 배열 가드 추가
+    const _arr = Array.isArray(json.rows) ? json.rows
+               : Array.isArray(json.data) ? json.data
+               : Array.isArray(json)      ? json
+               : [];
+    _subCompanies = _arr.filter(r=>r && r.SubName);
   }catch(e){ console.warn('M_SUB 로드 실패:',e); }
   return _subCompanies;
 }
@@ -17012,6 +17045,8 @@ function _egQuadrantMatrixHTML(){
         sorted.forEach(r => {
           const dr = _drOf(r);
           const ta = _taOf(r);
+          // ★ 청구 단가 누락 감지 — TA 가 드라이버 비용으로 fallback 된 케이스
+          const taMissing = (typeof _taRateMissing === 'function') ? _taRateMissing(r) : false;
           const dt = parseToISO(r.Date)||'';
           const dtShort = dt ? dt.slice(5).replace('-','/') : '—';
           const tc = String(r.Tour_Code||r.TourCode||'').trim();
@@ -17048,11 +17083,12 @@ function _egQuadrantMatrixHTML(){
                 ${escH(r.Rego||'')} · ${escH(r.Driver||'')}${gd?' · <span style="color:#0891b2;">🧭 '+escH(gd)+'</span>':''}${tc?' · <span style="color:'+accent+';font-weight:600;">'+escH(tc)+'</span>':''}
               </span>
               <span style="font-family:var(--fn);color:#16a34a;font-weight:600;">${_fmt(dr)}</span>
-              <span style="font-family:var(--fn);color:${accent};font-weight:600;">${_fmt(ta)}</span>
+              <span style="font-family:var(--fn);color:${taMissing?'#dc2626':accent};font-weight:600;" title="${taMissing?'M_PriceClient 단가 미설정 — 드라이버 비용으로 임시 표시됨':''}">${_fmt(ta)}${taMissing?' ⚠️':''}</span>
             </div>
-            ${(att || itineraryLine || surBadges) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-left:42px;margin-top:2px;font-size:8.5px;color:var(--t3);">
+            ${(att || itineraryLine || surBadges || taMissing) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-left:42px;margin-top:2px;font-size:8.5px;color:var(--t3);">
               ${att ? `<span style="font-weight:600;color:#374151;">${escH(att)}</span>` : ''}
               ${itineraryLine ? `<span style="color:#6b7280;">${escH(itineraryLine)}</span>` : ''}
+              ${taMissing ? `<span style="font-size:8.5px;background:#fee2e2;color:#dc2626;padding:1px 5px;border-radius:3px;font-weight:700;white-space:nowrap;">⚠️ 청구 단가 미설정</span>` : ''}
               ${surBadges}
             </div>` : ''}
           </div>`;
