@@ -17898,11 +17898,23 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
     if (!iso) return;
     if (!_tourCodeLastOpISO[tc] || iso > _tourCodeLastOpISO[tc]) _tourCodeLastOpISO[tc] = iso;
   });
+  // ★ 투어코드 앞 8자리(YYYYMMDD)에서 운행일 파싱 — DR 기록이 없는 인보이스 대비.
+  //   예: "20260601-130-GIT-BE" → 2026-06-01. 유효한 날짜일 때만 반환.
+  const _isoFromTourCodePrefix = (tc) => {
+    const m = String(tc || '').match(/^(\d{4})(\d{2})(\d{2})/);
+    if (!m) return '';
+    const y = +m[1], mo = +m[2], d = +m[3];
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+    const dt = new Date(y, mo - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return ''; // 잘못된 날짜
+    return m[1] + '-' + m[2] + '-' + m[3];
+  };
   // 여러 투어코드(콤마 join)에서 가장 늦은 운행일을 뽑는 헬퍼
+  //   1순위: _drCache 운행 기록 / 2순위: 투어코드 앞 8자리 날짜
   const _lastOpOfTourCodes = (tcStr) => {
     let last = '';
     String(tcStr || '').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean).forEach(tc => {
-      const iso = _tourCodeLastOpISO[tc];
+      const iso = _tourCodeLastOpISO[tc] || _isoFromTourCodePrefix(tc);
       if (iso && (!last || iso > last)) last = iso;
     });
     return last;
@@ -18053,8 +18065,9 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
 
           // ★ 2026-06: 주간 버킷 = 일정 코드 마지막 운행일(g.lastISO).
           //   자동 입력 일정은 그 코드가 끝난 날 기준으로 그 주에 표시.
+          //   DR 기록 없으면 투어코드 앞 8자리 날짜, 그것도 없으면 dueDate fallback.
           //   dueDate 는 위에서 계산된 값을 옆에 참고로 표시(필터엔 안 씀).
-          const _subBucketISO = g.lastISO || dueDate; // 운행일 없으면 due fallback
+          const _subBucketISO = g.lastISO || _isoFromTourCodePrefix(g.tourCode) || dueDate;
           if(_subBucketISO < filterStartS || _subBucketISO > sunS) return;
           subPayables.push({
             company: b.name,
