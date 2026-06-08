@@ -17886,6 +17886,28 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
   //   "수금 다 받기 전에 SUB에 지급하는 일" 방지.
   const _tourCodeReceivableDue = {}; // normalized tourCode → latest dueISO
 
+  // ★ 투어코드 → 마지막 운행일 (주간 버킷 기준, 2026-06)
+  //   여행사 수금/서브 지급을 "due date 주"가 아니라 "투어코드가 끝난 날 주"로 묶음.
+  //   인보이스는 일정 마친 날 보내므로 투어코드 마지막 운행일이 그 주의 활동을 대표.
+  //   → 드라이버 급여(운행 주 기준)와 같은 주에 정렬됨. due date 는 옆에 참고 표시 유지.
+  const _tourCodeLastOpISO = {}; // normalized tourCode → latest operation ISO
+  (_drCache || []).forEach(r => {
+    const tc = String(r.Tour_Code || r.TourCode || '').trim().toUpperCase();
+    if (!tc) return;
+    const iso = parseToISO(r.Date || '');
+    if (!iso) return;
+    if (!_tourCodeLastOpISO[tc] || iso > _tourCodeLastOpISO[tc]) _tourCodeLastOpISO[tc] = iso;
+  });
+  // 여러 투어코드(콤마 join)에서 가장 늦은 운행일을 뽑는 헬퍼
+  const _lastOpOfTourCodes = (tcStr) => {
+    let last = '';
+    String(tcStr || '').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean).forEach(tc => {
+      const iso = _tourCodeLastOpISO[tc];
+      if (iso && (!last || iso > last)) last = iso;
+    });
+    return last;
+  };
+
   const receivables = []; // agency income due this week
   const subPayables = []; // sub costs due this week
   const driverPay = [];   // driver wages for this week
@@ -17955,8 +17977,16 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
       }
     }
 
-    if (dueISO < filterStartS || dueISO > sunS) return;
-
+    // ★ 2026-06: 주간 버킷 = 투어코드 마지막 운행일 (없으면 dueISO fallback)
+    //   인보이스의 모든 투어코드(tx + 인보이스 캐시)에서 가장 늦은 운행일을 사용.
+    //   화면 due date 표시는 그대로 dueISO 유지.
+    let _allTcStr = String(tx.TourCode || '');
+    if (invNum && Array.isArray(_invHistoryCache)) {
+      const _inv = _invHistoryCache.find(i => String(i.InvNumber||'').trim() === invNum);
+      if (_inv && _inv.TourCode) _allTcStr += ',' + String(_inv.TourCode);
+    }
+    const _bucketISO = _lastOpOfTourCodes(_allTcStr) || dueISO; // 운행일 없으면 due로 fallback
+    if (_bucketISO < filterStartS || _bucketISO > sunS) return;
     // Check unpaid balance
     const key = (tx.Agency || '') + '|' + (tx.InvoiceID || '');
     const paid = agCR[key] || 0;
@@ -18021,7 +18051,11 @@ function _buildCashFlowForWeek(targetMonISO, includeOverdue) {
             }
           }
 
-          if(dueDate < filterStartS || dueDate > sunS) return;
+          // ★ 2026-06: 주간 버킷 = 일정 코드 마지막 운행일(g.lastISO).
+          //   자동 입력 일정은 그 코드가 끝난 날 기준으로 그 주에 표시.
+          //   dueDate 는 위에서 계산된 값을 옆에 참고로 표시(필터엔 안 씀).
+          const _subBucketISO = g.lastISO || dueDate; // 운행일 없으면 due fallback
+          if(_subBucketISO < filterStartS || _subBucketISO > sunS) return;
           subPayables.push({
             company: b.name,
             invoiceNo: '', // 그룹 단위라 단일 invoiceNo 없음
