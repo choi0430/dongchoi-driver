@@ -6479,7 +6479,7 @@ function _smRebuildDays(){
       // 시나리오 자동 판별
       const slotData = d.slots[k];
       const slotMode = slotData.mode || 'dc';
-      const scenarioBadge = _schSlotScenarioBadge(slotData, !!d.trailer);
+      const scenarioBadge = _schSlotScenarioBadge(slotData, !!d.trailer, d.trailerNumber);
 
       // 차량/드라이버 영역 — 모드별 분기
       const vehDriverSection = slotMode === 'sub'
@@ -7160,9 +7160,27 @@ function _schTourScenarioIcon(slot, hasTrailer){
 // 시나리오 3: 서브 차량 + 자사 드라이버 (CROSS)
 // 시나리오 4: 자사 차량 + 서브 드라이버 (외부 위탁)
 // + 트레일러 분리 (서브 차량 사용 시 자사 트레일러 임대 수익)
-function _schSlotScenarioBadge(slot, hasTrailer){
+function _schSlotScenarioBadge(slot, hasTrailer, trailerNumber){
   if(!slot) return '';
   const slotMode = slot.mode || 'dc';
+
+  // 트레일러 노트 — 소유 주체에 따라 라벨/의미 분기
+  //   회사↔서브 정산 금액은 소유와 무관하게 항상 $80(BLUESKY $50) 환산.
+  //   배지가 구분하는 것은 "DC 렌트비 $30 회수 여부":
+  //     - 자사(DC) 소유: 서브가 우리 트레일러 빌림 → "자사 트레일러 임대" (-$30 회수)
+  //     - 그 외 소유: 환산 지급만, 렌트비 회수 없음 → "트레일러 (소유주)"
+  //     - 미등록(소유주 불명): "트레일러(소유주 미등록)" 경고 — 등록 필요
+  const _trlNoteHtml = () => {
+    if(!hasTrailer) return '';
+    const own = _trailerOwnership(trailerNumber);
+    if(!own.found){
+      return ' <span class="sc-trailer-note" style="color:#b45309;" title="M_Trailers 미등록 — 소유주 확인 필요. 자사 소유면 $30 렌트비 회수 대상.">+🚐 트레일러(소유주 미등록)</span>';
+    }
+    if(own.isDC){
+      return ' <span class="sc-trailer-note" title="자사 트레일러 — 서브에게 $30 렌트비 회수">+🚐 자사 트레일러 임대 (-$30)</span>';
+    }
+    return ` <span class="sc-trailer-note" style="color:#7c3aed;" title="${escH(own.owner)} 소유 — 렌트비 회수 없음, 정산은 환산 지급">+🚐 트레일러 (${escH(own.owner)})</span>`;
+  };
 
   // 새 데이터 모델: 서브 모드면 차량 Rego 모르고 subCompany만 있을 수 있음
   if(slotMode === 'sub'){
@@ -7171,7 +7189,7 @@ function _schSlotScenarioBadge(slot, hasTrailer){
     if(!subCo && !subDrv) return '';
     let label = `🏢 서브 통째${subCo?` (${subCo})`:''}`;
     let cls = 'sc-2';
-    let trailerNote = hasTrailer ? ' <span class="sc-trailer-note">+🚐 자사 트레일러 임대</span>' : '';
+    let trailerNote = _trlNoteHtml();
     return `<span class="sc-badge ${cls}" title="시나리오 2 (서브 외주)">${label}</span>${trailerNote}`;
   }
 
@@ -7208,7 +7226,7 @@ function _schSlotScenarioBadge(slot, hasTrailer){
 
   let trailerNote = '';
   if(hasTrailer && !isVehDC){
-    trailerNote = ' <span class="sc-trailer-note">+🚐 자사 트레일러 임대</span>';
+    trailerNote = _trlNoteHtml();
   }
   return `<span class="sc-badge ${cls}" title="시나리오 ${scenario}">${label}</span>${trailerNote}`;
 }
@@ -10194,6 +10212,31 @@ function isBillingEntityDC(be){
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 트레일러 소유 주체 판정 — M_Trailers(DB.T) Owner 기준
+// ═══════════════════════════════════════════════════════════════
+// 정책:
+//   - 트레일러가 자사(DC) 소유인 경우만 "자사 트레일러 임대" 처리
+//   - 그 외(서브/제3자 소유)는 소유주-사용자 간 별도 합의가 있으므로
+//     우리는 트레일러 비용을 전액 그대로 지급 (TA 환산 공식 적용 안 함)
+//   - M_Trailers에 미등록(소유주 불명)이면 자사로 단정하지 않음 → 전액 지급
+// 반환: { found, owner, rentalFee, isDC }
+function _trailerOwnership(trailerNum){
+  const tn = String(trailerNum||'').trim();
+  if(!tn) return { found:false, owner:'', rentalFee:0, isDC:false };
+  const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === tn);
+  if(!tr) return { found:false, owner:'', rentalFee:0, isDC:false };
+  const owner = String(tr.Owner||'').trim();
+  const rentalFee = Number(tr.Rental_Fee) || 0;
+  return { found:true, owner, rentalFee, isDC: isBillingEntityDC(owner) };
+}
+
+// 트레일러가 자사(DC) 소유인지 — 미등록/불명이면 false (자사로 단정 안 함)
+function _isDCTrailer(trailerNum){
+  const o = _trailerOwnership(trailerNum);
+  return o.found && o.isDC;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // 여행사별 Payment Terms (인보이스 결제 기한 — 일 단위)
 // M_Clients 시트의 Payment_Terms 컬럼에서 가져옴 (기본값 14일)
 // ═══════════════════════════════════════════════════════════════
@@ -10314,7 +10357,18 @@ function calcSubReport(r) {
   const trailerDR_raw = parseFloat(r.Trailer)||0;
   const hotelSub = _hotelDRtoTA(hotelDR, capNum);
   const distSub  = _distDRtoTA(distDR, capNum);
-  let trailerSub = _trailerDRtoTA(trailerDR_raw, capNum);
+  // ★ 트레일러 비용 (회사↔서브 정산) — 소유 주체와 무관하게 항상 환산 적용
+  //   정책:
+  //     - 드라이버→차주 청구는 DR 원본 $30 (이미 r.Trailer에 입력됨)
+  //     - 회사↔서브, 회사↔여행사 정산은 $30 → $80 환산. 단 BLUESKY는 $50 고정.
+  //     - 40/50석 대형은 트레일러 없음 → $0
+  //   소유 판정은 여기서 금액을 바꾸지 않음. DC 소유 트레일러일 때만
+  //   아래 trailerSplitToDC에서 별도 -$30 렌트비 회수 거래를 붙인다.
+  const _isBlueskySub = /bluesky/i.test(agency);
+  let trailerSub = (_isBlueskySub && trailerDR_raw > 0 && capNum < 40)
+    ? 50
+    : _trailerDRtoTA(trailerDR_raw, capNum);
+  const _trlOwn = _trailerOwnership(String(r.Trailer_Number||'').trim());
   // OT TA값
   const otDR = parseFloat(r.OT)||0;
   const otRateTA = capNum>=50?160:capNum>=40?150:80;
@@ -10382,14 +10436,12 @@ function calcSubReport(r) {
   //   별도의 SUB_Txn CR 행으로 자동 생성하여 회계 라인 분리.
   //   결과: DRSUB는 운행 운임 그대로 ($1,380) + 별도 CR -$30 → 잔액 $1,350
   const trailerNum = String(r.Trailer_Number||'').trim();
-  let trailerOwner = '';
+  let trailerOwner = _trlOwn.owner;
   let trailerSplitToDC = 0;  // 표시용 (UI 배지) — 실제 차감은 backend가 처리
-  if(trailerNum && trailerSub > 0){
-    const trailerRow = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === trailerNum);
-    trailerOwner = (trailerRow?.Owner||'').trim();
-    if(trailerOwner && /dong\s*choi/i.test(trailerOwner)){
-      trailerSplitToDC = 30;  // UI 표시용 — SUB 운임에서는 빼지 않음
-    }
+  // 트레일러를 실제 사용했고(DR Trailer 값 존재) 자사(DC) 소유면 임대 수익 회수 플래그
+  //   ★ 정책: DC 트레일러 렌트비 회수는 $30 고정 (드라이버→차주 청구액과 동일)
+  if(trailerNum && trailerDR_raw > 0 && _trlOwn.found && _trlOwn.isDC){
+    trailerSplitToDC = 30;  // UI 표시용 — SUB 운임에서는 빼지 않음 (backend가 별도 CR -$30 처리)
   }
 
   // SUB 총액 — 트레일러 분리 적용 안 함 (backend가 별도 거래로 처리)
