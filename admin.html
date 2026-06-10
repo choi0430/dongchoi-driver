@@ -10220,6 +10220,8 @@ function isBillingEntityDC(be){
 //     우리는 트레일러 비용을 전액 그대로 지급 (TA 환산 공식 적용 안 함)
 //   - M_Trailers에 미등록(소유주 불명)이면 자사로 단정하지 않음 → 전액 지급
 // 반환: { found, owner, rentalFee, isDC }
+//   ※ rentalFee는 참고용(시트 표시값). 실제 정산 렌탈피는 항상 $30 고정이므로
+//     금액 계산에는 사용하지 말 것 (정책: 트레일러 주인과의 거래 = $30).
 function _trailerOwnership(trailerNum){
   const tn = String(trailerNum||'').trim();
   if(!tn) return { found:false, owner:'', rentalFee:0, isDC:false };
@@ -20608,25 +20610,18 @@ function _calcSlotSubCost(tour, day, slot, slotKey){
   }
   if(!subCo) return null; // 자사 케이스
 
-  // ★ 트레일러 사용료 정산 — 차량 소유주 ≠ 트레일러 소유주이면 ±Rental_Fee
-  //   day.trailer가 true이고 day.trailerNumber가 있으면 트레일러 사용 중
-  //   - 트레일러가 SUB 소유: SUB가 본인 트레일러 사용 → 차감 없음
-  //   - 트레일러가 자사(DC) 소유, SUB 차량 사용: SUB가 자사 트레일러 빌림 → SUB 지급액에서 -Rental_Fee
-  //   - 트레일러가 다른 SUB 소유: SUB 지급액에서 -Rental_Fee (이 경우 별도 트레일러 소유주 정산은 수동)
+  // ★ 트레일러 정산 — 옵션 A (2026-06): 이 함수(Schedule Import 임시 추정값)에서는
+  //   트레일러를 SUB 운임에서 가감하지 않는다.
+  //   사유: DR 입력 시 calcSubReport 기반 DRSUB 거래가 이 Import 행을 삭제·대체하며,
+  //         정확한 트레일러 환산($80 / BLUESKY $50)과 DC 소유 시 -$30 회수는 거기서 처리됨.
+  //         여기에 환산/차감을 중복 구현하면 규칙이 두 곳에 흩어져 동기화가 깨짐.
+  //   정책 요약:
+  //     - 드라이버→차주 청구 $30은 DR 원본값 (별개 레이어)
+  //     - 회사↔서브/여행사 정산은 환산 $80 (BLUESKY $50) — calcSubReport가 전담
+  //     - DC 트레일러를 빌린 경우에만 -$30 렌트비 회수 — calcSubReport가 전담
+  //   trailerAdjust/trailerInfo 필드는 호출부 호환을 위해 유지하되 항상 0/null.
   let trailerAdjust = 0;
   let trailerInfo = null;
-  if(day && day.trailer && day.trailerNumber){
-    const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
-    if(tr){
-      const trOwner = String(tr.Owner||'').trim();
-      const trFee = Number(tr.Rental_Fee) || 30;
-      // SUB 차량 소유주가 SUB 자체이고 트레일러 소유주가 SUB와 다르면 차감
-      if(trOwner && trOwner !== subCo){
-        trailerAdjust = -trFee;
-        trailerInfo = { trailerNumber: tr.Trailer_Number, trailerOwner: trOwner, fee: trFee, type: 'borrowed_from_other' };
-      }
-    }
-  }
 
   // DB.PS[subCo][course][seats] 단가 조회
   const psCo = (typeof DB !== 'undefined' && DB.PS) ? DB.PS[subCo] : null;
@@ -20641,7 +20636,7 @@ function _calcSlotSubCost(tour, day, slot, slotKey){
   const seatData = entry[seats] || entry['21'];
   const baseAmount = parseFloat(seatData?.rate) || 0;
   const otRate = parseFloat(seatData?.ot) || 0;
-  const amount = baseAmount + trailerAdjust; // 운임 - 트레일러 사용료
+  const amount = baseAmount + trailerAdjust; // trailerAdjust는 항상 0 (트레일러는 calcSubReport가 전담)
   return { subCo, amount, baseAmount, course, seats, ot: 0, _otRate: otRate, trailerAdjust, trailerInfo };
 }
 
@@ -20892,7 +20887,7 @@ function _renderInvScheduleImportModal(){
         const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
         if(tr){
           const trOwner = String(tr.Owner||'').trim();
-          const trFee = Number(tr.Rental_Fee) || 30;
+          const trFee = 30;  // ★ 렌탈피 $30 고정 (21202 거래 생성부와 일치)
           if(trOwner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(trOwner)){
             const enabled = it.trailerEnabled !== false;
             const adjBadge = enabled
@@ -21206,7 +21201,7 @@ async function applyInvScheduleImport(){
           const tr = (DB.T||[]).find(t => String(t.Trailer_Number||'').trim() === String(day.trailerNumber).trim());
           if(tr){
             const trOwner = String(tr.Owner||'').trim();
-            const trFee = Number(tr.Rental_Fee) || 30;
+            const trFee = 30;  // ★ 렌탈피 $30 고정 (트레일러 주인과의 별개 거래)
             // 트레일러 소유주가 자사가 아니면 SUB에게 지급
             if(trOwner && typeof DC_OWNERS !== 'undefined' && !DC_OWNERS.includes(trOwner)){
               const _trDesc = `트레일러 ${tr.Trailer_Number} 사용료 (${item.tour} ${tourCode})`;
