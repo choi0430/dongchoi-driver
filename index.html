@@ -6497,7 +6497,7 @@ function _finalizeDailyReportSave(_drBtn){
     meal: parseFloat(document.getElementById('f-meal')?.value||0),
     etc: parseFloat(document.getElementById('f-etc')?.value||0),
     etcDesc: document.getElementById('f-etc-desc')?.value?.trim() || '',
-    manualBonus: (()=>{ const rg=document.getElementById('pre-rego')?.value||''; const vh=MASTER.vehicles?.find(v=>v.Rego===rg); const isM=vh?.Transmission==='Manual'; const sv=getSvcValue(); return (isM&&sv>=250)?20:0; })(),
+    manualBonus: calcManualBonus(document.getElementById('pre-rego')?.value||'', att),
     remarks: document.getElementById('dr-remarks').value,
     svcMismatch: window._svcMismatch ? JSON.stringify(window._svcMismatch) : '',
     private: _isPrivateRun ? 'Y' : '',
@@ -8001,10 +8001,9 @@ function autoRate(){
     const skData = courseData[sk] || {};
     let drAmt = Number(skData.base || 0);
 
-    // 수동 차량 여부 확인 (+$20)
+    // 수동 차량 추가 수당 (TRANSFER +$10 / 그 외 +$20)
     const rego = getCurrentRego() || '';
-    const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
-    if(veh?.Transmission === 'Manual') drAmt += 20;
+    drAmt += calcManualBonus(rego, att);
 
     if(drAmt > 0){
       const drStr = String(drAmt);
@@ -8197,6 +8196,24 @@ function renderHintBox(el, items){
 
 
 // ──────────────────────────────────────────
+// ──────────────────────────────────────────
+// 수동 변속기 차량 드라이버 추가 수당 계산 (공용)
+// 정책 (2026-06):
+//   - 차량 Transmission === 'Manual' 일 때만 적용
+//   - 코스명(attraction)에 'TRANSFER' 포함 (AIRPORT/DINNER/HOTEL TRANSFER 등) → +$10
+//   - 그 외 (HALF DAY CITY, 풀데이 10/12시간 근무 등) → +$20
+//   - 수동이 아니거나 코스 미선택 시 $0
+// 인자: veh(차량 객체 또는 Rego 문자열), attraction(코스명)
+// ──────────────────────────────────────────
+function calcManualBonus(veh, attraction){
+  let v = veh;
+  if(typeof veh === 'string') v = (MASTER.vehicles||[]).find(x=>x.Rego===veh);
+  if(!v || v.Transmission !== 'Manual') return 0;
+  const course = String(attraction||'').toUpperCase();
+  if(!course) return 0;
+  return /TRANSFER/.test(course) ? 10 : 20;
+}
+
 // 수동 차량 선택 시 힌트 표시
 // ──────────────────────────────────────────
 function updateManualHint(veh){
@@ -8209,7 +8226,7 @@ function updateManualHint(veh){
     renderHintBox(hintEl, [{
       type: 'warn',
       title: '🔧 수동 변속기 차량 — ' + veh.Rego,
-      sub: '10HR / 12HR 일정 시 드라이버 추가 수당 $20 자동 포함됩니다'
+      sub: 'TRANSFER 일정 +$10 · HALF DAY/10HR/12HR 등 그 외 +$20 자동 포함됩니다'
     }]);
   } else {
     hintEl.style.display = 'none';
@@ -8331,16 +8348,18 @@ function updateSvcHint(){
     const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
     return veh?.Transmission === 'Manual';
   })();
-  const manualAdd = isManualVehicle ? 20 : 0;
+  const _mRego = document.getElementById('pre-rego')?.value || getCurrentRego() || '';
+  // 코스 선택 시 정확한 보너스(TRANSFER $10 / 그 외 $20), 미선택 시 0 (아래 범위는 별도 표기)
+  const manualAdd = att ? calcManualBonus(_mRego, att) : 0;
 
   if(!att){
     const rows = MASTER.priceDriver || [];
     const allBase = rows.map(r=>Number(r['seats_'+sk+'_base']||0)).filter(v=>v>0);
     if(allBase.length){
-      const mn = Math.min(...allBase)+manualAdd, mx = Math.max(...allBase)+manualAdd;
+      const mn = Math.min(...allBase)+(isManualVehicle?10:0), mx = Math.max(...allBase)+(isManualVehicle?20:0);
       items.push({ type:'info',
         title: '💰 '+seats+' 드라이버 비용 범위: $'+mn+' — $'+mx,
-        sub: '관광지 선택 시 정확한 금액이 표시됩니다'+(isManualVehicle?' · 수동 +$20 포함':'')
+        sub: '관광지 선택 시 정확한 금액이 표시됩니다'+(isManualVehicle?' · 수동 TRANSFER +$10 / 그 외 +$20':'')
       });
     } else { hintEl.style.display='none'; return; }
     renderHintBox(hintEl, items); return;
@@ -8361,12 +8380,12 @@ function updateSvcHint(){
           title: match
             ? '✅ 서비스 차지 $'+curVal+' 선택됨 ('+seats+')'
             : '⚠️ 이 코스 권장 $'+drAmt+' — 현재 $'+curVal+' 선택됨',
-          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h':'')+(isManualVehicle?' · 수동 +$20':'')
+          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h':'')+(manualAdd>0?(' · 수동 +$'+manualAdd):'')
         });
       } else {
         items.push({ type:'warn',
           title: '❌ 서비스 차지 미선택 — 권장 $'+drAmt+' ('+seats+')',
-          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h':'')+(isManualVehicle?' · 수동 +$20 포함':'')
+          sub: att+' · '+seats+(maxH?' · 기준 '+maxH+'h':'')+(manualAdd>0?(' · 수동 +$'+manualAdd+' 포함'):'')
         });
       }
     } else {
@@ -8737,12 +8756,8 @@ function autoFillDRSurcharges(force){
     // getCourseData → getPDCourseFromMaster 구조: courseData[sk].base
     const skData5 = courseData5 ? (courseData5[sk5] || {}) : {};
     const drBase5 = Number(skData5.base || 0);
-    const isManual5 = (()=>{
-      const rego = document.getElementById('pre-rego')?.value || '';
-      const veh = MASTER.vehicles?.find(v=>v.Rego===rego);
-      return veh?.Transmission === 'Manual';
-    })();
-    const drAmt5 = drBase5 + (isManual5 ? 20 : 0);
+    const _mRego5 = document.getElementById('pre-rego')?.value || '';
+    const drAmt5 = drBase5 + calcManualBonus(_mRego5, att);
     const svcOpts = SVC_OPTIONS[seats] || [];
 
     // M_PriceDriver base 금액이 있으면 그 값으로 직접 매핑
@@ -9581,8 +9596,10 @@ function calcTotal(){
     return veh?.Transmission === 'Manual';
   })();
   const svcVal = getSvcValue();
-  const isLongRun = svcVal >= 250; // $250 이상 = 10HR/12HR 일정 (MANUAL: $270/$300 포함)
-  const manualBonus = (isManualVehicle && isLongRun) ? 20 : 0;
+  // ★ 수동 차량 추가 수당: TRANSFER +$10 / 그 외(HALF DAY, 10·12HR 등) +$20
+  const _mAtt = document.getElementById('dr-attraction')?.value || '';
+  const _mRego = document.getElementById('pre-rego')?.value || '';
+  const manualBonus = calcManualBonus(_mRego, _mAtt);
   // Early/Late TA: Airport Transfer 여행사별 요금 × 0.3 (DR은 고정 $30/$40)
   const earlyVal = parseFloat(document.getElementById('f-early')?.value||0);
   let earlyTA = 0;
@@ -9642,7 +9659,7 @@ function calcTotal(){
   dr += getDistValue();  // 거리 서차지 전액 드라이버 지급
   dr += earlyVal;        // Early/Late 서차지 드라이버 지급
   dr += trailerVal;      // 트레일러 드라이버 지급
-  dr += manualBonus;     // 수동 차량 10/12HR 추가 수당 $20
+  dr += manualBonus;     // 수동 차량 추가 수당 (TRANSFER +$10 / 그 외 +$20)
   dr += nightDR + washVal + mealVal;
   dr += tipVal;          // 팁 드라이버 지급
   dr += etcVal;          // 기타 드라이버 지급
