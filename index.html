@@ -8406,6 +8406,11 @@ function updateSvcHint(){
 // 실시간 OT 경고 박스 갱신
 let _lastOTToastKey = '';  // 중복 알림 방지
 
+// Airport Transfer는 OT 미적용 (공항 이동은 시간 초과 개념이 없음)
+function _isAirportTransfer(att){
+  return /airport\s*transfer|공항\s*이동/i.test(String(att||''));
+}
+
 function updateOTHint(fromEndTime){
   const hintBox = document.getElementById('ot-hint-box');
   if(!hintBox) return;
@@ -8523,7 +8528,15 @@ function updateOTHint(fromEndTime){
         // 미입력 — 야경이 아닌 경우 자동 선택
         const nightType = document.getElementById('f-night-type')?.value || 'none';
         const isNight = nightType !== 'none';
-        if(!isNight){
+        const isAPT = _isAirportTransfer(att);
+        if(isAPT){
+          // Airport Transfer — OT 미적용. $0 강제 유지, 자동선택 안 함
+          if(curOT === 0) selectOTAmount(0);
+          items.push({ type:'info',
+            title: '✈️ Airport Transfer — OT 미적용',
+            sub: '공항 이동은 OT가 적용되지 않습니다 (필요 시 수동 선택 가능)'
+          });
+        } else if(!isNight){
           // 자동으로 해당 금액 버튼 선택
           selectOTAmount(otAmt);
           items.push({ type:'apply',
@@ -8549,10 +8562,14 @@ function updateOTHint(fromEndTime){
       // ── 종료 시간 입력 시 toast 알림 (중복 방지)
       if(fromEndTime){
         const nightType2 = document.getElementById('f-night-type')?.value || 'none';
+        const isAPT2 = _isAirportTransfer(att);
+        const curOT2 = parseFloat(document.getElementById('f-ot')?.value || 0);
         const toastKey = et+'|'+otAmt;
-        if(_lastOTToastKey !== toastKey){
+        if(_lastOTToastKey !== toastKey && !(isAPT2 && curOT2 === 0)){
           _lastOTToastKey = toastKey;
-          if(nightType2 === 'none'){
+          if(isAPT2){
+            // Airport Transfer + 사용자가 수동으로 OT 입력한 경우만 도달
+          } else if(nightType2 === 'none'){
             if(navigator.vibrate) navigator.vibrate([100,50,100]);
             showToast('✅ OT $'+otAmt+' 자동 선택됨 ('+seats+' · '+effOT_ceil+'h)', 'success');
           } else {
@@ -8716,7 +8733,8 @@ function autoFillDRSurcharges(force){
   // OT 버튼 중 $0 이외 선택된 것이 있으면 이미 사용자가 선택한 것 → force 아니면 건드리지 않음
   const _otBtnSelected = document.querySelector('.ot-btn.selected, .num-btn[data-ot].selected');
   const otAlreadySet = !force && (curOT > 0);
-  if(!otAlreadySet && startVal && endVal){
+  // Airport Transfer는 OT 미적용 — 자동 제안 건너뜀
+  if(!_isAirportTransfer(att) && !otAlreadySet && startVal && endVal){
     const [sh, sm] = startVal.split(':').map(Number);
     const [eh, em] = endVal.split(':').map(Number);
     const startMin = sh*60+sm;
