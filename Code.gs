@@ -8852,6 +8852,7 @@ function _egTripCardHTML(r){
   }
   const hotel = r.Hotel || r.Accommodation || '';
   const guide = r.Guide || '';
+  const driver = String(r.Driver || '').trim();
   const tc = r.Tour_Code || r.TourCode || '';
   const rego = r.Rego || '';
   const seats = r.Seats || r.Pax || '';
@@ -8934,7 +8935,7 @@ function _egTripCardHTML(r){
     const amtColor = (cls === 'EG_BILLS_DC_VEH') ? '#dc2626' : '#7c3aed';
     html += '<div style="font-size:8.5pt;color:#6b7280;margin-bottom:2px;">' + amtLabel + '</div>';
     html += '<div style="font-size:13pt;font-weight:800;color:' + amtColor + ';">$' + taAmount.toLocaleString('en-AU',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>';
-    html += '<div style="font-size:8pt;color:#9ca3af;margin-top:4px;border-top:1px solid #e5e7eb;padding-top:4px;">드라이버 지급액</div>';
+    html += '<div style="font-size:8pt;color:#9ca3af;margin-top:4px;border-top:1px solid #e5e7eb;padding-top:4px;">드라이버 지급액' + (driver ? ' · ' + _egEsc(driver) : '') + '</div>';
   }
   html += '<div class="amount' + (drCost < 0 ? ' neg' : '') + '" style="' + (taAmount !== 0 ? 'font-size:11pt;' : '') + '">' + _fmtAmt(drCost) + '</div>';
   if(nightOwn > 0){
@@ -8979,7 +8980,7 @@ function _egTripCardHTML(r){
     }
     if(hasDR){
       html += '<div style="flex:1;min-width:240px;">';
-      html += _renderBreakdown('📊 드라이버 지급액 산출 근거', drBreakdown, drCost, '#16a34a');
+      html += _renderBreakdown('📊 드라이버 지급액 산출 근거' + (driver ? ' · ' + _egEsc(driver) : ''), drBreakdown, drCost, '#16a34a');
       html += '</div>';
     }
     html += '</div>';
