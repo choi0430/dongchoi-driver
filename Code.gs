@@ -2990,6 +2990,10 @@ function lookupTrailerForDR(opts) {
     const idx = {};
     headers.forEach((h, i) => { idx[String(h)] = i; });
     const targetISO = _normalizeDateISO(date);
+    // 정규화: 공백 제거 + 대문자 (표기 차이로 매칭 실패 방지)
+    const _norm = (s) => String(s||'').replace(/\s+/g,'').toUpperCase();
+    const driverN = _norm(driver);
+    const regoN = _norm(rego);
 
     // 가장 최근의 PD (같은 날짜+드라이버+차량) 찾기
     let foundTrailer = '';
@@ -2997,8 +3001,8 @@ function lookupTrailerForDR(opts) {
       const row = data[i];
       const rowISO = _normalizeDateISO(row[idx.Date]);
       if (rowISO !== targetISO) continue;
-      if (String(row[idx.Driver] || '').trim() !== driver) continue;
-      if (String(row[idx.Rego] || '').trim() !== rego) continue;
+      if (_norm(row[idx.Driver]) !== driverN) continue;
+      if (_norm(row[idx.Rego]) !== regoN) continue;
       foundTrailer = String(row[idx.Trailer_Number] || '').trim();
       break;
     }
@@ -3032,13 +3036,16 @@ function patchPDTrailer(opts) {
     const idx = {};
     headers.forEach((h, i) => { idx[String(h)] = i; });
     const targetISO = _normalizeDateISO(date);
+    const _normP = (s) => String(s||'').replace(/\s+/g,'').toUpperCase();
+    const driverNP = _normP(driver);
+    const regoNP = _normP(rego);
 
     for (let i = data.length - 1; i >= 1; i--) {
       const row = data[i];
       const rowISO = _normalizeDateISO(row[idx.Date]);
       if (rowISO !== targetISO) continue;
-      if (String(row[idx.Driver] || '').trim() !== driver) continue;
-      if (String(row[idx.Rego] || '').trim() !== rego) continue;
+      if (_normP(row[idx.Driver]) !== driverNP) continue;
+      if (_normP(row[idx.Rego]) !== regoNP) continue;
       // 해당 PD 행 발견 → Trailer_Number 셀 업데이트
       preSheet.getRange(i + 1, idx.Trailer_Number + 1).setValue(trailerNum);
       return {ok: true, updated: true, rowIndex: i + 1};
