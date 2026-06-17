@@ -20405,7 +20405,15 @@ async function saveBalTxn(){
         }
       }
 
-      _done(); toast('✅ 저장 완료','ok');
+      _done();
+      // ★ 영수증 자동 발송 결과 표시 (수금 거래 시)
+      if(json.receipt && json.receipt.sent){
+        toast('✅ 저장 완료 · 📧 영수증 발송됨 ('+(json.receipt.to||'')+')','ok');
+      } else if(json.receipt && json.receipt.reason && /이메일 미등록/.test(json.receipt.reason)){
+        toast('✅ 저장 완료 · ⚠️ 영수증 미발송: 여행사 이메일 미등록','ok');
+      } else {
+        toast('✅ 저장 완료','ok');
+      }
 
       // ★ 수금 처리 시 Schedule.Status = 'paid' 자동 갱신
       // 조건: CR>0 (수금) + 연결된 인보이스 InvoiceID 있음
