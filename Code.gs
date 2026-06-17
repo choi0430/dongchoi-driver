@@ -220,6 +220,7 @@ const ADMIN_ONLY_ACTIONS = [
   'add_master', 'update_master', 'delete_master', 'replace_master',
   'bulk_update_guide_phones', 'init_masters',
   'send_invoice_email', 'save_invoice', 'update_invoice_status', 'delete_invoice',
+  'send_payment_receipt',
   'replace_sub_rates', 'replace_price_sub',
   'add_ledger', 'update_ledger', 'delete_ledger', 'replace_ledger',
   'add_wage', 'update_wage', 'delete_wage', 'replace_wages',
@@ -1971,16 +1972,12 @@ function doPost(e) {
         if (r.ok) {
           appendAuditLog(_user, 'add_agency_txn', 'Agency_Txn', r.row || '',
             'Agency:' + (payload.data.Agency||'') + ' DR:' + (payload.data.DR||0) + ' CR:' + (payload.data.CR||0));
-          // ★ 여행사 입금(수금) 거래면 영수증 이메일 자동 발송 (best-effort)
-          //   실패해도 수금 처리 자체는 성공 — 이메일은 부가 기능
-          let _receipt = null;
-          try {
-            _receipt = sendPaymentReceiptEmail(payload.data, _user);
-          } catch (re) {
-            Logger.log('[receipt] auto-send error: ' + re);
-          }
-          if (_receipt) r.receipt = _receipt;
         }
+        return cors(r);
+      }
+      // ── 영수증 수동 발송 (admin 확인 모달에서 호출) ──
+      case 'send_payment_receipt': {
+        const r = sendPaymentReceiptEmail(payload.data || {}, _user);
         return cors(r);
       }
       case 'update_agency_txn': {
