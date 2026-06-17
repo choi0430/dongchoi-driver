@@ -1968,8 +1968,19 @@ function doPost(e) {
       // ── Agency_Txn CRUD ──
       case 'add_agency_txn': {
         const r = addMasterRow('Agency_Txn', payload.data);
-        if (r.ok) appendAuditLog(_user, 'add_agency_txn', 'Agency_Txn', r.row || '',
-          'Agency:' + (payload.data.Agency||'') + ' DR:' + (payload.data.DR||0));
+        if (r.ok) {
+          appendAuditLog(_user, 'add_agency_txn', 'Agency_Txn', r.row || '',
+            'Agency:' + (payload.data.Agency||'') + ' DR:' + (payload.data.DR||0) + ' CR:' + (payload.data.CR||0));
+          // ★ 여행사 입금(수금) 거래면 영수증 이메일 자동 발송 (best-effort)
+          //   실패해도 수금 처리 자체는 성공 — 이메일은 부가 기능
+          let _receipt = null;
+          try {
+            _receipt = sendPaymentReceiptEmail(payload.data, _user);
+          } catch (re) {
+            Logger.log('[receipt] auto-send error: ' + re);
+          }
+          if (_receipt) r.receipt = _receipt;
+        }
         return cors(r);
       }
       case 'update_agency_txn': {
@@ -4812,6 +4823,198 @@ function sendInvoiceEmail(payload) {
     return { ok: true, to: to, pdfAttached: pdfAttached, pdfError: pdfError };
   } catch (err) {
     return { ok: false, error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAYMENT RECEIPT EMAIL — 여행사 입금(수금) 처리 시 자동 영수증 발송
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 여행사 입금 처리 후 영수증 이메일 자동 발송.
+ * add_agency_txn에서 CR(수금) 거래가 등록된 직후 best-effort로 호출.
+ * 실패해도 수금 처리 자체는 영향 없음 (호출부에서 try/catch).
+ *
+ * @param {Object} txn  방금 등록된 Agency_Txn 거래 데이터
+ *                      { Agency, Type, CR, InvoiceID, Date, Remark, ... }
+ * @param {string} user 처리한 관리자 (감사 로그용)
+ * @return {Object} { ok, sent, reason }
+ */
+function sendPaymentReceiptEmail(txn, user) {
+  try {
+    if (!txn) return { ok: false, sent: false, reason: 'no txn' };
+
+    // ── 1) CR(수금) 거래만 대상. DR(청구)·선수금·크레딧 거래는 영수증 발송 안 함 ──
+    const cr = Number(txn.CR) || 0;
+    const dr = Number(txn.DR) || 0;
+    const type = String(txn.Type || '').trim().toLowerCase();
+    if (cr <= 0)  return { ok: true, sent: false, reason: 'not a receipt (CR<=0)' };
+    if (dr > 0)   return { ok: true, sent: false, reason: 'has DR (청구 거래)' };
+    // 선수금/크레딧 입금은 인보이스 영수증과 성격이 달라 제외
+    if (type === 'prepaid_in' || type === 'prepaid_use' ||
+        type === 'credit_in'  || type === 'credit_use') {
+      return { ok: true, sent: false, reason: 'prepaid/credit txn' };
+    }
+
+    const agency = String(txn.Agency || '').trim();
+    if (!agency) return { ok: true, sent: false, reason: 'no agency' };
+
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+
+    // ── 2) M_Clients에서 여행사 이메일/ABN 조회 ──
+    let toEmail = '', ccEmail = '', clientABN = '', clientAddr = '';
+    try {
+      const cSheet = ss.getSheetByName('M_Clients');
+      if (cSheet && cSheet.getLastRow() > 1) {
+        const cData = cSheet.getDataRange().getValues();
+        const cH = cData[0];
+        const ci = {};
+        cH.forEach((h, i) => ci[String(h)] = i);
+        const agU = agency.toUpperCase();
+        for (let i = 1; i < cData.length; i++) {
+          if (String(cData[i][ci.Name] || '').trim().toUpperCase() === agU) {
+            toEmail   = String(cData[i][ci.Email] || '').trim();
+            ccEmail   = String(cData[i][ci.Email_CC] || '').trim();
+            clientABN = String(cData[i][ci.ABN] || '').trim();
+            clientAddr= String(cData[i][ci.Address] || '').trim();
+            break;
+          }
+        }
+      }
+    } catch (e) { Logger.log('[receipt] M_Clients lookup: ' + e); }
+
+    if (!toEmail) return { ok: true, sent: false, reason: '여행사 이메일 미등록 (' + agency + ')' };
+
+    // ── 3) 대응 인보이스의 청구총액·기수금·잔액 계산 (완납/부분입금 판별) ──
+    const invNo = String(txn.InvoiceID || '').trim();
+    let invTotal = 0, paidSoFar = 0, invFound = false;
+    if (invNo) {
+      try {
+        const invSheet = ss.getSheetByName('Invoices');
+        if (invSheet && invSheet.getLastRow() > 1) {
+          const iData = invSheet.getDataRange().getValues();
+          const iH = iData[0];
+          const ii = {};
+          iH.forEach((h, idx) => ii[String(h)] = idx);
+          for (let i = 1; i < iData.length; i++) {
+            if (String(iData[i][ii.InvNumber] || '').trim() === invNo) {
+              invTotal = Number(iData[i][ii.GrandTotal]) || 0;
+              invFound = true;
+              break;
+            }
+          }
+        }
+        // 같은 InvoiceID로 등록된 모든 CR 합계 = 누적 수금액
+        const txSheet = ss.getSheetByName('Agency_Txn');
+        if (txSheet && txSheet.getLastRow() > 1) {
+          const tData = txSheet.getDataRange().getValues();
+          const tH = tData[0];
+          const ti = {};
+          tH.forEach((h, idx) => ti[String(h)] = idx);
+          for (let i = 1; i < tData.length; i++) {
+            if (String(tData[i][ti.InvoiceID] || '').trim() === invNo) {
+              paidSoFar += Number(tData[i][ti.CR]) || 0;
+            }
+          }
+        }
+      } catch (e) { Logger.log('[receipt] invoice calc: ' + e); }
+    }
+
+    const balance = invFound ? Math.round((invTotal - paidSoFar) * 100) / 100 : null;
+    const isPaidInFull = (balance !== null && balance <= 0.01);
+
+    // ── 4) 영수증 번호 생성 + 날짜 포맷 ──
+    const tz = 'Australia/Sydney';
+    const now = new Date();
+    const receiptNo = 'RCPT-' + Utilities.formatDate(now, tz, 'yyyyMMdd-HHmmss');
+    const paidDate = txn.Date
+      ? (function () {
+          try { return Utilities.formatDate(new Date(_normalizeDateISO(txn.Date)), tz, 'dd/MM/yyyy'); }
+          catch (e) { return String(txn.Date); }
+        })()
+      : Utilities.formatDate(now, tz, 'dd/MM/yyyy');
+    const issueDate = Utilities.formatDate(now, tz, 'dd/MM/yyyy');
+
+    const fmtMoney = (n) => '$' + (Number(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    // ── 5) 영수증 HTML (→ 서버사이드 PDF 변환) ──
+    const statusBadge = isPaidInFull
+      ? '<span style="background:#16a34a;color:#fff;padding:4px 14px;border-radius:6px;font-size:13px;font-weight:700;">PAID IN FULL</span>'
+      : '<span style="background:#d97706;color:#fff;padding:4px 14px;border-radius:6px;font-size:13px;font-weight:700;">PART PAYMENT</span>';
+
+    let balanceRow = '';
+    if (balance !== null) {
+      balanceRow =
+        '<tr><td style="padding:6px 0;color:#555;">Invoice Total</td><td style="padding:6px 0;text-align:right;">' + fmtMoney(invTotal) + '</td></tr>' +
+        '<tr><td style="padding:6px 0;color:#555;">Total Received (to date)</td><td style="padding:6px 0;text-align:right;">' + fmtMoney(paidSoFar) + '</td></tr>' +
+        '<tr style="border-top:1px solid #ddd;"><td style="padding:8px 0;font-weight:700;">Balance Outstanding</td><td style="padding:8px 0;text-align:right;font-weight:700;color:' + (isPaidInFull ? '#16a34a' : '#d97706') + ';">' + fmtMoney(Math.max(0, balance)) + '</td></tr>';
+    }
+
+    const docHtml =
+      '<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;padding:32px;color:#1a1a1a;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a56db;padding-bottom:16px;margin-bottom:24px;">' +
+          '<div><div style="font-size:22px;font-weight:800;color:#1a56db;">Dong Choi Pty Ltd</div>' +
+            '<div style="font-size:12px;color:#666;margin-top:4px;">Payment Receipt 입금 영수증</div></div>' +
+          '<div style="text-align:right;">' + statusBadge + '</div>' +
+        '</div>' +
+        '<table style="width:100%;font-size:13px;margin-bottom:20px;border-collapse:collapse;">' +
+          '<tr><td style="padding:4px 0;color:#555;width:45%;">Receipt No.</td><td style="padding:4px 0;font-weight:600;">' + receiptNo + '</td></tr>' +
+          '<tr><td style="padding:4px 0;color:#555;">Issue Date</td><td style="padding:4px 0;">' + issueDate + '</td></tr>' +
+          '<tr><td style="padding:4px 0;color:#555;">Received From</td><td style="padding:4px 0;font-weight:600;">' + agency + (clientABN ? ' (ABN ' + clientABN + ')' : '') + '</td></tr>' +
+          (invNo ? '<tr><td style="padding:4px 0;color:#555;">Invoice No.</td><td style="padding:4px 0;">' + invNo + '</td></tr>' : '') +
+          '<tr><td style="padding:4px 0;color:#555;">Payment Date</td><td style="padding:4px 0;">' + paidDate + '</td></tr>' +
+        '</table>' +
+        '<div style="background:#f0f7ff;border:1px solid #1a56db;border-radius:10px;padding:18px 20px;margin-bottom:20px;text-align:center;">' +
+          '<div style="font-size:12px;color:#555;margin-bottom:4px;">Amount Received 수령 금액</div>' +
+          '<div style="font-size:30px;font-weight:800;color:#1a56db;">' + fmtMoney(cr) + '</div>' +
+        '</div>' +
+        (balanceRow ? '<table style="width:100%;font-size:13px;border-collapse:collapse;margin-bottom:24px;">' + balanceRow + '</table>' : '') +
+        '<div style="font-size:11px;color:#888;border-top:1px solid #eee;padding-top:16px;line-height:1.6;">' +
+          'Thank you for your payment. 입금해 주셔서 감사합니다.<br>' +
+          'This is a computer-generated receipt and does not require a signature.<br>' +
+          'Dong Choi Pty Ltd' + (clientAddr ? '' : '') +
+        '</div>' +
+      '</div>';
+
+    const subject = '[Dong Choi] Payment Receipt ' + receiptNo +
+      (invNo ? ' — Invoice ' + invNo : '') + ' — ' + fmtMoney(cr) + ' received';
+
+    const bodyText =
+      'Dear ' + agency + ',\n\n' +
+      'We confirm receipt of your payment of ' + fmtMoney(cr) + ' on ' + paidDate + '.\n' +
+      (invNo ? 'Invoice: ' + invNo + '\n' : '') +
+      (balance !== null
+        ? (isPaidInFull
+            ? 'This invoice is now PAID IN FULL.\n'
+            : 'Balance outstanding: ' + fmtMoney(Math.max(0, balance)) + '\n')
+        : '') +
+      '\nPlease find the attached payment receipt (PDF).\n\n' +
+      'Thank you,\nDong Choi Pty Ltd';
+
+    const pdfName = receiptNo + '.pdf';
+
+    // ── 6) 발송 (sendInvoiceEmail 인프라 재사용) ──
+    const sendRes = sendInvoiceEmail({
+      to: toEmail,
+      cc: ccEmail,
+      subject: subject,
+      body: bodyText,
+      docHtml: docHtml,
+      pdfName: pdfName,
+      senderName: 'Dong Choi Pty Ltd',
+      _user: user
+    });
+
+    appendAuditLog(user, 'send_payment_receipt', 'Agency_Txn', '—',
+      'Receipt ' + receiptNo + ' → ' + toEmail + ' | ' + agency +
+      ' | ' + fmtMoney(cr) + (invNo ? ' | ' + invNo : '') +
+      ' | ' + (isPaidInFull ? 'PAID_FULL' : (balance !== null ? 'PARTIAL' : 'NO_INV')) +
+      ' | sent=' + (sendRes && sendRes.ok));
+
+    return { ok: true, sent: !!(sendRes && sendRes.ok), receiptNo: receiptNo, to: toEmail, sendRes: sendRes };
+  } catch (err) {
+    Logger.log('[receipt] error: ' + err);
+    return { ok: false, sent: false, reason: err.toString() };
   }
 }
 
