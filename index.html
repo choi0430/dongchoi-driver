@@ -6234,13 +6234,20 @@ function submitDailyReport(){
     const _drTrailerVal = Number(document.getElementById('f-trailer')?.value || 0);
     const _drDate = document.getElementById('dr-date')?.value || _todayISO();
     const _drDriver = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : (_shift?.driver || (currentDriver?.name || ''));
-    const _drRego = _shift?.rego || '';
+    // ★ rego는 _shift에만 의존하면 editingShiftId 불일치 시 빈 값이 되어 검증 전체가 스킵됨.
+    //   getCurrentRego()로 dr-rego → pre-rego → shift 순으로 견고하게 해석.
+    const _drRego = (typeof getCurrentRego === 'function' ? getCurrentRego() : '')
+                    || _shift?.rego
+                    || document.getElementById('pre-rego')?.value
+                    || '';
     if(_drDriver && _drRego){
-      _checkTrailerWithPD(_drBtn, _drTrailerVal, _drDate, _drDriver, _drRego, () => {
+      _checkTrailerWithPD(_drBtn, _drTrailerVal, _drDate, _drDriver, String(_drRego).trim(), () => {
         // 검증 통과 콜백 → 실제 저장 진행
         _finalizeDailyReportSave(_drBtn);
       });
       return; // 비동기 흐름으로 이양, 콜백에서 _finalizeDailyReportSave 호출
+    } else {
+      console.warn('[trailer check] skipped — driver/rego 미해석', {_drDriver, _drRego});
     }
   }
   _finalizeDailyReportSave(_drBtn);
