@@ -19267,6 +19267,11 @@ function _quickAddPayment(type, name, balance, targetKey){
   //   2순위: SUB_Txn에 InvoiceNo 있는 미지급 DR — 같은 InvoiceNo로 그룹화
   //   3순위: 미정 거래 — 일반 거래 등록 모달
   if(type === 'sub'){
+    // 여행사/가이드 표시를 위해 DR 캐시 보장 (없으면 로드 후 재호출)
+    if((typeof _drCache === 'undefined' || !_drCache || !_drCache.length) && typeof _schEnsureDRCache === 'function'){
+      _schEnsureDRCache().then(() => _quickAddPayment(type, name, balance, targetKey));
+      return;
+    }
     // 1순위: 발행된 SUB 인보이스 검색
     const unpaidInvs = (_invHistoryCache||[]).filter(inv => {
       const subCo = (inv.SubCompany||inv.Agency||'').trim();
@@ -19308,12 +19313,23 @@ function _quickAddPayment(type, name, balance, targetKey){
         remaining: total - prevPaid,
         periodFrom: inv.PeriodFrom||'',
         periodTo: inv.PeriodTo||'',
-        issueDate: inv.IssueDate||''
+        issueDate: inv.IssueDate||'',
+        agency: String(inv.Agency||'').trim(),
+        guide: String(inv.Guide||'').trim()
       };
     });
 
     // 2순위: SUB_Txn에 InvoiceNo 있는 미지급 DR (인보이스 시트에 없는 것)
     const invNumsAlreadyShown = new Set(unpaidInvs.map(i=>i.invNum));
+    // TourCode 추출 헬퍼 (TourCode 컬럼 우선, 없으면 DRSUB Description 파싱)
+    const _extractTC = (tx) => {
+      const direct = String(tx.TourCode||'').trim();
+      if(direct) return direct.toUpperCase();
+      const desc = String(tx.Description||'');
+      const m = desc.match(/^DRSUB:\d{4}-\d{2}-\d{2}_[^_]*_(.+)$/);
+      if(m && m[1]) return m[1].trim().toUpperCase();
+      return '';
+    };
     const txnByInv = {};
     (_balSubTxns||[]).forEach(tx => {
       if((tx.SubCompany||'').trim() !== name) return;
@@ -19334,10 +19350,13 @@ function _quickAddPayment(type, name, balance, targetKey){
           paid: 0,
           remaining: 0,
           dates: [],
-          descs: []
+          descs: [],
+          tcs: {}
         };
       }
       txnByInv[invNo].total += dr;
+      const _txTC = _extractTC(tx);
+      if(_txTC) txnByInv[invNo].tcs[_txTC] = (txnByInv[invNo].tcs[_txTC]||0) + 1;
       const txDate = tx.Date || tx.FinishDate || '';
       if(txDate) txnByInv[invNo].dates.push(txDate);
       if(desc) txnByInv[invNo].descs.push(desc);
@@ -19351,6 +19370,27 @@ function _quickAddPayment(type, name, balance, targetKey){
       }).reduce((s,t)=>s+Number(t.CR||0),0);
       txnByInv[invNo].paid = paid;
       txnByInv[invNo].remaining = txnByInv[invNo].total - paid;
+      // 대표 여행사/가이드 — 거래에 포함된 TourCode로 운행 데이터 매칭
+      try {
+        const _tcs = Object.keys(txnByInv[invNo].tcs||{});
+        const _agCntI = {}, _gdCntI = {};
+        if(_tcs.length && typeof _drCache !== 'undefined' && _drCache){
+          _drCache.forEach(r => {
+            if(_tcs.includes(pickTourCode(r).toUpperCase())){
+              const a = String(r.Agency||'').trim();
+              if(a) _agCntI[a] = (_agCntI[a]||0) + 1;
+              const g = String(r.Guide||'').trim();
+              if(g) _gdCntI[g] = (_gdCntI[g]||0) + 1;
+            }
+          });
+        }
+        const _topI = (obj) => { const ks=Object.keys(obj); return ks.length?ks.sort((x,y)=>obj[y]-obj[x])[0]:''; };
+        txnByInv[invNo].agency = _topI(_agCntI);
+        txnByInv[invNo].guide  = _topI(_gdCntI);
+      } catch(e){
+        txnByInv[invNo].agency = '';
+        txnByInv[invNo].guide  = '';
+      }
     });
     const unpaidTxns = Object.values(txnByInv).filter(g => g.remaining > 0.01);
 
@@ -19358,14 +19398,6 @@ function _quickAddPayment(type, name, balance, targetKey){
     //   - SUB_Txn 시트의 TourCode 컬럼 우선 사용
     //   - 없으면 Description의 'DRSUB:YYYY-MM-DD_REGO_TOURCODE' 파싱 (fallback)
     //   - PAID_TC:{tourcode} Description으로 등록된 CR은 기지급 차감
-    const _extractTC = (tx) => {
-      const direct = String(tx.TourCode||'').trim();
-      if(direct) return direct.toUpperCase();
-      const desc = String(tx.Description||'');
-      const m = desc.match(/^DRSUB:\d{4}-\d{2}-\d{2}_[^_]*_(.+)$/);
-      if(m && m[1]) return m[1].trim().toUpperCase();
-      return '';
-    };
     const txnByTC = {};
     (_balSubTxns||[]).forEach(tx => {
       if((tx.SubCompany||'').trim() !== name) return;
@@ -19386,10 +19418,16 @@ function _quickAddPayment(type, name, balance, targetKey){
           paid: 0,
           remaining: 0,
           dates: [],
-          descs: []
+          descs: [],
+          agencies: {},
+          guides: {}
         };
       }
       txnByTC[tc].total += dr;
+      const _agc = String(tx.Agency||'').trim();
+      if(_agc) txnByTC[tc].agencies[_agc] = (txnByTC[tc].agencies[_agc]||0) + 1;
+      const _gde = String(tx.Guide||'').trim();
+      if(_gde) txnByTC[tc].guides[_gde] = (txnByTC[tc].guides[_gde]||0) + 1;
       const txDate = tx.Date || tx.FinishDate || '';
       if(txDate) txnByTC[tc].dates.push(txDate);
       if(desc) txnByTC[tc].descs.push(desc);
@@ -19407,6 +19445,26 @@ function _quickAddPayment(type, name, balance, targetKey){
       }).reduce((s,t)=>s+Number(t.CR||0),0);
       txnByTC[tc].paid = paid;
       txnByTC[tc].remaining = txnByTC[tc].total - paid;
+      // 대표 여행사/가이드 — SUB_Txn에는 Agency/Guide 컬럼이 없으므로
+      // TourCode로 운행 데이터(_drCache)를 매칭해 가져온다
+      try {
+        const _tcRows = (typeof _drCache !== 'undefined' && _drCache)
+          ? _drCache.filter(r => pickTourCode(r).toUpperCase() === tc)
+          : [];
+        const _agCnt = {}, _gdCnt = {};
+        _tcRows.forEach(r => {
+          const a = String(r.Agency||'').trim();
+          if(a) _agCnt[a] = (_agCnt[a]||0) + 1;
+          const g = String(r.Guide||'').trim();
+          if(g) _gdCnt[g] = (_gdCnt[g]||0) + 1;
+        });
+        const _top = (obj) => { const ks=Object.keys(obj); return ks.length?ks.sort((x,y)=>obj[y]-obj[x])[0]:''; };
+        txnByTC[tc].agency = _top(_agCnt);
+        txnByTC[tc].guide  = _top(_gdCnt);
+      } catch(e){
+        txnByTC[tc].agency = '';
+        txnByTC[tc].guide  = '';
+      }
     });
     const unpaidTCs = Object.values(txnByTC).filter(g => g.remaining > 0.01);
 
@@ -19633,10 +19691,21 @@ function _showSubInvoiceSelectorModal(subName, items){
             subLine = dateRange;
           }
           if(i.paid > 0) subLine += ` · 기지급 $${i.paid.toLocaleString('en-AU',{minimumFractionDigits:2})}`;
+          // 여행사 · 가이드 메타 라인 (투어코드/거래 항목)
+          const _agc = String(i.agency||'').trim();
+          const _gde = String(i.guide||'').trim();
+          let metaLine = '';
+          if(_agc || _gde){
+            const _parts = [];
+            if(_agc) _parts.push('🏢 ' + escH(_agc));
+            if(_gde) _parts.push('🧭 ' + escH(_gde));
+            metaLine = `<div style="font-size:10px;color:var(--t2);margin-top:2px;font-weight:600;">${_parts.join(' · ')}</div>`;
+          }
           return `
             <button data-inv="${escH(i.invNum)}" data-type="${i.type}" class="sis-inv-btn" style="text-align:left;background:var(--sf2);border:1.5px solid var(--b1);border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;transition:all .15s;">
               <div style="flex:1;min-width:0;">
                 <div style="display:flex;align-items:center;gap:6px;">${badge}<span style="font-size:13px;font-weight:700;color:var(--t1);">${escH(i.invNum)}</span></div>
+                ${metaLine}
                 <div style="font-size:10px;color:var(--t3);margin-top:2px;">${subLine}</div>
               </div>
               <div style="text-align:right;flex-shrink:0;">
