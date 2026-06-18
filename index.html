@@ -3809,11 +3809,11 @@ function _onAuthFailure(reason){
   } catch(e){}
   let msg;
   if(reason === 'expired'){
-    msg = '세션이 만료되었습니다. PIN을 다시 입력해주세요.';
+    msg = '세션이 만료되었습니다. 다시 로그인해주세요.';
   } else if(reason === 'forbidden' || reason === 'admin_only'){
     msg = '권한이 없는 작업입니다. 다시 로그인해주세요.';
   } else if(reason === 'no_token' || reason === 'unauthorized'){
-    msg = '인증이 만료되었습니다. PIN을 다시 입력해주세요.';
+    msg = '인증이 만료되었습니다. 다시 로그인해주세요.';
   } else {
     msg = '인증이 필요합니다. 다시 로그인해주세요.';
   }
@@ -4154,9 +4154,8 @@ function _softReauth(reason){
                   || inGrace;
                 if (!isPublic && !reauthBlocked) {
                   const r = j.reason || j.error || 'unauthorized';
-                  // 부드러운 재인증 사용 (PIN 모달만 띄움, 앱 화면/폼 보존)
-                  if (typeof _softReauth === 'function') _softReauth(r);
-                  else _onAuthFailure(r);
+                  // ★ PIN 재입력(soft re-auth) 제거 — 세션 만료 시 바로 로그아웃
+                  _onAuthFailure(r);
                 }
               }
             } catch(e){}
