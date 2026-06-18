@@ -879,7 +879,10 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           </div>
           <div class="form-group">
             <label class="form-label">End Time (종료 시간)</label>
-            <input type="time" class="form-input" id="dr-end" onchange="calcOT();" oninput="calcOT();">
+            <input type="time" class="form-input" id="dr-end" onchange="_onEndTimeChange();" oninput="_onEndTimeChange();">
+            <!-- 자정 넘김(다음날 종료) 여부 — 종료<=시작일 때 제출 검증에서 confirm으로 설정 -->
+            <input type="hidden" id="dr-overnight" value="0">
+            <div id="dr-overnight-badge" style="display:none;margin-top:6px;font-size:11px;font-weight:700;color:#7c3aed;background:#f3e8ff;border:1px solid #d8b4fe;border-radius:6px;padding:4px 8px;">🌙 자정 넘김 운행 (다음날 종료)로 계산됨 · <a href="#" onclick="_clearOvernight();return false;" style="color:#7c3aed;text-decoration:underline;">해제</a></div>
           </div>
         </div>
 
@@ -6187,9 +6190,11 @@ function submitDailyReport(){
   const _seatsVal = document.getElementById('dr-seats')?.value;
   if(!_skipValidation && !_seatsVal){ _unlockSubmitBtn(_drBtn);showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
 
-  // ★ 시작/종료 시간 일관성 검증 — 모든 운행은 당일 종료 전제.
-  //   종료 ≤ 시작이면 AM/PM 입력 오류(예: 오전 10시를 오후 10시로) → 제출 차단.
-  //   이걸 막지 않으면 자정 넘김으로 오인되어 비현실적 OT가 발생함.
+  // ★ 시작/종료 시간 일관성 검증
+  //   종료 ≤ 시작인 경우 두 가지 가능성:
+  //     (1) AM/PM 입력 오류 (예: 오전 10시를 오후 10시로) — 흔함
+  //     (2) 실제 자정 넘김 운행 (예: 23시 시작 → 익일 01시 종료) — 드묾
+  //   시각만으로 구분 불가하므로 드라이버에게 확인. 자정 넘김이면 +24h로 계산.
   {
     const _stV = document.getElementById('dr-start')?.value || '';
     const _etV = document.getElementById('dr-end')?.value || '';
@@ -6197,17 +6202,38 @@ function submitDailyReport(){
       const [_sh,_sm] = _stV.split(':').map(Number);
       const [_eh,_em] = _etV.split(':').map(Number);
       const _sMin = _sh*60+_sm, _eMin = _eh*60+_em;
-      if(_eMin <= _sMin){
+      if(_eMin === _sMin){
+        // 시작=종료 → 운행시간 0, 자정 넘김으로도 볼 수 없음 → 항상 오류
         _unlockSubmitBtn(_drBtn);
-        alert('⚠️ 시간 입력 확인\n\n'
-          + '시작 시간: '+_stV+'\n'
-          + '종료 시간: '+_etV+'\n\n'
-          + '종료 시간이 시작 시간보다 빠르거나 같습니다.\n'
-          + '오전/오후(AM/PM)를 잘못 선택하지 않았는지 확인해주세요.\n\n'
-          + '(예: 오전 10시 시작인데 오후 10시로 입력된 경우)\n'
-          + '모든 운행은 당일 안에 종료되는 것으로 계산됩니다.');
+        alert('⚠️ 시간 입력 확인\n\n시작과 종료 시간이 같습니다 ('+_stV+').\n시간을 다시 확인해주세요.');
         try { document.getElementById('dr-start')?.focus(); } catch(e){}
         return;
+      }
+      if(_eMin < _sMin){
+        // 이미 자정 넘김으로 확인된 상태가 아니면 confirm
+        if(!_isOvernightDR()){
+          const _overnight = confirm(
+            '🕐 시간 확인\n\n'
+            + '시작 시간: '+_stV+'\n'
+            + '종료 시간: '+_etV+'\n\n'
+            + '종료 시간이 시작 시간보다 빠릅니다.\n\n'
+            + '이 운행이 자정(밤 12시)을 넘겨 다음날에 끝났나요?\n\n'
+            + '[확인] = 네, 자정 넘김 운행입니다 (다음날 종료로 계산)\n'
+            + '[취소] = 아니오, 시간을 잘못 입력했습니다 (수정)'
+          );
+          if(_overnight){
+            // 자정 넘김 확정 → 플래그 설정 후 OT 재계산하고 제출 계속 진행
+            _setOvernight(true);
+            try { calcOT(); } catch(e){}
+          } else {
+            // 입력 오류 → 막고 수정
+            _unlockSubmitBtn(_drBtn);
+            try { _setOvernight(false); document.getElementById('dr-start')?.focus(); } catch(e){}
+            showToast('시작/종료 시간을 수정해주세요 (AM/PM 확인)','error');
+            return;
+          }
+        }
+        // _isOvernightDR()가 이미 true면 그대로 통과 (자정 넘김으로 계산됨)
       }
     }
   }
@@ -6507,6 +6533,7 @@ function _finalizeDailyReportSave(_drBtn){
     kmEnd:   _kmEndRaw,
     timeStart: document.getElementById('dr-start').value,
     timeEnd: document.getElementById('dr-end').value,
+    overnight: _isOvernightDR() ? '1' : '0',  // 자정 넘김(다음날 종료) 여부
     guide: document.getElementById('dr-guide').value,
     tourcode: document.getElementById('dr-tourcode').value,
     total, dr: parseFloat((document.getElementById('t-dr')||document.getElementById('t-dr-gross')).textContent.replace('$',''))||0,
@@ -6612,6 +6639,7 @@ function _finalizeDailyReportSave(_drBtn){
   ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   ['f-ot','f-night','f-tip','f-toll','f-fuel','f-etc','f-etc-desc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
+  if(typeof _setOvernight==='function') _setOvernight(false);  // 자정 넘김 플래그 초기화
   selectWash(0);
   selectMeal(0);
   const ntEl=document.getElementById('f-night-type');if(ntEl)ntEl.value='none'; cselSetValue('f-night-type','none');
@@ -7401,6 +7429,7 @@ function saveDailyDraft(){
 
     const draft = {
       agency, attraction, pickup, dropoff, kmStart, kmEnd, timeStart, timeEnd, tourcode,
+      overnight:   (typeof _isOvernightDR==='function' && _isOvernightDR()) ? '1' : '0',
       guide:       document.getElementById('dr-guide')?.value || '',
       remarks:     document.getElementById('dr-remarks')?.value || '',
       seats:       document.getElementById('dr-seats')?.value || '',
@@ -7628,6 +7657,9 @@ function restoreDailyDraft(){
       'dr-start':d.timeStart,'dr-end':d.timeEnd,'dr-guide':d.guide,
       'dr-tourcode':d.tourcode,'dr-remarks':d.remarks };
     Object.entries(valMap).forEach(([id,v])=>{ const el=document.getElementById(id); if(el&&v) el.value=v; });
+
+    // 자정 넘김 플래그 복원
+    if(typeof _setOvernight==='function') _setOvernight(d.overnight==='1' || d.overnight===1);
 
     // 2) 체크박스
     const tp=document.getElementById('toll-personal'); if(tp) tp.checked=!!d.tollPersonal;
@@ -8438,6 +8470,27 @@ function updateSvcHint(){
 // 실시간 OT 경고 박스 갱신
 let _lastOTToastKey = '';  // 중복 알림 방지
 
+// ── 자정 넘김(다음날 종료) 플래그 헬퍼 ──
+function _isOvernightDR(){
+  return (document.getElementById('dr-overnight')?.value === '1');
+}
+function _setOvernight(on){
+  const el = document.getElementById('dr-overnight');
+  if(el) el.value = on ? '1' : '0';
+  const badge = document.getElementById('dr-overnight-badge');
+  if(badge) badge.style.display = on ? 'block' : 'none';
+}
+function _clearOvernight(){
+  _setOvernight(false);
+  _lastOTToastKey = '';
+  calcOT();
+}
+// 종료 시간이 다시 바뀌면 자정넘김 플래그 리셋 (새 입력은 새로 판단)
+function _onEndTimeChange(){
+  _setOvernight(false);
+  calcOT();
+}
+
 // Airport Transfer는 OT 미적용 (공항 이동은 시간 초과 개념이 없음)
 function _isAirportTransfer(att){
   return /airport\s*transfer|공항\s*이동/i.test(String(att||''));
@@ -8497,16 +8550,24 @@ function updateOTHint(fromEndTime){
   if(et){
     const [eh,em] = et.split(':').map(Number);
     let totalMin = (eh*60+em) - startMin;
-    // ★ 모든 운행은 당일 종료 — 종료가 시작보다 이르면 입력 오류(주로 AM/PM 혼동).
-    //   기존 +24시간 자정넘김 가정 제거: 잘못된 21h OT 발생 방지 → OT 0 처리 + 경고
+    // ★ 종료 ≤ 시작 처리
+    //   - 자정 넘김(다음날 종료)으로 확인된 경우(dr-overnight=1): +24시간 적용해 정상 계산
+    //   - 그 외: 입력 오류(주로 AM/PM 혼동)로 보고 OT 0 + 경고 (제출 검증에서 차단)
     if(totalMin <= 0){
-      items.push({ type:'warn',
-        title: '⚠️ 종료 시간이 시작 시간보다 빠릅니다',
-        sub: '시작 '+st+' → 종료 '+et+' · 오전/오후(AM/PM)를 확인해주세요. 모든 운행은 당일 종료 기준이며, 수정 전까지 OT는 계산되지 않습니다.'
-      });
-      // OT 관련 후속 계산은 건너뜀 (OT 0 유지) — 경고만 렌더하고 종료
-      renderHintBox(hintBox, items);
-      return;
+      if(_isOvernightDR()){
+        totalMin += 24*60; // 다음날 종료 — 자정 넘김 보정
+        items.push({ type:'info',
+          title: '🌙 자정 넘김 운행 (다음날 종료)',
+          sub: '시작 '+st+' → 익일 '+et+' 기준으로 OT를 계산합니다.'
+        });
+      } else {
+        items.push({ type:'warn',
+          title: '⚠️ 종료 시간이 시작 시간보다 빠릅니다',
+          sub: '시작 '+st+' → 종료 '+et+' · 오전/오후(AM/PM)를 확인해주세요. 자정을 넘긴 운행이면 제출 시 확인 단계에서 처리됩니다. (현재 OT 미계산)'
+        });
+        renderHintBox(hintBox, items);
+        return;
+      }
     }
 
     let pm8OT = 0;
