@@ -3774,7 +3774,8 @@ function calcDuration(start, end) {
   const e = toMin(parseSheetTime(end));
   if(isNaN(s)||isNaN(e)) return '';
   let diff = e - s;
-  if(diff < 0) diff += 24*60; // 자정 넘기는 경우
+  // 모든 운행은 당일 종료 전제 — 종료가 시작보다 이르면 입력 오류이므로 자정넘김으로 보정하지 않음
+  if(diff < 0) return '—';
   const h = Math.floor(diff/60), m = diff%60;
   return h > 0 ? (m > 0 ? h+'h '+m+'m' : h+'h') : m+'m';
 }
@@ -6186,6 +6187,31 @@ function submitDailyReport(){
   const _seatsVal = document.getElementById('dr-seats')?.value;
   if(!_skipValidation && !_seatsVal){ _unlockSubmitBtn(_drBtn);showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
 
+  // ★ 시작/종료 시간 일관성 검증 — 모든 운행은 당일 종료 전제.
+  //   종료 ≤ 시작이면 AM/PM 입력 오류(예: 오전 10시를 오후 10시로) → 제출 차단.
+  //   이걸 막지 않으면 자정 넘김으로 오인되어 비현실적 OT가 발생함.
+  {
+    const _stV = document.getElementById('dr-start')?.value || '';
+    const _etV = document.getElementById('dr-end')?.value || '';
+    if(_stV && _etV){
+      const [_sh,_sm] = _stV.split(':').map(Number);
+      const [_eh,_em] = _etV.split(':').map(Number);
+      const _sMin = _sh*60+_sm, _eMin = _eh*60+_em;
+      if(_eMin <= _sMin){
+        _unlockSubmitBtn(_drBtn);
+        alert('⚠️ 시간 입력 확인\n\n'
+          + '시작 시간: '+_stV+'\n'
+          + '종료 시간: '+_etV+'\n\n'
+          + '종료 시간이 시작 시간보다 빠르거나 같습니다.\n'
+          + '오전/오후(AM/PM)를 잘못 선택하지 않았는지 확인해주세요.\n\n'
+          + '(예: 오전 10시 시작인데 오후 10시로 입력된 경우)\n'
+          + '모든 운행은 당일 안에 종료되는 것으로 계산됩니다.');
+        try { document.getElementById('dr-start')?.focus(); } catch(e){}
+        return;
+      }
+    }
+  }
+
   // ★ 여행사 / 투어코드 검증 — 마스터/일정에 없으면 사용자 확인 받기
   if(!_skipValidation){
     const _tourCode = document.getElementById('dr-tourcode')?.value.trim() || '';
@@ -8471,7 +8497,17 @@ function updateOTHint(fromEndTime){
   if(et){
     const [eh,em] = et.split(':').map(Number);
     let totalMin = (eh*60+em) - startMin;
-    if(totalMin < 0) totalMin += 24*60;
+    // ★ 모든 운행은 당일 종료 — 종료가 시작보다 이르면 입력 오류(주로 AM/PM 혼동).
+    //   기존 +24시간 자정넘김 가정 제거: 잘못된 21h OT 발생 방지 → OT 0 처리 + 경고
+    if(totalMin <= 0){
+      items.push({ type:'warn',
+        title: '⚠️ 종료 시간이 시작 시간보다 빠릅니다',
+        sub: '시작 '+st+' → 종료 '+et+' · 오전/오후(AM/PM)를 확인해주세요. 모든 운행은 당일 종료 기준이며, 수정 전까지 OT는 계산되지 않습니다.'
+      });
+      // OT 관련 후속 계산은 건너뜀 (OT 0 유지) — 경고만 렌더하고 종료
+      renderHintBox(hintBox, items);
+      return;
+    }
 
     let pm8OT = 0;
     const endAbsMin = startMin + totalMin;
@@ -8745,29 +8781,30 @@ function autoFillDRSurcharges(force){
     const [eh, em] = endVal.split(':').map(Number);
     const startMin = sh*60+sm;
     let totalMin = (eh*60+em) - startMin;
-    if(totalMin < 0) totalMin += 24*60;
+    // ★ 종료가 시작보다 이르면 입력 오류(당일 종료 전제) — OT 자동 계산/선택 건너뜀
+    if(totalMin > 0){
+      const WAIVE = 15;
+      const maxH  = att ? getMaxHours(att) : null;
+      const pm8WaiveMin = 20*60 + WAIVE; // 20:15
+      const endAbsMin = startMin + totalMin;
 
-    const WAIVE = 15;
-    const maxH  = att ? getMaxHours(att) : null;
-    const pm8WaiveMin = 20*60 + WAIVE; // 20:15
-    const endAbsMin = startMin + totalMin;
+      let pm8OT  = 0;
+      let durOT  = 0;
+      if(endAbsMin > pm8WaiveMin) pm8OT = (endAbsMin - pm8WaiveMin)/60;
+      if(maxH){ const wm2 = maxH*60+WAIVE; if(totalMin > wm2) durOT = (totalMin-wm2)/60; }
 
-    let pm8OT  = 0;
-    let durOT  = 0;
-    if(endAbsMin > pm8WaiveMin) pm8OT = (endAbsMin - pm8WaiveMin)/60;
-    if(maxH){ const wm2 = maxH*60+WAIVE; if(totalMin > wm2) durOT = (totalMin-wm2)/60; }
-
-    const effOT = Math.max(pm8OT, durOT);
-    if(effOT > 0){
-      const otCeil = Math.ceil(effOT);
-      const otAmt  = otCeil * otRate;
-      // OT 버튼에 해당 금액이 있으면 선택, 없으면 input에 직접 입력
-      const otBtnAmts = [otRate, otRate*2, otRate*3, otRate*4];
-      if(otBtnAmts.includes(otAmt)){
-        selectOTAmount(otAmt);
-      } else if(force || curOT === 0){
-        document.getElementById('f-ot').value = otAmt;
-        calcTotal();
+      const effOT = Math.max(pm8OT, durOT);
+      if(effOT > 0){
+        const otCeil = Math.ceil(effOT);
+        const otAmt  = otCeil * otRate;
+        // OT 버튼에 해당 금액이 있으면 선택, 없으면 input에 직접 입력
+        const otBtnAmts = [otRate, otRate*2, otRate*3, otRate*4];
+        if(otBtnAmts.includes(otAmt)){
+          selectOTAmount(otAmt);
+        } else if(force || curOT === 0){
+          document.getElementById('f-ot').value = otAmt;
+          calcTotal();
+        }
       }
     }
   }
@@ -8871,21 +8908,26 @@ function _updateAutoFillBanner(){
     const [sh,sm] = startVal.split(':').map(Number);
     const [eh,em] = endVal.split(':').map(Number);
     const startMin = sh*60+sm;
-    let total = (eh*60+em)-startMin; if(total<0) total+=24*60;
-    const maxH = att?getMaxHours(att):null;
-    const pm8WaiveMin=20*60+15;
-    const endAbs=startMin+total;
-    let pm8OT=0,durOT=0;
-    if(endAbs>pm8WaiveMin) pm8OT=(endAbs-pm8WaiveMin)/60;
-    if(maxH){const wm=maxH*60+15;if(total>wm)durOT=(total-wm)/60;}
-    const effOT=Math.max(pm8OT,durOT);
-    const rate=(seats==='40S'||seats==='50S')?40:30;
-    if(effOT>0){
-      const otAmt=Math.ceil(effOT)*rate;
-      lines.push('⏱ OT 발생: <b>'+effOT.toFixed(1)+'h → $'+otAmt+'</b> 자동 입력됨');
-    } else if(startVal){
-      const hTotal=Math.floor(total/60),mTotal=total%60;
-      lines.push('🕐 운행 시간: <b>'+hTotal+'h '+(mTotal?mTotal+'m':'')+'</b> — OT 없음');
+    let total = (eh*60+em)-startMin;
+    if(total <= 0){
+      // ★ 종료가 시작보다 이름 — 입력 오류(AM/PM 혼동). OT 미계산, 경고만.
+      lines.push('⚠️ <b>종료 시간이 시작보다 빠릅니다</b> — 오전/오후(AM/PM)를 확인하세요 (OT 미계산)');
+    } else {
+      const maxH = att?getMaxHours(att):null;
+      const pm8WaiveMin=20*60+15;
+      const endAbs=startMin+total;
+      let pm8OT=0,durOT=0;
+      if(endAbs>pm8WaiveMin) pm8OT=(endAbs-pm8WaiveMin)/60;
+      if(maxH){const wm=maxH*60+15;if(total>wm)durOT=(total-wm)/60;}
+      const effOT=Math.max(pm8OT,durOT);
+      const rate=(seats==='40S'||seats==='50S')?40:30;
+      if(effOT>0){
+        const otAmt=Math.ceil(effOT)*rate;
+        lines.push('⏱ OT 발생: <b>'+effOT.toFixed(1)+'h → $'+otAmt+'</b> 자동 입력됨');
+      } else {
+        const hTotal=Math.floor(total/60),mTotal=total%60;
+        lines.push('🕐 운행 시간: <b>'+hTotal+'h '+(mTotal?mTotal+'m':'')+'</b> — OT 없음');
+      }
     }
   } else if(startVal && !endVal){
     lines.push('🕐 시작 '+startVal+' · 종료 시간 입력 시 OT 자동 계산');
