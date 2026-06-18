@@ -5164,7 +5164,8 @@ function _otHrsFromTimes(startT, endT, course, agency, seats){
   if(!s || !e) return null;
   const t2m = hhmm => { const [h,m]=hhmm.split(':').map(Number); return h*60+m; };
   let workedMin = t2m(e) - t2m(s);
-  if(workedMin < 0) workedMin += 24*60; // 자정 넘김 방어
+  // ★ 모든 운행은 당일 종료 전제 — 종료가 시작보다 이르면 입력 오류이므로 자정넘김 보정 안 함.
+  //   (잘못된 AM/PM 입력으로 비현실적 OT가 잡히는 것 방지) → 계산 불가로 처리
   if(workedMin <= 0) return null;
   // 표준 코스 시간(maxHrs) 조회 — M_PriceClient[agency][course].max_hours
   let maxHrs = null;
@@ -28458,7 +28459,8 @@ function calcDuration(start, end) {
   const toMin = t => { const s=parseSheetTime(t); if(!s) return NaN; const [h,m]=s.split(':').map(Number); return h*60+(m||0); };
   let diff = toMin(end) - toMin(start);
   if(isNaN(diff)) return '';
-  if(diff < 0) diff += 24*60;
+  // 모든 운행은 당일 종료 전제 — 종료가 시작보다 이르면 입력 오류 (자정넘김 보정 안 함)
+  if(diff < 0) return '—';
   const h = Math.floor(diff/60), m = diff%60;
   return h > 0 ? (m > 0 ? h+'h '+m+'m' : h+'h') : m+'m';
 }
