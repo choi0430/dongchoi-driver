@@ -5971,6 +5971,20 @@ async function completePre(){
 
 function addDailyReport(shiftId){
   editingShiftId = shiftId;
+  // ★ 직전 DR 저장 후 버튼이 _markBtnDone으로 잠긴 상태(disabled + "저장 완료")가
+  //   남아 있으면 두 번째 DR을 저장할 수 없는 버그가 있었음.
+  //   새 DR 진입 시 제출 버튼을 원래 상태로 복구한다. (2026-06 fix)
+  try {
+    const _drBtn = document.querySelector('button[onclick="submitDailyReport()"]');
+    if(_drBtn){
+      _drBtn.dataset.submitting = '';
+      _drBtn.disabled = false;
+      _drBtn.innerHTML = '✓ Save Daily Report (리포트 저장)';
+      _drBtn.style.background = '';   // _markBtnDone이 박은 인라인 배경 제거 → btn-green 클래스 복원
+      _drBtn.style.opacity = '';
+      _drBtn.style.cursor = '';
+    }
+  } catch(e){ console.warn('DR button reset error:', e); }
   showPage('report');
   goStep(2);
   // Pre Departure 정보를 초기값으로 세팅
@@ -6040,6 +6054,21 @@ function addDailyReport(shiftId){
   }
 
   const _useDraft = _hasDraft && !_hasPrefill && !shift?._synthetic;
+  // ★ draft도 prefill도 없는 "새 빈 리포트" 진입인데, 직전 DR의 텍스트/ETC 값이
+  //   폼에 그대로 남아 있는 버그가 있었음. 이 경우에만 폼을 명시적으로 비운다.
+  //   (draft/prefill이 있으면 각자의 복원 로직이 채우므로 건드리지 않는다.) (2026-06 fix)
+  if(!_useDraft && !_hasPrefill){
+    try {
+      ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks']
+        .forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+      ['f-ot','f-night','f-tip','f-toll','f-fuel','f-etc','f-etc-desc']
+        .forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+      ['toll-personal','fuel-personal']
+        .forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
+      {const c=document.getElementById('f-svc-custom'); if(c)c.value='';}
+      {const w=document.getElementById('f-svc-custom-wrap'); if(w)w.style.display='none';}
+    } catch(e){ console.warn('fresh DR clear error:', e); }
+  }
   if(!_useDraft){
     // 인승 유무와 관계없이 항상 서차지 옵션 초기화 (OT 버튼 렌더링 포함)
     updateSurchargeOptions();
