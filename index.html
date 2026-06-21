@@ -12959,8 +12959,16 @@ function _lockSubmitBtn(btnOrSelector, loadingText){
   if(!btn) return null;
   if(btn.dataset.submitting === '1') return null; // 이미 처리 중 → null 리턴
   btn.dataset.submitting = '1';
-  btn.dataset.originalText = btn.innerHTML;
-  btn.dataset.originalBg = btn.style.background || '';
+  // ★ 자동복구 타이머가 살아있는(완료 표시 중) 버튼을 다시 잠글 때는
+  //   현재 라벨이 "✅ ...완료"이므로 originalText를 덮어쓰지 않는다.
+  //   타이머를 취소하고 직전에 저장된 진짜 원래 라벨을 유지한다. (2026-06 fix)
+  if(btn._restoreTimer){
+    clearTimeout(btn._restoreTimer);
+    btn._restoreTimer = null;
+  } else {
+    btn.dataset.originalText = btn.innerHTML;
+    btn.dataset.originalBg = btn.style.background || '';
+  }
   btn.disabled = true;
   btn.innerHTML = loadingText || '⏳ 저장 중...';
   btn.style.opacity = '0.7';
@@ -12969,9 +12977,11 @@ function _lockSubmitBtn(btnOrSelector, loadingText){
 }
 function _unlockSubmitBtn(btn){
   if(!btn) return;
+  if(btn._restoreTimer){ clearTimeout(btn._restoreTimer); btn._restoreTimer = null; }
   btn.dataset.submitting = '';
   btn.disabled = false;
   if(btn.dataset.originalText) btn.innerHTML = btn.dataset.originalText;
+  btn.style.background = (btn.dataset.originalBg || '');
   btn.style.opacity = '';
   btn.style.cursor = '';
 }
@@ -12982,6 +12992,22 @@ function _markBtnDone(btn, doneText){
   btn.style.background = '#16a34a';
   btn.style.opacity = '1';
   btn.style.cursor = 'default';
+  // ★ 완료 표시 후 자동 복구 (2026-06 fix)
+  //   과거: 버튼을 영구 잠가서 한 번 저장하면 같은 폼에서 다음 저장/수정이
+  //   불가능했음(앱 재시작해야만 가능). 중복 제출 방지는 저장이 끝나는 순간까지만
+  //   필요하므로, 완료 피드백을 잠시 보여준 뒤 원래 상태로 되돌린다.
+  if(btn._restoreTimer) clearTimeout(btn._restoreTimer);
+  btn._restoreTimer = setTimeout(()=>{
+    try {
+      btn.dataset.submitting = '';
+      btn.disabled = false;
+      // _lockSubmitBtn이 저장해 둔 원래 라벨/배경 복원, 없으면 인라인 스타일만 해제
+      if(btn.dataset.originalText) btn.innerHTML = btn.dataset.originalText;
+      btn.style.background = (btn.dataset.originalBg || '');
+      btn.style.opacity = '';
+      btn.style.cursor = '';
+    } catch(e){ console.warn('btn auto-restore error:', e); }
+  }, 2500);
 }
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 
