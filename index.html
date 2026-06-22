@@ -6585,7 +6585,7 @@ function _finalizeDailyReportSave(_drBtn){
     meal: parseFloat(document.getElementById('f-meal')?.value||0),
     etc: parseFloat(document.getElementById('f-etc')?.value||0),
     etcDesc: document.getElementById('f-etc-desc')?.value?.trim() || '',
-    manualBonus: calcManualBonus(document.getElementById('pre-rego')?.value||'', att),
+    manualBonus: calcManualBonus((typeof getCurrentRego === 'function' ? getCurrentRego() : '') || document.getElementById('pre-rego')?.value || '', att),
     remarks: document.getElementById('dr-remarks').value,
     svcMismatch: window._svcMismatch ? JSON.stringify(window._svcMismatch) : '',
     private: _isPrivateRun ? 'Y' : '',
@@ -8907,8 +8907,9 @@ function autoFillDRSurcharges(force){
     // getCourseData → getPDCourseFromMaster 구조: courseData[sk].base
     const skData5 = courseData5 ? (courseData5[sk5] || {}) : {};
     const drBase5 = Number(skData5.base || 0);
-    const _mRego5 = document.getElementById('pre-rego')?.value || '';
-    const drAmt5 = drBase5 + calcManualBonus(_mRego5, att);
+    // SVC 추천값에는 순수 base만 사용. 수동 보너스는 저장 시 1회만 가산.
+    //   (드롭다운에 base+보너스를 넣으면 저장 시 이중 적용됨 — autoRate와 동일 정책) (2026-06 fix)
+    const drAmt5 = drBase5;
     const svcOpts = SVC_OPTIONS[seats] || [];
 
     // M_PriceDriver base 금액이 있으면 그 값으로 직접 매핑
@@ -9754,7 +9755,10 @@ function calcTotal(){
   const svcVal = getSvcValue();
   // ★ 수동 차량 추가 수당: TRANSFER +$10 / 그 외(HALF DAY, 10·12HR 등) +$20
   const _mAtt = document.getElementById('dr-attraction')?.value || '';
-  const _mRego = document.getElementById('pre-rego')?.value || '';
+  // rego는 pre-rego 입력이 비어 있을 수 있으므로 getCurrentRego() 폴백 포함.
+  //   (dr-rego → shift.rego → pre-rego 순) 이게 없으면 수동 보너스가 $0로 누락됨. (2026-06 fix)
+  const _mRego = (typeof getCurrentRego === 'function' ? getCurrentRego() : '')
+                 || document.getElementById('pre-rego')?.value || '';
   const manualBonus = calcManualBonus(_mRego, _mAtt);
   // Early/Late TA: Airport Transfer 여행사별 요금 × 0.3 (DR은 고정 $30/$40)
   const earlyVal = parseFloat(document.getElementById('f-early')?.value||0);
