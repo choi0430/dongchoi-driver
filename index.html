@@ -2351,6 +2351,24 @@ function todayDisplay() {
     String(n.getMonth()+1).padStart(2,'0') + '/' + n.getFullYear();
 }
 
+// ★ 작성 날짜가 오늘(시드니)이 아니면 한 번 확인. (2026-06)
+//   dateStr: 'dd/mm/yyyy' 형식. 오늘이면 true(그대로 진행),
+//   오늘이 아니면 confirm 다이얼로그 → 사용자가 확인하면 true, 취소하면 false.
+function confirmDateIfNotToday(dateStr, label){
+  try {
+    const today = todayDisplay(); // dd/mm/yyyy (시드니)
+    const v = String(dateStr||'').trim();
+    if(!v || v === today) return true;
+    const ctx = label ? label + ' ' : '';
+    return confirm(
+      '⚠️ ' + ctx + '날짜가 오늘이 아닙니다.\n\n' +
+      '입력된 날짜: ' + v + '\n' +
+      '오늘 날짜: ' + today + '\n\n' +
+      '이 날짜로 계속 진행하시겠습니까?\n(The date is not today. Continue with this date?)'
+    );
+  } catch(e){ return true; } // 오류 시 진행 막지 않음
+}
+
 // 시드니 기준 오늘 (YYYY-MM-DD) — 네이티브 date picker용
 function todaySydneyISO() {
   const n = new Date(new Date().toLocaleString('en-US', {timeZone: 'Australia/Sydney'}));
@@ -5850,6 +5868,8 @@ async function completePre(){
   // 1) 같은 드라이버가 이미 해당 날짜·차량으로 운행 중인지 (로컬 체크)
   // 과거 날짜로 입력할 때는 날짜가 다르면 허용
   const selectedDate = document.getElementById('pre-date')?.value || todayDisplay();
+  // ★ 오늘이 아닌 날짜면 한 번 확인
+  if(!confirmDateIfNotToday(selectedDate, 'Pre Departure')){ _unlockSubmitBtn(_preBtn); return; }
   const alreadyMine = activeShifts.some(s => s.rego === rego && s.date === selectedDate);
   if(alreadyMine){
     const myShift = activeShifts.find(s => s.rego === rego && s.date === selectedDate);
@@ -6232,6 +6252,12 @@ function submitDailyReport(){
   /* ── 개선: 인승 미선택 경고 ── */
   const _seatsVal = document.getElementById('dr-seats')?.value;
   if(!_skipValidation && !_seatsVal){ _unlockSubmitBtn(_drBtn);showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
+
+  // ★ 작성 날짜가 오늘이 아니면 한 번 확인
+  {
+    const _drDateVal = document.getElementById('dr-date')?.value || '';
+    if(!confirmDateIfNotToday(_drDateVal, 'Daily Report')){ _unlockSubmitBtn(_drBtn); return; }
+  }
 
   // ★ 시작/종료 시간 일관성 검증
   //   종료 ≤ 시작인 경우 두 가지 가능성:
@@ -7196,6 +7222,12 @@ function submitEndShift(){
 
   const km = document.getElementById('end-km').value;
   if(!km){_unlockSubmitBtn(_eosBtn);showToast('종료 KM을 입력하세요. End KM required.','error');return;}
+
+  // ★ 작성 날짜가 오늘이 아니면 한 번 확인
+  {
+    const _eosDateVal = document.getElementById('end-date')?.value || '';
+    if(!confirmDateIfNotToday(_eosDateVal, 'End of Shift')){ _unlockSubmitBtn(_eosBtn); return; }
+  }
 
   // ★ 미저장 Daily Report 감지 — 폼에 의미있는 데이터 있는데 제출 안 한 경우 경고
   //   사용자가 EOS만 누르고 DR 잊어버린 경우 데이터 손실 방지
