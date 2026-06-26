@@ -8500,6 +8500,8 @@ function _egCalcEgSubAmount(r){
   const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
   const isLarge = capNum>=40;
   const agency = String(r.Agency||r.agency||'').trim();
+  // BlueSky 정책(2026-06): 트레일러 서차지 $50 (TA 환산 $80 아님), 조기 서차지 미수취
+  const isBlueSky = /blue\s*sky|블루\s*스카이/i.test(agency);
 
   // 1) M_PriceSub의 EG TRAVEL 행에서 base rate
   function _findSub(){
@@ -8543,7 +8545,11 @@ function _egCalcEgSubAmount(r){
 
   const hotelTA   = _egHotelDRtoTA(hotelDR, capNum);
   const distTA    = _egDistDRtoTA(distDR, capNum);
-  const trailerTA = _egTrailerSurchargeDRtoTA(trailerDR, capNum);
+  let trailerTA = _egTrailerSurchargeDRtoTA(trailerDR, capNum);
+  // BlueSky: DC가 BlueSky에 트레일러를 $50만 청구 → EG에도 $50만 지급
+  if(isBlueSky && trailerDR > 0 && capNum < 40){
+    trailerTA = 50;
+  }
 
   // OT 환산 — 호주로(Tour Hojuro)/Plus Australia 21~25S: 30분 UNIT
   const otRateTA = capNum>=50?160:capNum>=40?150:80;
@@ -8554,8 +8560,9 @@ function _egCalcEgSubAmount(r){
     : Math.round((otRateDR>0 ? otDR/otRateDR : 0) * otRateTA);
 
   // Early 환산 — Hojuro 21/25S: $80 / 그 외: Airport Transfer rate × 0.3
+  // BlueSky: 조기 서차지를 못 받으므로 EG에도 지급 안 함
   let earlyTA = 0;
-  if(earlyDR > 0){
+  if(earlyDR > 0 && !isBlueSky){
     const isHojuroEarly = /호주로|hojuro|plus\s*australia/i.test(agency);
     if(isHojuroEarly && capNum < 40){
       earlyTA = 80;
@@ -8592,21 +8599,10 @@ function _egCalcEgSubAmount(r){
   // 4) Toll (대형만)
   const tollAmt = isLarge ? toll : 0;
 
-  // 5) 트레일러 대여비 - 트레일러 소유주가 식별되면 -$30 (소유주에게 지급)
+  // 5) 트레일러 대여비 - 정책 변경(2026-06): EG에 트레일러 대여비를 받지 않음 → 항상 0
+  //    (이전: DC 소유 트레일러 사용 시 -$30 차감했으나 폐지)
   let trailerRental = 0;
   let trailerOwnerName = '';
-  if(trailerDR > 0){
-    const trNum = String(r.Trailer_Number||'').trim();
-    if(trNum){
-      const tOwners = _egLoadTrailerOwners();
-      const rawOwner = tOwners[trNum] || '';
-      const trOwner = _egNormEntity(rawOwner);
-      if(trOwner){
-        trailerRental = -30;
-        trailerOwnerName = rawOwner;
-      }
-    }
-  }
 
   // Breakdown 구성
   const items = [];
@@ -8645,7 +8641,9 @@ function _egCalcEgSubAmount(r){
   if(tollAmt !== 0) items.push({label: '톨비', amount: tollAmt});
   if(trailerTA !== 0){
     items.push({
-      label: '트레일러 서차지 (DR $' + trailerDR + ' → TA $' + trailerTA + ')',
+      label: isBlueSky
+        ? '트레일러 서차지 (BlueSky $' + trailerTA + ')'
+        : '트레일러 서차지 (DR $' + trailerDR + ' → TA $' + trailerTA + ')',
       amount: trailerTA
     });
   }
@@ -9001,6 +8999,13 @@ function _egCommonStyle(){
       .tour-card .body{padding:10px 14px;}
       .tour-card .reason{font-size:9pt;color:#7c3aed;background:#ede9fe;
                          padding:4px 10px;border-radius:4px;margin-bottom:8px;font-weight:600;}
+      .tour-card .trip-summary{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;
+                               padding:8px 12px;margin-bottom:10px;}
+      .tour-card .trip-summary .ts-title{font-size:9.5pt;font-weight:700;color:#1e293b;
+                                         margin-bottom:6px;padding-bottom:4px;border-bottom:1px dashed #cbd5e1;}
+      .tour-card .trip-summary .ts-day{font-size:9pt;color:#334155;padding:2px 0;line-height:1.5;}
+      .tour-card .trip-summary .ts-day .ts-d{display:inline-block;min-width:118px;
+                                             font-weight:700;color:#7c3aed;}
       .tour-card .dr-list{margin-top:8px;}
       .tour-card .dr-row{display:table;width:100%;font-size:9.5pt;padding:5px 0;
                          border-bottom:1px solid #f3f4f6;}
@@ -9232,9 +9237,49 @@ function _egTourCompletionCardHTML(t){
   html += '</div>';
   html += '</div>';
 
-  // 본문 (종료 사유 + DR 리스트 + 합계)
+  // 본문 (종료 사유 + 전체 일정 요약 + DR 리스트 + 합계)
   html += '<div class="body">';
   html += '<div class="reason">✅ 종료 사유: ' + _egEsc(t.reason) + '</div>';
+
+  // ── 전체 일정 요약 (날짜별 코스 한 줄 요약) ──
+  if(drs.length > 0){
+    // 날짜별로 그룹핑하여 한 줄씩 요약
+    const byDate = {};
+    drs.forEach(r => {
+      const iso = r._iso || '';
+      if(!byDate[iso]) byDate[iso] = [];
+      const course = r.Attraction || r.Course || '';
+      const rego = r.Rego || '';
+      const drv = r.Driver || '';
+      const tS = _egFmtTime(r.Time_Start || r.Start_Time);
+      const tE = _egFmtTime(r.Time_End || r.End_Time);
+      const tStr = tS ? (tS + (tE ? '~' + tE : '')) : '';
+      byDate[iso].push({course, rego, drv, tStr});
+    });
+    const sortedDates = Object.keys(byDate).filter(Boolean).sort();
+    const totalPax = t.pax ? _egEsc(t.pax) : '';
+    html += '<div class="trip-summary">';
+    html += '<div class="ts-title">🗓️ 전체 일정 요약 · ' +
+            _egFmtDate(t.startDate) + ' ~ ' + _egFmtDate(t.endDate) +
+            ' (총 ' + days + '일 · DR ' + drs.length + '건' +
+            (totalPax ? ' · Pax ' + totalPax : '') + ')</div>';
+    sortedDates.forEach((iso, idx) => {
+      const segs = byDate[iso];
+      const courses = segs.map(s => {
+        const parts = [];
+        if(s.course) parts.push(_egEsc(s.course));
+        const sub = [];
+        if(s.rego) sub.push(_egEsc(s.rego));
+        if(s.drv) sub.push(_egEsc(s.drv));
+        if(s.tStr) sub.push(s.tStr);
+        return (parts.join('') || '운행') +
+               (sub.length ? ' <span style="color:#9ca3af;">(' + sub.join(' · ') + ')</span>' : '');
+      }).join(', ');
+      html += '<div class="ts-day"><span class="ts-d">Day ' + (idx+1) + ' · ' +
+              _egFmtDate(iso) + '</span> ' + courses + '</div>';
+    });
+    html += '</div>';
+  }
 
   if(drs.length > 0){
     html += '<div class="dr-list">';
