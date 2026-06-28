@@ -12551,6 +12551,46 @@ function lrow(label, val, color){
   '</div>';
 }
 function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+// ★★★ 발행 이력 카드 버튼 래퍼 ★★★
+// onclick에 회사명 같은 문자열을 박으면 작은따옴표(예: LEE'S)에서 JS 파싱이 깨진다.
+// → 버튼은 인보이스 번호만 넘기고, 여기서 캐시로 나머지 정보를 조회한다. (번호엔 따옴표 없음)
+function _invFromCache(invNumber){
+  return (_invHistoryCache||[]).find(i => String(i.InvNumber) === String(invNumber)) || null;
+}
+async function _ensureInvCache(){
+  if (!_invHistoryCache && typeof loadInvHistory === 'function') {
+    try { await loadInvHistory(true); } catch(e){ console.warn('[invCache] reload failed:', e); }
+  }
+}
+async function previewInvById(invNumber){
+  dismissNewItem('ninv', invNumber);
+  await _ensureInvCache();
+  const inv = _invFromCache(invNumber);
+  if (!inv) { toast('⚠️ 인보이스를 찾을 수 없습니다: ' + invNumber, 'er'); return; }
+  return previewIssuedInvoice(inv.InvNumber, inv.Agency, inv.PeriodFrom, inv.PeriodTo);
+}
+async function editInvById(invNumber){
+  await _ensureInvCache();
+  const inv = _invFromCache(invNumber);
+  if (!inv) { toast('⚠️ 인보이스를 찾을 수 없습니다: ' + invNumber, 'er'); return; }
+  return editIssuedInvoice(inv.InvNumber, inv.Agency, inv.PeriodFrom, inv.PeriodTo);
+}
+async function resendInvById(invNumber){
+  await _ensureInvCache();
+  const inv = _invFromCache(invNumber);
+  if (!inv) { toast('⚠️ 인보이스를 찾을 수 없습니다: ' + invNumber, 'er'); return; }
+  return resendInvoice(inv.InvNumber, inv.Agency, inv.PeriodFrom, inv.PeriodTo);
+}
+async function payInvById(invNumber){
+  await _ensureInvCache();
+  const inv = _invFromCache(invNumber);
+  if (!inv) { toast('⚠️ 인보이스를 찾을 수 없습니다: ' + invNumber, 'er'); return; }
+  const amt = parseFloat(inv.GrandTotal)||0;
+  const paid = (inv.Status === 'paid') ? amt : (parseFloat(inv.PaidCR)||0);
+  return openPartialPayment(inv.InvNumber, inv.Agency, amt, paid);
+}
+
 function fmtABN(v){ const d=String(v||'').replace(/\D/g,''); if(d.length!==11) return v||''; return d.slice(0,2)+' '+d.slice(2,5)+' '+d.slice(5,8)+' '+d.slice(8,11); }
 
 // ── 전화번호 앞 0 복원 (Google Sheets 숫자→텍스트 보정) ──
@@ -24067,11 +24107,11 @@ function _renderInvHistPage() {
         <div style="text-align:right;flex-shrink:0;margin-left:8px;">
           <div style="font-size:15px;font-weight:800;color:var(--gn);">$${amt.toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
           <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap;">
-            <button onclick="dismissNewItem('ninv','${escH(inv.InvNumber)}');previewIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">👁미리보기</button>
-            <button onclick="editIssuedInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #a78bfa;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">✏️수정</button>
-            ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="openPartialPayment('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}',${amt},${effectivePaid})" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fbbf24;background:#fffbeb;color:#92400e;cursor:pointer;font-weight:600;">💰수금</button>`:''}
+            <button onclick="previewInvById('${escH(inv.InvNumber)}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">👁미리보기</button>
+            <button onclick="editInvById('${escH(inv.InvNumber)}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #a78bfa;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600;">✏️수정</button>
+            ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="payInvById('${escH(inv.InvNumber)}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fbbf24;background:#fffbeb;color:#92400e;cursor:pointer;font-weight:600;">💰수금</button>`:''}
             ${!isPaidFull&&inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','paid','PaidDate')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #86efac;background:#f0fdf4;color:#166534;cursor:pointer;font-weight:600;">✅전액결제</button>`:''}
-            ${inv.Status!=='cancelled'?`<button onclick="resendInvoice('${escH(inv.InvNumber)}','${escH(inv.Agency||'')}','${escH(inv.PeriodFrom||'')}','${escH(inv.PeriodTo||'')}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;cursor:pointer;font-weight:600;">✉️발송</button>`:''}
+            ${inv.Status!=='cancelled'?`<button onclick="resendInvById('${escH(inv.InvNumber)}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;cursor:pointer;font-weight:600;">✉️발송</button>`:''}
             ${inv.Status!=='cancelled'?`<button onclick="updateInvStatus('${escH(inv.InvNumber)}','cancelled','')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:600;">❌취소</button>`:''}
             <button onclick="deleteInvoiceRecord('${escH(inv.InvNumber)}')" style="font-size:10px;padding:3px 7px;border-radius:8px;border:1px solid #fecaca;background:#fef2f2;color:#ef4444;cursor:pointer;font-weight:600;">🗑삭제</button>
           </div>
