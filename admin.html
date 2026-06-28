@@ -24286,6 +24286,10 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   }
 
   // ④ 저장된 크레딧/선수금 복원
+  // ★ FIX: 캐시가 비어(null) 있으면 먼저 로드 — 미리보기/발송이 캐시 의존하므로
+  if (!_invHistoryCache && typeof loadInvHistory === 'function') {
+    try { await loadInvHistory(true); } catch(e) { console.warn('[InvPreview] cache reload failed:', e); }
+  }
   let _previewSavedInv = null;
   if (_invHistoryCache) {
     _previewSavedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber) || null;
@@ -24473,6 +24477,10 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
       } catch(e) { toast('리포트 로드 실패','er'); return; }
     }
 
+    // ★ FIX: 캐시가 비어 있으면 먼저 로드 (발송이 캐시의 저장 Items에 의존)
+    if (!_invHistoryCache && typeof loadInvHistory === 'function') {
+      try { await loadInvHistory(true); } catch(e) { console.warn('[resend] cache reload failed:', e); }
+    }
     let savedInv = null;
     if (_invHistoryCache) savedInv = _invHistoryCache.find(inv => String(inv.InvNumber) === invNumber);
 
