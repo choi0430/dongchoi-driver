@@ -11289,6 +11289,44 @@ function _quarterEnd(d){
 }
 function _quarterNum(d){ return Math.floor(d.getMonth()/3)+1; }
 
+// ★★★ 주간 구분선 공용 헬퍼 (월~일 기준) ★★★
+// 리포트/거래내역 테이블에서 주차가 바뀔 때 가로 구분선 행을 삽입한다.
+// 사용법: 행 루프 안에서
+//   const wk = _weekKeyOf(r.Date);
+//   if(wk !== _lastWk){ html += _weekDividerRow(r.Date, COLSPAN); _lastWk = wk; }
+function _weekKeyOf(ds){
+  const iso = (typeof parseToISO === 'function') ? parseToISO(ds||'') : '';
+  if(!iso) return '';
+  const d = new Date(iso + 'T00:00:00');
+  if(isNaN(d.getTime())) return '';
+  return toLocalISO(_weekStart(d)); // 그 주 월요일 ISO = 주차 키
+}
+// 주차 라벨: "6/21~6/27" 형태
+function _weekLabelOf(ds){
+  const iso = (typeof parseToISO === 'function') ? parseToISO(ds||'') : '';
+  if(!iso) return '';
+  const d = new Date(iso + 'T00:00:00');
+  if(isNaN(d.getTime())) return '';
+  const ws = _weekStart(d), we = _weekEnd(d);
+  const f = x => `${x.getMonth()+1}/${x.getDate()}`;
+  return `${f(ws)}~${f(we)}`;
+}
+// 테이블(<tr>)용 주간 구분선 행
+function _weekDividerRow(ds, colspan){
+  const label = _weekLabelOf(ds);
+  return `<tr class="wk-divider"><td colspan="${colspan||1}" style="padding:5px 8px;background:linear-gradient(var(--sf2,#f1f5f9),var(--sf2,#f1f5f9));border-top:2px solid var(--ac,#7c3aed);border-bottom:1px solid var(--b2,#e4e8ef);">
+    <span style="font-size:10px;font-weight:800;color:var(--ac,#7c3aed);letter-spacing:.5px;font-family:var(--fd);">📅 주간 ${label}</span>
+  </td></tr>`;
+}
+// 비-테이블(div 목록)용 주간 구분선 블록
+function _weekDividerBlock(ds){
+  const label = _weekLabelOf(ds);
+  return `<div class="wk-divider-blk" style="display:flex;align-items:center;gap:8px;margin:10px 2px 6px;">
+    <span style="font-size:10px;font-weight:800;color:var(--ac,#7c3aed);letter-spacing:.5px;font-family:var(--fd);white-space:nowrap;">📅 주간 ${label}</span>
+    <span style="flex:1;height:2px;background:linear-gradient(90deg,var(--ac,#7c3aed),transparent);border-radius:2px;"></span>
+  </div>`;
+}
+
 // 현재 기간 모드에 따라 [from, to] 계산
 function _periodRange(mode, anchor){
   const a = anchor || new Date();
@@ -16725,9 +16763,11 @@ function _agencyBalances(){
   return Object.values(map).map(a=>({...a, balance: a.dr - a.cr})).sort((a,b)=>b.balance-a.balance);
 }
 
+let _balAgencyListCache = [];   // 인덱스 기반 버튼 디스패치용 (따옴표 회사명 안전)
 function renderBalAgencyList(){
   const search = (document.getElementById('bal-agency-search')?.value||'').toLowerCase();
   const balances = _agencyBalances().filter(a=> !search || a.name.toLowerCase().includes(search));
+  _balAgencyListCache = balances;
   const totalDR = balances.reduce((s,a)=>s+a.dr,0);
   const totalCR = balances.reduce((s,a)=>s+a.cr,0);
   const totalBal = totalDR - totalCR;
@@ -16752,21 +16792,38 @@ function renderBalAgencyList(){
   const list = document.getElementById('bal-agency-list');
   if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">거래 내역이 없습니다</div>'; return; }
 
-  list.innerHTML = balances.map(a=>{
-    const safeName = a.name.replace(/'/g,"\\'");
+  list.innerHTML = balances.map((a,idx)=>{
     return `
     <div style="background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
-      <div onclick="openBalDetail('agency','${safeName}')" style="cursor:pointer;flex:1;">
+      <div onclick="_openAgencyBalByIdx(${idx})" style="cursor:pointer;flex:1;">
         <div style="font-weight:700;font-size:13px;">${a.name}</div>
         <div style="font-size:10px;color:var(--t3);margin-top:2px;">DR $${a.dr.toLocaleString('en',{minimumFractionDigits:2})} / CR $${a.cr.toLocaleString('en',{minimumFractionDigits:2})}</div>
       </div>
-      <div style="text-align:right;cursor:pointer;" onclick="openBalDetail('agency','${safeName}')">
+      <div style="text-align:right;cursor:pointer;" onclick="_openAgencyBalByIdx(${idx})">
         <div style="font-size:15px;font-weight:700;font-family:var(--fn);color:${a.balance>0?'var(--or)':a.balance<0?'var(--gn)':'var(--t2)'};">$${Math.abs(a.balance).toLocaleString('en',{minimumFractionDigits:2})}</div>
         <div style="font-size:9px;color:var(--t3);">${a.balance>0?'미수금':'정산 완료'}</div>
       </div>
-      ${a.balance > 0.01 ? `<button onclick="event.stopPropagation();_quickAddPayment('agency','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:8px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;" title="수금 처리">💰 수금</button>` : ''}
+      ${a.balance > 0.01 ? `<button class="btn bac sm" onclick="event.stopPropagation();_quickPayAgencyByIdx(${idx})" title="수금 처리" style="white-space:nowrap;">+ 수금 등록</button>` : ''}
     </div>`;
   }).join('');
+}
+
+// ★ 인덱스 기반 디스패처 — onclick에 회사명 문자열을 박지 않아 따옴표(LEE'S 등)에 안전
+function _openAgencyBalByIdx(idx){
+  const a = _balAgencyListCache[idx];
+  if(!a){ return; }
+  openBalDetail('agency', a.name);
+}
+function _quickPayAgencyByIdx(idx){
+  const a = _balAgencyListCache[idx];
+  if(!a){ return; }
+  _quickAddPayment('agency', a.name, a.balance);
+}
+let _balSubListCache = [];
+function _quickPaySubByIdx(idx){
+  const a = _balSubListCache[idx];
+  if(!a){ return; }
+  _quickAddPayment('sub', a.name, a.balance);
 }
 
 // ── SUB (OUTSOURCING) BALANCE ──
@@ -17489,6 +17546,7 @@ function _subBalances(){
 function renderBalSubList(){
   const search = (document.getElementById('bal-sub-search')?.value||'').toLowerCase();
   const balances = _subBalances().filter(a=> !search || a.name.toLowerCase().includes(search));
+  _balSubListCache = balances;
   // 가려진 LEDGER 건수 카운트 (안내용)
   const suppressedCount = (_balSubTxns||[]).filter(t => _isSubLedgerSuppressed(t)).length;
   const exactMatchMode = _subInvExactKeys && _subInvExactKeys.size > 0;
@@ -17516,7 +17574,7 @@ function renderBalSubList(){
   const list = document.getElementById('bal-sub-list');
   if(!balances.length){ list.innerHTML='<div style="text-align:center;color:var(--t3);padding:40px 0;">거래 내역이 없습니다</div>'; return; }
 
-  list.innerHTML = balances.map(a=>{
+  list.innerHTML = balances.map((a,idx)=>{
     const safeName = a.name.replace(/'/g,"\\'");
     // ★ 차주가 자기 직원 드라이버에게 분배해야 할 금액
     const driverWages = a.driverWages || {};
@@ -17597,7 +17655,7 @@ function renderBalSubList(){
       ${tgHtml}
       ${_egIsEGEntity(a.name) ? _egQuadrantMatrixHTML() : ''}
       ${driverWageHtml}
-      ${a.balance > 0.01 ? `<div style="margin-top:8px;text-align:right;"><button onclick="event.stopPropagation();_quickAddPayment('sub','${safeName}',${a.balance})" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;" title="지급 처리">💰 지급</button></div>` : ''}
+      ${a.balance > 0.01 ? `<div style="margin-top:8px;text-align:right;"><button class="btn bac sm" onclick="event.stopPropagation();_quickPaySubByIdx(${idx})" title="지급 처리" style="white-space:nowrap;">+ 지급 등록</button></div>` : ''}
     </div>`;
   }).join('');
 }
@@ -18962,10 +19020,14 @@ function renderBalDetail(){
       balMap.set(r, Math.round(runBal*100)/100);
     });
 
+    let _lastWkAg = null;
     _displayRows.forEach((r,i)=>{
       const realIdx = _balAgencyTxns.indexOf(r);
       const bal = balMap.get(r)||0;
       const remark = r.Remark || '—';
+      // ★ 주간 구분선 (월~일 기준, 주차가 바뀔 때 삽입)
+      const _wkAg = _weekKeyOf(r.Date);
+      if(_wkAg && _wkAg !== _lastWkAg){ html += _weekDividerRow(r.Date, 10); _lastWkAg = _wkAg; }
       const invId = String(r.InvoiceID||'').trim();
       const _info = _invInfoMap[invId] || {};
       const _tc = r.TourCode || (_info.tourcodes||[]).join(', ') || '—';
@@ -19097,7 +19159,13 @@ function renderBalDetail(){
       </tr></thead><tbody>`;
 
     // ★ 투어코드별 그룹 렌더 — 헤더(투어코드+합계+지급예정일) → 상세 행들
+    let _lastWkSub = null;
     sortedGroups.forEach(g => {
+      // ★ 주간 구분선 (그룹의 마지막 운행일 기준, 월~일)
+      if(g.lastISO){
+        const _wkSub = _weekKeyOf(g.lastISO);
+        if(_wkSub && _wkSub !== _lastWkSub){ html += _weekDividerRow(g.lastISO, 7); _lastWkSub = _wkSub; }
+      }
       // 마지막 날짜 + 14일 = 지급 예정일
       let dueStr = '';
       if(g.lastISO){
@@ -27092,7 +27160,12 @@ function renderDR(){
   };
   _renderVerifyAlert();
 
+  let _lastWkDR = null;
   el.innerHTML = filtered.map(r=>{
+    // ★ 주간 구분선 (월~일, 주차 변경 시 카드 앞에 삽입)
+    let _wkDivDR = '';
+    const _wkDR = _weekKeyOf(r.Date);
+    if(_wkDR && _wkDR !== _lastWkDR){ _wkDivDR = _weekDividerBlock(r.Date); _lastWkDR = _wkDR; }
     const dr   = parseFloat(r.DR_Cost||0);
     const ot   = parseFloat(r.OT||0);
     const svc  = parseFloat(r.SVC_Charge||0);
@@ -27148,7 +27221,7 @@ function renderDR(){
     + (nightOwner ? `<span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;margin:1px;">야경납입 -$${nightOwner}</span>` : '')
     + (()=>{ try { const _mm=r.SVC_Mismatch; if(!_mm) return ''; const mm=typeof _mm==='string'?JSON.parse(_mm):_mm; if(!mm||!mm.selected) return ''; return '<span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;margin:1px;font-weight:700;">💰 수당불일치 $'+mm.expected+'→$'+mm.selected+'</span>'; } catch(e){ return ''; } })();
 
-    return `<div style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;margin-bottom:8px;">
+    return `${_wkDivDR}<div style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
 
