@@ -19020,14 +19020,10 @@ function renderBalDetail(){
       balMap.set(r, Math.round(runBal*100)/100);
     });
 
-    let _lastWkAg = null;
     _displayRows.forEach((r,i)=>{
       const realIdx = _balAgencyTxns.indexOf(r);
       const bal = balMap.get(r)||0;
       const remark = r.Remark || '—';
-      // ★ 주간 구분선 (월~일 기준, 주차가 바뀔 때 삽입)
-      const _wkAg = _weekKeyOf(r.Date);
-      if(_wkAg && _wkAg !== _lastWkAg){ html += _weekDividerRow(r.Date, 10); _lastWkAg = _wkAg; }
       const invId = String(r.InvoiceID||'').trim();
       const _info = _invInfoMap[invId] || {};
       const _tc = r.TourCode || (_info.tourcodes||[]).join(', ') || '—';
@@ -19159,13 +19155,7 @@ function renderBalDetail(){
       </tr></thead><tbody>`;
 
     // ★ 투어코드별 그룹 렌더 — 헤더(투어코드+합계+지급예정일) → 상세 행들
-    let _lastWkSub = null;
     sortedGroups.forEach(g => {
-      // ★ 주간 구분선 (그룹의 마지막 운행일 기준, 월~일)
-      if(g.lastISO){
-        const _wkSub = _weekKeyOf(g.lastISO);
-        if(_wkSub && _wkSub !== _lastWkSub){ html += _weekDividerRow(g.lastISO, 7); _lastWkSub = _wkSub; }
-      }
       // 마지막 날짜 + 14일 = 지급 예정일
       let dueStr = '';
       if(g.lastISO){
@@ -27160,12 +27150,7 @@ function renderDR(){
   };
   _renderVerifyAlert();
 
-  let _lastWkDR = null;
   el.innerHTML = filtered.map(r=>{
-    // ★ 주간 구분선 (월~일, 주차 변경 시 카드 앞에 삽입)
-    let _wkDivDR = '';
-    const _wkDR = _weekKeyOf(r.Date);
-    if(_wkDR && _wkDR !== _lastWkDR){ _wkDivDR = _weekDividerBlock(r.Date); _lastWkDR = _wkDR; }
     const dr   = parseFloat(r.DR_Cost||0);
     const ot   = parseFloat(r.OT||0);
     const svc  = parseFloat(r.SVC_Charge||0);
@@ -27221,7 +27206,7 @@ function renderDR(){
     + (nightOwner ? `<span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;margin:1px;">야경납입 -$${nightOwner}</span>` : '')
     + (()=>{ try { const _mm=r.SVC_Mismatch; if(!_mm) return ''; const mm=typeof _mm==='string'?JSON.parse(_mm):_mm; if(!mm||!mm.selected) return ''; return '<span style="display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;margin:1px;font-weight:700;">💰 수당불일치 $'+mm.expected+'→$'+mm.selected+'</span>'; } catch(e){ return ''; } })();
 
-    return `${_wkDivDR}<div style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;margin-bottom:8px;">
+    return `<div style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div style="flex:1;min-width:0;">
 
