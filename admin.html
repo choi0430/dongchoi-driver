@@ -10397,15 +10397,33 @@ function calcSubReport(r) {
     }
   }
 
+  // ★ Early surcharge SUB 지급 (2026-06 정책: BlueSky 여행사만 제외, 나머지는 SUB에게 지급)
+  //   환산 기준은 TA와 동일: 호주로/Plus Australia 21·25S = $80 고정, 그 외 = Airport Transfer 요금 × 30%
+  const earlyDR_sub = parseFloat(r.Early)||0;
+  let earlySub = 0;
+  const _isBlueskyEarly = /bluesky/i.test(agency);
+  if(earlyDR_sub > 0 && !_isBlueskyEarly){
+    const _isHojuroEarlySub = /호주로|hojuro|plus\s*australia/i.test(agency);
+    if(_isHojuroEarlySub && capNum < 40){
+      earlySub = 80;
+    } else {
+      let atE = agPC ? _findCourse(agPC, 'Airport Transfer') : null;
+      if(!atE){
+        for(const ag of Object.keys(DB.PC||{})){ atE = _findCourse(DB.PC[ag], 'Airport Transfer'); if(atE) break; }
+      }
+      if(atE){ const sd2 = atE[capKey] || atE['21']; earlySub = Math.round((parseFloat(sd2?.rate)||0) * 0.3); }
+    }
+  }
+
   // ★★ SUB 총액 계산 — TA 서차지를 그대로 전달하는 게 아니라,
   //   SUB의 실제 서차지(SUB가 받아야 할 금액)를 직접 합산.
-  //   - 포함: Hotel, Dist, Trailer, OT (SUB가 실제 운행하면서 발생한 서차지)
+  //   - 포함: Hotel, Dist, Trailer, OT, Early (BlueSky 제외) (SUB가 실제 운행하면서 발생한 서차지)
   //   - EG에 한정 포함: Parking (DC가 여행사에 청구한 만큼 EG에게도 지급)
   //   - 제외: Parking (EG 외 SUB는 DC 수입으로 유지)
-  //   - 제외: Toll, Early (DC 직접 정산)
+  //   - 제외: Toll (DC 직접 정산)
   //   이게 정확한 모델 — 이전 "subTotal = subBase + taSurchargeTotal - parking" 회피 트릭 대신
   //   서차지 구성요소를 명시적으로 더함
-  const subTotal = subBase + hotelSub + distSub + trailerSub + subOT + subParking;
+  const subTotal = subBase + hotelSub + distSub + trailerSub + subOT + subParking + earlySub;
 
   // 디버그 로그 (진단용 — 추후 제거)
   if(window._debugSub){
@@ -10466,7 +10484,7 @@ function calcSubReport(r) {
   return {
     isSub: true, subOwner: owner, rego, capKey, attraction, agency, driver,
     taAmount,
-    subCost: { base: subBase, ot: subOT, hotel: hotelSub, dist: distSub, trailer: trailerSubInCost, parking: subParking, night: nightOwner, total: subTotalAdjusted },
+    subCost: { base: subBase, ot: subOT, hotel: hotelSub, dist: distSub, trailer: trailerSubInCost, parking: subParking, early: earlySub, night: nightOwner, total: subTotalAdjusted },
     drCost,
     profit,
     scenario,        // 'SUB_normal' | 'CROSS_DC_drives_SUB'
@@ -14447,7 +14465,9 @@ async function _searchByTourCode(){
         _subHotel: Number(calc.subCost.hotel) || 0,
         _subDist: Number(calc.subCost.dist) || 0,
         _subTrailer: Number(calc.subCost.trailer) || 0,
-        _subExtras: (Number(calc.subCost.hotel)||0) + (Number(calc.subCost.dist)||0) + (Number(calc.subCost.trailer)||0),
+        _subEarly: Number(calc.subCost.early) || 0,
+        _subParking: Number(calc.subCost.parking) || 0,
+        _subExtras: (Number(calc.subCost.hotel)||0) + (Number(calc.subCost.dist)||0) + (Number(calc.subCost.trailer)||0) + (Number(calc.subCost.early)||0) + (Number(calc.subCost.parking)||0),
         _subTotal: Number(calc.subCost.total) || 0,
         _hasSub: true
       };
@@ -14655,7 +14675,7 @@ function _renderSearchResults(matches, label){
     const trailer = r._hasSub ? Number(r._subTrailer||0) : Number(r.Trailer||0);
     const hotel   = r._hasSub ? Number(r._subHotel||0)   : Number(r.Hotel_Surcharge||0);
     const dist    = r._hasSub ? Number(r._subDist||0)    : Number(r.Dist_Surcharge||0);
-    const early = Number(r.Early||0);
+    const early = r._hasSub ? Number(r._subEarly||0) : Number(r.Early||0);
     const toll = Number(r.Toll||0);
     const extras = trailer+hotel+dist+early+toll;
     const isInv = r._source==='inv';
@@ -14741,7 +14761,7 @@ function _addSubInvRowFromReport(r){
   const trailer = r._hasSub ? Number(r._subTrailer||0) : Number(r.Trailer||0);
   const hotel   = r._hasSub ? Number(r._subHotel||0)   : Number(r.Hotel_Surcharge||0);
   const dist    = r._hasSub ? Number(r._subDist||0)    : Number(r.Dist_Surcharge||0);
-  const early = Number(r.Early||0);
+  const early = r._hasSub ? Number(r._subEarly||0) : Number(r.Early||0);
   const toll = Number(r.Toll||0);
   const extras = trailer+hotel+dist+early+toll;
   // 기타 라벨 결정
