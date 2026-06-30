@@ -3759,7 +3759,8 @@ function rDash(){
 
   // ★ 인보이스 미발행 운행 알림 — 지난 달 + 이번 달 운행 중 인보이스 안 발행된 것
   try {
-    if(_drCache && _drCache.length){
+    // ★ FIX: 인보이스 캐시가 로드되지 않았으면 계산 건너뜀 (캐시 비면 모든 운행이 미발행으로 오인됨 — 허위 100건 방지)
+    if(_drCache && _drCache.length && Array.isArray(_invHistoryCache) && _invHistoryCache.length){
       const today = new Date();
       const lastMonthFirst = new Date(today.getFullYear(), today.getMonth()-1, 1);
       const cutoffISO = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
@@ -3803,6 +3804,9 @@ function rDash(){
         const tc = pickTourCode(r).toUpperCase();
         const ag = String(r.Agency||'').trim().toUpperCase();
         if(!tc || !ag) return false;
+        // ★ FIX: BillingEntity가 DC가 아닌 운행(예: EG TRAVEL이 직접 발행)은 DC 미발행 대상 아님
+        const _be = (typeof _scheduleBillingMap !== 'undefined') ? _scheduleBillingMap[tc] : undefined;
+        if(_be !== undefined && typeof isBillingEntityDC === 'function' && !isBillingEntityDC(_be)) return false;
         const key = `${ag}|${tc}`;
         return !issuedKeys.has(key);
       });
