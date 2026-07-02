@@ -3531,7 +3531,16 @@ function rDash(){
     if(_isHvis&&!isEmpty(v.HVIS_Date)&&hd<90){
       const urgent=hd<0,warn=hd<30;
       const booking=findHvisBooking(v.Rego);
-      if(booking){
+      const _bres = booking ? String(booking.inspectionResult||'').toLowerCase() : '';
+      if(booking && _bres==='defect'){
+        const _dd = booking.defectDueDate ? vDaysDiff(booking.defectDueDate) : null;
+        const _stage = booking.repairedDate ? '수리완료·Clear대기' : '수리 필요';
+        als.push({sort:_dd!==null?_dd-500:-400,type:'hvis',
+          bg:'#fef2f2',bc:'#f87171',fc:'#b91c1c',icon:'🔧',
+          m:`${v.Rego} — HVIS DEFECT (${_stage}) · Clear 기한 ${booking.defectDueDate?fmtDate(booking.defectDueDate):'-'}${_dd!==null?(_dd<0?` (OVERDUE ${Math.abs(_dd)}일)`:` (${_dd}일 남음)`):''}`});
+      } else if(booking && (_bres==='pass'||_bres==='cleared')){
+        // PASS/CLEARED — 이번 주기 완료, 알림 없음
+      } else if(booking){
         als.push({sort:hd+1000,type:'hvis_booked',
           bg:'#ecfdf5',bc:'#10b981',fc:'#059669',icon:'✅',
           m:`${v.Rego} — HVIS Booked (예약완료) ${fmtDate(booking.inspDate)} ${parseSheetTime(booking.inspTime)} @ ${booking.location||''}`});
@@ -4104,6 +4113,153 @@ function vDaysLbl(n){
   return n+' days';
 }
 
+// ═══════════════════════════════════════════════════════════════
+// HVIS 검사 결과 워크플로우 (PASS / DEFECT → 수리 → Clear Notice)
+// 상태: '' 또는 'pending'(결과 미입력) / 'pass' / 'defect' / 'cleared'
+// ═══════════════════════════════════════════════════════════════
+function _hvisResultSection(b){
+  var res = String(b.inspectionResult||'').toLowerCase();
+
+  // 1) 결과 미입력 — PASS / DEFECT 버튼
+  if(!res || res==='pending'){
+    return '<div style="margin-top:8px;padding:8px 10px;background:var(--sf3);border-radius:8px;">'
+      +'<div style="font-size:11px;color:var(--t3);margin-bottom:6px;">🔍 Inspection Result (검사 결과 입력)</div>'
+      +'<div style="display:flex;gap:6px;">'
+      +'<button class="btn sm" style="flex:1;background:#dcfce7;color:#15803d;border:1px solid #86efac;font-weight:700;" onclick="hvisSetResult(\''+b.id+'\',\'pass\')">✅ PASS</button>'
+      +'<button class="btn sm" style="flex:1;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;font-weight:700;" onclick="hvisOpenDefect(\''+b.id+'\')">⚠️ DEFECT</button>'
+      +'</div></div>';
+  }
+
+  // 2) PASS — 완료
+  if(res==='pass'){
+    return '<div style="margin-top:8px;padding:8px 10px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;font-size:11px;color:#15803d;">'
+      +'✅ <b>PASS</b> — 검사 통과, 다음 주기까지 조치 없음'
+      +'<button style="background:none;border:none;color:var(--t3);font-size:10px;cursor:pointer;margin-left:8px;text-decoration:underline;" onclick="hvisSetResult(\''+b.id+'\',\'pending\')">되돌리기</button></div>';
+  }
+
+  // 3) CLEARED — defect였으나 clear notice 수령 완료
+  if(res==='cleared'){
+    return '<div style="margin-top:8px;padding:8px 10px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;font-size:11px;color:#15803d;">'
+      +'✅ <b>DEFECT CLEARED</b> — Clear Notice 수령 완료'
+      +(b.clearDate?' ('+fmtDate(b.clearDate)+(b.clearNoticeNo?' · #'+b.clearNoticeNo:'')+')':'')
+      +'</div>';
+  }
+
+  // 4) DEFECT — 수리/클리어 진행 단계
+  if(res==='defect'){
+    var dueDays = b.defectDueDate ? vDaysDiff(b.defectDueDate) : null;
+    var dueColor = dueDays===null ? 'var(--t3)' : (dueDays<0 ? '#dc2626' : dueDays<=3 ? '#dc2626' : dueDays<=7 ? '#d97706' : '#ca8a04');
+    var dueLbl = dueDays===null ? '기한 미설정' : (dueDays<0 ? 'OVERDUE '+Math.abs(dueDays)+'일 초과' : dueDays+'일 남음');
+    var html = '<div style="margin-top:8px;padding:9px 11px;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;">'
+      +'<div style="font-size:12px;font-weight:800;color:#b91c1c;">🔧 DEFECT — 수리 필요</div>'
+      +(b.defectNote?'<div style="font-size:11px;color:var(--t2);margin-top:3px;">'+escH(b.defectNote)+'</div>':'')
+      +'<div style="font-size:11px;margin-top:4px;">Clearance 기한: <b>'+(b.defectDueDate?fmtDate(b.defectDueDate):'-')+'</b> '
+      +'<span style="color:'+dueColor+';font-weight:700;">('+dueLbl+')</span></div>';
+    // 수리 완료 여부에 따라 다음 버튼
+    if(!b.repairedDate){
+      html += '<div style="display:flex;gap:6px;margin-top:8px;">'
+        +'<button class="btn sm" style="flex:1;background:#e0e7ff;color:#4338ca;border:1px solid #a5b4fc;font-weight:700;" onclick="hvisMarkRepaired(\''+b.id+'\')">🔧 수리 완료 처리</button>'
+        +'<button style="background:none;border:none;color:var(--t3);font-size:10px;cursor:pointer;" onclick="hvisOpenDefect(\''+b.id+'\')">기한/메모 수정</button>'
+        +'</div>';
+    } else {
+      html += '<div style="font-size:11px;color:#4338ca;margin-top:6px;">🔧 수리 완료: '+fmtDate(b.repairedDate)+'</div>'
+        +'<button class="btn sm" style="width:100%;margin-top:6px;background:#dcfce7;color:#15803d;border:1px solid #86efac;font-weight:700;" onclick="hvisOpenClear(\''+b.id+'\')">📄 Clear Notice 등록</button>';
+    }
+    html += '</div>';
+    return html;
+  }
+  return '';
+}
+
+// 부킹 ID로 캐시에서 찾기
+function _findHvisBk(id){ return getHvisBookings().find(function(b){return String(b.id)===String(id);}); }
+
+// GAS 업데이트 + 캐시 반영 공용
+async function _hvisUpdate(id, fields, okMsg){
+  var b = _findHvisBk(id);
+  if(!b){ toast('부킹을 찾을 수 없습니다','er'); return false; }
+  try {
+    toast('저장 중...','ok');
+    var payload = Object.assign({ ID: id }, fields);
+    var res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'update_hvis_booking', data: payload})});
+    var json = await res.json();
+    if(!json.ok){ toast('저장 실패: '+(json.error||''),'er'); return false; }
+    // 로컬 캐시 반영 (camelCase 키로)
+    var map = { InspectionResult:'inspectionResult', DefectDueDate:'defectDueDate', DefectNote:'defectNote',
+                RepairedDate:'repairedDate', ClearDate:'clearDate', ClearNoticeNo:'clearNoticeNo' };
+    Object.keys(fields).forEach(function(k){ if(map[k]) b[map[k]] = fields[k]; });
+    renderHvis(); rDash();
+    if(okMsg) toast(okMsg,'ok');
+    return true;
+  } catch(e){ toast('서버 오류: '+e.message,'er'); return false; }
+}
+
+// PASS / pending 토글
+async function hvisSetResult(id, result){
+  await _hvisUpdate(id, { InspectionResult: result },
+    result==='pass' ? '✅ PASS 처리 완료' : '되돌렸습니다');
+}
+
+// DEFECT 입력 모달 (기한 + 메모)
+function hvisOpenDefect(id){
+  var b = _findHvisBk(id); if(!b) return;
+  var ov = document.createElement('div');
+  ov.id = 'hvis-defect-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML = '<div style="background:var(--bg);border-radius:16px;padding:20px;max-width:420px;width:100%;">'
+    +'<div style="font-size:16px;font-weight:800;color:#b91c1c;margin-bottom:4px;">⚠️ DEFECT 등록</div>'
+    +'<div style="font-size:12px;color:var(--t3);margin-bottom:14px;">'+escH(b.rego)+' · 검사일 '+fmtDate(b.inspDate)+'</div>'
+    +'<label style="font-size:12px;font-weight:600;color:var(--t2);">Clearance 기한 (수리 완료 기한)</label>'
+    +'<input type="date" id="hd-due" value="'+(b.defectDueDate?parseToISO(b.defectDueDate):'')+'" style="width:100%;padding:9px;margin:4px 0 12px;border:1px solid var(--b1);border-radius:8px;font-size:13px;">'
+    +'<label style="font-size:12px;font-weight:600;color:var(--t2);">Defect 내용 (메모)</label>'
+    +'<textarea id="hd-note" rows="3" placeholder="예: 브레이크 패드 마모, 헤드램프 정렬 불량" style="width:100%;padding:9px;margin:4px 0 14px;border:1px solid var(--b1);border-radius:8px;font-size:13px;resize:vertical;">'+escH(b.defectNote||'')+'</textarea>'
+    +'<div style="display:flex;gap:8px;">'
+    +'<button class="btn sm" style="flex:1;background:var(--sf2);" onclick="document.getElementById(\'hvis-defect-overlay\').remove()">취소</button>'
+    +'<button class="btn bac sm" style="flex:1;" onclick="hvisSaveDefect(\''+b.id+'\')">DEFECT 저장</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+}
+async function hvisSaveDefect(id){
+  var due = gv('hd-due'), note = gv('hd-note');
+  if(!due){ toast('Clearance 기한을 입력하세요','er'); return; }
+  var ok = await _hvisUpdate(id, { InspectionResult:'defect', DefectDueDate: fmtDate(due), DefectNote: note||'' }, '⚠️ DEFECT 등록 완료');
+  if(ok){ var o=document.getElementById('hvis-defect-overlay'); if(o) o.remove(); }
+}
+
+// 수리 완료 처리 (오늘 날짜)
+async function hvisMarkRepaired(id){
+  if(!confirm('수리 완료로 처리할까요? (Clear Notice 등록 단계로 넘어갑니다)')) return;
+  await _hvisUpdate(id, { RepairedDate: fmtDate(toLocalISO(new Date())) }, '🔧 수리 완료 처리됨');
+}
+
+// Clear Notice 등록 모달 (발급일 + 증명번호)
+function hvisOpenClear(id){
+  var b = _findHvisBk(id); if(!b) return;
+  var ov = document.createElement('div');
+  ov.id = 'hvis-clear-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML = '<div style="background:var(--bg);border-radius:16px;padding:20px;max-width:420px;width:100%;">'
+    +'<div style="font-size:16px;font-weight:800;color:#15803d;margin-bottom:4px;">📄 Defect Clear Notice 등록</div>'
+    +'<div style="font-size:12px;color:var(--t3);margin-bottom:14px;">'+escH(b.rego)+' · 정비소 발급 Clear Notice 정보를 입력하세요</div>'
+    +'<label style="font-size:12px;font-weight:600;color:var(--t2);">발급일 (Clear Notice Date)</label>'
+    +'<input type="date" id="hc-date" value="'+(b.clearDate?parseToISO(b.clearDate):toLocalISO(new Date()))+'" style="width:100%;padding:9px;margin:4px 0 12px;border:1px solid var(--b1);border-radius:8px;font-size:13px;">'
+    +'<label style="font-size:12px;font-weight:600;color:var(--t2);">증명번호 (Clear Notice No.)</label>'
+    +'<input type="text" id="hc-no" value="'+escH(b.clearNoticeNo||'')+'" placeholder="예: CN-2026-00123" style="width:100%;padding:9px;margin:4px 0 14px;border:1px solid var(--b1);border-radius:8px;font-size:13px;">'
+    +'<div style="display:flex;gap:8px;">'
+    +'<button class="btn sm" style="flex:1;background:var(--sf2);" onclick="document.getElementById(\'hvis-clear-overlay\').remove()">취소</button>'
+    +'<button class="btn bac sm" style="flex:1;" onclick="hvisSaveClear(\''+b.id+'\')">등록 완료</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+}
+async function hvisSaveClear(id){
+  var date = gv('hc-date'), no = gv('hc-no');
+  if(!date){ toast('발급일을 입력하세요','er'); return; }
+  if(!no){ toast('증명번호를 입력하세요','er'); return; }
+  var ok = await _hvisUpdate(id, { InspectionResult:'cleared', ClearDate: fmtDate(date), ClearNoticeNo: no }, '✅ Clear Notice 등록 완료');
+  if(ok){ var o=document.getElementById('hvis-clear-overlay'); if(o) o.remove(); }
+}
+
 function renderHvis(){
   var box=document.getElementById('hvis-alert-box');
   var list=document.getElementById('hvis-list');
@@ -4125,7 +4281,19 @@ function renderHvis(){
     }
     if(v.HVIS_Date&&hvisDays!==null&&hvisDays<=90){
       var hvisBookingMatch=bookings.filter(function(b){return b.rego===v.Rego;}).sort(function(a,b2){return(b2.inspDate||'').localeCompare(a.inspDate||'');})[0];
-      if(hvisBookingMatch){
+      var _res = hvisBookingMatch ? String(hvisBookingMatch.inspectionResult||'').toLowerCase() : '';
+      if(hvisBookingMatch && _res==='defect'){
+        // DEFECT — clearance 기한 카운트다운 경고 (수리/클리어 전까지 유지)
+        var _dd = hvisBookingMatch.defectDueDate ? vDaysDiff(hvisBookingMatch.defectDueDate) : null;
+        var _dc = _dd===null?'#b91c1c':(_dd<0?'#dc2626':_dd<=3?'#dc2626':_dd<=7?'#d97706':'#b45309');
+        var _dl = _dd===null?'기한 미설정':(_dd<0?'OVERDUE '+Math.abs(_dd)+'일 초과':_dd+'일 남음');
+        var _stage = hvisBookingMatch.repairedDate ? '수리완료 · Clear Notice 대기' : '수리 필요';
+        alertHtml+='<div style="background:#fef2f2;border:1.5px solid #f87171;border-radius:10px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
+          +'&#x1F527; <b>'+v.Rego+'</b> — HVIS <b style="color:#b91c1c;">DEFECT</b> ('+_stage+') · Clear 기한 '+(hvisBookingMatch.defectDueDate?fmtDate(hvisBookingMatch.defectDueDate):'-')
+          +' <b style="color:'+_dc+';">('+_dl+')</b></div>';
+      } else if(hvisBookingMatch && (_res==='pass'||_res==='cleared')){
+        // PASS/CLEARED — 이번 주기 완료, 알림 표시 안 함 (아무것도 push 안 함)
+      } else if(hvisBookingMatch){
         alertHtml+='<div style="background:#ecfdf5;border:1.5px solid #10b981;border-radius:10px;padding:9px 12px;margin-bottom:6px;font-size:12px;">'
           +'&#x2705; <b>'+v.Rego+'</b> — HVIS Booked (예약완료) '+fmtDate(hvisBookingMatch.inspDate)+' '+parseSheetTime(hvisBookingMatch.inspTime)+' @ '+(hvisBookingMatch.location||'TBD')
           +' <span style="color:#6b7280;font-size:11px;">(Due: '+fmtDate(v.HVIS_Date)+' · '+vDaysLbl(hvisDays)+')</span></div>';
@@ -4199,6 +4367,7 @@ function renderHvis(){
         +' <span style="color:var(--t3);">Booking# '+(lastB.bookingNo||'-')+'</span>'
         +'<button style="background:none;border:none;color:var(--ac);font-size:10px;cursor:pointer;margin-left:6px;" onclick="openHvisBooking(\''+v.Rego+'\')">View all</button></div>'
         :'<div style="font-size:11px;color:var(--t3);">No Booking (부킹 없음)</div>')
+      +(lastB?_hvisResultSection(lastB):'')
       +'</div>';
   });
   box.innerHTML=alertHtml||'<div style="text-align:center;padding:12px;color:var(--gn);font-size:12px;">&#x2705; No urgent alerts</div>';
@@ -30013,7 +30182,9 @@ async function _applyAdminBundle(bundle){
       id: r.ID||'', rego: r.Rego||'', inspDate: r.InspDate||'', inspTime: r.InspTime||'',
       location: r.Location||'', customerNo: r.CustomerNo||'', bookingNo: r.BookingNo||'',
       vehicleType: r.VehicleType||'', ownerName: r.OwnerName||'', bookingDate: r.BookingDate||'',
-      status: r.Status||''
+      status: r.Status||'',
+      inspectionResult: r.InspectionResult||'', defectDueDate: r.DefectDueDate||'', defectNote: r.DefectNote||'',
+      repairedDate: r.RepairedDate||'', clearDate: r.ClearDate||'', clearNoticeNo: r.ClearNoticeNo||''
     })));
   } else { setHvisBookingsCache([]); }
   // ── Maint_Records ──
@@ -30305,7 +30476,9 @@ async function loadAllFromSheets(){
         id: r.ID||'', rego: r.Rego||'', inspDate: r.InspDate||'', inspTime: r.InspTime||'',
         location: r.Location||'', customerNo: r.CustomerNo||'', bookingNo: r.BookingNo||'',
         vehicleType: r.VehicleType||'', ownerName: r.OwnerName||'', bookingDate: r.BookingDate||'',
-        status: r.Status||''
+        status: r.Status||'',
+        inspectionResult: r.InspectionResult||'', defectDueDate: r.DefectDueDate||'', defectNote: r.DefectNote||'',
+        repairedDate: r.RepairedDate||'', clearDate: r.ClearDate||'', clearNoticeNo: r.ClearNoticeNo||''
       })));
     } else {
       setHvisBookingsCache([]);
