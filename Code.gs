@@ -4181,7 +4181,7 @@ function updateDriverInfo(driverName, data) {
       wwcNo: 'WWC_No', wwcExp: 'WWC_Expiry',
       nokName: 'NEXT_OF_KIN', nokPhone: 'Mobile_2',
       address: 'Address', suburb: 'Suburb',
-      bank: 'Bank', bsb: 'BSB', account: 'Account'
+      bank: 'Bank_Name', bsb: 'BSB', account: 'Account_Number'
     };
 
     // ★ 진단: 매핑된 컬럼이 실제 시트에 있는지 미리 검증 (저장 누락 디버깅용)
