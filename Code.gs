@@ -85,7 +85,7 @@ const MASTER_HEADERS = {
   // ── 차량 데미지 마커 ──
   'Bus_Damage': ['Rego','Markers','UpdatedAt','UpdatedBy'],
   // ── HVIS 부킹 관리 ──
-  'HVIS_Bookings': ['ID','Rego','InspDate','InspTime','Location','CustomerNo','BookingNo','VehicleType','OwnerName','BookingDate','Status'],
+  'HVIS_Bookings': ['ID','Rego','InspDate','InspTime','Location','CustomerNo','BookingNo','VehicleType','OwnerName','BookingDate','Status','InspectionResult','DefectDueDate','DefectNote','RepairedDate','ClearDate','ClearNoticeNo'],
   // ── 정비 기록 ──
   'Maint_Records': ['ID','Rego','Date','KM','Type','Description','Workshop','Cost','NextServiceKM'],
   // ── 인보이스 서차지 오버라이드 ──
@@ -230,7 +230,7 @@ const ADMIN_ONLY_ACTIONS = [
   // update_driver_info는 본인 정보 수정에 한해 드라이버도 허용 (doPost에서 driverName 강제)
   'update_defect_status',
   'review_leave_request', 'update_roster_cell',
-  'save_hvis_booking', 'delete_hvis_booking',
+  'save_hvis_booking', 'update_hvis_booking', 'delete_hvis_booking',
   'save_maint_record', 'delete_maint_record',
   'save_invoice_override', 'delete_invoice_override', 'bulk_save_invoice_overrides',
   'save_company_profile',
@@ -2050,6 +2050,9 @@ function doPost(e) {
       // ── HVIS Bookings (POST) ──
       case 'save_hvis_booking':
         return cors(saveHvisBooking(payload.data));
+
+      case 'update_hvis_booking':
+        return cors(updateHvisBooking(payload.data));
 
       case 'delete_hvis_booking':
         return cors(deleteHvisBooking(payload.id));
@@ -5875,6 +5878,40 @@ function saveHvisBooking(data) {
     });
     sheet.appendRow(row);
     return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ── UPDATE: 기존 HVIS 부킹 행을 ID로 찾아 지정 필드만 갱신 (검사결과/디펙트/클리어) ──
+function updateHvisBooking(data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureSheet(ss, 'HVIS_Bookings');  // 누락 컬럼 자동 추가
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { ok: false, error: 'No data' };
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    const idCol = headers.indexOf('ID');
+    if (idCol < 0) return { ok: false, error: 'ID column not found' };
+    const ids = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(data.ID)) {
+        const rowNum = i + 2;
+        Object.keys(data).forEach(k => {
+          if (k === 'ID') return;
+          const nk = normalizeKey(k);
+          for (let c = 0; c < headers.length; c++) {
+            if (normalizeKey(headers[c]) === nk) {
+              sheet.getRange(rowNum, c + 1).setValue(data[k] === undefined || data[k] === null ? '' : data[k]);
+              break;
+            }
+          }
+        });
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'ID not found: ' + data.ID };
   } catch (err) {
     return { ok: false, error: err.toString() };
   }
