@@ -8040,8 +8040,11 @@ async function saveScheduleData(){
       _schCache.forEach(s => {
         if(s.TourID === _schEditTourId) return;
         if((s.Guide||'').trim() !== data.Guide.trim()) return;
-        const sStart = (s.StartDate||'').slice(0,10);
-        const sEnd = (s.EndDate||'').slice(0,10) || sStart;
+        // ★ 날짜를 ISO(YYYY-MM-DD)로 정규화 후 비교 — GAS가 DD/MM/YYYY로 반환하는 경우
+        //   문자열 비교("23/06/2026" >= "2026-07-10" → true)로 인한 오탐 방지
+        const sStart = _tryParseDate(s.StartDate);
+        const sEnd = _tryParseDate(s.EndDate) || sStart;
+        if(!sStart) return; // 날짜 파싱 불가 시 검사 제외
         // 기간 겹침 검사
         if(sStart <= endD && sEnd >= startD){
           const overlap = (sStart > startD ? sStart : startD) + ' ~ ' + (sEnd < endD ? sEnd : endD);
