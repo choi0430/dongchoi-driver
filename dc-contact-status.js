@@ -11,6 +11,31 @@
 (function () {
   'use strict';
 
+  // ── 0) 시작 시간 포맷 헬퍼 — 구글시트 시간값(1899 기준 타임스탬프 등)을 HH:MM 으로 ──
+  //    앱 전역 parseSheetTime()을 우선 사용하고, 실패 시 여러 형식을 보정한다.
+  function fmtStartTime(v) {
+    if (v === null || v === undefined || v === '') return '—';
+    var s = String(v).trim();
+    if (/^\d{1,2}:\d{2}$/.test(s)) return s.length === 4 ? '0' + s : s;
+    try {
+      if (typeof parseSheetTime === 'function') {
+        var p = parseSheetTime(s);
+        if (p && /^\d{1,2}:\d{2}$/.test(p)) return p;
+      }
+    } catch (e) {}
+    var m = s.match(/(\d{1,2}):(\d{2}):\d{2}\s*GMT/);
+    if (m) return (m[1].length === 1 ? '0' + m[1] : m[1]) + ':' + m[2];
+    try {
+      var d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        return new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Australia/Sydney', hour: '2-digit', minute: '2-digit', hour12: false
+        }).format(d);
+      }
+    } catch (e) {}
+    return s;
+  }
+
   // ── 1) 운행 상태 모달 DOM 생성 (최초 1회) ──────────────────────────────
   function ensureModal() {
     if (document.getElementById('modal-driver-status')) return;
@@ -68,7 +93,7 @@
         '<div style="font-size:14px;color:#1e3a5f;line-height:2.1;">' +
           '<div>🚌 운행 차량 (Vehicle): <b>' + (info.rego || '—') + '</b></div>' +
           '<div>📅 운행 날짜 (Date): <b>' + (info.date || '—') + '</b></div>' +
-          '<div>🕐 시작 시간 (Start Time): <b>' + (info.startTime || '—') + '</b></div>' +
+          '<div>🕐 시작 시간 (Start Time): <b>' + fmtStartTime(info.startTime) + '</b></div>' +
         '</div>';
     } else {
       bodyEl.innerHTML =
