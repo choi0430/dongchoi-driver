@@ -8939,8 +8939,8 @@ function _egFindCompletedTourCodes(todayISO){
     if(!isDone && (status === 'completed' || status === 'invoiced' || status === 'paid')){
       isDone = true; reason = '상태: ' + status;
     }
-    // 조건 3
-    if(!isDone){
+    // 조건 3 — 일정에 종료일이 없을 때만 DR 마지막일로 판정 (드라이버 중간 교체 시 오종료 방지)
+    if(!isDone && !endISO){
       const tcDRs = _drByTC[tc] || [];
       if(tcDRs.length > 0){
         const lastDR = tcDRs.map(r=>r._iso).sort().reverse()[0];
