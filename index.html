@@ -4928,12 +4928,27 @@ async function syncShiftsFromServer(driverName) {
     const _normDate = d => fmtDate(String(d||''));
 
     if (serverShifts.length === 0 && activeShifts.length > 0) {
-      // 서버에 미완료 shift가 없어도 로컬에 dailyReport가 있으면 유지 (데이터 보호)
-      const hasWork = activeShifts.some(s => s.dailyReports && s.dailyReports.length > 0);
-      if (!hasWork) {
-        activeShifts = [];
-        editingShiftId = null;
-        localStorage.setItem('shifts_' + driverName, '[]');
+      // 서버에 열린 시프트가 없음.
+      // ★ 오래된(완료 추정) 로컬 시프트는 제거하고, 최근(24h 이내) 미저장 DR 작업만 보존.
+      //   (예전엔 DR이 하나라도 있으면 무조건 남겨서 완료된 시프트가 폰에 유령으로 남던 문제)
+      const _now = Date.now();
+      const _RECENT_MS = 24 * 60 * 60 * 1000;
+      const _ghostStartMs = (s) => {
+        const md = String(s.date || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        const mt = String(s.startTime || '00:00').match(/(\d{1,2}):(\d{2})/);
+        return md ? new Date(+md[3], +md[2] - 1, +md[1], mt ? +mt[1] : 0, mt ? +mt[2] : 0).getTime() : 0;
+      };
+      const _kept = activeShifts.filter(s => {
+        if (s._synthetic) return true;
+        const ms = _ghostStartMs(s);
+        const recent = ms > 0 && (_now - ms) < _RECENT_MS;
+        const hasDR = s.dailyReports && s.dailyReports.length > 0;
+        return recent && hasDR;
+      });
+      if (_kept.length !== activeShifts.length) {
+        activeShifts = _kept;
+        editingShiftId = _kept.length ? _kept[_kept.length - 1].id : null;
+        localStorage.setItem('shifts_' + driverName, JSON.stringify(_kept.filter(s => !s._synthetic)));
         renderShiftSection();
       }
       return;
