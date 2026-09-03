@@ -2355,6 +2355,7 @@ function getAdminBundle() {
     // 4) Max KM per Rego (Pre_Departure + Daily_Report + End_of_Shift 스캔)
     const kmMap = {};
     try {
+      const resetMap = _getOdoResetMap(ss);  // ★ 계기판 교체일 맵
       const scanForKM = (sheetName, kmFields) => {
         const sheet = ss.getSheetByName(sheetName);
         if (!sheet) return;
@@ -2365,11 +2366,17 @@ function getAdminBundle() {
         const headers = data[0];
         const regoIdx = headers.indexOf('Rego');
         if (regoIdx < 0) return;
+        const dateIdx = headers.indexOf('Date');  // ★ 교체일 비교용
         const colIdxs = kmFields.map(f => headers.indexOf(f)).filter(i => i >= 0);
         for (let i = 1; i < data.length; i++) {
           const row = data[i];
           const rego = String(row[regoIdx] || '').trim();
           if (!rego) continue;
+          // ★ 계기판 교체일 이전 기록은 제외
+          if (resetMap[rego]) {
+            const rowDate = dateIdx >= 0 ? _egToISO(row[dateIdx]) : '';
+            if (!rowDate || rowDate < resetMap[rego]) continue;
+          }
           colIdxs.forEach(ci => {
             const v = parseFloat(row[ci]);
             if (!isNaN(v) && v > 0) {
@@ -4405,10 +4412,34 @@ function fixPhoneNumbers() {
 // Scans Pre_Departure (Start_KM), Daily_Report (KM_Start, KM_End),
 // and End_of_Shift (End_KM) to return the highest KM recorded per rego.
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ★ 계기판(오도미터) 교체 차량 지원
+// M_Vehicles의 Odo_Reset_Date(교체일) → {rego: 'YYYY-MM-DD'}
+// 교체일이 설정된 차량은 그 날짜 이전 기록을 KM 수집에서 제외한다.
+function _getOdoResetMap(ss) {
+  try {
+    const sheet = ss.getSheetByName('M_Vehicles');
+    if (!sheet || sheet.getLastRow() < 2) return {};
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const rIdx = headers.indexOf('Rego');
+    const oIdx = headers.indexOf('Odo_Reset_Date');
+    if (rIdx < 0 || oIdx < 0) return {};  // 컬럼 없으면 기존 동작 유지
+    const map = {};
+    for (let i = 1; i < data.length; i++) {
+      const rego = String(data[i][rIdx] || '').trim();
+      const iso = _egToISO(data[i][oIdx]);
+      if (rego && iso) map[rego] = iso;
+    }
+    return map;
+  } catch (e) { return {}; }
+}
+
 function getMaxKMPerRego() {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const kmMap = {};  // { rego: maxKM }
+    const resetMap = _getOdoResetMap(ss);  // ★ 계기판 교체일 맵
 
     function scanSheet(sheetName, kmFields) {
       const sheet = ss.getSheetByName(sheetName);
@@ -4417,10 +4448,16 @@ function getMaxKMPerRego() {
       const headers = data[0];
       const regoIdx = headers.indexOf('Rego');
       if (regoIdx < 0) return;
+      const dateIdx = headers.indexOf('Date');  // ★ 교체일 비교용
       const colIdxs = kmFields.map(f => headers.indexOf(f)).filter(i => i >= 0);
       data.slice(1).forEach(row => {
         const rego = String(row[regoIdx] || '').trim();
         if (!rego) return;
+        // ★ 계기판 교체일 이전 기록은 제외 (날짜 파싱 불가 기록도 안전하게 제외)
+        if (resetMap[rego]) {
+          const rowDate = dateIdx >= 0 ? _egToISO(row[dateIdx]) : '';
+          if (!rowDate || rowDate < resetMap[rego]) return;
+        }
         colIdxs.forEach(ci => {
           const v = parseFloat(row[ci]);
           if (!isNaN(v) && v > 0) {
@@ -8220,12 +8257,18 @@ function _bulkSyncAllVehicleCurrentKM() {
       const headers = data[0];
       const regoIdx = headers.indexOf('Rego');
       if (regoIdx < 0) return;
+      const dateIdx = headers.indexOf('Date');  // ★ 교체일 비교용
       const colIdxs = kmFields.map(f => headers.indexOf(f)).filter(i => i >= 0);
       if (colIdxs.length === 0) return;
       for (let i = 1; i < data.length; i++) {
         const row = data[i];
         const rego = String(row[regoIdx] || '').trim();
         if (!rego) continue;
+        // ★ 계기판 교체일 이전 기록은 제외
+        if (_odoResetMap[rego]) {
+          const rowDate = dateIdx >= 0 ? _egToISO(row[dateIdx]) : '';
+          if (!rowDate || rowDate < _odoResetMap[rego]) continue;
+        }
         colIdxs.forEach(ci => {
           const v = parseFloat(row[ci]);
           if (!isNaN(v) && v > 0) {
@@ -8234,6 +8277,7 @@ function _bulkSyncAllVehicleCurrentKM() {
         });
       }
     };
+    const _odoResetMap = _getOdoResetMap(ss);  // ★ 계기판 교체일 맵
     scanForKM('Pre_Departure', ['Start_KM']);
     scanForKM('Daily_Report',  ['KM_Start', 'KM_End']);
     scanForKM('End_of_Shift',  ['Start_KM', 'End_KM']);
@@ -8251,7 +8295,8 @@ function _bulkSyncAllVehicleCurrentKM() {
       if (latest == null) continue;
       const cur = parseFloat(kmColValues[i][0]);
       // 현재 값보다 새로 발견된 KM이 더 클 때만 업데이트
-      if (isNaN(cur) || latest > cur) {
+      // ★ 예외: 계기판 교체(Odo_Reset_Date 설정) 차량은 값이 작아져도 갱신
+      if (isNaN(cur) || latest > cur || (_odoResetMap[rego] && latest !== cur)) {
         updates.push({ row: i + 2, newKM: latest });
       }
     }
