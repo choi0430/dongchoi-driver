@@ -15793,6 +15793,36 @@ async function initBalance(){
   renderBalance();
 }
 
+// ★ 타임아웃 있는 GAS GET (기본 20초) — 한 요청이 멈춰도 잔액 탭이 무한 대기하지 않도록
+async function _gasGetT(url, ms){
+  const controller = new AbortController();
+  const tid = setTimeout(()=>controller.abort(), ms||20000);
+  try { return await fetch(url, {signal:controller.signal}); }
+  finally { clearTimeout(tid); }
+}
+// ★ 응답 → JSON (실패/타임아웃 시 null) — 하나가 실패해도 나머지는 계속 진행
+async function _resJsonSafe(settled){
+  try { return (settled && settled.status==='fulfilled' && settled.value && settled.value.ok) ? await settled.value.json() : null; }
+  catch(e){ return null; }
+}
+// ★ SUB_Txn 배치 헬퍼 — 여러 삭제(rowIndex 배열)+추가(데이터 배열)를 단일 요청으로 처리.
+//    기존엔 행마다 POST를 순차 전송(N+1)해 잔액 탭이 느리고 자주 실패했음.
+//    반환: {ok, deleted, added:[{ok,row}...]}  (실패 시 {ok:false})
+async function _batchSubTxn(deletes, adds){
+  const dels = (deletes||[]).filter(x => x != null);
+  const rows = (adds||[]);
+  if(!dels.length && !rows.length) return {ok:true, deleted:0, added:[]};
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'batch_sub_txn', deletes:dels, adds:rows, _user:getAdminUser()})
+    });
+    const txt = await res.text();
+    let j; try { j = JSON.parse(txt); } catch(e){ return {ok:false, error:'parse'}; }
+    return (j && j.ok) ? j : {ok:false, error:(j&&j.error)||'batch failed'};
+  } catch(e){ console.warn('[SUB Sync] batch_sub_txn 실패:', e); return {ok:false, error:String(e)}; }
+}
+
 async function syncBalanceData(force){
   try {
     // DR 리포트 캐시 확보 (드라이버 잔액 계산에 필요)
@@ -15800,31 +15830,30 @@ async function syncBalanceData(force){
     // ★ Schedule 캐시 확보 (가이드 정보 fallback에 필요)
     if(typeof _schCache !== 'undefined' && (!_schCache || !_schCache.length)){
       try {
-        const schRes = await fetch(APPS_SCRIPT_URL+'?action=get_schedule');
+        const schRes = await _gasGetT(APPS_SCRIPT_URL+'?action=get_schedule');
         const schJson = await schRes.json();
         if(schJson.ok && schJson.rows) _schCache = schJson.rows;
       } catch(e){ console.warn('[Schedule cache load for balance]', e); }
     }
-    const [agRes, subRes, invRes, poRes] = await Promise.all([
-      fetch(APPS_SCRIPT_URL+'?action=get_agency_txn'),
-      fetch(APPS_SCRIPT_URL+'?action=get_sub_txn'),
-      fetch(APPS_SCRIPT_URL+'?action=get_invoices'),
-      fetch(APPS_SCRIPT_URL+'?action=get_payout_overrides')
+    // ★ 4개 읽기를 타임아웃 + allSettled로 — 하나가 멈추거나 실패해도 전체가 굳지 않음
+    const _settled = await Promise.allSettled([
+      _gasGetT(APPS_SCRIPT_URL+'?action=get_agency_txn'),
+      _gasGetT(APPS_SCRIPT_URL+'?action=get_sub_txn'),
+      _gasGetT(APPS_SCRIPT_URL+'?action=get_invoices'),
+      _gasGetT(APPS_SCRIPT_URL+'?action=get_payout_overrides')
     ]);
-    const agJson = await agRes.json();
-    const subJson = await subRes.json();
-    const invJson = await invRes.json();
+    const agJson  = await _resJsonSafe(_settled[0]);
+    const subJson = await _resJsonSafe(_settled[1]);
+    const invJson = await _resJsonSafe(_settled[2]);
+    const poJson  = await _resJsonSafe(_settled[3]);
     // ★ Payout Override 로드 — 서브 회사별 투어 포함/제외 설정
-    try {
-      const poJson = await poRes.json();
-      if (poJson && poJson.ok) {
-        _payoutOverrides = poJson.overrides || {};
-        _scheduleBillingMap = poJson.billingEntities || {};
-      }
-    } catch(e) { console.warn('[payout-override] load failed:', e); }
-    if(agJson.ok && agJson.rows) _balAgencyTxns = agJson.rows;
-    if(subJson.ok && subJson.rows) _balSubTxns = subJson.rows;
-    if(invJson.ok && invJson.rows) {
+    if (poJson && poJson.ok) {
+      _payoutOverrides = poJson.overrides || {};
+      _scheduleBillingMap = poJson.billingEntities || {};
+    }
+    if(agJson && agJson.ok && agJson.rows) _balAgencyTxns = agJson.rows;
+    if(subJson && subJson.ok && subJson.rows) _balSubTxns = subJson.rows;
+    if(invJson && invJson.ok && invJson.rows) {
       _balInvoices = invJson.rows;
       // ★ _invHistoryCache도 채움 (SUBINV 정확 매칭용 — Items JSON 파싱)
       if(!_invHistoryCache) _invHistoryCache = (invJson.rows||[]).slice().reverse();
@@ -15837,16 +15866,26 @@ async function syncBalanceData(force){
     //   잔액 탭에 즉시 반영되도록 (잔액 탭 ↔ 급여 탭 양방향 동기화)
     try { await loadWagesFromSheet(true); } catch(e){ console.warn('wages sync:', e); }
 
-    // ★ Ledger → SUB_Txn 자동 동기화 (외주 + Dong Choi 차량)
-    await _syncLedgerToSubTxn();
-
-    // ★ Daily_Report의 SUB 차량 운행 → SUB_Txn 자동 동기화
-    //   (DC 드라이버가 SUB 차량으로 운행한 경우, getSubReportData와 동일 로직)
-    await _cleanupDuplicateSubTxn();
-    await _syncDailyReportSubToSubTxn();
-
-    // ★ SUB 인보이스(D1,D2...) → SUB_Txn 자동 동기화
-    await _syncSubInvoicesToSubTxn();
+    // ★ 되쓰기(자동 SUB_Txn 등록/정리)는 시트에 쓰기가 많은 무거운 작업.
+    //   기존엔 잔액 탭을 열 때마다 매번 실행돼 지연·동기화 실패의 주원인이었음.
+    //   → force(명시적 Sync/인보이스 발행 후)일 때는 항상, 그 외에는 마지막 실행
+    //     5분 경과 시에만 실행. 화면 합계는 위에서 fresh 로드한 데이터로 이미 정확.
+    const _WB_THROTTLE = 5 * 60 * 1000;
+    const _wbNow = Date.now();
+    const _doWriteback = force || !window._balWriteBackLast || (_wbNow - window._balWriteBackLast > _WB_THROTTLE);
+    if(_doWriteback){
+      window._balWriteBackLast = _wbNow;
+      // ★ Ledger → SUB_Txn 자동 동기화 (외주 + Dong Choi 차량)
+      await _syncLedgerToSubTxn();
+      // ★ Daily_Report의 SUB 차량 운행 → SUB_Txn 자동 동기화
+      //   (DC 드라이버가 SUB 차량으로 운행한 경우, getSubReportData와 동일 로직)
+      await _cleanupDuplicateSubTxn();
+      await _syncDailyReportSubToSubTxn();
+      // ★ SUB 인보이스(D1,D2...) → SUB_Txn 자동 동기화
+      await _syncSubInvoicesToSubTxn();
+    } else {
+      console.log('[Balance] 되쓰기 자동 동기화 스킵 (최근 실행됨 — Sync 버튼으로 강제 가능)');
+    }
 
     // Driver wage: derive from Daily_Report DR_Cost + wages
     _buildWageTxns();
@@ -15926,18 +15965,13 @@ async function _syncLedgerToSubTxn(){
     if(newTxns.length === 0) return;
     console.log('[SUB Sync] Ledger→SUB_Txn 자동 등록:', newTxns.length, '건');
 
-    for(const txn of newTxns) {
-      try {
-        const res = await fetch(APPS_SCRIPT_URL, {
-          method: 'POST', headers: {'Content-Type':'text/plain'},
-          body: JSON.stringify({action:'add_sub_txn', data:txn, _user:getAdminUser()})
-        });
-        const j = await res.json();
-        if(j.ok) {
-          if(!Array.isArray(_balSubTxns)) _balSubTxns = [];
-          _balSubTxns.push({...txn, _rowIndex:j.row||j.rowIndex});
-        }
-      } catch(e2) { console.warn('[SUB Sync] 등록 실패:', txn.Description, e2); }
+    // ★ 배치: 행마다 POST 대신 단일 요청으로 일괄 추가
+    const _lres = await _batchSubTxn([], newTxns);
+    if(_lres.ok){
+      if(!Array.isArray(_balSubTxns)) _balSubTxns = [];
+      (_lres.added||[]).forEach((a, i) => { if(a && a.ok) _balSubTxns.push({...newTxns[i], _rowIndex:a.row}); });
+    } else {
+      console.warn('[SUB Sync] Ledger→SUB_Txn 배치 등록 실패:', _lres.error);
     }
   } catch(e) {
     console.warn('[SUB Sync] Ledger→SUB_Txn 동기화 오류:', e);
@@ -16520,22 +16554,13 @@ async function _syncSubInvoicesToSubTxn(){
     }
     console.log('[SUB Sync] SubInvoice→SUB_Txn 자동 등록 시도:', newTxns.length, '건');
 
+    // ★ 배치: 행마다 POST 대신 단일 요청으로 일괄 추가
     let added = 0;
-    for(const txn of newTxns) {
-      try {
-        const res = await fetch(APPS_SCRIPT_URL, {
-          method: 'POST', headers: {'Content-Type':'text/plain'},
-          body: JSON.stringify({action:'add_sub_txn', data:txn, _user:getAdminUser()})
-        });
-        const txt = await res.text();
-        let j; try{ j = JSON.parse(txt); }catch(e){ continue; }
-        if(j.ok) {
-          _balSubTxns.push({...txn, _rowIndex:j.row||j.rowIndex});
-          added++;
-        } else {
-          console.warn('[SUB Sync] GAS 응답 실패:', txn.InvoiceNo, j);
-        }
-      } catch(e2) { console.warn('[SUB Sync] 등록 실패:', txn.InvoiceNo, e2); }
+    const _sres = await _batchSubTxn([], newTxns);
+    if(_sres.ok){
+      (_sres.added||[]).forEach((a, i) => { if(a && a.ok){ _balSubTxns.push({...newTxns[i], _rowIndex:a.row}); added++; } });
+    } else {
+      console.warn('[SUB Sync] SubInvoice→SUB_Txn 배치 등록 실패:', _sres.error);
     }
     console.log('[SUB Sync] 등록 완료:', added, '/', newTxns.length, '건');
   } catch(e) {
@@ -16573,18 +16598,16 @@ async function _cleanupDuplicateSubTxn(){
   });
   if(dupsToDelete.length === 0) return;
   console.log('[SUB Sync] 중복 SUB_Txn 정리:', dupsToDelete.length, '건');
-  for(const t of dupsToDelete){
-    try {
-      const res = await fetch(APPS_SCRIPT_URL, {
-        method:'POST', headers:{'Content-Type':'text/plain'},
-        body: JSON.stringify({action:'delete_sub_txn', rowIndex: t._rowIndex, _user: getAdminUser()})
-      });
-      const j = await res.json();
-      if(j.ok){
-        const idx = _balSubTxns.findIndex(x => x._rowIndex === t._rowIndex);
-        if(idx >= 0) _balSubTxns.splice(idx, 1);
-      }
-    } catch(e){ console.warn('[SUB Sync] 중복 삭제 실패:', t.Description, e); }
+  // ★ 배치: 행마다 DELETE POST 대신 단일 요청으로 일괄 삭제 (서버가 내림차순 처리)
+  const _delRows = dupsToDelete.map(t => t._rowIndex).filter(Boolean);
+  const _cres = await _batchSubTxn(_delRows, []);
+  if(_cres.ok){
+    _delRows.forEach(ri => {
+      const idx = _balSubTxns.findIndex(x => x._rowIndex === ri);
+      if(idx >= 0) _balSubTxns.splice(idx, 1);
+    });
+  } else {
+    console.warn('[SUB Sync] 중복 SUB_Txn 배치 삭제 실패:', _cres.error);
   }
 }
 
@@ -16780,44 +16803,23 @@ async function _syncDailyReportSubToSubTxn(){
     if(newTxns.length === 0) return;
     console.log('[SUB Sync] DailyReport→SUB_Txn 자동 등록:', newTxns.length, '건', newTxns.map(t=>t.Description));
 
-    // ★ FIX 2026-05-31: 매칭된 Schedule Import 행 자동 삭제 (DRSUB 생성 직전)
-    //   같은 운행에 대해 사전 등록된 Schedule Import 행이 있으면 stale 처리.
-    //   CR 있는 그룹은 이미 위에서 보존 처리됨.
-    if(_schImportRowsToDelete.length > 0){
-      console.log('[SUB Sync] Schedule Import 행 자동 삭제 시도:', _schImportRowsToDelete.length, '건');
-      for(const item of _schImportRowsToDelete){
-        try {
-          const res = await fetch(APPS_SCRIPT_URL, {
-            method: 'POST', headers: {'Content-Type':'text/plain'},
-            body: JSON.stringify({action:'delete_sub_txn', rowIndex: item.rowIndex, _user: getAdminUser()})
-          });
-          const j = await res.json();
-          if(j.ok){
-            console.log('[SUB Sync] Schedule Import 행 삭제 완료:', item.desc);
-            // 로컬 캐시에서도 제거
-            const idx = _balSubTxns.findIndex(x => x._rowIndex === item.rowIndex);
-            if(idx >= 0) _balSubTxns.splice(idx, 1);
-          } else {
-            console.warn('[SUB Sync] Schedule Import 행 삭제 실패:', item.desc, j);
-          }
-        } catch(e){
-          console.warn('[SUB Sync] Schedule Import 행 삭제 에러:', item.desc, e);
-        }
-      }
-    }
-
-    for(const txn of newTxns) {
-      try {
-        const res = await fetch(APPS_SCRIPT_URL, {
-          method: 'POST', headers: {'Content-Type':'text/plain'},
-          body: JSON.stringify({action:'add_sub_txn', data:txn, _user:getAdminUser()})
-        });
-        const j = await res.json();
-        if(j.ok) {
-          if(!Array.isArray(_balSubTxns)) _balSubTxns = [];
-          _balSubTxns.push({...txn, _rowIndex:j.row||j.rowIndex});
-        }
-      } catch(e2) { console.warn('[SUB Sync] DRSUB 등록 실패:', txn.Description, e2); }
+    // ★ 배치: Schedule Import 행 삭제 + DRSUB 추가를 단일 요청으로 처리.
+    //   서버가 삭제(내림차순)를 먼저, 추가를 나중에 수행 → 기존 순서와 동일.
+    //   CR 있는 그룹은 위에서 이미 삭제 큐에서 제외됨.
+    const _delRows = _schImportRowsToDelete.map(x => x.rowIndex).filter(Boolean);
+    if(_delRows.length > 0) console.log('[SUB Sync] Schedule Import 행 자동 삭제:', _delRows.length, '건');
+    const _dres = await _batchSubTxn(_delRows, newTxns);
+    if(_dres.ok){
+      // 삭제된 행을 로컬 캐시에서 제거
+      _delRows.forEach(ri => {
+        const idx = _balSubTxns.findIndex(x => x._rowIndex === ri);
+        if(idx >= 0) _balSubTxns.splice(idx, 1);
+      });
+      // 추가된 행을 로컬 캐시에 반영
+      if(!Array.isArray(_balSubTxns)) _balSubTxns = [];
+      (_dres.added||[]).forEach((a, i) => { if(a && a.ok) _balSubTxns.push({...newTxns[i], _rowIndex:a.row}); });
+    } else {
+      console.warn('[SUB Sync] DailyReport→SUB_Txn 배치 처리 실패:', _dres.error);
     }
   } catch(e) {
     console.warn('[SUB Sync] DailyReport→SUB_Txn 동기화 오류:', e);
