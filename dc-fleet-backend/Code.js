@@ -2008,6 +2008,29 @@ function doPost(e) {
         if (r.ok) appendAuditLog(_user, 'delete_sub_txn', 'SUB_Txn', payload.rowIndex, '');
         return cors(r);
       }
+      // ★ 배치 SUB_Txn: 여러 삭제/추가를 단일 요청으로 처리 (N+1 요청 폭주 방지 — 잔액 탭 속도)
+      //   deletes = [rowIndex, ...]  (내림차순 정렬해 먼저 삭제 → 행 인덱스 밀림 방지)
+      //   adds    = [rowData, ...]   (삭제 후 추가 → 순서대로 row 번호 반환)
+      case 'batch_sub_txn': {
+        var _bDels = Array.isArray(payload.deletes) ? payload.deletes.slice() : [];
+        var _bAdds = Array.isArray(payload.adds) ? payload.adds : [];
+        _bDels.sort(function (a, b){ return (parseInt(b, 10) || 0) - (parseInt(a, 10) || 0); });
+        var _bDelOk = 0;
+        for (var _bi = 0; _bi < _bDels.length; _bi++) {
+          var _bdr = deleteMasterRow('SUB_Txn', _bDels[_bi]);
+          if (_bdr && _bdr.ok) _bDelOk++;
+        }
+        var _bAdded = [];
+        var _bAddOk = 0;
+        for (var _bj = 0; _bj < _bAdds.length; _bj++) {
+          var _bar = addMasterRow('SUB_Txn', _bAdds[_bj]);
+          if (_bar && _bar.ok) { _bAdded.push({ ok: true, row: _bar.row }); _bAddOk++; }
+          else _bAdded.push({ ok: false, error: (_bar && _bar.error) || '' });
+        }
+        appendAuditLog(_user, 'batch_sub_txn', 'SUB_Txn', '',
+          'del:' + _bDelOk + '/' + _bDels.length + ' add:' + _bAddOk + '/' + _bAdds.length);
+        return cors({ ok: true, deleted: _bDelOk, deleteRequested: _bDels.length, added: _bAdded });
+      }
 
       // ── Notices ──
       case 'save_notices':
