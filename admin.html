@@ -2440,7 +2440,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 <div class="pg" id="pbal">
   <div class="shd" style="padding-top:8px">
     <div><div class="stl">📊 거래처 잔액</div><div class="ssb">여행사 · 외주 · 드라이버 잔액 관리</div></div>
-    <button class="btn-refresh" onclick="withRefreshSpin(this,()=>syncBalanceData(true))"><span class="refresh-icon">🔄</span> Sync (동기화)</button>
+    <div style="display:flex;gap:6px;">
+      <button class="btn bac sm" onclick="showFastBalances()" title="Supabase에서 즉시 계산한 잔액">⚡ 빠른 잔액</button>
+      <button class="btn-refresh" onclick="withRefreshSpin(this,()=>syncBalanceData(true))"><span class="refresh-icon">🔄</span> Sync (동기화)</button>
+    </div>
   </div>
 
   <!-- 3-way 탭 -->
@@ -15776,6 +15779,49 @@ let _balDetailType = '';   // 'agency'|'sub'|'wage'
 let _balDetailName = '';
 let _balEditIdx = null;    // editing txn index (null=add)
 let _balLoaded = false;
+
+// ⚡ 빠른 잔액 — Supabase가 SQL로 즉시 계산한 잔액을 모달로 표시 (기존 잔액 로직과 독립)
+async function showFastBalances(){
+  var ov = document.createElement('div');
+  ov.id = 'fastbal-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.onclick = function(e){ if(e.target===ov) ov.remove(); };
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--sf,#fff);color:var(--t1,#111);border:1px solid var(--b1,#ddd);border-radius:14px;max-width:520px;width:100%;max-height:85vh;overflow:auto;padding:18px 20px;';
+  box.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+    +   '<div style="font-weight:800;font-size:16px;">⚡ 빠른 잔액 <span style="font-size:11px;color:var(--t3,#888);font-weight:500;">Supabase · SQL 즉시 계산</span></div>'
+    +   '<button onclick="var o=document.getElementById(\'fastbal-overlay\');if(o)o.remove();" style="border:none;background:var(--sf2,#eee);color:var(--t1,#111);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:14px;">✕</button>'
+    + '</div>'
+    + '<div id="fastbal-body" style="font-size:13px;">불러오는 중…</div>';
+  ov.appendChild(box); document.body.appendChild(ov);
+
+  var t0 = Date.now();
+  try {
+    var res = await fetch(APPS_SCRIPT_URL + '?action=get_balances_v2');
+    var j = await res.json();
+    if(!j || !j.ok) throw new Error((j && j.error) ? j.error : '조회 실패');
+    var ms = Date.now() - t0;
+    var fmt = function(v){ return '$' + (Number(v)||0).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+    var rowsHtml = function(arr, nameKey){
+      var list = (arr||[]).filter(function(r){ return Math.abs(Number(r.balance)) > 0.005; });
+      if(!list.length) return '<div style="color:var(--t3,#888);padding:8px 0;">잔액 있는 항목 없음</div>';
+      return list.map(function(r){
+        return '<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--b1,#eee);">'
+          + '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+ (r[nameKey]||'') +'</span>'
+          + '<span style="font-weight:700;font-family:var(--fn,monospace);white-space:nowrap;">'+ fmt(r.balance) +'</span></div>';
+      }).join('');
+    };
+    var body = document.getElementById('fastbal-body');
+    if(body) body.innerHTML =
+        '<div style="color:var(--gn,#0a0);font-size:11px;margin-bottom:8px;">✓ '+ ms +'ms 만에 계산 완료</div>'
+      + '<div style="font-weight:700;margin:6px 0 2px;">🏢 여행사 미수 잔액 (받을 돈)</div>' + rowsHtml(j.agency,'agency')
+      + '<div style="font-weight:700;margin:14px 0 2px;">🚌 외주(SUB) 미지급 잔액 (줄 돈)</div>' + rowsHtml(j.sub,'sub_company');
+  } catch(e){
+    var body2 = document.getElementById('fastbal-body');
+    if(body2) body2.innerHTML = '<div style="color:var(--rd,#c00);">불러오기 실패: '+ (e.message||e) +'</div>';
+  }
+}
 
 function showBalTab(tab){
   _balTab = tab;
