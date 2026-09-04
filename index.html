@@ -4749,6 +4749,7 @@ function getDriverPin(name) {
 }
 
 async function doLogin() {
+  if(window._loginBusy) return;   // ★ 중복 로그인 실행 차단 (자동 로그인이 두 곳에서 겹쳐도 한 번만)
   const sel = document.getElementById('login-driver-select').value;
   if(!sel){
     showLoginError('Please select a driver (드라이버를 선택하세요)');
@@ -4783,26 +4784,36 @@ async function doLogin() {
   const loginBtn = document.querySelector('#login-screen button[onclick="doLogin()"]');
   const prevLabel = loginBtn ? loginBtn.textContent : '';
   if(loginBtn) { loginBtn.disabled = true; loginBtn.textContent = '🔐 인증 중...'; }
+  window._loginBusy = true;   // ★ 이 시점부터 중복 실행 차단
 
-  // ── 서버 PIN 검증 + 토큰 발급 ──
-  let loginRes;
-  try {
-    const ua = (navigator.userAgent||'').slice(0,80);
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: {'Content-Type':'text/plain'},
-      body: JSON.stringify({action:'login', name: name, pin: pin, ua: ua})
-    });
-    loginRes = await res.json();
-  } catch(e) {
+  // ── 서버 PIN 검증 + 토큰 발급 (15초 타임아웃 + 1회 자동 재시도) ──
+  let loginRes = null;
+  for(let _try = 0; _try < 2 && !loginRes; _try++){
+    const _ctrl = new AbortController();
+    const _tid = setTimeout(() => _ctrl.abort(), 15000);
+    try {
+      const ua = (navigator.userAgent||'').slice(0,80);
+      if(_try > 0 && loginBtn) loginBtn.textContent = '⏳ 다시 시도 중...';
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST', headers: {'Content-Type':'text/plain'},
+        body: JSON.stringify({action:'login', name: name, pin: pin, ua: ua}),
+        signal: _ctrl.signal
+      });
+      loginRes = await res.json();
+    } catch(e) {
+      // 타임아웃/네트워크 오류 → 다음 루프에서 1회 자동 재시도
+    } finally { clearTimeout(_tid); }
+  }
+  if(!loginRes) {
+    // ★ 네트워크/타임아웃 최종 실패 — PIN은 지우지 않음 (다시 누르면 바로 재시도)
+    window._loginBusy = false;
     if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = prevLabel || '🔐 로그인'; }
-    showLoginError('Network error — 네트워크 오류');
-    // ★ PIN 클리어 (다음 입력 가능하도록)
-    if(typeof _loginPinClear === 'function') _loginPinClear();
+    showLoginError('서버 응답이 지연됩니다 — 잠시 후 로그인을 다시 눌러주세요');
     return;
   }
 
   if(!loginRes || !loginRes.ok || !loginRes.token) {
+    window._loginBusy = false;
     if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = prevLabel || '🔐 로그인'; }
     // 서버 락아웃/시도제한 메시지 우선 표시
     if (loginRes && loginRes.reason === 'too_many_attempts') {
@@ -4844,6 +4855,7 @@ async function doLogin() {
     } catch(e){}
   }
 
+  window._loginBusy = false;   // ★ 인증 성공 — 잠금 해제
   if(loginBtn) { loginBtn.disabled = false; loginBtn.textContent = prevLabel || '🔐 로그인'; }
 
   // ── 인증 성공 후 마스터 데이터 (캐시 우선 + 백그라운드 갱신) ──
@@ -15141,4 +15153,3 @@ function renderExpiryAlerts(){
 <script src="dc-contact-status.js"></script>
 </body>
 </html>
-
