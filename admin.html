@@ -498,6 +498,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </style>
   <div id="als"></div>
 
+  <!-- 📊 운행 통계 (Supabase 집계 · 읽기전용) — 데이터 없으면 자동 숨김 -->
+  <div id="ops-stats" style="display:none;"></div>
+
   <!-- 🚌 운행 (가장 자주 쓰는 그룹 — 상단으로) -->
   <div class="shd" style="margin-top:14px"><div class="stl">🚌 운행 (Operations)</div><div class="ssb">일정 · 일일 운행 · 일지 · 단속</div></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -3479,7 +3482,49 @@ async function submitQuickTrailerRegistration(trailerNum){
 // ═══════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════
+// 📊 운행 통계 패널 — Supabase v_ops_monthly 직접 읽기 (읽기전용·개인정보 없음).
+//   실패/키없음/데이터없음 시 패널을 숨김 → 기존 대시보드엔 영향 없음.
+async function renderOpsStats(){
+  var el = document.getElementById('ops-stats');
+  if(!el) return;
+  if(typeof SUPABASE_ANON === 'undefined' || !SUPABASE_ANON){ el.style.display='none'; return; }
+  try {
+    var h = { apikey: SUPABASE_ANON, 'Authorization':'Bearer '+SUPABASE_ANON };
+    var base = SUPABASE_URL.replace(/\/+$/,'');
+    var res = await fetch(base + '/rest/v1/v_ops_monthly?select=*&order=month.desc&limit=6', {headers:h});
+    if(!res.ok){ el.style.display='none'; return; }
+    var rows = await res.json();
+    if(!rows || !rows.length){ el.style.display='none'; return; }
+    var $f = function(v){ return '$'+(Number(v)||0).toLocaleString('en-AU',{maximumFractionDigits:0}); };
+    var mLabel = function(m){ var p=String(m).split('-'); return (p[1]||'')+'월'; };
+    var cur = rows[0];
+    var totalTrips = rows.reduce(function(s,r){ return s+(Number(r.trips)||0); }, 0);
+    var head = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">'
+      + '<div style="background:var(--acd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 운행</div><div style="font-size:17px;font-weight:800;color:var(--ac);font-family:var(--fn);">'+ (cur.trips||0) +'건</div></div>'
+      + '<div style="background:var(--sf2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 드라이버 비용</div><div style="font-size:17px;font-weight:800;color:var(--t2);font-family:var(--fn);">'+ $f(cur.driver_cost) +'</div></div>'
+      + '<div style="background:var(--gnd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">최근 6개월 총 운행</div><div style="font-size:17px;font-weight:800;color:var(--gn);font-family:var(--fn);">'+ totalTrips +'건</div></div>'
+      + '</div>';
+    var maxTrips = Math.max.apply(null, rows.map(function(r){return Number(r.trips)||0;})) || 1;
+    var bars = rows.slice().reverse().map(function(r){
+      var w = Math.round((Number(r.trips)||0)/maxTrips*100);
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
+        + '<span style="width:38px;color:var(--t3);">'+ mLabel(r.month) +'</span>'
+        + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:var(--ac);"></div></div>'
+        + '<span style="width:44px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (r.trips||0) +'건</span>'
+        + '<span style="width:72px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(r.driver_cost) +'</span>'
+        + '</div>';
+    }).join('');
+    el.style.display='';
+    el.innerHTML =
+        '<div class="shd" style="margin-top:14px"><div class="stl">📊 운행 통계 <span style="font-size:10px;color:var(--t3);font-weight:500;">Supabase · 최근 6개월</span></div></div>'
+      + '<div class="crd" style="padding:12px;">' + head
+      + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 운행 건수</span><span>드라이버 비용</span></div>' + bars
+      + '</div>';
+  } catch(e){ console.warn('[운행통계] 렌더 실패:', e); el.style.display='none'; }
+}
+
 function rDash(){
+  try { renderOpsStats(); } catch(e){}   // 📊 운행 통계 (독립 렌더 — 실패해도 대시보드 영향 없음)
   // 상단 통계 카드는 제거됐지만, 마스터 그룹 카드의 카운트는 유지
   const kvEl=document.getElementById('kv'); if(kvEl) kvEl.textContent=DB.V.length;
   const kdEl=document.getElementById('kd'); if(kdEl) kdEl.textContent=DB.D.length;
