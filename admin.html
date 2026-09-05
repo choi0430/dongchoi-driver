@@ -3515,6 +3515,31 @@ async function renderOpsStats(){
         + '</div>';
     }).join('');
 
+    // ── 주간 추세 (최근 8주) — 실패 시 이 섹션만 생략 ──
+    var wkHtml = '';
+    try {
+      var wres = await fetch(base + '/rest/v1/v_ops_weekly?order=week_start.desc&limit=8&select=week_start,trips,driver_cost', {headers:h});
+      if(wres.ok){
+        var wrows = await wres.json();
+        if(wrows && wrows.length){
+          var wkMax = Math.max.apply(null, wrows.map(function(w){return Number(w.trips)||0;})) || 1;
+          var wLabel = function(d){ var p=String(d).split('-'); return (p[1]?parseInt(p[1],10):'')+'/'+(p[2]?parseInt(p[2],10):'')+'주'; };
+          var wkList = wrows.slice().reverse().map(function(w){
+            var pw = Math.round((Number(w.trips)||0)/wkMax*100);
+            return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
+              + '<span style="width:52px;color:var(--t3);">'+ wLabel(w.week_start) +'</span>'
+              + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+pw+'%;height:100%;background:#f59e0b;"></div></div>'
+              + '<span style="width:44px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (w.trips||0) +'건</span>'
+              + '<span style="width:72px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(w.driver_cost) +'</span>'
+              + '</div>';
+          }).join('');
+          wkHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
+            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>주간 추세 (최근 8주 · 주 시작일)</span><span>드라이버 비용</span></div>'
+            + wkList + '</div>';
+        }
+      }
+    } catch(e){ /* 주간 섹션만 생략 */ }
+
     // ── 차량별 운행 (가장 최근 달) — 실패 시 이 섹션만 생략 ──
     var vehHtml = '';
     try {
@@ -3568,6 +3593,7 @@ async function renderOpsStats(){
         '<div class="shd" style="margin-top:14px"><div class="stl">📊 운행 통계 <span style="font-size:10px;color:var(--t3);font-weight:500;">Supabase · 최근 6개월</span></div></div>'
       + '<div class="crd" style="padding:12px;">' + head
       + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 운행 건수</span><span>드라이버 비용</span></div>' + bars
+      + wkHtml
       + vehHtml
       + agHtml
       + '</div>';
