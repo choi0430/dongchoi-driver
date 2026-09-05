@@ -3539,12 +3539,37 @@ async function renderOpsStats(){
       }
     } catch(e){ /* 차량별 섹션만 생략 */ }
 
+    // ── 여행사별 운행 (가장 최근 달) — 실패 시 이 섹션만 생략 ──
+    var agHtml = '';
+    try {
+      var ares = await fetch(base + '/rest/v1/v_ops_agency_monthly?month=eq.'+ encodeURIComponent(cur.month) +'&order=trips.desc&select=agency,trips,driver_cost', {headers:h});
+      if(ares.ok){
+        var arows = await ares.json();
+        if(arows && arows.length){
+          var amax = Math.max.apply(null, arows.map(function(a){return Number(a.trips)||0;})) || 1;
+          var alist = arows.slice(0,8).map(function(a){
+            var w = Math.round((Number(a.trips)||0)/amax*100);
+            return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
+              + '<span style="width:110px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+ escH(a.agency||'') +'</span>'
+              + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:#8b5cf6;"></div></div>'
+              + '<span style="width:44px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (a.trips||0) +'건</span>'
+              + '<span style="width:72px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(a.driver_cost) +'</span>'
+              + '</div>';
+          }).join('');
+          agHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
+            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>여행사별 운행 ('+ mLabel(cur.month) +')</span><span>드라이버 비용</span></div>'
+            + alist + '</div>';
+        }
+      }
+    } catch(e){ /* 여행사별 섹션만 생략 */ }
+
     el.style.display='';
     el.innerHTML =
         '<div class="shd" style="margin-top:14px"><div class="stl">📊 운행 통계 <span style="font-size:10px;color:var(--t3);font-weight:500;">Supabase · 최근 6개월</span></div></div>'
       + '<div class="crd" style="padding:12px;">' + head
       + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 운행 건수</span><span>드라이버 비용</span></div>' + bars
       + vehHtml
+      + agHtml
       + '</div>';
   } catch(e){ console.warn('[운행통계] 렌더 실패:', e); el.style.display='none'; }
 }
