@@ -15823,6 +15823,42 @@ async function showFastBalances(){
   }
 }
 
+// ⬆️ 앱이 계산한 SUB(외주) 잔액을 Supabase 스냅샷에 반영 (서버 프록시 경유 — 키는 서버에만)
+//   앱의 _subBalances() 결과(SUBINV 가림·BillingEntity≠DC 제외·자동제외 모두 반영된 최종값)를
+//   그대로 push_sub_balances 로 보내 sub_balance_snapshot 테이블을 갱신.
+//   → v_sub_balance(스냅샷 뷰)를 읽는 ⚡ 빠른 잔액이 앱과 100% 일치.
+async function _pushSubBalancesToSupabase(){
+  try {
+    if(typeof _subBalances !== 'function') return;
+    const list = _subBalances();
+    const rows = (list||[]).map(a => {
+      const groups = a.tourGroups || [];
+      let lastISO = '';
+      let cnt = 0;
+      groups.forEach(g => { cnt += (g.count||0); if((g.lastISO||'') > lastISO) lastISO = g.lastISO||''; });
+      return {
+        sub_company:      String(a.name||'').trim() || 'Unknown',
+        balance:          Math.round((Number(a.balance)||0)*100)/100,
+        total_billed:     Math.round((Number(a.includedDr)||0)*100)/100,
+        total_paid:       Math.round((Number(a.includedCr)||0)*100)/100,
+        excluded_balance: Math.round((Number(a.outsourcingBalExcl)||0)*100)/100,
+        txn_count:        cnt,
+        last_txn:         lastISO || null
+      };
+    });
+    if(!rows.length) return;
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'push_sub_balances', rows: rows,
+        token:(typeof getAuthToken==='function'?getAuthToken():''),
+        _user:(typeof getAdminUser==='function'?getAdminUser():'')})
+    });
+    const j = await res.json().catch(()=>null);
+    if(!j || !j.ok) console.warn('[SUB→Supabase] push 실패:', j && j.error);
+    else console.log('[SUB→Supabase] 반영 완료:', j.count, '개 회사');
+  } catch(e){ console.warn('[SUB→Supabase] push 예외:', e); }
+}
+
 function showBalTab(tab){
   _balTab = tab;
   ['agency','sub','wage','weekly'].forEach(t=>{
@@ -15941,6 +15977,9 @@ async function syncBalanceData(force){
     // ★ 자동 정합성 검사: 급여 탭 vs 잔액 탭 불일치 감지 → 콘솔 경고
     try { _wageConsistencyCheck(); } catch(e) { console.warn('wage consistency check:', e); }
     _balLoaded = true;
+    // ★ 명시적 Sync 시 앱이 계산한 SUB 잔액을 Supabase 스냅샷에 반영 (⚡ 빠른 잔액이 앱과 일치하도록)
+    //   실패해도 잔액 탭엔 영향 없음 (fire-and-forget)
+    if(force){ _pushSubBalancesToSupabase(); }
     if(force) toast('잔액 데이터 동기화 완료','ok');
   } catch(e){
     console.warn('Balance sync 실패:', e);
