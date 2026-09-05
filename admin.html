@@ -2720,23 +2720,6 @@ async function loadRegoMaxKM() {
   } catch(e) { console.warn('loadRegoMaxKM failed', e); }
 }
 
-// ★ 운행 리포트(get_reports) 공용 캐시 — 여러 화면이 매번 전체 리포트를 재조회하던 것을
-//   짧은 TTL(20초) 동안 재사용해 화면 전환 시 반복 다운로드 제거. 응답 계약(res.ok/res.json)은 동일.
-//   리포트 변경 시엔 _drCache/_reportsCache 무효화와 함께 _repRawCache 도 비워져 최신값 재조회됨.
-var _repRawCache = null, _repRawAt = 0, _REP_RAW_TTL = 20000;
-async function _fetchReportsCached(){
-  var now = Date.now();
-  if(_repRawCache && (now - _repRawAt) < _REP_RAW_TTL){
-    var p = _repRawCache;
-    return { ok:true, json:function(){ return Promise.resolve(p); } };
-  }
-  var res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
-  if(!res.ok) return res;               // 실패는 원본 Response 그대로 (호출부의 res.ok/res.status 유지)
-  var payload = await res.json();
-  _repRawCache = payload; _repRawAt = now;
-  return { ok:true, json:function(){ return Promise.resolve(payload); } };
-}
-
 // ═══════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════
@@ -10718,7 +10701,7 @@ async function getSubReportData(from, to) {
   // DR 캐시 없으면 로드
   if(!_drCache) {
     try {
-      const res = await _fetchReportsCached();
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       const json = await res.json();
       if(json.ok && json.rows) _drCache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
     } catch(e) {}
@@ -11249,7 +11232,7 @@ window._dumpDRBrief = async function(driverFilter){
   if(!cache || !cache.length){
     console.log('⏳ Daily_Report 로드 중...');
     try {
-      const res = await _fetchReportsCached();
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       const json = await res.json();
       if(json.ok && json.rows){
         cache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
@@ -11283,7 +11266,7 @@ window._debugSubRow = async function(driver, date, attraction){
   if(!cache || !cache.length){
     console.log('⏳ Daily_Report 자동 로드...');
     try {
-      const res = await _fetchReportsCached();
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       const json = await res.json();
       if(json.ok && json.rows){
         cache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
@@ -11376,7 +11359,7 @@ window._diagDriverSettlement = async function(driver){
   if(!cache || !cache.length){
     console.log('⏳ Daily_Report 로드 중...');
     try {
-      const res = await _fetchReportsCached();
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       const json = await res.json();
       if(json.ok && json.rows){
         cache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
@@ -11875,7 +11858,7 @@ function initSettleDashboard() {
 // ★ 강제 재계산: 모든 캐시 비우고 처음부터 다시 로드
 async function forceRecalcSettle(){
   toast('🔄 캐시 비우는 중...','ok');
-  _drCache = null; _repRawCache = null;
+  _drCache = null;
   _settleData = null;
   _sdpData = null;
   if(window._wagesCache) window._wagesCache = null;
@@ -11904,7 +11887,7 @@ async function onSettleTourCodeSearch(){
     if(!_drCache){
       // 캐시 없으면 한 번 fetch
       try {
-        const res = await _fetchReportsCached();
+        const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
         const json = await res.json();
         _drCache = json.rows || [];
       } catch(e){
@@ -13103,7 +13086,7 @@ async function importFromReports(){
 
   let reports = [];
   try {
-    const res = await _fetchReportsCached();
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(json.ok) reports = json.rows;
@@ -13620,7 +13603,7 @@ async function onSdpTourCodeSearch(){
     }
     if(!_drCache){
       try {
-        const res = await _fetchReportsCached();
+        const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
         const json = await res.json();
         _drCache = json.rows || [];
       } catch(e){
@@ -13992,7 +13975,7 @@ async function adminCreateMissingDR(missingInfo){
   if(!_drCache){
     toast('데이터 로딩 중...','in');
     try {
-      const res = await _fetchReportsCached();
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       const json = await res.json();
       if(json.ok && json.rows) _drCache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
     } catch(e){ toast('캐시 로드 실패: '+e.message,'er'); return; }
@@ -14162,7 +14145,7 @@ async function adminSaveNewDR(){
     toast('✅ DR 저장 완료 (관리자 대신 작성)','ok');
 
     // 캐시 무효화
-    _drCache = null; _repRawCache = null;
+    _drCache = null;
     _settleData = null;
     if(window._wagesCache) window._wagesCache = null;
     window._wagesLastSync = 0;
@@ -14230,7 +14213,7 @@ async function saveDailyReportEdit(rowIndex){
     _done(); toast('✅ 저장 완료 — 모든 페이지 재계산','ok');
 
     // 모든 캐시 무효화 → 인보이스/정산/급여 모두 새 데이터 사용
-    _drCache = null; _repRawCache = null;
+    _drCache = null;
     _settleData = null;
     _sdpData = null;
     if(window._wagesCache) window._wagesCache = null;
@@ -16441,7 +16424,7 @@ window.cleanupNonDCBilledSubTxns = async function(){
   // DR 캐시 fresh
   let drs;
   try {
-    const res = await _fetchReportsCached();
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
     const json = await res.json();
     if(!json.ok) throw new Error(json.error||'load fail');
     drs = (json.rows||[]).map((r,i)=>({...r, _rowIndex:i+2}));
@@ -16773,7 +16756,7 @@ async function _syncDailyReportSubToSubTxn(){
     // DR 캐시 보장
     if(!_drCache){
       try {
-        const res = await _fetchReportsCached();
+        const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
         const json = await res.json();
         if(json.ok && json.rows) _drCache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
       } catch(e){ console.warn('[SUB Sync] DR 로드 실패:', e); return; }
@@ -22707,7 +22690,7 @@ async function loadInvReports() {
   // 캐시 or 새 조회 — agency 선택 전에도 리포트 로드해서 드롭다운 채우기
   if (!_invReports) {
     try {
-      const res  = await _fetchReportsCached();
+      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json = await res.json();
       if (json.ok) {
@@ -24144,7 +24127,7 @@ async function generateDraftInvoices(force=false){
     // 2. DR 캐시 보장
     if(!_drCache){
       try {
-        const res = await _fetchReportsCached();
+        const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
         const j = await res.json();
         if(j.ok && j.rows) _drCache = j.rows.map((r,i)=>({...r, _rowIndex:i+2}));
       } catch(e){}
@@ -24689,7 +24672,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   if (!_invReports) {
     try {
       toast('📄 리포트 로딩 중...','ok');
-      const res  = await _fetchReportsCached();
+      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
       if (json.ok) {
@@ -24913,7 +24896,7 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
     // ① 미리보기 HTML이 없는 경우에만 재빌드 (직접 발송 버튼 클릭 시)
     if (!_invReports) {
       try {
-        const res  = await _fetchReportsCached();
+        const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
         const json = await res.json();
         if (json.ok) _invReports = json.rows.map(r => ({...r, _iso:parseToISO(r.Date||''), _agency:String(r.Agency||'').trim(), _timeStart:parseSheetTime(r.Time_Start), _timeEnd:parseSheetTime(r.Time_End)}));
       } catch(e) { toast('리포트 로드 실패','er'); return; }
@@ -25991,7 +25974,7 @@ async function previewInvoiceDoc() {
   if (!_invReports) {
     toast('📄 리포트 로딩 중...','in');
     try {
-      const res = await _fetchReportsCached();
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       if (res.ok) {
         const json = await res.json();
         if (json.ok) {
@@ -26034,7 +26017,7 @@ async function downloadInvoicePdf() {
   if (!_invReports) {
     toast('📄 리포트 로딩 중...','in');
     try {
-      const res = await _fetchReportsCached();
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       if (res.ok) {
         const json = await res.json();
         if (json.ok) {
@@ -26088,7 +26071,7 @@ async function generateInvoice() {
   if (!_invReports) {
     toast('📄 리포트 로딩 중...','in');
     try {
-      const res = await _fetchReportsCached();
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       if (res.ok) {
         const json = await res.json();
         if (json.ok) {
@@ -27045,7 +27028,7 @@ async function pushWagesToSheet(){
 // ═══════════════════════════════════════════════════════════
 // DR REPORT 관리 (loadDR / renderDR / edit / delete)
 // ═══════════════════════════════════════════════════════════
-let _drCache = null; _repRawCache = null;
+let _drCache = null;
 let _drCacheTime = 0;
 const DR_CACHE_TTL = 3 * 60 * 1000;
 
@@ -27055,7 +27038,7 @@ async function loadDR(force=false){
   const listEl = document.getElementById('dr-list');
   if(listEl) listEl.innerHTML='<div style="text-align:center;padding:30px;color:var(--t3);">⏳ 운행 리포트 불러오는 중...</div>';
   try{
-    const res  = await _fetchReportsCached();
+    const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(json.ok && json.rows){
@@ -27689,7 +27672,7 @@ async function clearDREtc(rowIdx){
     const data = await res.json();
     if(!data.ok) throw new Error(data.error||'서버 오류');
     toast('ETC 삭제 완료','ok');
-    _drCache = null; _repRawCache = null; renderDailyReports();
+    _drCache = null; renderDailyReports();
   } catch(e){ toast('ETC 삭제 실패: '+e.message,'er'); }
 }
 
@@ -27788,7 +27771,7 @@ async function saveDREdit(){
     // 캐시 업데이트
     const idx = _drCache.findIndex(x=>x._rowIndex===rowIndex);
     if(idx!==-1) _drCache[idx] = { ...updated, _isoDate: parseToISO(dateVal) };
-    _reportsCache = null; _repRawCache = null; // 급여 캐시도 무효화
+    _reportsCache = null; // 급여 캐시도 무효화
     _invReports = null;   // 인보이스 캐시도 무효화 (수정된 금액 반영)
 
     closeDRModal();
@@ -27822,7 +27805,7 @@ async function deleteDR(rowIndex){
     _drCache = _drCache
       .filter(x=>x._rowIndex!==rowIndex)
       .map(x=>x._rowIndex>rowIndex ? {...x,_rowIndex:x._rowIndex-1} : x);
-    _reportsCache = null; _repRawCache = null;
+    _reportsCache = null;
     _invReports = null;
 
     renderDR();
@@ -27831,12 +27814,12 @@ async function deleteDR(rowIndex){
 }
 
 // ── GAS Daily_Report 캐시 (관리자용 dr 계산) ──────────────────────
-let _reportsCache = null; _repRawCache = null; // [{ Driver, Date(iso), DR_Cost, ... }]
+let _reportsCache = null; // [{ Driver, Date(iso), DR_Cost, ... }]
 
 async function ensureReportsCache() {
   if (_reportsCache) return _reportsCache;
   try {
-    const res  = await _fetchReportsCached();
+    const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if (json.ok && json.rows) {
@@ -28852,7 +28835,7 @@ async function fixReportFormats(){
     const json = await res.json();
     if(json.ok){
       toast('✅ 서식 수정 완료: '+(json.results||[]).join(', '),'ok');
-      _drCache=null; _repRawCache=null; _reportsCache=null; _repRawCache=null;
+      _drCache=null; _reportsCache=null;
       loadDR(true);
     } else {
       toast('⚠️ 수정 실패: '+(json.error||json.msg||''),'er');
@@ -28896,7 +28879,7 @@ async function forceReloadAll(){
   window._tabLastSync = {};
   window._psLastSync = 0;
   window._wagesLastSync = 0;
-  _reportsCache = null; _repRawCache = null;
+  _reportsCache = null;
   const syncEl = document.getElementById('sync-status');
   if(syncEl) syncEl.textContent = '⏳ Refreshing... (새로고침 중...)';
   try {
@@ -31058,7 +31041,7 @@ async function loadShiftReports(force=false) {
       }
     }
     if (needDr) {
-      const res = await _fetchReportsCached();
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
       if (!res.ok) throw new Error('DR HTTP ' + res.status);
       const json = await res.json();
       if (json.ok) {
@@ -32777,7 +32760,7 @@ async function runAdminSync(silent=true){
     }
 
     // ── 7. DR 리포트 (항상 체크 — 뱃지 감지용) ──
-    { _drCache=null; _repRawCache=null; _drCacheTime=0; await loadDR(); }
+    { _drCache=null; _drCacheTime=0; await loadDR(); }
 
     // ── 7b. 뱃지 감지용: 주요 데이터 항상 동기화 ──
     if(pg!=='pveh')  await syncVehicles();
