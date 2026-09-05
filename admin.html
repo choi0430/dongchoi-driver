@@ -2753,6 +2753,13 @@ function parseSheetTime(ts) {
 }
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzF-WozF1bAabd3ogdX8WA-LljE2foET4_BNenm6spVePapUBAE2wYPxiHWVTPRMFLSMw/exec';
 
+// ═══ Supabase 직접 읽기 (읽기 전용) ═══
+//   ⚡ 빠른 잔액을 Apps Script 프록시(3초) 대신 Supabase에서 직접 조회(~0.3초).
+//   SUPABASE_ANON 은 브라우저 안전용 publishable 키 (sb_publishable_...). RLS로 잔액 뷰만 읽기 허용.
+//   ★ SUPABASE_ANON 값을 아래 따옴표 안에 붙여넣으세요. (비워두면 자동으로 기존 프록시 방식으로 동작)
+const SUPABASE_URL  = 'https://umvtezkqjvpejekkeyap.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_r84cLVz1vVlZg1dbY96zhA_L3v0tmly';  // 브라우저용 publishable 키 (공개 안전)
+
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTH TOKEN MANAGEMENT (admin app)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -15798,8 +15805,30 @@ async function showFastBalances(){
 
   var t0 = Date.now();
   try {
-    var res = await fetch(APPS_SCRIPT_URL + '?action=get_balances_v2');
-    var j = await res.json();
+    var j, via;
+    // ① Supabase 직접 읽기 (publishable 키 설정돼 있으면) — 가장 빠름
+    if(SUPABASE_ANON){
+      try {
+        var h = { apikey: SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON };
+        var base = SUPABASE_URL.replace(/\/+$/,'');
+        var pair = await Promise.all([
+          fetch(base + '/rest/v1/v_agency_balance?select=*&order=balance.desc', {headers:h}),
+          fetch(base + '/rest/v1/v_sub_balance?select=*&order=balance.desc',    {headers:h})
+        ]);
+        if(pair[0].ok && pair[1].ok){
+          j = { ok:true, agency: await pair[0].json(), sub: await pair[1].json() };
+          via = 'Supabase 직접';
+        } else {
+          console.warn('[빠른잔액] 직접 읽기 실패, 프록시로 폴백:', pair[0].status, pair[1].status);
+        }
+      } catch(e){ console.warn('[빠른잔액] 직접 읽기 예외, 프록시로 폴백:', e); }
+    }
+    // ② 폴백: Apps Script 프록시
+    if(!j){
+      var res = await fetch(APPS_SCRIPT_URL + '?action=get_balances_v2');
+      j = await res.json();
+      via = 'Apps Script 프록시';
+    }
     if(!j || !j.ok) throw new Error((j && j.error) ? j.error : '조회 실패');
     var ms = Date.now() - t0;
     var fmt = function(v){ return '$' + (Number(v)||0).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2}); };
@@ -15814,7 +15843,7 @@ async function showFastBalances(){
     };
     var body = document.getElementById('fastbal-body');
     if(body) body.innerHTML =
-        '<div style="color:var(--gn,#0a0);font-size:11px;margin-bottom:8px;">✓ '+ ms +'ms 만에 계산 완료</div>'
+        '<div style="color:var(--gn,#0a0);font-size:11px;margin-bottom:8px;">✓ '+ ms +'ms 만에 계산 완료 <span style="color:var(--t3,#888);">('+ (via||'') +')</span></div>'
       + '<div style="font-weight:700;margin:6px 0 2px;">🏢 여행사 미수 잔액 (받을 돈)</div>' + rowsHtml(j.agency,'agency')
       + '<div style="font-weight:700;margin:14px 0 2px;">🚌 외주(SUB) 미지급 잔액 (줄 돈)</div>' + rowsHtml(j.sub,'sub_company');
   } catch(e){
