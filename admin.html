@@ -2697,7 +2697,22 @@ const NIGHT_RATES = {
 };
 
 // Load max KM per rego from report sheets (for accurate service schedule)
+//   ① Supabase v_vehicle_km 직접 읽기(빠름) → ② 실패 시 Apps Script 프록시 폴백
 async function loadRegoMaxKM() {
+  if (SUPABASE_ANON) {
+    try {
+      const h = { apikey: SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON };
+      const r = await fetch(SUPABASE_URL.replace(/\/+$/,'') + '/rest/v1/v_vehicle_km?select=rego,current_km', {headers:h});
+      if (r.ok) {
+        const rows = await r.json();
+        const map = {};
+        (rows||[]).forEach(x => { if(x.rego) map[x.rego] = Number(x.current_km)||0; });
+        if (Object.keys(map).length) { DB.regoMaxKM = map; return; }
+      } else {
+        console.warn('[maxKM] 직접 읽기 실패, 프록시 폴백:', r.status);
+      }
+    } catch(e){ console.warn('[maxKM] 직접 읽기 예외, 프록시 폴백:', e); }
+  }
   try {
     const res = await fetch(APPS_SCRIPT_URL + '?action=get_max_km');
     const json = await res.json();
