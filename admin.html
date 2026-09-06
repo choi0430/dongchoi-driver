@@ -3616,13 +3616,20 @@ async function renderRevStats(){
     if(!res.ok){ el.style.display='none'; return; }
     var rows = await res.json();
     if(!rows || !rows.length){ el.style.display='none'; return; }
+    // ★ 현재 총 미수는 거래처 잔액(정확 — 부분수금 반영)에서. 인보이스 상태(paid)는 완납만 잡혀 부정확.
+    var totalDue = null;
+    try {
+      var ar = await fetch(base + '/rest/v1/v_agency_balance?select=balance', {headers:h});
+      if(ar.ok){ var ab = await ar.json(); totalDue = (ab||[]).reduce(function(s,x){ return s + (Number(x.balance)||0); }, 0); }
+    } catch(e){}
     var $f = function(v){ return '$'+(Number(v)||0).toLocaleString('en-AU',{maximumFractionDigits:0}); };
     var mLabel = function(m){ var p=String(m).split('-'); return (p[1]||'')+'월'; };
     var cur = rows[0];
+    var total6 = rows.reduce(function(s,r){ return s + (Number(r.total_billed)||0); }, 0);
     var head = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">'
       + '<div style="background:var(--gnd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 매출 (GST포함)</div><div style="font-size:17px;font-weight:800;color:var(--gn);font-family:var(--fn);">'+ $f(cur.total_billed) +'</div><div style="font-size:8px;color:var(--t3);margin-top:1px;">GST제외 '+ $f(cur.revenue_ex_gst) +'</div></div>'
-      + '<div style="background:var(--acd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 수금</div><div style="font-size:17px;font-weight:800;color:var(--ac);font-family:var(--fn);">'+ $f(cur.collected) +'</div></div>'
-      + '<div style="background:var(--rdd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 미수</div><div style="font-size:17px;font-weight:800;color:var(--rd);font-family:var(--fn);">'+ $f(cur.outstanding) +'</div></div>'
+      + '<div style="background:var(--acd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">최근 6개월 총 매출</div><div style="font-size:17px;font-weight:800;color:var(--ac);font-family:var(--fn);">'+ $f(total6) +'</div></div>'
+      + '<div style="background:var(--rdd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">현재 총 미수 <span style="opacity:.7;">(거래처 기준)</span></div><div style="font-size:17px;font-weight:800;color:var(--rd);font-family:var(--fn);">'+ (totalDue!=null ? $f(totalDue) : '—') +'</div></div>'
       + '</div>';
     var mx = Math.max.apply(null, rows.map(function(r){return Number(r.total_billed)||0;})) || 1;
     var bars = rows.slice().reverse().map(function(r){
@@ -3630,15 +3637,15 @@ async function renderRevStats(){
       return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
         + '<span style="width:38px;color:var(--t3);">'+ mLabel(r.month) +'</span>'
         + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:#0ea5e9;"></div></div>'
-        + '<span style="width:78px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ $f(r.total_billed) +'</span>'
-        + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--rd);">'+ $f(r.outstanding) +'</span>'
+        + '<span style="width:80px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ $f(r.total_billed) +'</span>'
+        + '<span style="width:74px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(r.revenue_ex_gst) +'</span>'
         + '</div>';
     }).join('');
     el.style.display='';
     el.innerHTML =
         '<div class="shd" style="margin-top:14px"><div class="stl">💰 매출 리포트 <span style="font-size:10px;color:var(--t3);font-weight:500;">Supabase · 여행사 인보이스 · 최근 6개월</span></div></div>'
       + '<div class="crd" style="padding:12px;">' + head
-      + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 매출 (GST포함)</span><span>미수</span></div>' + bars
+      + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 매출 (GST포함)</span><span>GST제외</span></div>' + bars
       + '</div>';
   } catch(e){ console.warn('[매출리포트] 렌더 실패:', e); el.style.display='none'; }
 }
