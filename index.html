@@ -14630,12 +14630,12 @@ async function submitLeaveRequest(){
   const dateFrom=document.getElementById('leave-date-from').value; // already dd/MM/yyyy
   const dateTo=document.getElementById('leave-date-to').value;
   let reason=document.getElementById('leave-reason').value;
-  if(!dateFrom||!dateTo){ showToast('⚠️ Please select dates (날짜를 선택하세요)','error'); return; }
+  if(!dateFrom||!dateTo){ _unlockSubmitBtn(_leaveBtn); showToast('⚠️ Please select dates (날짜를 선택하세요)','error'); return; }
   // dd/MM/yyyy → Date for validation
   const _toD=s=>{const p=s.split('/');return new Date(p[2],p[1]-1,p[0]);};
-  if(_toD(dateTo)<_toD(dateFrom)){ showToast('⚠️ End date is before start date (종료일이 시작일보다 빠릅니다)','error'); return; }
+  if(_toD(dateTo)<_toD(dateFrom)){ _unlockSubmitBtn(_leaveBtn); showToast('⚠️ End date is before start date (종료일이 시작일보다 빠릅니다)','error'); return; }
   const today=new Date(); today.setHours(0,0,0,0);
-  if(_toD(dateFrom)<today){ showToast('⚠️ Cannot select past dates (과거 날짜는 선택할 수 없습니다)','error'); return; }
+  if(_toD(dateFrom)<today){ _unlockSubmitBtn(_leaveBtn); showToast('⚠️ Cannot select past dates (과거 날짜는 선택할 수 없습니다)','error'); return; }
   if(reason==='기타') reason=document.getElementById('leave-reason-etc').value||'기타';
   const note=document.getElementById('leave-note')?.value?.trim()||'';
 
@@ -14651,9 +14651,8 @@ async function submitLeaveRequest(){
       _markBtnDone(_leaveBtn, '✅ 휴가 신청 완료');
       showToast('✅ Leave request submitted. Awaiting approval (휴무 요청 제출됨. 관리자 승인 대기)','success');
       hideLeaveForm(); loadMyLeaves();
-    } else { showToast('⚠️ '+(res?.error||'Submit failed (제출 실패)'),'error'); }
-  }catch(e){ showToast('⚠️ Network error (네트워크 오류)','error'); }
-  if(btn){btn.disabled=false;btn.textContent='✓ Submit (제출)';}
+    } else { _unlockSubmitBtn(_leaveBtn); showToast('⚠️ '+(res?.error||'Submit failed (제출 실패)'),'error'); }
+  }catch(e){ _unlockSubmitBtn(_leaveBtn); showToast('⚠️ Network error (네트워크 오류)','error'); }
 }
 
 var _myLeaveData = [];
