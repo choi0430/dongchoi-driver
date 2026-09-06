@@ -3564,6 +3564,16 @@ async function renderOpsStats(){
     var _legend = '<span style="font-size:9px;color:var(--t3);font-weight:500;">'
       + '<span style="display:inline-block;width:8px;height:8px;background:'+C_OWN+';border-radius:2px;margin:0 2px -1px 0;"></span>자차 '
       + '<span style="display:inline-block;width:8px;height:8px;background:'+C_SUB+';border-radius:2px;margin:0 2px -1px 6px;"></span>서브</span>';
+    // 컬럼 헤더 — 데이터 행과 동일한 고정폭으로 정렬(건수 34 · 자차·서브 56 · 청구 66 · 비용 58)
+    var _colHdr = function(left){
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--t3);margin:6px 2px 4px;">'
+        + '<span style="flex:1;min-width:0;">'+ left +'</span>'
+        + '<span style="width:34px;text-align:right;">건수</span>'
+        + '<span style="width:56px;text-align:right;">자차·서브</span>'
+        + '<span style="width:66px;text-align:right;">청구</span>'
+        + '<span style="width:58px;text-align:right;">비용</span>'
+        + '</div>';
+    };
     var cur = rows[0];
     var totalTrips = rows.reduce(function(s,r){ return s+(Number(r.trips)||0); }, 0);
     var head = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">'
@@ -3603,7 +3613,7 @@ async function renderOpsStats(){
               + '</div>';
           }).join('');
           wkHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
-            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>주간 추세 (최근 8주 · 주 시작일)</span><span>자차·서브 · 청구 · 비용</span></div>'
+            + _colHdr('주간 추세 (최근 8주 · 주 시작일)')
             + wkList + '</div>';
         }
       }
@@ -3630,12 +3640,13 @@ async function renderOpsStats(){
               + _badge(v.is_own)
               + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:'+bc+';"></div></div>'
               + '<span style="width:34px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (v.trips||0) +'건</span>'
+              + '<span style="width:56px;"></span>'
               + '<span style="width:66px;text-align:right;font-family:var(--fn);color:var(--gn);" title="여행사 청구액 (가격표 기준)">'+ _bill(bill ? (bill.v[cur.month+'|'+String(v.rego||'').trim().toUpperCase()]||0) : null) +'</span>'
               + '<span style="width:58px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(v.driver_cost) +'</span>'
               + '</div>';
           }).join('');
           vehHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
-            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>차량별 운행 ('+ mLabel(cur.month) +')</span><span>자차/서브 · 청구 · 비용</span></div>'
+            + _colHdr('차량별 운행 ('+ mLabel(cur.month) +')')
             + vlist + '</div>';
         }
       }
@@ -3660,7 +3671,7 @@ async function renderOpsStats(){
               + '</div>';
           }).join('');
           agHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
-            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>여행사별 운행 ('+ mLabel(cur.month) +')</span><span>자차·서브 · 청구 · 비용</span></div>'
+            + _colHdr('여행사별 운행 ('+ mLabel(cur.month) +')')
             + alist + '</div>';
         }
       }
@@ -3670,7 +3681,7 @@ async function renderOpsStats(){
     el.innerHTML =
         '<div class="shd" style="margin-top:14px"><div class="stl">📊 운행 통계 <span style="font-size:10px;color:var(--t3);font-weight:500;">Supabase · 최근 6개월 · 청구=여행사(가격표)</span> &nbsp;'+ _legend +'</div></div>'
       + '<div class="crd" style="padding:12px;">' + head
-      + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 운행 건수</span><span>자차·서브 · 청구 · 비용</span></div>' + bars
+      + _colHdr('월별 운행 건수') + bars
       + wkHtml
       + vehHtml
       + agHtml
