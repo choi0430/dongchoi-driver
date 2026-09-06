@@ -4772,10 +4772,14 @@ function getDriverPin(name) {
 async function primeDriverBundle(){
   window._dvBundle = null;
   try {
-    const res = await fetch(APPS_SCRIPT_URL + '?action=get_driver_bundle');  // 인터셉터가 토큰 부착
+    // 스케줄은 loadDriverSchedule과 동일한 범위(오늘-14 ~ 오늘+7)로 받아야 데이터 일치
+    var q = '?action=get_driver_bundle';
+    try { var _t = _todayLocalISO(); q += '&from=' + _addDaysISO(_t,-14) + '&to=' + _addDaysISO(_t,7); } catch(e){}
+    const res = await fetch(APPS_SCRIPT_URL + q);  // 인터셉터가 토큰 부착
     const b = await res.json();
     if(!b || !b.ok) return;
     const map = {
+      'get_driver_schedule':   b.schedule,
       'get_notices':           b.notices,
       'get_wages':             b.wages,
       'get_defect_reports':    b.defects,
@@ -14227,6 +14231,20 @@ function calcSubCostFromReport(r, subName){
   return { base, ot:otSub, hotel, dist, trailer, nightOwner, total };
 }
 
+// SUB 인보이스 화면 전용 — 전체 Daily_Report(4MB+)를 매번 재조회하던 걸 2분 캐시로 공유.
+//   조회(목록/이력)만 사용. 리포트 저장 후엔 _siReportsCache=null 로 무효화 → 항상 최신 반영.
+//   제출 시 중복체크는 캐시 안 씀(항상 신선).
+let _siReportsCache = null, _siReportsAt = 0;
+const _SI_REPORTS_TTL = 120000;
+async function _siFetchAllReports(force){
+  const now = Date.now();
+  if(!force && _siReportsCache && (now - _siReportsAt) < _SI_REPORTS_TTL) return _siReportsCache;
+  const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report&driver=');
+  const json = await res.json();
+  if(json && (json.ok || json.rows)){ _siReportsCache = json; _siReportsAt = now; }
+  return json;
+}
+
 async function loadSubInvReports(){
   const from = document.getElementById('si-from').value;
   const to = document.getElementById('si-to').value;
@@ -14237,9 +14255,8 @@ async function loadSubInvReports(){
   // SUB 오너의 차량 목록
   const myVehs = (MASTER.vehicles||[]).filter(v=>(v.Owner||'').trim()===subName).map(v=>v.Rego);
   try{
-    // 전체 리포트에서 내 차량 필터
-    const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report&driver=');
-    const json = await res.json();
+    // 전체 리포트에서 내 차량 필터 (2분 캐시 공유)
+    const json = await _siFetchAllReports();
     const rows = json.rows || json.data || [];
     // 기간 + 내 차량 + Private 제외
     const filtered = rows.filter(r=>{
@@ -14533,6 +14550,7 @@ async function submitSubReport(){
       });
       const pvt=document.getElementById('sr-private'); if(pvt) pvt.checked=false;
       if(dupWarn) dupWarn.style.display='none';
+      _siReportsCache = null;   // 새 리포트 저장됨 → 캐시 무효화 후 최신 이력 로드
       loadSubReportHistory();
     } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
   }catch(e){ showToast('❌ 네트워크 오류: '+e.message,'error'); }
@@ -14545,8 +14563,7 @@ async function loadSubReportHistory(){
     const subName = _subDriverInfo?.SubName||'';
     const vehs = (MASTER.vehicles||[]).filter(v=>(v.Owner||'').trim()===subName).map(v=>v.Rego);
     if(!vehs.length){ el.innerHTML='<div style="color:var(--muted);">등록된 차량이 없습니다.</div>'; return; }
-    const res = await fetch(APPS_SCRIPT_URL+'?action=get_reports&sheet=Daily_Report&driver=');
-    const json = await res.json();
+    const json = await _siFetchAllReports();
     const rows = (json.rows||json.data||[]).filter(r=>vehs.includes(r.Rego));
     // 최근 20건
     const recent = rows.sort((a,b)=>(parseToISO(b.Date)||'').localeCompare(parseToISO(a.Date)||'')).slice(0,20);
