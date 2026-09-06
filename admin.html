@@ -501,6 +501,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 📊 운행 통계 (Supabase 집계 · 읽기전용) — 데이터 없으면 자동 숨김 -->
   <div id="ops-stats" style="display:none;"></div>
 
+  <!-- 💰 매출 리포트 (인보이스 기반 · 읽기전용) — 데이터 없으면 자동 숨김 -->
+  <div id="rev-stats" style="display:none;"></div>
+
   <!-- 🚌 운행 (가장 자주 쓰는 그룹 — 상단으로) -->
   <div class="shd" style="margin-top:14px"><div class="stl">🚌 운행 (Operations)</div><div class="ssb">일정 · 일일 운행 · 일지 · 단속</div></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -3600,8 +3603,49 @@ async function renderOpsStats(){
   } catch(e){ console.warn('[운행통계] 렌더 실패:', e); el.style.display='none'; }
 }
 
+// 💰 매출 리포트 패널 — Supabase v_revenue_monthly 직접 읽기 (읽기전용·추가형).
+//   여행사 인보이스 기반 월별 매출(ExGST)·총청구·수금·미수. 실패/데이터없음 시 숨김.
+async function renderRevStats(){
+  var el = document.getElementById('rev-stats');
+  if(!el) return;
+  if(typeof SUPABASE_ANON === 'undefined' || !SUPABASE_ANON){ el.style.display='none'; return; }
+  try {
+    var h = { apikey: SUPABASE_ANON, 'Authorization':'Bearer '+SUPABASE_ANON };
+    var base = SUPABASE_URL.replace(/\/+$/,'');
+    var res = await fetch(base + '/rest/v1/v_revenue_monthly?select=*&order=month.desc&limit=6', {headers:h});
+    if(!res.ok){ el.style.display='none'; return; }
+    var rows = await res.json();
+    if(!rows || !rows.length){ el.style.display='none'; return; }
+    var $f = function(v){ return '$'+(Number(v)||0).toLocaleString('en-AU',{maximumFractionDigits:0}); };
+    var mLabel = function(m){ var p=String(m).split('-'); return (p[1]||'')+'월'; };
+    var cur = rows[0];
+    var head = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">'
+      + '<div style="background:var(--gnd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 매출 (GST포함)</div><div style="font-size:17px;font-weight:800;color:var(--gn);font-family:var(--fn);">'+ $f(cur.total_billed) +'</div><div style="font-size:8px;color:var(--t3);margin-top:1px;">GST제외 '+ $f(cur.revenue_ex_gst) +'</div></div>'
+      + '<div style="background:var(--acd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 수금</div><div style="font-size:17px;font-weight:800;color:var(--ac);font-family:var(--fn);">'+ $f(cur.collected) +'</div></div>'
+      + '<div style="background:var(--rdd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 미수</div><div style="font-size:17px;font-weight:800;color:var(--rd);font-family:var(--fn);">'+ $f(cur.outstanding) +'</div></div>'
+      + '</div>';
+    var mx = Math.max.apply(null, rows.map(function(r){return Number(r.total_billed)||0;})) || 1;
+    var bars = rows.slice().reverse().map(function(r){
+      var w = Math.round((Number(r.total_billed)||0)/mx*100);
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
+        + '<span style="width:38px;color:var(--t3);">'+ mLabel(r.month) +'</span>'
+        + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:#0ea5e9;"></div></div>'
+        + '<span style="width:78px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ $f(r.total_billed) +'</span>'
+        + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--rd);">'+ $f(r.outstanding) +'</span>'
+        + '</div>';
+    }).join('');
+    el.style.display='';
+    el.innerHTML =
+        '<div class="shd" style="margin-top:14px"><div class="stl">💰 매출 리포트 <span style="font-size:10px;color:var(--t3);font-weight:500;">Supabase · 여행사 인보이스 · 최근 6개월</span></div></div>'
+      + '<div class="crd" style="padding:12px;">' + head
+      + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 매출 (GST포함)</span><span>미수</span></div>' + bars
+      + '</div>';
+  } catch(e){ console.warn('[매출리포트] 렌더 실패:', e); el.style.display='none'; }
+}
+
 function rDash(){
   try { renderOpsStats(); } catch(e){}   // 📊 운행 통계 (독립 렌더 — 실패해도 대시보드 영향 없음)
+  try { renderRevStats(); } catch(e){}   // 💰 매출 리포트 (독립 렌더)
   // 상단 통계 카드는 제거됐지만, 마스터 그룹 카드의 카운트는 유지
   const kvEl=document.getElementById('kv'); if(kvEl) kvEl.textContent=DB.V.length;
   const kdEl=document.getElementById('kd'); if(kdEl) kdEl.textContent=DB.D.length;
