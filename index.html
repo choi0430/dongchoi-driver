@@ -4118,6 +4118,24 @@ function _softReauth(reason){
   const _originalFetch = window.fetch.bind(window);
 
   window.fetch = function(input, init){
+    // ★ 드라이버 홈 번들: 로그인 직후 첫 GET은 미리 받은 번들로 즉시 응답 (1회 소비 후 삭제 → 이후 실시간).
+    //   번들이 없거나 오류면 그냥 실제 fetch로 진행 → 기존 동작과 100% 동일 (폴백).
+    try {
+      if (window._dvBundle) {
+        const _u = typeof input === 'string' ? input : (input && input.url);
+        const _isGet = (!init || !init.method || String(init.method).toUpperCase() === 'GET');
+        if (_u && _u.indexOf(GAS_URL) === 0 && _isGet) {
+          const _m = _u.match(/[?&]action=([^&]+)/);
+          const _act = _m ? decodeURIComponent(_m[1]) : '';
+          if (_act && Object.prototype.hasOwnProperty.call(window._dvBundle, _act)) {
+            const _slice = window._dvBundle[_act];
+            delete window._dvBundle[_act];   // 한 번만 사용
+            return Promise.resolve(new Response(JSON.stringify(_slice), {status:200, headers:{'Content-Type':'application/json'}}));
+          }
+        }
+      }
+    } catch(e){ /* 문제 시 실제 fetch로 진행 */ }
+
     try {
       const url = typeof input === 'string' ? input : (input && input.url);
       if (url && url.indexOf(GAS_URL) === 0) {
@@ -4748,6 +4766,27 @@ function getDriverPin(name) {
   return '';
 }
 
+// 로그인 직후 홈 로딩 가속: 가벼운 번들 1회 수신 → 첫 GET 5종을 즉시 응답(인터셉터가 소비).
+//   실패해도 window._dvBundle=null → 모든 화면이 기존처럼 실시간 fetch (안전 폴백).
+//   스케줄은 from/to 범위 파라미터가 있어 제외 (항상 실시간).
+async function primeDriverBundle(){
+  window._dvBundle = null;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_driver_bundle');  // 인터셉터가 토큰 부착
+    const b = await res.json();
+    if(!b || !b.ok) return;
+    const map = {
+      'get_notices':           b.notices,
+      'get_wages':             b.wages,
+      'get_defect_reports':    b.defects,
+      'get_my_leave_requests': b.leaves,
+      'get_my_shifts':         b.shifts
+    };
+    Object.keys(map).forEach(function(k){ if(map[k] === undefined) delete map[k]; });
+    window._dvBundle = map;
+  } catch(e){ window._dvBundle = null; }
+}
+
 async function doLogin() {
   if(window._loginBusy) return;   // ★ 중복 로그인 실행 차단 (자동 로그인이 두 곳에서 겹쳐도 한 번만)
   const sel = document.getElementById('login-driver-select').value;
@@ -4907,6 +4946,8 @@ async function doLogin() {
   renderTodayReports();
   renderSalary();
   renderExpiryAlerts();
+  // ★ 홈 로딩 가속: 가벼운 번들을 먼저 받아두면 아래 loadMyLeaves/syncShifts/runSync의 첫 호출들이 즉시 응답됨
+  await primeDriverBundle();
   loadDriverSchedule();
   restoreSectionStates();
   initMyInfoPage();
