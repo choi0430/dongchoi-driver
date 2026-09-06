@@ -3503,46 +3503,70 @@ async function renderOpsStats(){
     if(!rows || !rows.length){ el.style.display='none'; return; }
     var $f = function(v){ return '$'+(Number(v)||0).toLocaleString('en-AU',{maximumFractionDigits:0}); };
     var mLabel = function(m){ var p=String(m).split('-'); return (p[1]||'')+'월'; };
+    // ── 자차/서브 색상·헬퍼 ───────────────────────────────────────
+    var C_OWN='#2563eb', C_SUB='#f59e0b';                 // 자차=파랑, 서브=주황
+    // 자차/서브 비율로 채운 스택 막대 (전체 폭 w% 안에서 자차:서브 분할)
+    var _stack = function(tot, ownN, subN, max){
+      var w = Math.round((Number(tot)||0)/(max||1)*100);
+      var known = (Number(ownN)||0)+(Number(subN)||0);
+      var op = known>0 ? Math.round((Number(ownN)||0)/known*100) : 0;
+      return '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;">'
+        + '<div style="width:'+w+'%;height:100%;display:flex;">'
+        + (known>0
+            ? '<div style="width:'+op+'%;background:'+C_OWN+';"></div><div style="flex:1;background:'+C_SUB+';"></div>'
+            : '<div style="flex:1;background:var(--t3);opacity:.4;"></div>')
+        + '</div></div>';
+    };
+    // 자차N·서브M 컴팩트 표기 (색으로 막대와 매칭)
+    var _osNum = function(ownN, subN){
+      return '<span style="width:56px;text-align:right;font-family:var(--fn);font-size:10px;">'
+        + '<span style="color:'+C_OWN+';">'+ (Number(ownN)||0) +'</span>'
+        + '<span style="color:var(--t3);">·</span>'
+        + '<span style="color:'+C_SUB+';">'+ (Number(subN)||0) +'</span></span>';
+    };
+    var _legend = '<span style="font-size:9px;color:var(--t3);font-weight:500;">'
+      + '<span style="display:inline-block;width:8px;height:8px;background:'+C_OWN+';border-radius:2px;margin:0 2px -1px 0;"></span>자차 '
+      + '<span style="display:inline-block;width:8px;height:8px;background:'+C_SUB+';border-radius:2px;margin:0 2px -1px 6px;"></span>서브</span>';
     var cur = rows[0];
     var totalTrips = rows.reduce(function(s,r){ return s+(Number(r.trips)||0); }, 0);
     var head = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">'
-      + '<div style="background:var(--acd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 운행</div><div style="font-size:17px;font-weight:800;color:var(--ac);font-family:var(--fn);">'+ (cur.trips||0) +'건</div></div>'
+      + '<div style="background:var(--acd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 운행</div><div style="font-size:17px;font-weight:800;color:var(--ac);font-family:var(--fn);">'+ (cur.trips||0) +'건</div><div style="font-size:8px;margin-top:1px;"><span style="color:'+C_OWN+';">자차 '+ (cur.own_trips||0) +'</span> · <span style="color:'+C_SUB+';">서브 '+ (cur.sub_trips||0) +'</span></div></div>'
       + '<div style="background:var(--sf2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 드라이버 비용</div><div style="font-size:17px;font-weight:800;color:var(--t2);font-family:var(--fn);">'+ $f(cur.driver_cost) +'</div></div>'
       + '<div style="background:var(--gnd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">최근 6개월 총 운행</div><div style="font-size:17px;font-weight:800;color:var(--gn);font-family:var(--fn);">'+ totalTrips +'건</div></div>'
       + '</div>';
     var maxTrips = Math.max.apply(null, rows.map(function(r){return Number(r.trips)||0;})) || 1;
     var bars = rows.slice().reverse().map(function(r){
-      var w = Math.round((Number(r.trips)||0)/maxTrips*100);
       return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
-        + '<span style="width:38px;color:var(--t3);">'+ mLabel(r.month) +'</span>'
-        + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:var(--ac);"></div></div>'
-        + '<span style="width:38px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (r.trips||0) +'건</span>'
-        + '<span style="width:70px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고 청구액(Total_TA)">'+ $f(r.billed_ta) +'</span>'
-        + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(r.driver_cost) +'</span>'
+        + '<span style="width:34px;color:var(--t3);">'+ mLabel(r.month) +'</span>'
+        + _stack(r.trips, r.own_trips, r.sub_trips, maxTrips)
+        + '<span style="width:34px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (r.trips||0) +'건</span>'
+        + _osNum(r.own_trips, r.sub_trips)
+        + '<span style="width:66px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고 청구액(Total_TA)">'+ $f(r.billed_ta) +'</span>'
+        + '<span style="width:58px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(r.driver_cost) +'</span>'
         + '</div>';
     }).join('');
 
     // ── 주간 추세 (최근 8주) — 실패 시 이 섹션만 생략 ──
     var wkHtml = '';
     try {
-      var wres = await fetch(base + '/rest/v1/v_ops_weekly?order=week_start.desc&limit=8&select=week_start,trips,driver_cost,billed_ta', {headers:h});
+      var wres = await fetch(base + '/rest/v1/v_ops_weekly?order=week_start.desc&limit=8&select=week_start,trips,own_trips,sub_trips,driver_cost,billed_ta', {headers:h});
       if(wres.ok){
         var wrows = await wres.json();
         if(wrows && wrows.length){
           var wkMax = Math.max.apply(null, wrows.map(function(w){return Number(w.trips)||0;})) || 1;
           var wLabel = function(d){ var p=String(d).split('-'); return (p[1]?parseInt(p[1],10):'')+'/'+(p[2]?parseInt(p[2],10):'')+'주'; };
           var wkList = wrows.slice().reverse().map(function(w){
-            var pw = Math.round((Number(w.trips)||0)/wkMax*100);
             return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
-              + '<span style="width:52px;color:var(--t3);">'+ wLabel(w.week_start) +'</span>'
-              + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+pw+'%;height:100%;background:#f59e0b;"></div></div>'
-              + '<span style="width:38px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (w.trips||0) +'건</span>'
-              + '<span style="width:70px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고 청구액(Total_TA)">'+ $f(w.billed_ta) +'</span>'
-              + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(w.driver_cost) +'</span>'
+              + '<span style="width:44px;color:var(--t3);">'+ wLabel(w.week_start) +'</span>'
+              + _stack(w.trips, w.own_trips, w.sub_trips, wkMax)
+              + '<span style="width:34px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (w.trips||0) +'건</span>'
+              + _osNum(w.own_trips, w.sub_trips)
+              + '<span style="width:66px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고 청구액(Total_TA)">'+ $f(w.billed_ta) +'</span>'
+              + '<span style="width:58px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(w.driver_cost) +'</span>'
               + '</div>';
           }).join('');
           wkHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
-            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>주간 추세 (최근 8주 · 주 시작일)</span><span>청구(참고) · 드라이버비용</span></div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>주간 추세 (최근 8주 · 주 시작일)</span><span>자차·서브 · 청구 · 비용</span></div>'
             + wkList + '</div>';
         }
       }
@@ -3551,23 +3575,30 @@ async function renderOpsStats(){
     // ── 차량별 운행 (가장 최근 달) — 실패 시 이 섹션만 생략 ──
     var vehHtml = '';
     try {
-      var vres = await fetch(base + '/rest/v1/v_ops_vehicle_monthly?month=eq.'+ encodeURIComponent(cur.month) +'&order=trips.desc&select=rego,trips,driver_cost,billed_ta', {headers:h});
+      var vres = await fetch(base + '/rest/v1/v_ops_vehicle_monthly?month=eq.'+ encodeURIComponent(cur.month) +'&order=trips.desc&select=rego,is_own,trips,driver_cost,billed_ta', {headers:h});
       if(vres.ok){
         var vrows = await vres.json();
         if(vrows && vrows.length){
           var vmax = Math.max.apply(null, vrows.map(function(v){return Number(v.trips)||0;})) || 1;
-          var vlist = vrows.slice(0,8).map(function(v){
+          var _badge = function(io){
+            if(io === true)  return '<span style="width:30px;font-size:8px;text-align:center;color:#fff;background:'+C_OWN+';border-radius:3px;padding:1px 0;">자차</span>';
+            if(io === false) return '<span style="width:30px;font-size:8px;text-align:center;color:#fff;background:'+C_SUB+';border-radius:3px;padding:1px 0;">서브</span>';
+            return '<span style="width:30px;font-size:8px;text-align:center;color:var(--t3);background:var(--sf2);border-radius:3px;padding:1px 0;">미상</span>';
+          };
+          var vlist = vrows.slice(0,10).map(function(v){
             var w = Math.round((Number(v.trips)||0)/vmax*100);
+            var bc = v.is_own===true ? C_OWN : (v.is_own===false ? C_SUB : 'var(--t3)');
             return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
-              + '<span style="width:52px;color:var(--t2);font-weight:600;">'+ (v.rego||'') +'</span>'
-              + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:var(--gn);"></div></div>'
-              + '<span style="width:38px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (v.trips||0) +'건</span>'
-              + '<span style="width:70px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고용 청구액(Total_TA 합계 · 부정확 가능)">'+ $f(v.billed_ta) +'</span>'
-              + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(v.driver_cost) +'</span>'
+              + '<span style="width:48px;color:var(--t2);font-weight:600;">'+ (v.rego||'') +'</span>'
+              + _badge(v.is_own)
+              + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:'+bc+';"></div></div>'
+              + '<span style="width:34px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (v.trips||0) +'건</span>'
+              + '<span style="width:66px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고용 청구액(Total_TA 합계 · 부정확 가능)">'+ $f(v.billed_ta) +'</span>'
+              + '<span style="width:58px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(v.driver_cost) +'</span>'
               + '</div>';
           }).join('');
           vehHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
-            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>차량별 운행 ('+ mLabel(cur.month) +')</span><span>청구(참고) · 드라이버비용</span></div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>차량별 운행 ('+ mLabel(cur.month) +')</span><span>자차/서브 · 청구 · 비용</span></div>'
             + vlist + '</div>';
         }
       }
@@ -3576,23 +3607,23 @@ async function renderOpsStats(){
     // ── 여행사별 운행 (가장 최근 달) — 실패 시 이 섹션만 생략 ──
     var agHtml = '';
     try {
-      var ares = await fetch(base + '/rest/v1/v_ops_agency_monthly?month=eq.'+ encodeURIComponent(cur.month) +'&order=trips.desc&select=agency,trips,driver_cost,billed_ta', {headers:h});
+      var ares = await fetch(base + '/rest/v1/v_ops_agency_monthly?month=eq.'+ encodeURIComponent(cur.month) +'&order=trips.desc&select=agency,trips,own_trips,sub_trips,driver_cost,billed_ta', {headers:h});
       if(ares.ok){
         var arows = await ares.json();
         if(arows && arows.length){
           var amax = Math.max.apply(null, arows.map(function(a){return Number(a.trips)||0;})) || 1;
           var alist = arows.slice(0,8).map(function(a){
-            var w = Math.round((Number(a.trips)||0)/amax*100);
             return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
-              + '<span style="width:100px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+ escH(a.agency||'') +'</span>'
-              + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:#8b5cf6;"></div></div>'
-              + '<span style="width:38px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (a.trips||0) +'건</span>'
-              + '<span style="width:70px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고 청구액(Total_TA)">'+ $f(a.billed_ta) +'</span>'
-              + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(a.driver_cost) +'</span>'
+              + '<span style="width:92px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+ escH(a.agency||'') +'</span>'
+              + _stack(a.trips, a.own_trips, a.sub_trips, amax)
+              + '<span style="width:34px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (a.trips||0) +'건</span>'
+              + _osNum(a.own_trips, a.sub_trips)
+              + '<span style="width:66px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고 청구액(Total_TA)">'+ $f(a.billed_ta) +'</span>'
+              + '<span style="width:58px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(a.driver_cost) +'</span>'
               + '</div>';
           }).join('');
           agHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
-            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>여행사별 운행 ('+ mLabel(cur.month) +')</span><span>청구(참고) · 드라이버비용</span></div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>여행사별 운행 ('+ mLabel(cur.month) +')</span><span>자차·서브 · 청구 · 비용</span></div>'
             + alist + '</div>';
         }
       }
@@ -3600,9 +3631,9 @@ async function renderOpsStats(){
 
     el.style.display='';
     el.innerHTML =
-        '<div class="shd" style="margin-top:14px"><div class="stl">📊 운행 통계 <span style="font-size:10px;color:var(--t3);font-weight:500;">Supabase · 최근 6개월</span></div></div>'
+        '<div class="shd" style="margin-top:14px"><div class="stl">📊 운행 통계 <span style="font-size:10px;color:var(--t3);font-weight:500;">Supabase · 최근 6개월</span> &nbsp;'+ _legend +'</div></div>'
       + '<div class="crd" style="padding:12px;">' + head
-      + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 운행 건수</span><span>청구(참고) · 드라이버비용</span></div>' + bars
+      + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 운행 건수</span><span>자차·서브 · 청구 · 비용</span></div>' + bars
       + wkHtml
       + vehHtml
       + agHtml
