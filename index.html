@@ -14949,7 +14949,7 @@ async function submitIncidentReport(){
   });
 
   const data = {
-    Driver: currentDriver,
+    Driver: currentDriver?.name || '',
     Date: date,
     Time: time,
     Rego: rego,
@@ -14965,8 +14965,8 @@ async function submitIncidentReport(){
 
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({action:'save_incident_report', data:data, _user:currentDriver})
+      method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'save_incident_report', data:data, _user:currentDriver?.name||''})
     });
     const json = await res.json();
     if(json.ok){
@@ -14995,7 +14995,12 @@ async function loadMyIncidents(){
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_incident_reports');
     const json = await res.json();
     if(json?.ok){
-      _myIncidents = (json.rows||[]).filter(r=>String(r.Driver||'').trim()===currentDriver);
+      const _n1 = String(currentDriver?.name||'').trim();
+      const _n2 = String(currentDriver?.englishName||'').trim();
+      _myIncidents = (json.rows||[]).filter(r=>{
+        const d = String(r.Driver||'').trim();
+        return d && (d===_n1 || (_n2 && d===_n2));
+      });
       renderMyIncidents();
     }
   } catch(e){ console.warn('Load incidents error:', e); }
