@@ -498,6 +498,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </style>
   <div id="als"></div>
 
+  <!-- ⚠️ 청구액 점검 (Total_TA ≠ M_PriceClient 계산값) — 이상 없으면 간단 표시 -->
+  <div id="ta-check" style="display:none;"></div>
+
   <!-- 📊 운행 통계 (Supabase 집계 · 읽기전용) — 데이터 없으면 자동 숨김 -->
   <div id="ops-stats" style="display:none;"></div>
 
@@ -3513,15 +3516,16 @@ async function renderOpsStats(){
       return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
         + '<span style="width:38px;color:var(--t3);">'+ mLabel(r.month) +'</span>'
         + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:var(--ac);"></div></div>'
-        + '<span style="width:44px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (r.trips||0) +'건</span>'
-        + '<span style="width:72px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(r.driver_cost) +'</span>'
+        + '<span style="width:38px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (r.trips||0) +'건</span>'
+        + '<span style="width:70px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고 청구액(Total_TA)">'+ $f(r.billed_ta) +'</span>'
+        + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(r.driver_cost) +'</span>'
         + '</div>';
     }).join('');
 
     // ── 주간 추세 (최근 8주) — 실패 시 이 섹션만 생략 ──
     var wkHtml = '';
     try {
-      var wres = await fetch(base + '/rest/v1/v_ops_weekly?order=week_start.desc&limit=8&select=week_start,trips,driver_cost', {headers:h});
+      var wres = await fetch(base + '/rest/v1/v_ops_weekly?order=week_start.desc&limit=8&select=week_start,trips,driver_cost,billed_ta', {headers:h});
       if(wres.ok){
         var wrows = await wres.json();
         if(wrows && wrows.length){
@@ -3532,12 +3536,13 @@ async function renderOpsStats(){
             return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
               + '<span style="width:52px;color:var(--t3);">'+ wLabel(w.week_start) +'</span>'
               + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+pw+'%;height:100%;background:#f59e0b;"></div></div>'
-              + '<span style="width:44px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (w.trips||0) +'건</span>'
-              + '<span style="width:72px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(w.driver_cost) +'</span>'
+              + '<span style="width:38px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (w.trips||0) +'건</span>'
+              + '<span style="width:70px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고 청구액(Total_TA)">'+ $f(w.billed_ta) +'</span>'
+              + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(w.driver_cost) +'</span>'
               + '</div>';
           }).join('');
           wkHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
-            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>주간 추세 (최근 8주 · 주 시작일)</span><span>드라이버 비용</span></div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>주간 추세 (최근 8주 · 주 시작일)</span><span>청구(참고) · 드라이버비용</span></div>'
             + wkList + '</div>';
         }
       }
@@ -3546,7 +3551,7 @@ async function renderOpsStats(){
     // ── 차량별 운행 (가장 최근 달) — 실패 시 이 섹션만 생략 ──
     var vehHtml = '';
     try {
-      var vres = await fetch(base + '/rest/v1/v_ops_vehicle_monthly?month=eq.'+ encodeURIComponent(cur.month) +'&order=trips.desc&select=rego,trips,driver_cost', {headers:h});
+      var vres = await fetch(base + '/rest/v1/v_ops_vehicle_monthly?month=eq.'+ encodeURIComponent(cur.month) +'&order=trips.desc&select=rego,trips,driver_cost,billed_ta', {headers:h});
       if(vres.ok){
         var vrows = await vres.json();
         if(vrows && vrows.length){
@@ -3556,12 +3561,13 @@ async function renderOpsStats(){
             return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
               + '<span style="width:52px;color:var(--t2);font-weight:600;">'+ (v.rego||'') +'</span>'
               + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:var(--gn);"></div></div>'
-              + '<span style="width:44px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (v.trips||0) +'건</span>'
-              + '<span style="width:72px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(v.driver_cost) +'</span>'
+              + '<span style="width:38px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (v.trips||0) +'건</span>'
+              + '<span style="width:70px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고용 청구액(Total_TA 합계 · 부정확 가능)">'+ $f(v.billed_ta) +'</span>'
+              + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(v.driver_cost) +'</span>'
               + '</div>';
           }).join('');
           vehHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
-            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>차량별 운행 ('+ mLabel(cur.month) +')</span><span>드라이버 비용</span></div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>차량별 운행 ('+ mLabel(cur.month) +')</span><span>청구(참고) · 드라이버비용</span></div>'
             + vlist + '</div>';
         }
       }
@@ -3570,7 +3576,7 @@ async function renderOpsStats(){
     // ── 여행사별 운행 (가장 최근 달) — 실패 시 이 섹션만 생략 ──
     var agHtml = '';
     try {
-      var ares = await fetch(base + '/rest/v1/v_ops_agency_monthly?month=eq.'+ encodeURIComponent(cur.month) +'&order=trips.desc&select=agency,trips,driver_cost', {headers:h});
+      var ares = await fetch(base + '/rest/v1/v_ops_agency_monthly?month=eq.'+ encodeURIComponent(cur.month) +'&order=trips.desc&select=agency,trips,driver_cost,billed_ta', {headers:h});
       if(ares.ok){
         var arows = await ares.json();
         if(arows && arows.length){
@@ -3578,14 +3584,15 @@ async function renderOpsStats(){
           var alist = arows.slice(0,8).map(function(a){
             var w = Math.round((Number(a.trips)||0)/amax*100);
             return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
-              + '<span style="width:110px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+ escH(a.agency||'') +'</span>'
+              + '<span style="width:100px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+ escH(a.agency||'') +'</span>'
               + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+w+'%;height:100%;background:#8b5cf6;"></div></div>'
-              + '<span style="width:44px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (a.trips||0) +'건</span>'
-              + '<span style="width:72px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(a.driver_cost) +'</span>'
+              + '<span style="width:38px;text-align:right;font-family:var(--fn);color:var(--t2);">'+ (a.trips||0) +'건</span>'
+              + '<span style="width:70px;text-align:right;font-family:var(--fn);color:var(--gn);" title="참고 청구액(Total_TA)">'+ $f(a.billed_ta) +'</span>'
+              + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(a.driver_cost) +'</span>'
               + '</div>';
           }).join('');
           agHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
-            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>여행사별 운행 ('+ mLabel(cur.month) +')</span><span>드라이버 비용</span></div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span>여행사별 운행 ('+ mLabel(cur.month) +')</span><span>청구(참고) · 드라이버비용</span></div>'
             + alist + '</div>';
         }
       }
@@ -3595,7 +3602,7 @@ async function renderOpsStats(){
     el.innerHTML =
         '<div class="shd" style="margin-top:14px"><div class="stl">📊 운행 통계 <span style="font-size:10px;color:var(--t3);font-weight:500;">Supabase · 최근 6개월</span></div></div>'
       + '<div class="crd" style="padding:12px;">' + head
-      + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 운행 건수</span><span>드라이버 비용</span></div>' + bars
+      + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 운행 건수</span><span>청구(참고) · 드라이버비용</span></div>' + bars
       + wkHtml
       + vehHtml
       + agHtml
@@ -3650,7 +3657,49 @@ async function renderRevStats(){
   } catch(e){ console.warn('[매출리포트] 렌더 실패:', e); el.style.display='none'; }
 }
 
+// ⚠️ 청구액 점검 — 저장된 Total_TA 와 가격표(M_PriceClient) 계산값(calcAgencyTA)이 다른 운행 목록.
+//   고쳐서 저장하면 두 값이 수렴 → 나중엔 저장 청구액을 믿고 쓸 수 있게 됨. (독립 렌더·읽기전용)
+function renderTAMismatch(){
+  var el = document.getElementById('ta-check');
+  if(!el) return;
+  try {
+    if(typeof calcAgencyTA !== 'function' || !Array.isArray(_drCache) || !_drCache.length){ el.style.display='none'; return; }
+    var $f = function(v){ return '$'+(Number(v)||0).toLocaleString('en-AU',{maximumFractionDigits:0}); };
+    var TOL = 1, bad = [];
+    _drCache.forEach(function(r){
+      if(r.Private === 'Y' || String(r.Agency||'').toUpperCase() === 'PRIVATE') return;   // 개인일정 제외
+      var calc = Number(calcAgencyTA(r)) || 0;
+      if(calcAgencyTA._lastMissing) return;               // 단가 미설정은 별개 이슈 → 제외
+      var stored = parseFloat(r.Total_TA);
+      if(isNaN(stored) || stored === 0) return;           // 청구액 미입력(0)은 "틀림"이 아니라 제외
+      var diff = Math.round((calc - stored) * 100) / 100;
+      if(Math.abs(diff) > TOL){
+        bad.push({ date: (typeof parseToISO==='function'?parseToISO(r.Date):'')||r.Date||'', rego: r.Rego||'',
+                   agency: r.Agency||'', tour: r.Tour_Code||r.Attraction||'', stored: stored, calc: calc, diff: diff });
+      }
+    });
+    if(!bad.length){
+      el.style.display='';
+      el.innerHTML = '<div class="shd" style="margin-top:10px"><div class="stl" style="color:var(--gn);font-size:13px;">✓ 청구액 점검 — 저장값이 계산값과 모두 일치</div></div>';
+      return;
+    }
+    bad.sort(function(a,b){ return Math.abs(b.diff) - Math.abs(a.diff); });
+    var rowsHtml = bad.slice(0,20).map(function(b){
+      return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:3px 0;border-bottom:1px solid var(--b1);">'
+        + '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t2);">'+ escH(b.date) +' · <b>'+ escH(b.rego) +'</b> · '+ escH(b.agency) + (b.tour?' · '+escH(b.tour):'') +'</span>'
+        + '<span style="white-space:nowrap;font-family:var(--fn);color:var(--t3);">저장 '+ $f(b.stored) +' → 계산 '+ $f(b.calc) +' <span style="color:'+(b.diff>0?'#dc2626':'#2563eb')+';font-weight:700;">('+(b.diff>0?'+':'')+$f(b.diff)+')</span></span>'
+        + '</div>';
+    }).join('');
+    el.style.display='';
+    el.innerHTML = '<div class="shd" style="margin-top:10px"><div class="stl" style="color:#b45309;">⚠️ 청구액 점검 — Total_TA ≠ 계산값 '+ bad.length +'건</div><div class="ssb">저장된 청구액이 가격표(M_PriceClient) 계산과 다른 운행. 해당 운행을 열어 저장하면 정정됩니다.</div></div>'
+      + '<div class="crd" style="padding:10px 12px;">' + rowsHtml
+      + (bad.length>20 ? '<div style="font-size:10px;color:var(--t3);text-align:center;padding-top:6px;">외 '+(bad.length-20)+'건 더 (금액 차이 큰 순)</div>' : '')
+      + '</div>';
+  } catch(e){ console.warn('[청구액 점검]', e); el.style.display='none'; }
+}
+
 function rDash(){
+  try { renderTAMismatch(); } catch(e){}  // ⚠️ 청구액 점검 (독립 렌더)
   try { renderOpsStats(); } catch(e){}   // 📊 운행 통계 (독립 렌더 — 실패해도 대시보드 영향 없음)
   try { renderRevStats(); } catch(e){}   // 💰 매출 리포트 (독립 렌더)
   // 상단 통계 카드는 제거됐지만, 마스터 그룹 카드의 카운트는 유지
