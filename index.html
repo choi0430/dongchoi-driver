@@ -4208,6 +4208,19 @@ function _softReauth(reason){
 })();
 
 // ═══════════════════════════════════════════════
+// 전역 오류 핸들러 — 조용히 사라지던 로더/네트워크 오류를 콘솔에 남김(진단용).
+//   과도한 알림 방지를 위해 사용자 토스트는 띄우지 않고 콘솔 기록만 (문제 발생 시 원인 추적 가능).
+// ═══════════════════════════════════════════════
+try {
+  window.addEventListener('unhandledrejection', function(ev){
+    try { console.warn('[unhandledrejection]', (ev && ev.reason) || ev); } catch(_){}
+  });
+  window.addEventListener('error', function(ev){
+    try { console.warn('[window.error]', ev && ev.message, (ev && ev.filename ? ev.filename+':'+ev.lineno : '')); } catch(_){}
+  });
+} catch(_){}
+
+// ═══════════════════════════════════════════════
 // Idempotency / Request_ID — 중복 저장 방지
 // ═══════════════════════════════════════════════
 // 모든 GAS write 요청에 고유 Request_ID를 부여.
@@ -6456,7 +6469,7 @@ function submitDailyReport(){
 // drTrailerVal: DR에 입력된 트레일러 비용 (0 또는 30 등)
 // onPass: 검증 통과 시 호출되는 콜백
 function _checkTrailerWithPD(btn, drTrailerVal, date, driver, rego, onPass){
-  const endpoint = (typeof GAS_URL !== 'undefined') ? GAS_URL : '';
+  const endpoint = (typeof APPS_SCRIPT_URL !== 'undefined' && APPS_SCRIPT_URL) ? APPS_SCRIPT_URL : '';
   const url = endpoint + '?action=lookup_pd_trailer'
     + '&date=' + encodeURIComponent(date)
     + '&driver=' + encodeURIComponent(driver)
@@ -6529,7 +6542,7 @@ function _checkTrailerWithPD(btn, drTrailerVal, date, driver, rego, onPass){
 // 케이스 B용: 트레일러 번호 입력 모달
 function _promptTrailerNumber(btn, date, driver, rego, onPass){
   // 활성 트레일러 목록 가져와서 선택지 제공
-  const endpoint = (typeof GAS_URL !== 'undefined') ? GAS_URL : '';
+  const endpoint = (typeof APPS_SCRIPT_URL !== 'undefined' && APPS_SCRIPT_URL) ? APPS_SCRIPT_URL : '';
   fetch(endpoint + '?action=get_active_trailers').then(r => r.json()).then(res => {
     const list = (res && res.ok) ? (res.trailers || []) : [];
     const opts = list.map(t => t.trailer).filter(Boolean);
@@ -11116,15 +11129,14 @@ function submitDefectReport(){
   reports.unshift(entry);
   saveDefectReports(reports);
 
-  // GAS에도 저장
-  fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-    body: JSON.stringify({action:'save_defect_report', data:{
-      ID: entry.id, Rego: rego, Category: cat, Location: location,
-      Description: desc, Severity: severity, KM: km||'',
-      Driver: currentDriver?.name||driver, Status:'open',
-      SubmittedAt: entry.submittedAt, AdminNote:''
-    }})
-  }).catch(()=>{});
+  // GAS에도 저장 — 실패 시 재시도 큐(유실 방지) + Request_ID 멱등(중복 방지)
+  //   기존: fetch(...).catch(()=>{}) 로 실패를 조용히 삼켜 결함 보고가 유실될 수 있었음
+  postToSheetsWithRetry('save_defect_report', {
+    ID: entry.id, Rego: rego, Category: cat, Location: location,
+    Description: desc, Severity: severity, KM: km||'',
+    Driver: currentDriver?.name||driver, Status:'open',
+    SubmittedAt: entry.submittedAt, AdminNote:''
+  });
 
   // 필드 초기화
   ['def-rego','def-cat','def-location','def-desc','def-km'].forEach(id=>{
@@ -14552,8 +14564,8 @@ async function submitSubReport(){
       if(dupWarn) dupWarn.style.display='none';
       _siReportsCache = null;   // 새 리포트 저장됨 → 캐시 무효화 후 최신 이력 로드
       loadSubReportHistory();
-    } else { showToast('❌ 저장 실패: '+(json.error||''),'error'); }
-  }catch(e){ showToast('❌ 네트워크 오류: '+e.message,'error'); }
+    } else { _unlockSubmitBtn(_subBtn); showToast('❌ 저장 실패: '+(json.error||''),'error'); }
+  }catch(e){ _unlockSubmitBtn(_subBtn); showToast('❌ 네트워크 오류: '+e.message,'error'); }
 }
 
 async function loadSubReportHistory(){
