@@ -3814,10 +3814,52 @@ function renderTAMismatch(){
   } catch(e){ console.warn('[청구액 점검]', e); el.style.display='none'; }
 }
 
+// ⚠️ 단가 누락 패널 — 가격표(M_PriceClient)에 단가가 없어 청구가 드라이버 비용으로 잘못 잡히는
+//   여행사·코스 조합을 대시보드에 목록화. 검증된 _taRateMissing 재사용. 읽기전용·추가형(실패해도 대시보드 무관).
+//   최근 120일 · 개인/서브직접 제외(DC 빌링만). ta-check 컨테이너 재사용.
+async function renderMissingPrices(){
+  var el = document.getElementById('ta-check');
+  if(!el) return;
+  try {
+    if(typeof _schEnsureDRCache === 'function'){ try { await _schEnsureDRCache(); } catch(e){} }
+    if(typeof _taRateMissing !== 'function' || typeof DB === 'undefined' || !DB.PC || !Object.keys(DB.PC).length){ el.style.display='none'; el.innerHTML=''; return; }
+    if(!Array.isArray(_drCache) || !_drCache.length){ el.style.display='none'; el.innerHTML=''; return; }
+    var cutoff = new Date(); cutoff.setDate(cutoff.getDate()-120);
+    var groups = {};
+    _drCache.forEach(function(r){
+      var ag = String(r.Agency||'').trim();
+      if(!ag || ag.toUpperCase()==='PRIVATE' || r.Private==='Y') return;
+      var course = String(r.Attraction||'').trim();
+      if(!course) return;
+      if(typeof isBillingEntityDC === 'function' && !isBillingEntityDC(r.Billing_Entity||r.BillingEntity)) return; // 서브 직접 빌링 제외
+      var iso = r._iso || (typeof parseToISO==='function' ? parseToISO(r.Date||'') : '');
+      if(iso){ var d = new Date(iso+'T00:00:00'); if(!isNaN(d.getTime()) && d < cutoff) return; }  // 최근 120일만
+      if(!_taRateMissing(r)) return;
+      var seats = String(r.Seats||'').replace(/[^0-9]/g,'');
+      var key = ag+'|'+course+'|'+seats;
+      if(!groups[key]) groups[key] = { agency:ag, course:course, seats:seats, count:0, last:'' };
+      groups[key].count++;
+      if(iso && iso > groups[key].last) groups[key].last = iso;
+    });
+    var list = Object.keys(groups).map(function(k){ return groups[k]; }).sort(function(a,b){ return b.count - a.count; });
+    if(!list.length){ el.style.display='none'; el.innerHTML=''; return; }
+    var totalTrips = list.reduce(function(s,g){ return s + g.count; }, 0);
+    var rows = list.slice(0,20).map(function(g){
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--b1);">'
+        + '<span style="flex:1;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><b>'+ escH(g.agency) +'</b> · '+ escH(g.course) + (g.seats? ' <span style="color:var(--t3);">('+g.seats+'석)</span>':'') +'</span>'
+        + '<span style="width:44px;text-align:right;font-family:var(--fn);color:#b45309;font-weight:700;">'+ g.count +'건</span>'
+        + '<span style="width:74px;text-align:right;color:var(--t3);font-size:11px;">'+ (g.last? fmtDate(g.last):'') +'</span>'
+        + '</div>';
+    }).join('');
+    el.style.display='';
+    el.innerHTML = '<div class="shd" style="margin-top:10px"><div class="stl" style="color:#b45309;">⚠️ 단가 누락 — 가격표에 단가 없는 운행 '+ totalTrips +'건 <span style="font-size:11px;font-weight:600;">('+ list.length +'개 조합)</span></div>'
+      + '<div class="ssb">이 여행사·코스는 <code>M_PriceClient</code>에 단가가 없어 <b>청구가 드라이버 비용으로 잘못 잡힙니다</b>. 마스터 → 가격표에서 단가를 채우면 청구가 정확해집니다. <span style="color:var(--t3);">(최근 120일 · DC 빌링만)</span></div></div>'
+      + '<div class="crd" style="padding:10px 12px;">'+ rows + (list.length>20 ? '<div style="font-size:11px;color:var(--t3);margin-top:6px;">…외 '+(list.length-20)+'개 조합 더</div>' : '') +'</div>';
+  } catch(e){ console.warn('[단가누락] 렌더 실패:', e); el.style.display='none'; }
+}
+
 function rDash(){
-  // ⚠️ '청구액 점검' 패널 제거: Total_TA(=드라이버 기본급)를 여행사 가격표 계산과 비교하던 것으로,
-  //    서로 다른 개념이라 항상 불일치로 나오는 잘못된 비교였음. 여행사 청구는 운행 통계/매출 리포트에서 확인.
-  var _tc = document.getElementById('ta-check'); if(_tc){ _tc.style.display='none'; _tc.innerHTML=''; }
+  try { renderMissingPrices(); } catch(e){}   // ⚠️ 단가 누락 (독립 렌더 — 실패해도 대시보드 무관)
   try { renderOpsStats(); } catch(e){}   // 📊 운행 통계 (독립 렌더 — 실패해도 대시보드 영향 없음)
   try { renderRevStats(); } catch(e){}   // 💰 매출 리포트 (독립 렌더)
   // 상단 통계 카드는 제거됐지만, 마스터 그룹 카드의 카운트는 유지
