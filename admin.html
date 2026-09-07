@@ -23030,7 +23030,7 @@ async function loadInvReports() {
   // 캐시 or 새 조회 — agency 선택 전에도 리포트 로드해서 드롭다운 채우기
   if (!_invReports) {
     try {
-      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const res = await _getDailyReportResp(); /* [4MB캐시] get_reports Daily_Report */
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const json = await res.json();
       if (json.ok) {
@@ -23187,6 +23187,38 @@ function _subInvItemsToRows(agency, from, to) {
 }
 
 // 수동 항목 포함 rows 빌드 (미리보기 갱신용)
+// ── 관리자 Daily_Report 공유 캐시 (짧은 TTL + 동시요청 합침) ──────────────
+//   반복 4MB 다운로드 제거용. _drCache/_reportsCache 변수는 건드리지 않음(호출부 각자 사용).
+//   fetch(get_reports Daily_Report) 대신 _getDailyReportResp() 사용 — Response 유사 객체(res.ok/res.json() 그대로).
+//   force=true 면 캐시 무시 항상 최신 (인보이스 실제 발행 등 최신성 필요 시).
+var _dailyRepCache = null, _dailyRepCacheTime = 0, _dailyRepInflight = null;
+var _DAILY_REP_TTL = 30000; // 30초
+async function _getDailyReportCached(force){
+  const now = Date.now();
+  if(!force && _dailyRepCache && (now - _dailyRepCacheTime) < _DAILY_REP_TTL){
+    return { ok:true, rows:_dailyRepCache, _cached:true };
+  }
+  if(!force && _dailyRepInflight){ return _dailyRepInflight; }
+  const p = (async () => {
+    try {
+      const r = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const j = await r.json();
+      if(j && j.ok && j.rows){ _dailyRepCache = j.rows; _dailyRepCacheTime = Date.now(); }
+      return j;
+    } catch(e){ return { ok:false, error:String(e) }; }
+    finally { _dailyRepInflight = null; }
+  })();
+  if(!force) _dailyRepInflight = p;
+  return p;
+}
+async function _getDailyReportResp(force){
+  const j = await _getDailyReportCached(force);
+  return { ok: !!(j && j.ok !== false), json: async () => j };
+}
+// 저장/수정 후 강제 무효화용 (다음 조회가 최신 받도록)
+function _invalidateDailyReportCache(){ _dailyRepCache = null; _dailyRepCacheTime = 0; }
+
 function _buildInvRows(agency, from, to) {
   // ★ 진정한 수정 모드: 저장된 Items로부터 구성된 행 반환
   if (_trueEditData && _trueEditData.rows) {
@@ -24483,7 +24515,7 @@ async function generateDraftInvoices(force=false){
     // 2. DR 캐시 보장
     if(!_drCache){
       try {
-        const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+        const res = await _getDailyReportResp(); /* [4MB캐시] get_reports Daily_Report */
         const j = await res.json();
         if(j.ok && j.rows) _drCache = j.rows.map((r,i)=>({...r, _rowIndex:i+2}));
       } catch(e){}
@@ -25028,7 +25060,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
   if (!_invReports) {
     try {
       toast('📄 리포트 로딩 중...','ok');
-      const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const res = await _getDailyReportResp(); /* [4MB캐시] get_reports Daily_Report */
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
       if (json.ok) {
@@ -25252,7 +25284,7 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
     // ① 미리보기 HTML이 없는 경우에만 재빌드 (직접 발송 버튼 클릭 시)
     if (!_invReports) {
       try {
-        const res  = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+        const res = await _getDailyReportResp(); /* [4MB캐시] get_reports Daily_Report */
         const json = await res.json();
         if (json.ok) _invReports = json.rows.map(r => ({...r, _iso:parseToISO(r.Date||''), _agency:String(r.Agency||'').trim(), _timeStart:parseSheetTime(r.Time_Start), _timeEnd:parseSheetTime(r.Time_End)}));
       } catch(e) { toast('리포트 로드 실패','er'); return; }
@@ -26330,7 +26362,7 @@ async function previewInvoiceDoc() {
   if (!_invReports) {
     toast('📄 리포트 로딩 중...','in');
     try {
-      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const res = await _getDailyReportResp(); /* [4MB캐시] get_reports Daily_Report */
       if (res.ok) {
         const json = await res.json();
         if (json.ok) {
@@ -26373,7 +26405,7 @@ async function downloadInvoicePdf() {
   if (!_invReports) {
     toast('📄 리포트 로딩 중...','in');
     try {
-      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const res = await _getDailyReportResp(); /* [4MB캐시] get_reports Daily_Report */
       if (res.ok) {
         const json = await res.json();
         if (json.ok) {
@@ -26427,7 +26459,7 @@ async function generateInvoice() {
   if (!_invReports) {
     toast('📄 리포트 로딩 중...','in');
     try {
-      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const res = await _getDailyReportResp(true); /* [4MB캐시] get_reports Daily_Report */
       if (res.ok) {
         const json = await res.json();
         if (json.ok) {
