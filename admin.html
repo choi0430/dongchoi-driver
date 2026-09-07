@@ -4064,6 +4064,17 @@ function rDash(){
         icon:'📜',
         m:`${d.Name_KR||d.Name_EN} — Authority (자격증) ${fmtDays(la, d.Authority_Expiry)}`});
     }
+    // ── WWC (Working With Children · 아동보호) 만료 — 설정된 드라이버만 ──
+    const lw=du(d.WWC_Expiry);
+    if(lw<90){
+      const urgent=lw<0,warn=lw<30;
+      als.push({sort:lw,type:'wwc',
+        bg:urgent?'#fef2f2':warn?'#fff7ed':'#fefce8',
+        bc:urgent?'#ef4444':warn?'#f97316':'#eab308',
+        fc:urgent?'#dc2626':warn?'#ea580c':'#ca8a04',
+        icon:'🧒',
+        m:`${d.Name_KR||d.Name_EN} — WWC (아동보호) ${fmtDays(lw, d.WWC_Expiry)}`});
+    }
   });
   // ── 차량 Rego / HVIS / 서비스 KM ──
   //   ★ DC 책임 차량만 알림 (DC 소유 또는 DC Accreditation 사용 차량)
@@ -4570,6 +4581,7 @@ function rDash(){
     const typeLabels = {
       license: '🪪 운전 면허',
       authority: '📜 자격증 (Authority)',
+      wwc: '🧒 WWC (아동보호)',
       rego: '🚗 차량 등록 (Rego)',
       hvis: '🔧 HVIS 검사',
       hvis_booked: '✅ HVIS 예약 완료',
@@ -4590,7 +4602,7 @@ function rDash(){
       byType[k].push(a);
     });
     // 유형 순서 — 일반적으로 긴급한 유형 먼저
-    const typeOrder = ['open_inc','license','authority','dc_record','rego','hvis','service','fatigue','svc_mismatch','unpaid_wage','trailer_rego','trailer_safety','hvis_booked','missing','other'];
+    const typeOrder = ['open_inc','license','authority','wwc','dc_record','rego','hvis','service','fatigue','svc_mismatch','unpaid_wage','trailer_rego','trailer_safety','hvis_booked','missing','other'];
     typeOrder.forEach(k => {
       const arr = byType[k];
       if(!arr || !arr.length) return;
