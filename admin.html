@@ -23849,6 +23849,9 @@ async function saveInvoiceToSheet() {
 
     // ★ 거래처 잔액에 Agency_Txn 자동 등록 (행 분리 방식)
     // Type별 개별 행: invoice(DR), prepaid_use(CR), credit_use(CR)
+    // ★ 원자성 보강: 각 잔액 기록을 await 하고 실패는 _balErrors에 모아 사용자에게 경고
+    //   (인보이스는 저장됐는데 잔액 기록만 조용히 누락되어 거래처 잔액이 어긋나는 것 방지)
+    let _balErrors = [];
     try {
       // ★ 실제 첫날/마지막날 계산 (인보이스 항목 기준)
       let firstDate = null, lastDate = null;
@@ -23911,22 +23914,25 @@ async function saveInvoiceToSheet() {
           });
           const _drJson = await _drRes.json();
           if(_drJson.ok) console.log('[Invoice→Balance] DR(invoice) 등록:', invNum, drAmount);
-          else console.warn('[Invoice→Balance] DR fail:', _drJson.error);
-        } catch(e) { console.warn('[Invoice→Balance] DR error:', e); }
+          else { console.warn('[Invoice→Balance] DR fail:', _drJson.error); _balErrors.push(`청구액(DR) $${drAmount}`); }
+        } catch(e) { console.warn('[Invoice→Balance] DR error:', e); _balErrors.push(`청구액(DR) $${drAmount}`); }
 
-        // ② 선수금/크레딧 개별 CR 행
-        _invDeductions.filter(d => d.amount > 0).forEach(d => {
+        // ② 선수금/크레딧 개별 CR 행 (await — 실패 시 경고 수집)
+        for (const d of _invDeductions.filter(d => d.amount > 0)) {
           const txnType = d.type === 'prepaid' ? 'prepaid_use' : 'credit_use';
           const label = d.type === 'prepaid' ? '선수금' : '크레딧';
           const note = d.note ? ` (${d.note})` : '';
           const crTxn = { ...baseTxn, Type: txnType, DR: 0, CR: roundMoney(d.amount),
             Remark: `${label} 차감${note} (${invNum})` };
-          fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
-            body: JSON.stringify({action:'add_agency_txn', data:crTxn, _user:getAdminUser()})
-          }).then(r=>r.json()).then(j=>{
-            if(j.ok) console.log(`[Invoice→Balance] CR(${txnType}) 등록:`, invNum, d.amount);
-          }).catch(e=>console.warn(`[Invoice→Balance] CR(${txnType}) error:`, e));
-        });
+          try {
+            const _crRes = await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+              body: JSON.stringify({action:'add_agency_txn', data:crTxn, _user:getAdminUser()})
+            });
+            const _crJson = await _crRes.json();
+            if(_crJson.ok) console.log(`[Invoice→Balance] CR(${txnType}) 등록:`, invNum, d.amount);
+            else { console.warn(`[Invoice→Balance] CR(${txnType}) fail:`, _crJson.error); _balErrors.push(`${label} 차감 $${roundMoney(d.amount)}`); }
+          } catch(e) { console.warn(`[Invoice→Balance] CR(${txnType}) error:`, e); _balErrors.push(`${label} 차감 $${roundMoney(d.amount)}`); }
+        }
 
         _balLoaded = false;
       } else {
@@ -23937,26 +23943,36 @@ async function saveInvoiceToSheet() {
           console.log('[Invoice→Balance] DR 금액 변경 감지:', invNum, oldDR, '→', drAmount);
           const rowIdx = existingTxn._rowIndex || existingTxn.rowIndex;
           if (rowIdx) {
-            fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
-              body: JSON.stringify({action:'update_agency_txn', rowIndex: rowIdx, data: {DR: drAmount, StartDate: actualFrom, FinishDate: actualTo, Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})`}, _user:getAdminUser()})
-            }).then(r=>r.json()).then(j=>{
-              if(j.ok) { console.log('[Invoice→Balance] DR 금액 업데이트:', invNum, drAmount); existingTxn.DR = drAmount; }
-            }).catch(e=>console.warn('[Invoice→Balance] DR update error:', e));
+            try {
+              const _uRes = await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+                body: JSON.stringify({action:'update_agency_txn', rowIndex: rowIdx, data: {DR: drAmount, StartDate: actualFrom, FinishDate: actualTo, Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})`}, _user:getAdminUser()})
+              });
+              const _uJson = await _uRes.json();
+              if(_uJson.ok) { console.log('[Invoice→Balance] DR 금액 업데이트:', invNum, drAmount); existingTxn.DR = drAmount; }
+              else { console.warn('[Invoice→Balance] DR update fail:', _uJson.error); _balErrors.push(`청구액 수정(DR) $${drAmount}`); }
+            } catch(e){ console.warn('[Invoice→Balance] DR update error:', e); _balErrors.push(`청구액 수정(DR) $${drAmount}`); }
           } else {
             // rowIndex 없으면 삭제 후 재등록 — 기존 DueDate 보존
             const baseTxn = { Agency: agency, Date: todayStr, InvoiceID: invNum, TourCode: txnTourCode, Guide: txnGuide, StartDate: actualFrom, FinishDate: actualTo, DueDate: existingTxn.DueDate||'' };
             const drTxn = { ...baseTxn, Type: 'invoice', DR: drAmount, CR: 0,
               Remark: `\uC778\uBCF4\uC774\uC2A4 \uC218\uC815 (${_allTxnItems.length}\uAC74, ${fmtDate(actualFrom)}~${fmtDate(actualTo)})` };
-            fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
-              body: JSON.stringify({action:'add_agency_txn', data:drTxn, _user:getAdminUser()})
-            }).then(r=>r.json()).then(j=>{
-              if(j.ok) console.log('[Invoice→Balance] DR(invoice) 재등록:', invNum, drAmount);
-            }).catch(e=>console.warn('[Invoice→Balance] DR re-add error:', e));
+            try {
+              const _rRes = await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+                body: JSON.stringify({action:'add_agency_txn', data:drTxn, _user:getAdminUser()})
+              });
+              const _rJson = await _rRes.json();
+              if(_rJson.ok) console.log('[Invoice→Balance] DR(invoice) 재등록:', invNum, drAmount);
+              else { console.warn('[Invoice→Balance] DR re-add fail:', _rJson.error); _balErrors.push(`청구액 재등록(DR) $${drAmount}`); }
+            } catch(e){ console.warn('[Invoice→Balance] DR re-add error:', e); _balErrors.push(`청구액 재등록(DR) $${drAmount}`); }
           }
           _balLoaded = false;
         }
       }
-    } catch(e) { _fail(); console.warn('[Invoice→Balance] 거래 등록 오류:', e); }
+      // ★ 잔액 기록 중 실패가 있었으면 사용자에게 분명히 경고 (조용한 누락 방지)
+      if(_balErrors.length){
+        toast(`⚠️ 인보이스 ${invNum}는 저장됐지만 거래처 잔액 기록 일부 실패: ${_balErrors.join(', ')} — 거래처 잔액에서 수동 확인/추가 필요`, 'er');
+      }
+    } catch(e) { console.warn('[Invoice→Balance] 거래 등록 오류:', e); _balErrors.push('거래 기록 오류'); toast(`⚠️ 인보이스 ${invNum} 저장됨 — 거래처 잔액 기록 실패: 수동 확인 필요`, 'er'); }
 
     _invHistoryCache = null; // 캐시 무효화
     _balLoaded = false; // ★ 잔액 캐시도 무효화
