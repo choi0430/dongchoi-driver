@@ -507,6 +507,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 📊 운행 통계 (Supabase 집계 · 읽기전용) — 데이터 없으면 자동 숨김 -->
   <div id="ops-stats" style="display:none;"></div>
 
+  <!-- 📈 마진 분석 (청구 − 비용 · 읽기전용) — 데이터 없으면 자동 숨김 -->
+  <div id="margin-stats" style="display:none;"></div>
+
   <!-- 💰 매출 리포트 (인보이스 기반 · 읽기전용) — 데이터 없으면 자동 숨김 -->
   <div id="rev-stats" style="display:none;"></div>
 
@@ -3497,11 +3500,13 @@ async function submitQuickTrailerRegistration(trailerNum){
 //   ※ Total_TA(=드라이버 기본급)가 아니라, 가격표(M_PriceClient) 기준 "여행사 청구액"을 계산.
 //   반환 { m:{월:합}, w:{주월요일:합}, v:{월|REGO:합}, a:{월|여행사:합} } 또는 null(가격표/데이터 미로드).
 //   개인(Private)·여행사 없음 행은 제외(여행사 청구 아님).
+var _billMemo = null, _billMemoRef = null;   // 같은 _drCache 참조면 재계산 생략(패널 여러 개가 공유)
 async function _computeAgencyBilling(){
   if(typeof calcAgencyTA !== 'function') return null;
   if(typeof DB === 'undefined' || !DB.PC || !Object.keys(DB.PC).length) return null;  // 가격표 미로드 → 잘못된 값 방지 위해 포기
   try { if(typeof _schEnsureDRCache === 'function') await _schEnsureDRCache(); } catch(e){}
   if(typeof _drCache === 'undefined' || !_drCache || !_drCache.length) return null;
+  if(_billMemo && _billMemoRef === _drCache) return _billMemo;   // 캐시 히트(동일 데이터)
   var _pd = function(s){
     if(s instanceof Date) return isNaN(s)?null:new Date(s.getFullYear(),s.getMonth(),s.getDate());
     var t = String(s||'').trim(); if(!t) return null;
@@ -3513,8 +3518,9 @@ async function _computeAgencyBilling(){
   var ym =function(d){return d.getFullYear()+'-'+pad(d.getMonth()+1);};
   var ymd=function(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());};
   var mon=function(d){var x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x;};  // 주 시작(월요일)
-  // out.{m,w,v,a}=DC 빌링 청구액. sd=서브직접 건수. drv=자차 드라이버비용. sub=서브 지급비용(DC빌링만).
-  var out={m:{},w:{},v:{},a:{},sd:{m:{},w:{},v:{},a:{}},drv:{m:{},w:{},v:{},a:{}},sub:{m:{},w:{},v:{},a:{}}};
+  // out.{m,w,v,a}=DC 빌링 청구액. sd=서브직접 건수. drv=자차 드라이버비용(전체).
+  //   drvDC=DC빌링 자차 드라이버비용(마진용). sub=서브 지급비용(DC빌링만).
+  var out={m:{},w:{},v:{},a:{},sd:{m:{},w:{},v:{},a:{}},drv:{m:{},w:{},v:{},a:{}},drvDC:{m:{},w:{},v:{},a:{}},sub:{m:{},w:{},v:{},a:{}}};
   var _add=function(o,mk,wk,rg,ag,val){ o.m[mk]=(o.m[mk]||0)+val; o.w[wk]=(o.w[wk]||0)+val; if(rg)o.v[mk+'|'+rg]=(o.v[mk+'|'+rg]||0)+val; o.a[mk+'|'+ag]=(o.a[mk+'|'+ag]||0)+val; };
   _drCache.forEach(function(r){
     var ag = String(r.Agency||r.agency||'').trim();
@@ -3529,7 +3535,7 @@ async function _computeAgencyBilling(){
     // ── 비용 분리 ──
     if(!isSub){                                              // 자차: 드라이버 비용 (빌링 무관 — 우리 드라이버에게 항상 지급)
       var dcost = cr ? (Number(cr.drCost)||0) : (Number(r.DR_Cost)||0);
-      if(dcost) _add(out.drv, mk,wk,rg,ag, dcost);
+      if(dcost){ _add(out.drv, mk,wk,rg,ag, dcost); if(isDC) _add(out.drvDC, mk,wk,rg,ag, dcost); }  // drvDC: 마진 계산용(DC빌링만)
     } else if(isDC){                                         // 서브 + DC빌링(②): 서브 지급 비용
       var spay = (cr && cr.subCost) ? (Number(cr.subCost.total)||0) : 0;
       if(spay) _add(out.sub, mk,wk,rg,ag, spay);
@@ -3542,6 +3548,7 @@ async function _computeAgencyBilling(){
       _add(out.sd, mk,wk,rg,ag, 1);
     }
   });
+  _billMemo = out; _billMemoRef = _drCache;
   return out;
 }
 
@@ -3727,6 +3734,73 @@ async function renderOpsStats(){
       + agHtml
       + '</div>';
   } catch(e){ console.warn('[운행통계] 렌더 실패:', e); el.style.display='none'; }
+}
+
+// 📈 마진 분석 패널 — 마진 = 청구(DC) − 드라이버(DC자차) − 서브지급(DC서브). _computeAgencyBilling 재사용.
+//   전부 DC 빌링 기준으로 맞춰 정확한 마진. 읽기전용·추가형(실패/데이터없음 시 숨김).
+async function renderMargin(){
+  var el = document.getElementById('margin-stats');
+  if(!el) return;
+  try {
+    var bill = await _computeAgencyBilling();
+    if(!bill){ el.style.display='none'; return; }
+    var months = Object.keys(bill.m||{}).sort();   // 오름차순
+    if(!months.length){ el.style.display='none'; return; }
+    var $f = function(v){ var n=Number(v)||0; return (n<0?'-$':'$')+Math.abs(n).toLocaleString('en-AU',{maximumFractionDigits:0}); };
+    var mLabel = function(m){ var p=String(m).split('-'); return (p[1]||'')+'월'; };
+    var pct = function(marg,bil){ return bil>0 ? Math.round(marg/bil*100) : 0; };
+    var costOf = function(scope, key){ return (bill.drvDC[scope][key]||0) + (bill.sub[scope][key]||0); };
+    var recent = months.slice(-6);
+    var cur = months[months.length-1];
+    // 요약: 이번달
+    var curBill = bill.m[cur]||0, curCost = costOf('m', cur), curMarg = curBill - curCost;
+    var head = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">'
+      + '<div style="background:var(--gnd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 마진</div><div style="font-size:17px;font-weight:800;color:'+(curMarg>=0?'var(--gn)':'var(--rd)')+';font-family:var(--fn);">'+ $f(curMarg) +'</div><div style="font-size:8px;color:var(--t3);margin-top:1px;">마진율 '+ pct(curMarg,curBill) +'%</div></div>'
+      + '<div style="background:var(--acd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 청구(DC)</div><div style="font-size:17px;font-weight:800;color:var(--ac);font-family:var(--fn);">'+ $f(curBill) +'</div></div>'
+      + '<div style="background:var(--sf2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 달 비용</div><div style="font-size:17px;font-weight:800;color:var(--t2);font-family:var(--fn);">'+ $f(curCost) +'</div><div style="font-size:8px;color:var(--t3);margin-top:1px;">드라이버+서브</div></div>'
+      + '</div>';
+    // 월별 마진 막대
+    var maxBill = Math.max.apply(null, recent.map(function(m){ return bill.m[m]||0; })) || 1;
+    var bars = recent.map(function(m){
+      var b = bill.m[m]||0, c = costOf('m',m), mg = b-c;
+      var wC = Math.round(c/maxBill*100), wM = Math.round(Math.max(mg,0)/maxBill*100);
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
+        + '<span style="width:34px;color:var(--t3);">'+ mLabel(m) +'</span>'
+        + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:14px;overflow:hidden;"><div style="width:'+Math.min(wC+wM,100)+'%;height:100%;display:flex;">'
+          + '<div style="width:'+(wC+wM>0?Math.round(wC/(wC+wM)*100):0)+'%;background:#9ca3af;" title="비용"></div><div style="flex:1;background:'+(mg>=0?'var(--gn)':'var(--rd)')+';" title="마진"></div></div></div>'
+        + '<span style="width:70px;text-align:right;font-family:var(--fn);color:'+(mg>=0?'var(--gn)':'var(--rd)')+';font-weight:600;">'+ $f(mg) +'</span>'
+        + '<span style="width:38px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ pct(mg,b) +'%</span>'
+        + '</div>';
+    }).join('');
+    // 여행사별 마진 (이번 달, 마진순)
+    var agRows = Object.keys(bill.a).filter(function(k){ return k.indexOf(cur+'|')===0; }).map(function(k){
+      var ag = k.slice(cur.length+1);
+      var b = bill.a[k]||0, c = costOf('a', k);
+      return { agency:ag, bill:b, cost:c, margin:b-c };
+    }).filter(function(x){ return x.bill>0; }).sort(function(a,b){ return b.margin-a.margin; });
+    var agHtml = '';
+    if(agRows.length){
+      var alist = agRows.slice(0,10).map(function(a){
+        return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:3px 0;border-bottom:1px solid var(--b1);">'
+          + '<span style="flex:1;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+ escH(a.agency) +'</span>'
+          + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--ac);">'+ $f(a.bill) +'</span>'
+          + '<span style="width:58px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ $f(a.cost) +'</span>'
+          + '<span style="width:64px;text-align:right;font-family:var(--fn);color:'+(a.margin>=0?'var(--gn)':'var(--rd)')+';font-weight:700;">'+ $f(a.margin) +'</span>'
+          + '<span style="width:36px;text-align:right;font-family:var(--fn);color:var(--t3);">'+ pct(a.margin,a.bill) +'%</span>'
+          + '</div>';
+      }).join('');
+      agHtml = '<div style="border-top:1px solid var(--b1);margin-top:10px;padding-top:8px;">'
+        + '<div style="display:flex;font-size:10px;color:var(--t3);margin:0 2px 4px;"><span style="flex:1;">여행사별 마진 ('+ mLabel(cur) +')</span><span style="width:64px;text-align:right;">청구</span><span style="width:58px;text-align:right;">비용</span><span style="width:64px;text-align:right;">마진</span><span style="width:36px;text-align:right;">율</span></div>'
+        + alist + '</div>';
+    }
+    el.style.display='';
+    el.innerHTML = '<div class="shd" style="margin-top:14px"><div class="stl">📈 마진 분석 <span style="font-size:10px;color:var(--t3);font-weight:500;">청구(DC) − 드라이버 − 서브지급 · 최근 6개월</span></div></div>'
+      + '<div class="crd" style="padding:12px;">' + head
+      + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3);margin:6px 2px 4px;"><span>월별 마진 <span style="opacity:.7;">(회색=비용, 초록/빨강=마진)</span></span><span>마진 · 율</span></div>' + bars
+      + agHtml
+      + '<div style="font-size:9px;color:var(--t3);margin-top:8px;">※ 전부 DC(자회사) 빌링 기준. 서브 직접 빌링 운행은 제외. 청구는 가격표, 비용은 calcSubReport 기준.</div>'
+      + '</div>';
+  } catch(e){ console.warn('[마진분석] 렌더 실패:', e); el.style.display='none'; }
 }
 
 // 💰 매출 리포트 패널 — Supabase v_revenue_monthly 직접 읽기 (읽기전용·추가형).
@@ -3942,6 +4016,7 @@ function rDash(){
   try { renderMissingPrices(); } catch(e){}   // ⚠️ 단가 누락 (독립 렌더 — 실패해도 대시보드 무관)
   try { renderARaging(); } catch(e){}          // 📅 미수금/연체 (독립 렌더)
   try { renderOpsStats(); } catch(e){}   // 📊 운행 통계 (독립 렌더 — 실패해도 대시보드 영향 없음)
+  try { renderMargin(); } catch(e){}     // 📈 마진 분석 (독립 렌더)
   try { renderRevStats(); } catch(e){}   // 💰 매출 리포트 (독립 렌더)
   // 상단 통계 카드는 제거됐지만, 마스터 그룹 카드의 카운트는 유지
   const kvEl=document.getElementById('kv'); if(kvEl) kvEl.textContent=DB.V.length;
