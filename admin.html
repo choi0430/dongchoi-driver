@@ -11041,7 +11041,7 @@ async function getSubReportData(from, to) {
   // DR 캐시 없으면 로드
   if(!_drCache) {
     try {
-      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const res = await _getDailyReportResp(); /* [4MB캐시] get_reports Daily_Report */
       const json = await res.json();
       if(json.ok && json.rows) _drCache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
     } catch(e) {}
@@ -12227,7 +12227,7 @@ async function onSettleTourCodeSearch(){
     if(!_drCache){
       // 캐시 없으면 한 번 fetch
       try {
-        const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+        const res = await _getDailyReportResp(); /* [4MB캐시] get_reports Daily_Report */
         const json = await res.json();
         _drCache = json.rows || [];
       } catch(e){
@@ -13426,7 +13426,7 @@ async function importFromReports(){
 
   let reports = [];
   try {
-    const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+    const res = await _getDailyReportResp(true); /* [4MB캐시] get_reports Daily_Report */
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json = await res.json();
     if(json.ok) reports = json.rows;
@@ -13943,7 +13943,7 @@ async function onSdpTourCodeSearch(){
     }
     if(!_drCache){
       try {
-        const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+        const res = await _getDailyReportResp(); /* [4MB캐시] get_reports Daily_Report */
         const json = await res.json();
         _drCache = json.rows || [];
       } catch(e){
@@ -14315,7 +14315,7 @@ async function adminCreateMissingDR(missingInfo){
   if(!_drCache){
     toast('데이터 로딩 중...','in');
     try {
-      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const res = await _getDailyReportResp(true); /* [4MB캐시] get_reports Daily_Report */
       const json = await res.json();
       if(json.ok && json.rows) _drCache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
     } catch(e){ toast('캐시 로드 실패: '+e.message,'er'); return; }
@@ -16764,7 +16764,7 @@ window.cleanupNonDCBilledSubTxns = async function(){
   // DR 캐시 fresh
   let drs;
   try {
-    const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+    const res = await _getDailyReportResp(true); /* [4MB캐시] get_reports Daily_Report */
     const json = await res.json();
     if(!json.ok) throw new Error(json.error||'load fail');
     drs = (json.rows||[]).map((r,i)=>({...r, _rowIndex:i+2}));
@@ -17096,7 +17096,7 @@ async function _syncDailyReportSubToSubTxn(){
     // DR 캐시 보장
     if(!_drCache){
       try {
-        const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+        const res = await _getDailyReportResp(true); /* [4MB캐시] get_reports Daily_Report */
         const json = await res.json();
         if(json.ok && json.rows) _drCache = json.rows.map((r,i)=>({...r, _rowIndex:i+2}));
       } catch(e){ console.warn('[SUB Sync] DR 로드 실패:', e); return; }
