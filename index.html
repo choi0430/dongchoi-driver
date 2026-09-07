@@ -1244,6 +1244,16 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           <div class="num-row"><input type="number" class="num-input" id="def-km" placeholder="0" style="border-radius:10px;padding:12px 14px;"></div>
         </div>
       </div>
+      <div class="form-group mb14">
+        <label class="form-label">📷 사진 첨부 (선택) — 최대 5장</label>
+        <input type="file" id="def-photo-input" accept="image/*" capture="environment" multiple style="display:none"
+          onchange="_handlePhotoSelect('defect', this, {rego:(document.getElementById('def-rego')?.value||'')})">
+        <button type="button" onclick="document.getElementById('def-photo-input').click()"
+          style="width:100%;padding:12px;border-radius:10px;font-size:14px;font-weight:600;background:var(--surface2,#f1f5f9);color:var(--text,#111);border:1.5px dashed var(--line,#cbd5e1);cursor:pointer;">
+          📷 사진 촬영 / 선택 (Take / Choose Photo)
+        </button>
+        <div id="def-photo-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;"></div>
+      </div>
       <button type="button" onclick="submitDefectReport()"
         style="width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;background:var(--accent);color:white;border:none;cursor:pointer;font-family:sans-serif;">
         📤 결함 리포트 제출
@@ -1978,6 +1988,15 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
             <label style="display:flex;align-items:center;gap:4px;font-size:13px;background:var(--surface2);padding:6px 10px;border-radius:8px;cursor:pointer;"><input type="checkbox" value="Roads & Maritime"> Roads & Maritime</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:13px;background:var(--surface2);padding:6px 10px;border-radius:8px;cursor:pointer;"><input type="checkbox" value="OTSI"> OTSI</label>
           </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">📷 Photos (사진 첨부, 선택) — 최대 5장</label>
+          <input type="file" id="inc-photo-input" accept="image/*" capture="environment" multiple style="display:none"
+            onchange="_handlePhotoSelect('incident', this, {rego:(document.getElementById('inc-rego')?.value||'')})">
+          <button type="button" class="btn btn-secondary" style="width:100%;border:1.5px dashed var(--line,#cbd5e1);"
+            onclick="document.getElementById('inc-photo-input').click()">📷 사진 촬영 / 선택 (Take / Choose Photo)</button>
+          <div id="inc-photo-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;"></div>
         </div>
 
         <div style="display:flex;gap:8px;margin-top:16px;">
@@ -11056,7 +11075,8 @@ async function syncDefectReportsFromGAS() {
         driver: r.Driver || '',
         status: r.Status || 'open',
         submittedAt: r.SubmittedAt || '',
-        adminNote: r.AdminNote || ''
+        adminNote: r.AdminNote || '',
+        photos: r.Photos || ''
       }));
       // GAS 기준으로 병합 (GAS에 없는 로컬 항목은 유지 — 아직 동기화 전일 수 있음)
       const gasIds = new Set(gasReports.map(r => r.id));
@@ -11109,8 +11129,10 @@ function submitDefectReport(){
     ID: entry.id, Rego: rego, Category: cat, Location: location,
     Description: desc, Severity: severity, KM: km||'',
     Driver: currentDriver?.name||driver, Status:'open',
-    SubmittedAt: entry.submittedAt, AdminNote:''
+    SubmittedAt: entry.submittedAt, AdminNote:'',
+    Photos: JSON.stringify(_photoState.defect || [])
   });
+  _resetPhotos('defect');
 
   // 필드 초기화
   ['def-rego','def-cat','def-location','def-desc','def-km'].forEach(id=>{
@@ -13061,6 +13083,95 @@ function showToast(msg,type=''){
 //
 // 검증 실패 시: showToast 후 _unlockSubmitBtn(btn) 호출하면 다시 시도 가능
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+// 사진 첨부 (결함·사고) — 촬영/선택 → 다운스케일 → 구글 드라이브 업로드
+// ═══════════════════════════════════════════════
+// 폼별 업로드 완료된 사진 URL 목록
+const _photoState = { defect: [], incident: [] };
+const _PHOTO_MAX = 5;
+
+// 이미지 파일을 canvas로 축소 → JPEG dataURL 반환 (업로드 크기·속도 최적화)
+// 폰 원본 사진은 3~8MB라 GAS 전송이 느리고 실패할 수 있어 긴 변 1600px로 축소
+function _downscaleImage(file, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = function(){
+      const img = new Image();
+      img.onload = function(){
+        try {
+          let w = img.width, h = img.height;
+          const scale = Math.min(1, (maxDim||1600) / Math.max(w, h));
+          w = Math.round(w*scale); h = Math.round(h*scale);
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', quality||0.8));
+        } catch(e){ resolve(reader.result); } // 축소 실패 시 원본 dataURL
+      };
+      img.onerror = function(){ resolve(reader.result); };
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// 선택/촬영된 사진들을 순서대로 업로드하고 썸네일 렌더
+async function _handlePhotoSelect(kind, inputEl, meta){
+  const files = Array.from(inputEl.files||[]);
+  inputEl.value = ''; // 같은 파일 재선택 가능하게 초기화
+  if(!files.length) return;
+  const state = _photoState[kind] || (_photoState[kind]=[]);
+  const container = document.getElementById(kind==='defect'?'def-photo-list':'inc-photo-list');
+  for(const file of files){
+    if(state.length >= _PHOTO_MAX){ showToast('사진은 최대 '+_PHOTO_MAX+'장까지 첨부할 수 있습니다','error'); break; }
+    if(!/^image\//.test(file.type||'')){ continue; }
+    // 업로드 중 placeholder 썸네일
+    const ph = document.createElement('div');
+    ph.style.cssText = 'position:relative;width:72px;height:72px;border-radius:10px;background:var(--surface2,#eee);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--muted,#888);overflow:hidden;';
+    ph.textContent = '⏳';
+    if(container) container.appendChild(ph);
+    try {
+      const dataUrl = await _downscaleImage(file, 1600, 0.8);
+      const res = await submitToSheets('save_photo', {
+        dataUrl: dataUrl, mimeType:'image/jpeg', kind: kind,
+        rego: (meta&&meta.rego)||'', driver: currentDriver?.name||'',
+        date: (meta&&meta.date)||todayDisplay()
+      });
+      if(res && res.ok && res.url){
+        state.push(res.url);
+        ph.innerHTML = '';
+        ph.style.background = '#000';
+        const im = document.createElement('img');
+        im.src = res.thumb || res.url;
+        im.referrerPolicy = 'no-referrer';
+        im.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+        ph.appendChild(im);
+        const rm = document.createElement('button');
+        rm.type='button'; rm.textContent='✕';
+        rm.style.cssText='position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(220,38,38,.92);color:#fff;font-size:12px;line-height:1;cursor:pointer;padding:0;';
+        const url = res.url;
+        rm.onclick = function(){ const i=state.indexOf(url); if(i>=0) state.splice(i,1); ph.remove(); };
+        ph.appendChild(rm);
+      } else {
+        ph.textContent = '❌'; setTimeout(()=>{ try{ph.remove();}catch(e){} }, 1800);
+        showToast('사진 업로드 실패 — 다시 시도해주세요','error');
+      }
+    } catch(e){
+      console.warn('photo upload error', e);
+      ph.textContent='❌'; setTimeout(()=>{ try{ph.remove();}catch(e2){} }, 1800);
+      showToast('사진 처리 실패','error');
+    }
+  }
+}
+
+// 폼 초기화 시 사진 상태·썸네일 비우기
+function _resetPhotos(kind){
+  _photoState[kind] = [];
+  const container = document.getElementById(kind==='defect'?'def-photo-list':'inc-photo-list');
+  if(container) container.innerHTML = '';
+}
+
 function _lockSubmitBtn(btnOrSelector, loadingText){
   const btn = (typeof btnOrSelector === 'string')
     ? document.querySelector(btnOrSelector) : btnOrSelector;
@@ -14965,7 +15076,8 @@ async function submitIncidentReport(){
     Injuries: document.getElementById('inc-injuries').value.trim(),
     Witnesses: document.getElementById('inc-witnesses').value.trim(),
     ImmediateAction: document.getElementById('inc-action').value.trim(),
-    ReportedTo: reportedTo.join(', ')
+    ReportedTo: reportedTo.join(', '),
+    Photos: JSON.stringify(_photoState.incident || [])
   };
 
   try {
@@ -14983,6 +15095,7 @@ async function submitIncidentReport(){
         const el=document.getElementById(id); if(el) el.value='';
       });
       document.querySelectorAll('#inc-reported-to input[type=checkbox]').forEach(cb=>cb.checked=false);
+      _resetPhotos('incident');
       loadMyIncidents();
     } else {
       _unlockSubmitBtn(_incidentBtn);
