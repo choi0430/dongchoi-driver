@@ -6468,141 +6468,115 @@ function submitDailyReport(){
 // 트레일러 PD-DR 정합성 검증
 // drTrailerVal: DR에 입력된 트레일러 비용 (0 또는 30 등)
 // onPass: 검증 통과 시 호출되는 콜백
-function _checkTrailerWithPD(btn, drTrailerVal, date, driver, rego, onPass){
-  const endpoint = (typeof APPS_SCRIPT_URL !== 'undefined' && APPS_SCRIPT_URL) ? APPS_SCRIPT_URL : '';
-  const url = endpoint + '?action=lookup_pd_trailer'
-    + '&date=' + encodeURIComponent(date)
-    + '&driver=' + encodeURIComponent(driver)
-    + '&rego=' + encodeURIComponent(rego);
-
-  fetch(url).then(r => r.json()).then(res => {
-    const pdTrailer = (res && res.ok) ? (res.pdTrailer || '') : '';
-    const hasPDTrailer = !!pdTrailer;
-    const hasDRCharge = drTrailerVal > 0;
-
-    // 케이스 A: PD에 트레일러 있는데 DR에 비용 0
-    if(hasPDTrailer && !hasDRCharge){
-      const choice = confirm(
-        '⚠️ 트레일러 사용 확인\n\n' +
-        'Pre Departure에 트레일러 [' + pdTrailer + '] 픽업이 기록되어 있습니다.\n' +
-        '하지만 Daily Report에 트레일러 비용이 입력되지 않았습니다.\n\n' +
-        '오늘 트레일러를 사용했나요?\n\n' +
-        '[확인] 트레일러 비용 $30 추가\n' +
-        '[취소] 사용 안 함 (그대로 저장)'
-      );
-      if(choice){
-        // 트레일러 $30 자동 선택
-        if(typeof selectTrailer === 'function') selectTrailer(30);
-        else {
-          const inp = document.getElementById('f-trailer');
-          if(inp) inp.value = 30;
-        }
-        // Trailer_Number도 hidden field에 저장 (저장 함수에서 사용)
-        let trNumInput = document.getElementById('f-trailer-num');
-        if(!trNumInput){
-          trNumInput = document.createElement('input');
-          trNumInput.type = 'hidden';
-          trNumInput.id = 'f-trailer-num';
-          document.body.appendChild(trNumInput);
-        }
-        trNumInput.value = pdTrailer;
-        if(typeof calcTotal === 'function') calcTotal();
-        onPass();
-      } else {
-        // 사용 안 함 — 그대로 진행
-        onPass();
-      }
-      return;
+// 인앱 브라우저(카카오 등)에서 막히는 confirm()/prompt() 대체 — 스타일 바텀시트 모달(Promise 반환).
+function _dcModal(opts){
+  return new Promise(function(resolve){
+    var esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+    var ov = document.createElement('div');
+    ov.className = 'modal-overlay open';
+    ov.style.zIndex = '400';
+    var inputHtml = '';
+    if(opts.input){
+      var dl = (opts.input.options||[]).map(function(o){ return '<option value="'+esc(o)+'"></option>'; }).join('');
+      inputHtml = '<input id="_dcm-input" list="_dcm-dl" inputmode="text" autocomplete="off" placeholder="'+esc(opts.input.placeholder||'')+'" '
+        + 'style="width:100%;box-sizing:border-box;padding:13px;border:1.5px solid var(--line,#d1d5db);border-radius:12px;font-size:16px;margin:2px 0 14px;background:#fff;color:#111;" />'
+        + '<datalist id="_dcm-dl">'+dl+'</datalist>';
     }
-
-    // 케이스 B: DR에 비용 있는데 PD에 트레일러 번호 없음 → 번호 입력 요구
-    if(hasDRCharge && !hasPDTrailer){
-      _promptTrailerNumber(btn, date, driver, rego, onPass);
-      return;
-    }
-
-    // 케이스 정상: PD에 있고 DR에도 비용 있음 → Trailer_Number 자동 첨부
-    if(hasPDTrailer && hasDRCharge){
-      let trNumInput = document.getElementById('f-trailer-num');
-      if(!trNumInput){
-        trNumInput = document.createElement('input');
-        trNumInput.type = 'hidden';
-        trNumInput.id = 'f-trailer-num';
-        document.body.appendChild(trNumInput);
-      }
-      trNumInput.value = pdTrailer;
-    }
-    onPass();
-  }).catch(err => {
-    console.warn('Trailer check failed, proceeding without:', err);
-    onPass();  // 검증 실패 시 그대로 진행 (저장은 막지 않음)
+    var btns = (opts.buttons||[]).map(function(b,i){
+      return '<button type="button" data-i="'+i+'" class="btn '+(b.primary?'btn-primary':'btn-secondary')+'" style="width:100%;margin-top:8px;">'+esc(b.label)+'</button>';
+    }).join('');
+    ov.innerHTML = '<div class="modal-sheet"><div class="modal-handle"></div>'
+      + '<div class="modal-title">'+esc(opts.title||'')+'</div>'
+      + (opts.body ? '<div style="font-size:13.5px;color:var(--muted,#6b7280);line-height:1.7;margin:0 0 14px;white-space:pre-line;">'+esc(opts.body)+'</div>' : '')
+      + inputHtml + btns + '</div>';
+    document.body.appendChild(ov);
+    var finish = function(val){ try{ ov.remove(); }catch(e){} resolve(val); };
+    ov.querySelectorAll('button[data-i]').forEach(function(bt){
+      bt.addEventListener('click', function(){
+        var b = opts.buttons[+bt.getAttribute('data-i')];
+        if(b && b.returnInput){ var el=document.getElementById('_dcm-input'); finish(el?el.value:''); }
+        else finish(b?b.value:null);
+      });
+    });
+    setTimeout(function(){ var el=document.getElementById('_dcm-input'); if(el){ try{ el.focus(); }catch(e){} } }, 60);
   });
 }
 
-// 케이스 B용: 트레일러 번호 입력 모달
-function _promptTrailerNumber(btn, date, driver, rego, onPass){
-  // 활성 트레일러 목록 가져와서 선택지 제공
-  const endpoint = (typeof APPS_SCRIPT_URL !== 'undefined' && APPS_SCRIPT_URL) ? APPS_SCRIPT_URL : '';
-  fetch(endpoint + '?action=get_active_trailers').then(r => r.json()).then(res => {
-    const list = (res && res.ok) ? (res.trailers || []) : [];
-    const opts = list.map(t => t.trailer).filter(Boolean);
+// f-trailer-num hidden input 세팅 헬퍼
+function _setTrailerNumField(v){
+  var el = document.getElementById('f-trailer-num');
+  if(!el){ el = document.createElement('input'); el.type='hidden'; el.id='f-trailer-num'; document.body.appendChild(el); }
+  el.value = v;
+}
 
-    let optionsText = '';
-    if(opts.length > 0){
-      optionsText = '\n현재 사용 중인 트레일러:\n' + opts.map((t,i)=>(i+1)+'. '+t).join('\n');
+async function _checkTrailerWithPD(btn, drTrailerVal, date, driver, rego, onPass){
+  var endpoint = (typeof APPS_SCRIPT_URL !== 'undefined' && APPS_SCRIPT_URL) ? APPS_SCRIPT_URL : '';
+  var url = endpoint + '?action=lookup_pd_trailer'
+    + '&date=' + encodeURIComponent(date)
+    + '&driver=' + encodeURIComponent(driver)
+    + '&rego=' + encodeURIComponent(rego);
+  var res;
+  try { var r = await fetch(url); res = await r.json(); }
+  catch(err){ console.warn('Trailer check failed, proceeding without:', err); onPass(); return; }
+  var pdTrailer = (res && res.ok) ? (res.pdTrailer || '') : '';
+  var hasPDTrailer = !!pdTrailer;
+  var hasDRCharge = drTrailerVal > 0;
+
+  // 케이스 A: PD에 트레일러 있는데 DR에 비용 0
+  if(hasPDTrailer && !hasDRCharge){
+    var yes = await _dcModal({
+      title: '⚠️ 트레일러 사용 확인',
+      body: 'Pre Departure에 트레일러 [' + pdTrailer + '] 픽업이 기록되어 있습니다.\n하지만 Daily Report에 트레일러 비용이 입력되지 않았습니다.\n\n오늘 트레일러를 사용했나요?',
+      buttons: [ {label:'✅ 사용함 — 비용 $30 추가', value:true, primary:true}, {label:'사용 안 함 (그대로 저장)', value:false} ]
+    });
+    if(yes){
+      if(typeof selectTrailer === 'function') selectTrailer(30);
+      else { var inp = document.getElementById('f-trailer'); if(inp) inp.value = 30; }
+      _setTrailerNumField(pdTrailer);
+      if(typeof calcTotal === 'function') calcTotal();
     }
+    onPass(); return;
+  }
 
-    const trNum = prompt(
-      '⚠️ 트레일러 번호 누락\n\n' +
-      '트레일러 비용 $30이 입력됐지만 어떤 트레일러를 사용했는지 기록되어 있지 않습니다.\n' +
-      '소유주에게 대여비를 지급하기 위해 트레일러 번호가 필요합니다.\n\n' +
-      '사용한 트레일러 번호를 입력해주세요:' +
-      optionsText + '\n\n' +
-      '(취소하면 트레일러 번호 없이 저장됩니다)'
-    );
+  // 케이스 B: DR에 비용 있는데 PD에 트레일러 번호 없음 → 번호 입력 요구
+  if(hasDRCharge && !hasPDTrailer){
+    await _promptTrailerNumber(btn, date, driver, rego, onPass);
+    return;
+  }
 
-    if(trNum && trNum.trim()){
-      const cleanNum = trNum.trim();
-      let trNumInput = document.getElementById('f-trailer-num');
-      if(!trNumInput){
-        trNumInput = document.createElement('input');
-        trNumInput.type = 'hidden';
-        trNumInput.id = 'f-trailer-num';
-        document.body.appendChild(trNumInput);
-      }
-      trNumInput.value = cleanNum;
+  // 케이스 정상: PD에 있고 DR에도 비용 있음 → Trailer_Number 자동 첨부
+  if(hasPDTrailer && hasDRCharge){ _setTrailerNumField(pdTrailer); }
+  onPass();
+}
 
-      // PD도 사후 업데이트 (best-effort, 실패해도 DR 저장은 계속)
-      fetch(endpoint, {
-        method: 'POST',
-        headers: {'Content-Type': 'text/plain'},
-        body: JSON.stringify({
-          action: 'patch_pd_trailer',
-          date: date, driver: driver, rego: rego, trailerNum: cleanNum
-        })
-      }).catch(() => {});
-    }
-    onPass();
-  }).catch(err => {
-    console.warn('Active trailer fetch failed:', err);
-    // 그래도 prompt는 띄움
-    const trNum = prompt(
-      '⚠️ 트레일러 번호 누락\n\n' +
-      '사용한 트레일러 번호를 입력해주세요:\n' +
-      '(취소하면 번호 없이 저장됩니다)'
-    );
-    if(trNum && trNum.trim()){
-      let trNumInput = document.getElementById('f-trailer-num');
-      if(!trNumInput){
-        trNumInput = document.createElement('input');
-        trNumInput.type = 'hidden';
-        trNumInput.id = 'f-trailer-num';
-        document.body.appendChild(trNumInput);
-      }
-      trNumInput.value = trNum.trim();
-    }
-    onPass();
+// 케이스 B용: 트레일러 번호 입력 (스타일 모달)
+async function _promptTrailerNumber(btn, date, driver, rego, onPass){
+  var endpoint = (typeof APPS_SCRIPT_URL !== 'undefined' && APPS_SCRIPT_URL) ? APPS_SCRIPT_URL : '';
+  var opts = [];
+  try {
+    var r = await fetch(endpoint + '?action=get_active_trailers');
+    var res = await r.json();
+    var list = (res && res.ok) ? (res.trailers || []) : [];
+    opts = list.map(function(t){ return t.trailer; }).filter(Boolean);
+  } catch(e){ console.warn('Active trailer fetch failed:', e); }
+
+  var trNum = await _dcModal({
+    title: '⚠️ 트레일러 번호 누락',
+    body: '트레일러 비용 $30이 입력됐지만 어떤 트레일러를 사용했는지 기록되어 있지 않습니다.\n소유주에게 대여비를 지급하려면 트레일러 번호가 필요합니다.' + (opts.length ? '\n\n(입력칸을 누르면 사용 중인 트레일러 목록에서 고를 수 있습니다)' : ''),
+    input: { placeholder:'사용한 트레일러 번호', options: opts },
+    buttons: [ {label:'저장', returnInput:true, primary:true}, {label:'번호 없이 저장', value:''} ]
   });
+
+  if(trNum && trNum.trim()){
+    var cleanNum = trNum.trim();
+    _setTrailerNumField(cleanNum);
+    // PD도 사후 업데이트 (best-effort, 실패해도 DR 저장은 계속)
+    fetch(endpoint, {
+      method: 'POST', headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({ action:'patch_pd_trailer', date:date, driver:driver, rego:rego, trailerNum:cleanNum })
+    }).catch(function(){});
+  }
+  onPass();
 }
 
 // 실제 DR 저장 진행 — submitDailyReport에서 분리
