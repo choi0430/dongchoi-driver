@@ -498,8 +498,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </style>
   <div id="als"></div>
 
-  <!-- ⚠️ 청구액 점검 (Total_TA ≠ M_PriceClient 계산값) — 이상 없으면 간단 표시 -->
+  <!-- ⚠️ 단가 누락 (M_PriceClient 단가 없음) — 없으면 자동 숨김 -->
   <div id="ta-check" style="display:none;"></div>
+
+  <!-- 📅 미수금 / 연체 인보이스 — 없으면 자동 숨김 -->
+  <div id="ar-aging" style="display:none;"></div>
 
   <!-- 📊 운행 통계 (Supabase 집계 · 읽기전용) — 데이터 없으면 자동 숨김 -->
   <div id="ops-stats" style="display:none;"></div>
@@ -3858,8 +3861,86 @@ async function renderMissingPrices(){
   } catch(e){ console.warn('[단가누락] 렌더 실패:', e); el.style.display='none'; }
 }
 
+// 📅 미수금 / 연체 인보이스 패널 — 발행된 인보이스 중 미납·연체 건을 대시보드에 표시.
+//   검증된 _agencyInvPaidCR(인보이스별 실수금) + _invHistoryCache 재사용 → 부분수금 반영.
+//   Due = 발행일 + 결제기한(getPaymentTermsForAgency). 읽기전용·추가형(실패해도 대시보드 무관).
+async function renderARaging(){
+  var el = document.getElementById('ar-aging');
+  if(!el) return;
+  try {
+    // 데이터 보장 (없으면 로드 — 대시보드에서 처음 열 때만)
+    if(!_invHistoryCache){
+      try { const r=await fetch(APPS_SCRIPT_URL+'?action=get_invoices'); const j=await r.json(); if(j.ok) _invHistoryCache=(j.rows||[]).reverse(); } catch(e){}
+    }
+    if(!_balAgencyTxns || !_balAgencyTxns.length){
+      try { const r=await fetch(APPS_SCRIPT_URL+'?action=get_agency_txn'); const j=await r.json(); if(j.ok && j.rows) _balAgencyTxns=j.rows; } catch(e){}
+    }
+    if(!Array.isArray(_invHistoryCache) || !_invHistoryCache.length){ el.style.display='none'; el.innerHTML=''; return; }
+    var $f = function(v){ return '$'+(Number(v)||0).toLocaleString('en-AU',{maximumFractionDigits:0}); };
+    var today = new Date(); today.setHours(0,0,0,0);
+    var buckets = { cur:0, d30:0, d60:0, d90:0, d90p:0 };
+    var overdue = [], totalOut = 0;
+    _invHistoryCache.forEach(function(inv){
+      if(typeof _isSubInvNumber==='function' && _isSubInvNumber(inv.InvNumber||'')) return;   // SUB 인보이스 제외
+      var total = Number(inv.GrandTotal)||0;
+      var paid  = (typeof _agencyInvPaidCR==='function') ? _agencyInvPaidCR(inv.InvNumber) : 0;
+      var bal   = Math.round((total-paid)*100)/100;
+      if(bal <= 0.01) return;
+      totalOut += bal;
+      var agency = String(inv.Agency||'').trim();
+      var terms  = (typeof getPaymentTermsForAgency==='function') ? getPaymentTermsForAgency(agency) : 14;
+      var issuedISO = (typeof parseToISO==='function') ? parseToISO(inv.IssuedDate||'') : '';
+      var daysOver = null, dueISO='';
+      if(issuedISO){
+        var due = new Date(issuedISO+'T00:00:00'); due.setDate(due.getDate()+terms);
+        dueISO = due.getFullYear()+'-'+String(due.getMonth()+1).padStart(2,'0')+'-'+String(due.getDate()).padStart(2,'0');
+        daysOver = Math.floor((today - due)/86400000);
+      }
+      var dv = daysOver||0;
+      if(dv <= 0) buckets.cur += bal;
+      else if(dv<=30) buckets.d30 += bal;
+      else if(dv<=60) buckets.d60 += bal;
+      else if(dv<=90) buckets.d90 += bal;
+      else buckets.d90p += bal;
+      if(dv > 0) overdue.push({ agency:agency, inv:String(inv.InvNumber||''), bal:bal, days:dv, due:dueISO });
+    });
+    if(totalOut <= 0.01){ el.style.display='none'; el.innerHTML=''; return; }
+    overdue.sort(function(a,b){ return b.days - a.days; });
+    var overdueTotal = buckets.d30+buckets.d60+buckets.d90+buckets.d90p;
+    // 요약 카드
+    var head = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">'
+      + '<div style="background:var(--rdd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">총 미수 (인보이스 기준)</div><div style="font-size:17px;font-weight:800;color:var(--rd);font-family:var(--fn);">'+ $f(totalOut) +'</div></div>'
+      + '<div style="background:'+(overdueTotal>0?'#fdecea':'var(--gnd)')+';border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">연체 미수</div><div style="font-size:17px;font-weight:800;color:'+(overdueTotal>0?'#c0362c':'var(--gn)')+';font-family:var(--fn);">'+ $f(overdueTotal) +'</div><div style="font-size:8px;color:var(--t3);margin-top:1px;">'+ overdue.length +'건 연체</div></div>'
+      + '<div style="background:var(--sf2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">미도래 (기한 전)</div><div style="font-size:17px;font-weight:800;color:var(--t2);font-family:var(--fn);">'+ $f(buckets.cur) +'</div></div>'
+      + '</div>';
+    // aging 막대 (정상/1-30/31-60/61-90/90+)
+    var segs = [['정상',buckets.cur,'#9ca3af'],['1-30일',buckets.d30,'#f59e0b'],['31-60일',buckets.d60,'#f97316'],['61-90일',buckets.d90,'#ef4444'],['90일+',buckets.d90p,'#991b1b']];
+    var agingBar = '<div style="display:flex;height:16px;border-radius:5px;overflow:hidden;margin:2px 0 4px;">'
+      + segs.map(function(s){ var w= totalOut>0? Math.round(s[1]/totalOut*100):0; return w>0?'<div title="'+s[0]+' '+$f(s[1])+'" style="width:'+w+'%;background:'+s[2]+';"></div>':''; }).join('')
+      + '</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:8px;font-size:10px;color:var(--t3);margin-bottom:8px;">'
+      + segs.map(function(s){ return s[1]>0?'<span><span style="display:inline-block;width:8px;height:8px;background:'+s[2]+';border-radius:2px;margin:0 3px -1px 0;"></span>'+s[0]+' '+$f(s[1])+'</span>':''; }).join('')
+      + '</div>';
+    // 연체 목록 (상위 15)
+    var rows = overdue.slice(0,15).map(function(o){
+      var col = o.days>90?'#991b1b':o.days>60?'#ef4444':o.days>30?'#f97316':'#f59e0b';
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--b1);">'
+        + '<span style="flex:1;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><b>'+ escH(o.agency) +'</b> <span style="color:var(--t3);font-size:11px;">'+ escH(o.inv) +'</span></span>'
+        + '<span style="width:64px;text-align:right;font-family:var(--fn);color:var(--rd);font-weight:700;">'+ $f(o.bal) +'</span>'
+        + '<span style="width:64px;text-align:right;font-weight:700;color:'+col+';">'+ o.days +'일 연체</span>'
+        + '</div>';
+    }).join('');
+    el.style.display='';
+    el.innerHTML = '<div class="shd" style="margin-top:14px"><div class="stl">📅 미수금 / 연체 인보이스 <span style="font-size:10px;color:var(--t3);font-weight:500;">발행 인보이스 · 부분수금 반영</span></div></div>'
+      + '<div class="crd" style="padding:12px;">' + head + agingBar
+      + (overdue.length ? '<div style="font-size:10px;color:var(--t3);margin:4px 2px;">연체 인보이스 (오래된 순)</div>' + rows + (overdue.length>15?'<div style="font-size:11px;color:var(--t3);margin-top:6px;">…외 '+(overdue.length-15)+'건 더</div>':'') : '<div style="font-size:12px;color:var(--gn);text-align:center;padding:8px;">✅ 연체 인보이스 없음</div>')
+      + '</div>';
+  } catch(e){ console.warn('[미수aging] 렌더 실패:', e); el.style.display='none'; }
+}
+
 function rDash(){
   try { renderMissingPrices(); } catch(e){}   // ⚠️ 단가 누락 (독립 렌더 — 실패해도 대시보드 무관)
+  try { renderARaging(); } catch(e){}          // 📅 미수금/연체 (독립 렌더)
   try { renderOpsStats(); } catch(e){}   // 📊 운행 통계 (독립 렌더 — 실패해도 대시보드 영향 없음)
   try { renderRevStats(); } catch(e){}   // 💰 매출 리포트 (독립 렌더)
   // 상단 통계 카드는 제거됐지만, 마스터 그룹 카드의 카운트는 유지
