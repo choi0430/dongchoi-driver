@@ -5258,6 +5258,7 @@ function renderDefects(){
       +'<div style="font-size:13px;font-weight:600;color:var(--t1);margin-bottom:4px;">'+(r.category||'Other')+'</div>'
       +'<div style="font-size:12px;color:var(--t2);">'+(r.description||'')+'</div>'
       +(r.location?'<div style="font-size:11px;color:var(--t3);margin-top:3px;">&#x1F4CD; '+r.location+'</div>':'')
+      +(r.photos?'<div style="margin-top:6px;">'+_dcPhotoStripHtml(r.photos,'📷 사진').replace('margin-bottom:8px;','margin-bottom:0;')+'</div>':'')
       +'<input id="note-'+r.id+'" type="text" placeholder="Admin note..." value="'+(r.adminNote||'')+'"'
       +' style="width:100%;font-size:11px;border:1px solid var(--bd);border-radius:6px;padding:5px 8px;background:var(--sf);color:var(--t1);box-sizing:border-box;margin-top:6px;"'
       +' onblur="saveDefectNote(\''+r.id+'\',this.value)"></div>';
@@ -34768,6 +34769,35 @@ async function loadAdminIncidents(){
   }
 }
 
+// ── 사진 첨부 표시 헬퍼 (결함·사고 공용) ──
+// Photos 필드(JSON 배열 문자열 또는 콤마/줄바꿈 구분)를 파싱해 클릭 가능한 썸네일로 렌더
+function _dcParsePhotos(raw){
+  if(!raw) return [];
+  if(Array.isArray(raw)) return raw.filter(Boolean);
+  var s=String(raw).trim();
+  if(!s) return [];
+  if(s.charAt(0)==='['){ try{ var a=JSON.parse(s); if(Array.isArray(a)) return a.filter(Boolean); }catch(e){} }
+  return s.split(/[\n,]+/).map(function(x){return x.trim();}).filter(Boolean);
+}
+function _dcDriveThumb(url){
+  var u=String(url);
+  var m=u.match(/\/d\/([-\w]{20,})/)||u.match(/[?&]id=([-\w]{20,})/);
+  return m?('https://drive.google.com/thumbnail?id='+m[1]+'&sz=w400'):u;
+}
+function _dcPhotoStripHtml(raw, label){
+  var arr=_dcParsePhotos(raw);
+  if(!arr.length) return '';
+  var thumbs=arr.map(function(u){
+    return '<a href="'+u+'" target="_blank" rel="noopener" style="display:block;width:76px;height:76px;border-radius:8px;overflow:hidden;background:#000;flex:0 0 auto;">'
+      +'<img src="'+_dcDriveThumb(u)+'" referrerpolicy="no-referrer" loading="lazy" style="width:100%;height:100%;object-fit:cover;" '
+      +'onerror="this.onerror=null;this.replaceWith(document.createTextNode(\'🖼️\'));">'
+      +'</a>';
+  }).join('');
+  return '<div class="crd" style="padding:10px;margin-bottom:8px;">'
+    +'<div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:6px;">'+(label||'📷 Photos (사진)')+' · '+arr.length+'장</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:8px;">'+thumbs+'</div></div>';
+}
+
 function renderAdminIncidents(){
   const el = document.getElementById('admin-inc-list');
   const filter = document.getElementById('inc-filter-status').value;
@@ -34836,6 +34866,7 @@ function showIncidentDetail(id){
       ${inc.Witnesses?'<div class="crd" style="padding:10px;margin-bottom:8px;"><div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:4px;">Witnesses (목격자)</div><div style="font-size:12px;color:var(--t1);">'+inc.Witnesses+'</div></div>':''}
       ${inc.ImmediateAction?'<div class="crd" style="padding:10px;margin-bottom:8px;"><div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:4px;">Immediate Action (즉시 조치)</div><div style="font-size:12px;color:var(--t1);">'+inc.ImmediateAction+'</div></div>':''}
       ${inc.ReportedTo?'<div class="crd" style="padding:10px;margin-bottom:8px;"><div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:4px;">Reported To (보고 대상)</div><div style="font-size:12px;color:var(--t1);">'+inc.ReportedTo+'</div></div>':''}
+      ${_dcPhotoStripHtml(inc.Photos, '📷 Photos (현장 사진)')}
 
       <div style="border-top:1px solid var(--bd);padding-top:12px;margin-top:8px;">
         <div style="font-size:12px;font-weight:800;color:var(--t1);margin-bottom:8px;">Admin Actions (관리자 조치)</div>
