@@ -14833,10 +14833,24 @@ function renderDriverRoster(){
   el.innerHTML = html;
 }
 
+// 홈 휴무 알림 닫기 — 드라이버가 확인 후 없앨 수 있게 (기기 localStorage에 기록)
+function _leaveDismissKey(){ return 'dc_dismissed_leave_'+(currentDriver?.name||''); }
+function _dismissedLeaveKeys(){
+  try { return JSON.parse(localStorage.getItem(_leaveDismissKey())||'[]'); } catch(e){ return []; }
+}
+function dismissLeaveAlert(key){
+  try {
+    const k = _dismissedLeaveKeys();
+    if(!k.includes(key)){ k.push(key); localStorage.setItem(_leaveDismissKey(), JSON.stringify(k)); }
+  } catch(e){}
+  renderHomeLeaveStatus();
+}
+
 function renderHomeLeaveStatus(){
   const box = document.getElementById('home-leave-status');
   if(!box) return;
   if(!_myLeaveData || !_myLeaveData.length){ box.innerHTML=''; return; }
+  const _dismissed = _dismissedLeaveKeys();
 
   // Show recent relevant leaves: Pending always, Approved/Rejected only if recent (within 14 days reviewed)
   const now = new Date();
@@ -14857,8 +14871,9 @@ function renderHomeLeaveStatus(){
       const endISO = toISO(r.Date_To);
       const todayISO = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
       if(endISO >= todayISO){
-        alerts.push({
-          sort: 1,
+        const _k = ['Approved', r.Date_From, r.Date_To, r.Reviewed_At||''].join('|');
+        if(!_dismissed.includes(_k)) alerts.push({
+          sort: 1, key: _k, dismissible: true,
           bg: '#dcfce7', bc: '#22c55e', fc: '#166534', icon: '✅',
           title: 'Leave Approved (휴무 승인)',
           detail: `${r.Date_From}${r.Date_From!==r.Date_To?' ~ '+r.Date_To:''} (${r.Days||1}일)`,
@@ -14874,8 +14889,9 @@ function renderHomeLeaveStatus(){
         const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate()-7);
         const weekAgoISO = weekAgo.getFullYear()+'-'+String(weekAgo.getMonth()+1).padStart(2,'0')+'-'+String(weekAgo.getDate()).padStart(2,'0');
         if(revISO >= weekAgoISO){
-          alerts.push({
-            sort: 2,
+          const _k = ['Rejected', r.Date_From, r.Date_To, r.Reviewed_At||''].join('|');
+          if(!_dismissed.includes(_k)) alerts.push({
+            sort: 2, key: _k, dismissible: true,
             bg: '#fee2e2', bc: '#ef4444', fc: '#991b1b', icon: '❌',
             title: 'Leave Rejected (휴무 거절)',
             detail: `${r.Date_From}${r.Date_From!==r.Date_To?' ~ '+r.Date_To:''} (${r.Days||1}일)`,
@@ -14889,16 +14905,20 @@ function renderHomeLeaveStatus(){
   if(!alerts.length){ box.innerHTML=''; return; }
   alerts.sort((a,b)=>a.sort-b.sort);
 
-  box.innerHTML = '<div style="padding:0 12px;margin-top:8px;">' + alerts.map(a =>
-    `<div onclick="showPage('leave')" style="background:${a.bg};border:1px solid ${a.bc}33;border-left:4px solid ${a.bc};border-radius:10px;padding:12px 14px;margin-bottom:6px;cursor:pointer;">
+  box.innerHTML = '<div style="padding:0 12px;margin-top:8px;">' + alerts.map(a => {
+    const closeBtn = a.dismissible
+      ? `<button onclick="event.stopPropagation();dismissLeaveAlert('${String(a.key).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')" title="확인 (닫기)" style="flex:none;margin-left:auto;background:transparent;border:none;color:${a.fc};opacity:.6;font-size:16px;line-height:1;cursor:pointer;padding:2px 4px;">✕</button>`
+      : '';
+    return `<div onclick="showPage('leave')" style="background:${a.bg};border:1px solid ${a.bc}33;border-left:4px solid ${a.bc};border-radius:10px;padding:12px 14px;margin-bottom:6px;cursor:pointer;">
       <div style="display:flex;align-items:center;gap:6px;">
         <span style="font-size:16px;">${a.icon}</span>
         <span style="font-weight:800;font-size:13px;color:${a.fc};">${a.title}</span>
+        ${closeBtn}
       </div>
       <div style="font-size:13px;font-weight:600;color:${a.fc};margin-top:4px;">${a.detail}</div>
       <div style="font-size:11px;color:${a.fc}99;margin-top:3px;">${a.sub}</div>
-    </div>`
-  ).join('') + '</div>';
+    </div>`;
+  }).join('') + '</div>';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
