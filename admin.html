@@ -4665,7 +4665,26 @@ function setVTab(tab){
   });
   if(tab==='hvis')renderHvis();
   if(tab==='maint')renderMaint();
-  if(tab==='defect'){renderDefects();populateDefectFilter();}
+  if(tab==='defect'){renderDefects();populateDefectFilter();loadAdminDefects();}
+}
+
+// 관리자: 서버(GAS)에서 결함 리포트 전체를 불러와 로컬 모델로 갱신 후 렌더
+// (관리자 토큰이면 전체 조회. 로컬 우선 렌더 → 서버 응답 오면 다시 렌더)
+async function loadAdminDefects(){
+  try {
+    const r = await fetch(APPS_SCRIPT_URL+'?action=get_defect_reports');
+    const j = await r.json();
+    if(j && j.ok && Array.isArray(j.reports)){
+      const mapped = j.reports.map(function(x){ return {
+        id:String(x.ID||''), rego:x.Rego||'', category:x.Category||'', location:x.Location||'',
+        description:x.Description||'', severity:x.Severity||'low', km:x.KM||null,
+        driver:x.Driver||'', status:x.Status||'open', submittedAt:x.SubmittedAt||'',
+        adminNote:x.AdminNote||'', photos:x.Photos||''
+      }; });
+      saveDefectReports(mapped);
+      renderDefects(); populateDefectFilter();
+    }
+  } catch(e){ console.warn('loadAdminDefects fail', e); }
 }
 
 function getHvisSchedule(regoDate){
@@ -5264,18 +5283,33 @@ function renderDefects(){
       +' onblur="saveDefectNote(\''+r.id+'\',this.value)"></div>';
   }).join('');
 }
-function updateDefectStatus(id,status){
+async function updateDefectStatus(id,status){
   var rpts=getDefectReports();var r=rpts.find(function(x){return x.id===id;});
   if(r){r.status=status;saveDefectReports(rpts);renderDefects();}
+  // 서버 반영 (상태+메모 함께 보내 서버 값이 덮어써지지 않게)
+  try{
+    await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'update_defect_status',id:id,status:status,adminNote:(r&&r.adminNote)||''})});
+  }catch(e){ console.warn('defect status 서버 저장 실패',e); }
 }
-function saveDefectNote(id,note){
+async function saveDefectNote(id,note){
   var rpts=getDefectReports();var r=rpts.find(function(x){return x.id===id;});
   if(r&&r.adminNote!==note){r.adminNote=note;saveDefectReports(rpts);}
+  try{
+    await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'update_defect_status',id:id,status:(r&&r.status)||'open',adminNote:note})});
+  }catch(e){ console.warn('defect note 서버 저장 실패',e); }
 }
-function deleteDefect(id){
+async function deleteDefect(id){
   if(!confirm('Delete this defect report?'))return;
   saveDefectReports(getDefectReports().filter(function(r){return r.id!==id;}));
-  renderDefects();toast('Deleted','ok');
+  renderDefects();
+  try{
+    var res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'delete_defect_report',id:id})});
+    var j=await res.json();
+    toast(j&&j.ok?'Deleted':'로컬 삭제됨 (서버 반영 실패)', j&&j.ok?'ok':'err');
+  }catch(e){ toast('로컬 삭제됨 (서버 반영 실패)','err'); }
 }
 // ===== END VEHICLE MANAGEMENT =====
 
