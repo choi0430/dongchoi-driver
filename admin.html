@@ -3296,6 +3296,8 @@ function _normTC(s){
   s = s.replace(/[^A-Z0-9]/g, '');                      // 영숫자만
   return s;
 }
+// 차량번호(Rego) 정규화 — 매칭용 (대문자·영숫자만)
+function _normRego(s){ return String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,''); }
 
 // ═══════════════════════════════════════════════════════════════════
 // 🔍 인보이스 미발행 운행 원인 진단
@@ -3318,7 +3320,8 @@ function diagnoseUninvoiced(){
     const issuedAG   = new Set();   // AG 만
     let invActive=0, invWithTC=0, invNoTC=0;
     const noTCInvoices=[];               // 투어코드 없는 인보이스 상세
-    const issuedDateKeys=new Set();      // AG|ISO — 인보이스 항목 날짜 기준 (투어코드 없는 인보이스 매칭용)
+    const issuedDateKeys=new Set();      // AG|ISO — 인보이스 항목 날짜 기준
+    const issuedTripKeys=new Set();      // AG|ISO|차량 — 여행사+날짜+차량 보조매칭 (실제 알림과 동일)
     (_invHistoryCache||[]).forEach(inv=>{
       const status=String(inv.Status||'').toLowerCase();
       if(status==='cancelled'||status==='void') return;
@@ -3328,7 +3331,7 @@ function diagnoseUninvoiced(){
       let gotTC=false; const itemDates=[];
       const scan=(arr)=>{ (arr||[]).forEach(it=>{
         const tc=pickItemTourCode(it).toUpperCase(); if(tc){ if(ag) issuedKeys.add(ag+'|'+tc); issuedTC.add(tc); gotTC=true; }
-        const di=(typeof parseToISO==='function')?parseToISO(it.date||it.Date||''):''; if(di){ itemDates.push(di); if(ag) issuedDateKeys.add(ag+'|'+di); }
+        const di=(typeof parseToISO==='function')?parseToISO(it.date||it.Date||''):''; if(di){ itemDates.push(di); if(ag) issuedDateKeys.add(ag+'|'+di); const rg=_normRego(it.rego||it.Rego||''); if(rg) issuedTripKeys.add(ag+'|'+di+'|'+rg); }
       }); };
       try{ scan(JSON.parse(inv.Items||'[]')); scan(JSON.parse(inv.ManualItems||'[]')); }catch(e){}
       const invTC=String(inv.TourCode||'').trim().toUpperCase();
@@ -3361,15 +3364,17 @@ function diagnoseUninvoiced(){
     });
     // 정확 일치만 적용했을 때 미발행 (수정 전 동작)
     const exactUninv = baseRows.filter(r=>{ const ag=String(r.Agency||'').trim().toUpperCase(); const tc=pickTourCode(r).toUpperCase(); return !issuedKeys.has(ag+'|'+tc); });
-    // 정규화 일치까지 적용했을 때 미발행 (수정 후 동작 = 실제 알림)
+    // 정규화 + 여행사+날짜+차량 보조까지 적용 (수정 후 동작 = 실제 알림)
     const uninvoiced = baseRows.filter(r=>{
       const ag=String(r.Agency||'').trim().toUpperCase(); const tc=pickTourCode(r).toUpperCase();
       if(issuedKeys.has(ag+'|'+tc)) return false;
       const nt=_normTC(tc); if(nt && issuedNormKeys.has(ag+'|'+nt)) return false;
+      const rg=_normRego(r.Rego||''); const di=parseToISO(r.Date||'');
+      if(rg && di && issuedTripKeys.has(ag+'|'+di+'|'+rg)) return false;
       return true;
     });
     const resolvedByNorm = exactUninv.length - uninvoiced.length;
-    // 여행사+날짜 기준(투어코드 없는 인보이스 포함)으로 매칭하면 해결될 건수
+    // 여행사+날짜만(차량 무시)으로 매칭하면 추가로 해결될 수 있는 건수 (참고)
     const resolvedByDate = uninvoiced.filter(r=>{ const ag=String(r.Agency||'').trim().toUpperCase(); const di=parseToISO(r.Date||''); return di && issuedDateKeys.has(ag+'|'+di); }).length;
 
     // ── 카테고리 분류 (키 단위 + 건수) ──
@@ -3406,13 +3411,13 @@ function diagnoseUninvoiced(){
     h+=`<div style="font-size:11px;color:var(--t2);margin-bottom:8px;line-height:1.6;">`;
     h+=`활성 인보이스 <b>${invActive}</b>개 · 그중 투어코드 있는 인보이스 <b>${invWithTC}</b>개 / 투어코드 없는 인보이스 <b style="color:${invNoTC>0?'#dc2626':'inherit'}">${invNoTC}</b>개<br>`;
     h+=`발행된 키(여행사|투어코드) <b>${issuedKeys.size}</b>개 · 발행된 투어코드 <b>${issuedTC.size}</b>종<br>`;
-    h+=`정규화(표기 차이 흡수) 적용 시: 미발행 <b>${exactUninv.length}건 → ${uninvoiced.length}건</b>`;
-    if(resolvedByNorm>0) h+=` <span style="color:#059669;">(표기 차이로 해결 ${resolvedByNorm}건)</span>`;
+    h+=`보정(정규화 + 여행사·날짜·차량) 적용 시: 미발행 <b>${exactUninv.length}건 → ${uninvoiced.length}건</b>`;
+    if(resolvedByNorm>0) h+=` <span style="color:#059669;">(보정으로 해결 ${resolvedByNorm}건)</span>`;
     h+=`<br>남은 미발행 키 <b>${Object.keys(keyRows).length}</b>개</div>`;
 
     if(invNoTC>0){
       h+=`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:8px;margin-bottom:8px;font-size:11px;line-height:1.6;">⚠️ <b>투어코드 없는 인보이스 ${invNoTC}개</b> — 이 인보이스들은 항목에 투어코드가 없어서, 실제로 발행했어도 투어코드로는 매칭이 안 됩니다. (미발행으로 오인되는 주요 원인)`;
-      h+=`<div style="margin-top:5px;color:#059669;font-weight:700;">→ 여행사+날짜로 매칭하면 남은 ${uninvoiced.length}건 중 <b>${resolvedByDate}건</b> 해결 가능</div>`;
+      h+=`<div style="margin-top:5px;color:var(--t2);">→ 여행사+날짜+차량 보조매칭은 <b>이미 적용됨</b>. 차량까지 무시(여행사+날짜만)하면 남은 ${uninvoiced.length}건 중 ${resolvedByDate}건이 더 잡히지만, 같은날 여러대 중 일부만 청구한 경우 과다매칭 위험이라 제외했습니다.</div>`;
       // 투어코드 없는 인보이스 상세
       h+=`<div style="margin-top:6px;max-height:150px;overflow:auto;border:1px solid #fca5a5;border-radius:6px;padding:6px;background:#fff;">`;
       h+= noTCInvoices.map(v=>`<div style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--bd);"><b>${esc(v.num)}</b> · ${esc(v.ag)} · 기간 ${esc(v.pf)}~${esc(v.pt)} · 항목 ${v.cnt}개${v.d0?` (${esc(v.d0)}~${esc(v.d1)})`:''} · ${esc(String(v.gt))}</div>`).join('') || '<div style="font-size:10px;color:var(--t3);">(상세 없음)</div>';
@@ -4685,23 +4690,26 @@ function rDash(){
       const lastMonthCutoff = cutoffISO(lastMonthFirst);
 
       const issuedKeys = new Set();
+      const issuedTripKeys = new Set(); // ★ AG|ISO날짜|차량 — 투어코드 없을 때 보조매칭용
       // ★ 1차: Invoices 시트의 Items JSON에서 발행된 (Agency, TourCode) 추출 (가장 정확)
       (_invHistoryCache||[]).forEach(inv => {
         const status = String(inv.Status||'').toLowerCase();
         if(status === 'cancelled' || status === 'void') return;
         const ag = String(inv.Agency||'').trim().toUpperCase();
         if(!ag) return;
+        const scan = (arr) => {
+          (arr||[]).forEach(it => {
+            const tc = pickItemTourCode(it).toUpperCase();
+            if(tc) issuedKeys.add(`${ag}|${tc}`);
+            // 보조: 여행사+날짜+차량
+            const di = parseToISO(it.date || it.Date || '');
+            const rg = _normRego(it.rego || it.Rego || '');
+            if(di && rg) issuedTripKeys.add(`${ag}|${di}|${rg}`);
+          });
+        };
         try {
-          const items = JSON.parse(inv.Items || '[]');
-          items.forEach(it => {
-            const tc = pickItemTourCode(it).toUpperCase();
-            if(tc) issuedKeys.add(`${ag}|${tc}`);
-          });
-          const manualItems = JSON.parse(inv.ManualItems || '[]');
-          manualItems.forEach(it => {
-            const tc = pickItemTourCode(it).toUpperCase();
-            if(tc) issuedKeys.add(`${ag}|${tc}`);
-          });
+          scan(JSON.parse(inv.Items || '[]'));
+          scan(JSON.parse(inv.ManualItems || '[]'));
           // 인보이스 자체의 TourCode 필드 (단일 TourCode 인보이스)
           const invTC = String(inv.TourCode||'').trim().toUpperCase();
           if(invTC) issuedKeys.add(`${ag}|${invTC}`);
@@ -4732,6 +4740,9 @@ function rDash(){
         if(issuedKeys.has(`${ag}|${tc}`)) return false;
         const nt = _normTC(tc);
         if(nt && issuedNormKeys.has(`${ag}|${nt}`)) return false;
+        // ★ 보조: 투어코드로 못 찾으면 여행사+날짜+차량으로 발행 여부 확인
+        const rg = _normRego(r.Rego||'');
+        if(rg && issuedTripKeys.has(`${ag}|${dateISO}|${rg}`)) return false;
         return true;
       });
 
