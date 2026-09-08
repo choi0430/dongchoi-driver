@@ -3320,6 +3320,64 @@ function _dxResetInvoiced(){
   diagnoseUninvoiced();
 }
 
+// ── 투어코드 없는 인보이스 → 투어코드 연결 도우미 ─────────────────────────
+// 같은 여행사·기간의 운행기록(_drCache)에서 실제 투어코드를 추천.
+//  · 여행사명이 정확히 일치하는 코드 우선, 없으면 같은 기간의 다른 여행사 코드도 참고로 제공.
+function _dxSuggestTourCodes(agency, pf, pt){
+  try{
+    if(!Array.isArray(_drCache)) return [];
+    const AG=String(agency||'').trim().toUpperCase();
+    const inRange=(di)=>{ if(!di) return false; if(pf && di<pf) return false; if(pt && di>pt) return false; return true; };
+    const exact=[], other=[]; const seenE=new Set(), seenO=new Set();
+    _drCache.forEach(r=>{
+      const di=(typeof parseToISO==='function')?parseToISO(r.Date||''):'';
+      if(!inRange(di)) return;
+      const tc=pickTourCode(r).trim(); if(!tc) return;
+      const ag=String(r.Agency||'').trim().toUpperCase();
+      if(AG && ag===AG){
+        if(!seenE.has(tc.toUpperCase())){ seenE.add(tc.toUpperCase()); exact.push({code:tc, ag:''}); }
+      } else {
+        const k=tc.toUpperCase()+'|'+ag;
+        if(!seenO.has(k)){ seenO.add(k); other.push({code:tc, ag:String(r.Agency||'').trim()}); }
+      }
+    });
+    return exact.length ? exact : other.slice(0,12);
+  }catch(e){ return []; }
+}
+// 추천 칩 클릭 → 입력칸에 코드 추가(중복 방지·콤마 구분)
+function _dxPickTC(idx, si){
+  try{
+    const it=(window._dxNoTCList||[])[idx]; if(!it) return;
+    const s=(it.sugg||[])[si]; const code=s&&s.code; if(!code) return;
+    const inp=document.getElementById('dx-tc-'+idx); if(!inp) return;
+    const cur=String(inp.value||'').split(',').map(x=>x.trim()).filter(Boolean);
+    if(cur.map(x=>x.toUpperCase()).indexOf(code.toUpperCase())<0) cur.push(code);
+    inp.value=cur.join(', ');
+    inp.focus();
+  }catch(e){}
+}
+// 입력한 투어코드를 인보이스에 저장(백엔드 set_invoice_tourcode) → 즉시 재진단
+async function _dxSetInvoiceTourCode(idx){
+  try{
+    const it=(window._dxNoTCList||[])[idx]; if(!it) return;
+    const inp=document.getElementById('dx-tc-'+idx); if(!inp) return;
+    const val=String(inp.value||'').split(',').map(x=>x.trim()).filter(Boolean).join(', ');
+    if(!val){ toast('투어코드를 입력하세요','er'); return; }
+    toast('투어코드 저장 중...','in');
+    const _user=(typeof getAdminUser==='function')?getAdminUser():((typeof ST!=='undefined'&&ST&&ST.user)||'admin');
+    const res=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'set_invoice_tourcode', invNumber:it.num, tourCode:val, _user:_user})});
+    const txt=await res.text(); let j;
+    try{ j=JSON.parse(txt); }catch(e){ console.error('set_invoice_tourcode parse',txt.slice(0,200)); toast('서버 응답 파싱 실패','er'); return; }
+    if(!j.ok){ toast('저장 실패: '+(j.error||''),'er'); return; }
+    // 로컬 인보이스 캐시에 반영 → 재진단 시 즉시 매칭되어 목록에서 빠짐
+    const inv=(_invHistoryCache||[]).find(x=>String(x.InvNumber||x.InvNo||x.InvID||'')===String(it.num));
+    if(inv) inv.TourCode=val;
+    toast('✅ '+it.num+' 투어코드 저장: '+val,'ok');
+    diagnoseUninvoiced();
+  }catch(e){ console.error('_dxSetInvoiceTourCode',e); toast('오류: '+e.message,'er'); }
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // 🔍 인보이스 미발행 운행 원인 진단
 //  대시보드 알림과 동일한 캐시(_drCache, _invHistoryCache 등)를 그대로 사용해
@@ -3355,8 +3413,10 @@ function diagnoseUninvoiced(){
         const di=(typeof parseToISO==='function')?parseToISO(it.date||it.Date||''):''; if(di){ itemDates.push(di); if(ag) issuedDateKeys.add(ag+'|'+di); const rg=_normRego(it.rego||it.Rego||''); if(rg) issuedTripKeys.add(ag+'|'+di+'|'+rg); }
       }); };
       try{ scan(JSON.parse(inv.Items||'[]')); scan(JSON.parse(inv.ManualItems||'[]')); }catch(e){}
-      const invTC=String(inv.TourCode||'').trim().toUpperCase();
-      if(invTC){ if(ag) issuedKeys.add(ag+'|'+invTC); issuedTC.add(invTC); gotTC=true; }
+      // 인보이스 단위 TourCode 태그 — 콤마 구분 다중 코드 허용 (set_invoice_tourcode로 저장)
+      String(inv.TourCode||'').split(',').map(c=>c.trim().toUpperCase()).filter(Boolean).forEach(c=>{
+        if(ag) issuedKeys.add(ag+'|'+c); issuedTC.add(c); gotTC=true;
+      });
       if(gotTC) invWithTC++;
       else { invNoTC++; itemDates.sort(); const _pf=parseToISO(inv.PeriodFrom||'')||String(inv.PeriodFrom||'').slice(0,10); const _pt=parseToISO(inv.PeriodTo||'')||String(inv.PeriodTo||'').slice(0,10); noTCInvoices.push({num:inv.InvNumber||inv.InvNo||inv.InvID||'?', ag:inv.Agency||'', pf:_pf, pt:_pt, gt:inv.GrandTotal||inv.Total||inv.ExGST||'', cnt:itemDates.length, d0:itemDates[0]||'', d1:itemDates[itemDates.length-1]||''}); }
     });
@@ -3450,10 +3510,26 @@ function diagnoseUninvoiced(){
     if(invNoTC>0){
       h+=`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:8px;margin-bottom:8px;font-size:11px;line-height:1.6;">⚠️ <b>투어코드 없는 인보이스 ${invNoTC}개</b> — 이 인보이스들은 항목에 투어코드가 없어서, 실제로 발행했어도 투어코드로는 매칭이 안 됩니다. (미발행으로 오인되는 주요 원인)`;
       h+=`<div style="margin-top:5px;color:var(--t2);">→ 여행사+날짜+차량 보조매칭은 <b>이미 적용됨</b>. 차량까지 무시(여행사+날짜만)하면 남은 ${uninvoiced.length}건 중 ${resolvedByDate}건이 더 잡히지만, 같은날 여러대 중 일부만 청구한 경우 과다매칭 위험이라 제외했습니다.</div>`;
-      // 투어코드 없는 인보이스 상세
-      h+=`<div style="margin-top:6px;max-height:150px;overflow:auto;border:1px solid #fca5a5;border-radius:6px;padding:6px;background:#fff;">`;
+      h+=`<div style="margin-top:5px;color:var(--t2);font-size:10px;">🔧 아래에서 각 인보이스에 실제 <b>투어코드</b>를 넣어 저장하면, 그 코드로 운행이 매칭되어 이 목록에서 빠집니다. (추천 코드는 같은 여행사·기간의 운행기록에서 자동 제안)</div>`;
+      // 투어코드 없는 인보이스 상세 + 투어코드 연결 도우미
+      window._dxNoTCList = [];
+      h+=`<div style="margin-top:6px;max-height:300px;overflow:auto;border:1px solid #fca5a5;border-radius:6px;padding:6px;background:#fff;">`;
       const _money=(x)=>{ const n=Number(x); return isFinite(n)&&n?('$'+n.toLocaleString('en-AU',{maximumFractionDigits:0})):esc(String(x||'')); };
-      h+= noTCInvoices.map(v=>`<div style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--bd);"><b>${esc(v.num)}</b> · ${esc(v.ag)} · 기간 ${esc(v.pf)}~${esc(v.pt)} · 항목 ${v.cnt}개${v.d0?` (${esc(v.d0)}${v.d1&&v.d1!==v.d0?'~'+esc(v.d1):''})`:''} · ${_money(v.gt)}</div>`).join('') || '<div style="font-size:10px;color:var(--t3);">(상세 없음)</div>';
+      h+= noTCInvoices.map(v=>{
+        const idx=_dxNoTCList.length;
+        const sugg=(typeof _dxSuggestTourCodes==='function')?_dxSuggestTourCodes(v.ag, v.pf, v.pt):[];
+        _dxNoTCList.push({num:v.num, ag:v.ag, pf:v.pf, pt:v.pt, sugg:sugg});
+        const suggHtml = sugg.length
+          ? `<div style="margin-top:3px;">${sugg.slice(0,12).map((s,si)=>`<span onclick="_dxPickTC(${idx},${si})" title="클릭하면 입력칸에 추가" style="display:inline-block;cursor:pointer;background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;border-radius:4px;padding:1px 6px;margin:2px 3px 0 0;font-size:10px;font-weight:700;">+ ${esc(s.code)}${s.ag?` <span style="opacity:.55;font-weight:400;">(${esc(s.ag)})</span>`:''}</span>`).join('')}</div>`
+          : `<div style="margin-top:3px;font-size:9px;color:var(--t3);">추천 코드 없음 (같은 여행사·기간 운행 매칭 안 됨) — 직접 입력하세요.</div>`;
+        return `<div style="font-size:10px;padding:6px 0;border-bottom:1px solid var(--bd);">`
+          + `<div><b>${esc(v.num)}</b> · ${esc(v.ag)} · 기간 ${esc(v.pf)}~${esc(v.pt)} · 항목 ${v.cnt}개${v.d0?` (${esc(v.d0)}${v.d1&&v.d1!==v.d0?'~'+esc(v.d1):''})`:''} · ${_money(v.gt)}</div>`
+          + suggHtml
+          + `<div style="display:flex;gap:4px;margin-top:4px;">`
+          +   `<input id="dx-tc-${idx}" type="text" placeholder="투어코드 (여러 개는 콤마로)" style="flex:1;font-size:11px;padding:4px 6px;border:1px solid var(--b2);border-radius:4px;font-family:var(--fd);background:var(--sf);color:var(--t1);">`
+          +   `<button onclick="_dxSetInvoiceTourCode(${idx})" style="white-space:nowrap;font-size:10px;font-weight:700;padding:4px 10px;border-radius:4px;border:1px solid #7c3aed;background:#7c3aed;color:#fff;cursor:pointer;">투어코드 저장</button>`
+          + `</div></div>`;
+      }).join('') || '<div style="font-size:10px;color:var(--t3);">(상세 없음)</div>';
       h+=`</div></div>`;
     }
 
