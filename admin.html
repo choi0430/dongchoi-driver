@@ -6090,8 +6090,8 @@ function _learnFlightsFromSchedule(){
       var type=(document.querySelector('input[name="'+(which==='in'?'sm-fi-type':'sm-fo-type')+'"]:checked')?.value)||'intl';
       var per=(typeof _flightPeriod==='function')?_flightPeriod(time):'';
       var slot;
-      if(which==='in') slot = per==='evening'?'evening':per==='morning'?'morning':'fullday';
-      else             slot = per==='morning'?'morning':'fullday'; // 저녁/그외 출발=풀데이
+      if(which==='in') slot = per==='evening'?'evening':'fullday';   // 저녁 도착=PM, 그 외=풀데이(공항픽업+종일)
+      else             slot = per==='morning'?'morning':'fullday';   // 오전 출발=AM 샌딩, 저녁/그외=풀데이
       fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
         body: JSON.stringify({ action:'save_flight', data:{ Flight:code, Direction:which, Time:time, Slot:slot, IntlDom:type }, _user:getAdminUser() })
       }).catch(function(){});
@@ -7379,13 +7379,12 @@ function onSmFlightInTimeChange(){
   const addMin = isIntl ? 60 : 30;
   const newTime = _addMinutes(t, addMin);
   const d = _schDays[0];
-  // ★ 도착 시간대로 첫날 슬롯 결정: 저녁 도착(OZ601·EK413 등)=PM(evening), 오전 도착=AM(morning)
-  //   첫날 슬롯이 모두 비어있으면 원하는 슬롯으로 재배치하고 빈 기본 슬롯 정리
+  // ★ 도착 시간대로 첫날 슬롯 결정:
+  //   저녁 도착(OZ601·EK413 등) = PM(evening) 공항 트랜스퍼 (저녁 픽업→호텔)
+  //   그 외(오전·낮 도착) = 풀데이 (아침 공항 픽업 후 종일 투어) — 첫날은 대부분 풀데이
   const _arrPeriod = _flightPeriod(t);
   const _firstAllEmpty = ['morning','fullday','evening'].every(k => !d.slots[k] || _schIsSlotEmpty(d.slots[k]));
-  let _arrKey = '';
-  if(_arrPeriod === 'evening') _arrKey = 'evening';
-  else if(_arrPeriod === 'morning') _arrKey = 'morning';
+  let _arrKey = (_arrPeriod === 'evening') ? 'evening' : 'fullday';
   let target = null;
   let slotName = '';
   if(_arrKey && _firstAllEmpty){
