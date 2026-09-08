@@ -4119,39 +4119,62 @@ async function renderIntegrityCheck(){
     var drByInv={}, invSet={};
     allInvs.forEach(function(i){ invSet[String(i.InvNumber||'').toUpperCase()]=1; });
     txns.forEach(function(t){ var id=String(t.InvoiceID||'').toUpperCase(); if(!id) return; var dr=Number(t.DR)||0; if(dr>0) drByInv[id]=(drByInv[id]||0)+dr; });
-    // A) DR 누락 인보이스
+    var _dismissed = _dismissedIntegrity();
+    // A) DR 누락 인보이스 (확인한 항목 제외)
     var missingDR=[];
     recent.forEach(function(i){
       var id=String(i.InvNumber||'').toUpperCase(); var gt=Number(i.GrandTotal)||0;
       if(gt<=0.01) return;
-      if(!drByInv[id]) missingDR.push({inv:i.InvNumber, agency:i.Agency, total:gt});
+      if(!drByInv[id]){ var k='mdr|'+id; if(_dismissed.indexOf(k)<0) missingDR.push({inv:i.InvNumber, agency:i.Agency, total:gt, key:k}); }
     });
-    // B) 존재하지 않는 인보이스에 수금(CR)
+    // B) 존재하지 않는 인보이스에 수금(CR) (확인한 항목 제외)
     var orphanPay=[];
     txns.forEach(function(t){
       var id=String(t.InvoiceID||'').toUpperCase(); var cr=Number(t.CR)||0;
-      if(id && cr>0 && !invSet[id] && !(typeof _isSubInvNumber==='function' && _isSubInvNumber(t.InvoiceID||''))) orphanPay.push({inv:t.InvoiceID, agency:t.Agency, cr:cr});
+      if(id && cr>0 && !invSet[id] && !(typeof _isSubInvNumber==='function' && _isSubInvNumber(t.InvoiceID||''))){
+        var k='orp|'+id+'|'+Math.round(cr); if(_dismissed.indexOf(k)<0) orphanPay.push({inv:t.InvoiceID, agency:t.Agency, cr:cr, key:k});
+      }
     });
     var issues=(missingDR.length>0)||(orphanPay.length>0);
-    if(!issues){ el.style.display='none'; el.innerHTML=''; return; }
+    // 현재 표시 중인 키 저장 (모두 확인용)
+    window._integrityKeys = missingDR.map(function(m){return m.key;}).concat(orphanPay.map(function(m){return m.key;}));
+    if(!issues){
+      // 남은 이슈 없음 — 확인한 항목이 있으면 '다시 보기'만 작게 노출, 없으면 완전 숨김
+      if(_dismissed.length){
+        el.innerHTML='<div style="text-align:right;margin-top:6px;"><span onclick="_resetDismissedIntegrity()" style="cursor:pointer;font-size:10px;color:var(--t3);text-decoration:underline;">🔎 정합성 점검 — 확인한 항목 다시 보기</span></div>';
+        el.style.display='block';
+      } else { el.style.display='none'; el.innerHTML=''; }
+      return;
+    }
     var $f=function(v){ return '$'+(Number(v)||0).toLocaleString('en-AU',{maximumFractionDigits:0}); };
+    var _xbtn=function(key){ return '<span onclick="_dismissIntegrity(\''+String(key).replace(/'/g,"\\'")+'\')" title="확인 — 이 알림 끄기" style="cursor:pointer;color:var(--t3);font-size:10px;border:1px solid var(--bd);border-radius:6px;padding:0 6px;margin-left:8px;white-space:nowrap;flex:0 0 auto;">✕ 확인</span>'; };
+    var _line=function(txt,key){ return '<div style="font-size:11px;color:var(--t2);display:flex;justify-content:space-between;align-items:center;padding:1px 0;"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;">• '+txt+'</span>'+_xbtn(key)+'</div>'; };
     var html='<div class="shd" style="margin-top:14px"><div class="stl">🔎 정합성 점검 <span style="font-size:10px;color:var(--t3);font-weight:500;">인보이스 ↔ 거래처 잔액 · 최근 120일</span></div></div>';
     html+='<div style="background:var(--sf);border:1.5px solid #f0b429;border-radius:12px;padding:12px 14px;margin:0 0 10px;">';
     if(missingDR.length){
       html+='<div style="font-size:12px;font-weight:700;color:#b45309;margin-bottom:3px;">⚠️ 잔액 기록 누락 — 인보이스는 있으나 거래처 잔액에 청구(DR)가 없음 ('+missingDR.length+'건)</div>';
       html+='<div style="font-size:11px;color:var(--t2);margin-bottom:6px;">인보이스 발행 중 잔액 기록이 누락됐을 수 있습니다. 거래처 잔액에서 수동 확인이 필요합니다.</div>';
-      html+=missingDR.slice(0,8).map(function(m){ return '<div style="font-size:11px;color:var(--t2);">• '+escH(m.inv)+' · '+escH(m.agency||'')+' · '+$f(m.total)+'</div>'; }).join('');
-      if(missingDR.length>8) html+='<div style="font-size:10px;color:var(--t3);">…외 '+(missingDR.length-8)+'건</div>';
+      html+=missingDR.slice(0,12).map(function(m){ return _line(escH(m.inv)+' · '+escH(m.agency||'')+' · '+$f(m.total), m.key); }).join('');
+      if(missingDR.length>12) html+='<div style="font-size:10px;color:var(--t3);">…외 '+(missingDR.length-12)+'건</div>';
     }
     if(orphanPay.length){
       html+='<div style="font-size:12px;font-weight:700;color:#b45309;margin:'+(missingDR.length?'10px':'0')+' 0 3px;">⚠️ 존재하지 않는 인보이스에 수금 기록 ('+orphanPay.length+'건)</div>';
-      html+=orphanPay.slice(0,6).map(function(m){ return '<div style="font-size:11px;color:var(--t2);">• '+escH(m.inv)+' · '+escH(m.agency||'')+' · '+$f(m.cr)+'</div>'; }).join('');
-      if(orphanPay.length>6) html+='<div style="font-size:10px;color:var(--t3);">…외 '+(orphanPay.length-6)+'건</div>';
+      html+=orphanPay.slice(0,10).map(function(m){ return _line(escH(m.inv)+' · '+escH(m.agency||'')+' · '+$f(m.cr), m.key); }).join('');
+      if(orphanPay.length>10) html+='<div style="font-size:10px;color:var(--t3);">…외 '+(orphanPay.length-10)+'건</div>';
     }
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;border-top:1px solid var(--bd);padding-top:8px;">';
+    html+= (_dismissed.length ? '<span onclick="_resetDismissedIntegrity()" style="cursor:pointer;font-size:10px;color:var(--t3);text-decoration:underline;">확인한 항목 다시 보기</span>' : '<span></span>');
+    html+='<span onclick="_dismissAllIntegrity()" style="cursor:pointer;font-size:11px;color:#b45309;font-weight:700;border:1px solid #f0b429;border-radius:6px;padding:2px 10px;">모두 확인</span>';
+    html+='</div>';
     html+='</div>';
     el.innerHTML=html; el.style.display='block';
   }catch(e){ console.warn('integrity check fail', e); el.style.display='none'; }
 }
+// 정합성 점검 — 확인(dismiss) 처리 (브라우저에 기억)
+function _dismissedIntegrity(){ try{ return safeGetLocal('dc_dismissed_integrity', []); }catch(e){ return []; } }
+function _dismissIntegrity(key){ try{ var a=_dismissedIntegrity(); if(a.indexOf(key)<0){ a.push(key); safeSetLocal('dc_dismissed_integrity', a); } }catch(e){} if(typeof renderIntegrityCheck==='function') renderIntegrityCheck(); }
+function _dismissAllIntegrity(){ try{ var a=_dismissedIntegrity(); (window._integrityKeys||[]).forEach(function(k){ if(a.indexOf(k)<0) a.push(k); }); safeSetLocal('dc_dismissed_integrity', a); }catch(e){} if(typeof renderIntegrityCheck==='function') renderIntegrityCheck(); }
+function _resetDismissedIntegrity(){ try{ safeSetLocal('dc_dismissed_integrity', []); }catch(e){} if(typeof renderIntegrityCheck==='function') renderIntegrityCheck(); }
 
 // 비활성 여부 — Active 값이 명시적으로 'N'일 때만 비활성 (빈값/Y/미지정은 활성)
 function _isActiveRow(r){ return String((r && r.Active != null ? r.Active : 'Y')).trim().toUpperCase() !== 'N'; }
