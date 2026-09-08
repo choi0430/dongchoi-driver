@@ -73,7 +73,12 @@
     `;
     document.head.appendChild(style);
 
-    _injectBillingEntityTab();
+    // ⚠️ 모달 BillingEntity UI는 dc-partner-dropdown.js가 단독으로 담당한다.
+    //    (예전엔 여기서 탭+라벨을 주입했는데, dropdown.js가 자체 라벨+드롭다운을
+    //     또 주입하면서 "인보이스 발행사" 라벨이 중복 표시되던 버그가 있었음.
+    //     dropdown.js의 CSS는 .be-tab-row(버튼줄)만 숨기고 이 라벨은 못 숨겼음.)
+    //    → 여기서는 탭/라벨 주입을 완전히 비활성화하고, 저장 훅·리스트 배지·필터만 유지.
+    // _injectBillingEntityTab();  // disabled — dropdown.js owns the modal UI
     _hookSaveSchedule();
     _hookRenderScheduleList();
     _injectScheduleFilters();
