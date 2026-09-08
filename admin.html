@@ -3287,6 +3287,15 @@ function pickItemTourCode(it){
   if(!it) return '';
   return String(it.tourcode || it.tourCode || it.Tour_Code || it.TourCode || it.tour_code || '').trim();
 }
+// 투어코드 정규화 — 매칭용 (표기 차이 흡수)
+//  · 대문자화 · 첫 한글(및 그 뒤 메모/그룹명) 제거 · 영숫자만 남김(공백·하이픈·괄호 무시)
+//  예: "0727 PAQ 1 TW 가족모임" → "0727PAQ1TW", "0727-LT-21-KE-7N (탕갈루마)" → "0727LT21KE7N"
+function _normTC(s){
+  s = String(s==null?'':s).toUpperCase();
+  s = s.replace(/[가-힣㄰-㆏].*$/, ''); // 첫 한글부터 끝까지(메모) 제거
+  s = s.replace(/[^A-Z0-9]/g, '');                      // 영숫자만
+  return s;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // 🔍 인보이스 미발행 운행 원인 진단
@@ -3331,16 +3340,31 @@ function diagnoseUninvoiced(){
       });
     }
 
-    // ── 미발행 운행 필터 (알림과 동일) ──
-    const uninvoiced = _drCache.filter(r=>{
+    // ── 정규화 키 세트 ──
+    const issuedNormKeys = new Set();
+    issuedKeys.forEach(k=>{ const i=k.indexOf('|'); if(i>0){ const nt=_normTC(k.slice(i+1)); if(nt) issuedNormKeys.add(k.slice(0,i)+'|'+nt); } });
+    const issuedNormTC = new Set(); issuedTC.forEach(tc=>{ const nt=_normTC(tc); if(nt) issuedNormTC.add(nt); });
+
+    // ── 미발행 운행 필터 ── (공통 전제 통과분)
+    const baseRows = _drCache.filter(r=>{
       const dateISO=parseToISO(r.Date||''); if(!dateISO||dateISO<lastMonthCutoff) return false;
       if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return false;
       const tc=pickTourCode(r).toUpperCase(); const ag=String(r.Agency||'').trim().toUpperCase();
       if(!tc||!ag) return false;
       const be=(typeof _scheduleBillingMap!=='undefined')?_scheduleBillingMap[tc]:undefined;
       if(be!==undefined && typeof isBillingEntityDC==='function' && !isBillingEntityDC(be)) return false;
-      return !issuedKeys.has(ag+'|'+tc);
+      return true;
     });
+    // 정확 일치만 적용했을 때 미발행 (수정 전 동작)
+    const exactUninv = baseRows.filter(r=>{ const ag=String(r.Agency||'').trim().toUpperCase(); const tc=pickTourCode(r).toUpperCase(); return !issuedKeys.has(ag+'|'+tc); });
+    // 정규화 일치까지 적용했을 때 미발행 (수정 후 동작 = 실제 알림)
+    const uninvoiced = baseRows.filter(r=>{
+      const ag=String(r.Agency||'').trim().toUpperCase(); const tc=pickTourCode(r).toUpperCase();
+      if(issuedKeys.has(ag+'|'+tc)) return false;
+      const nt=_normTC(tc); if(nt && issuedNormKeys.has(ag+'|'+nt)) return false;
+      return true;
+    });
+    const resolvedByNorm = exactUninv.length - uninvoiced.length;
 
     // ── 카테고리 분류 (키 단위 + 건수) ──
     const cats={ noTCanywhere:[], agencyMismatch:[], tcMissing:[], neither:[], personal:[] };
@@ -3376,7 +3400,9 @@ function diagnoseUninvoiced(){
     h+=`<div style="font-size:11px;color:var(--t2);margin-bottom:8px;line-height:1.6;">`;
     h+=`활성 인보이스 <b>${invActive}</b>개 · 그중 투어코드 있는 인보이스 <b>${invWithTC}</b>개 / 투어코드 없는 인보이스 <b style="color:${invNoTC>0?'#dc2626':'inherit'}">${invNoTC}</b>개<br>`;
     h+=`발행된 키(여행사|투어코드) <b>${issuedKeys.size}</b>개 · 발행된 투어코드 <b>${issuedTC.size}</b>종<br>`;
-    h+=`미발행 운행 <b>${uninvoiced.length}건</b> / 미발행 키 <b>${Object.keys(keyRows).length}</b>개</div>`;
+    h+=`정규화(표기 차이 흡수) 적용 시: 미발행 <b>${exactUninv.length}건 → ${uninvoiced.length}건</b>`;
+    if(resolvedByNorm>0) h+=` <span style="color:#059669;">(표기 차이로 해결 ${resolvedByNorm}건)</span>`;
+    h+=`<br>남은 미발행 키 <b>${Object.keys(keyRows).length}</b>개</div>`;
 
     if(invNoTC>0){
       h+=`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:8px;margin-bottom:8px;font-size:11px;line-height:1.6;">⚠️ <b>투어코드 없는 인보이스 ${invNoTC}개</b> — 이 인보이스들은 항목에 투어코드가 없어서, 실제로 발행했어도 매칭이 안 됩니다. (미발행으로 오인되는 주요 원인)</div>`;
@@ -4677,6 +4703,9 @@ function rDash(){
         const ag = (t.Agency||'').toUpperCase();
         codes.forEach(c => issuedKeys.add(`${ag}|${c}`));
       });
+      // ★ 정규화 키 세트 (표기 차이 흡수: 한글 메모·공백·하이픈 무시)
+      const issuedNormKeys = new Set();
+      issuedKeys.forEach(k => { const i = k.indexOf('|'); if(i>0){ const nt=_normTC(k.slice(i+1)); if(nt) issuedNormKeys.add(k.slice(0,i)+'|'+nt); } });
 
       const uninvoiced = _drCache.filter(r => {
         const dateISO = parseToISO(r.Date||'');
@@ -4688,8 +4717,11 @@ function rDash(){
         // ★ FIX: BillingEntity가 DC가 아닌 운행(예: EG TRAVEL이 직접 발행)은 DC 미발행 대상 아님
         const _be = (typeof _scheduleBillingMap !== 'undefined') ? _scheduleBillingMap[tc] : undefined;
         if(_be !== undefined && typeof isBillingEntityDC === 'function' && !isBillingEntityDC(_be)) return false;
-        const key = `${ag}|${tc}`;
-        return !issuedKeys.has(key);
+        // 정확 일치 또는 정규화 일치면 발행된 것으로 간주
+        if(issuedKeys.has(`${ag}|${tc}`)) return false;
+        const nt = _normTC(tc);
+        if(nt && issuedNormKeys.has(`${ag}|${nt}`)) return false;
+        return true;
       });
 
       if(uninvoiced.length > 0){
