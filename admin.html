@@ -3299,6 +3299,27 @@ function _normTC(s){
 // 차량번호(Rego) 정규화 — 매칭용 (대문자·영숫자만)
 function _normRego(s){ return String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,''); }
 
+// 수동 "발행됨 처리" — 자동 매칭이 불가한(수동/총액만 인보이스) 운행을 사용자가 직접 발행됨으로 표시
+//  localStorage 'dc_manual_invoiced' = ["AG|정규화투어코드", ...]
+function _manualInvoicedSet(){ try{ return new Set(JSON.parse(localStorage.getItem('dc_manual_invoiced')||'[]')); }catch(e){ return new Set(); } }
+function _dxToggleInvoiced(idx){
+  try{
+    const it = (window._dxKeyList||[])[idx]; if(!it) return;
+    const key = it.ag + '|' + _normTC(it.tc);
+    let arr; try{ arr = JSON.parse(localStorage.getItem('dc_manual_invoiced')||'[]'); }catch(e){ arr = []; }
+    const i = arr.indexOf(key);
+    if(i>=0) arr.splice(i,1); else arr.push(key);
+    localStorage.setItem('dc_manual_invoiced', JSON.stringify(arr));
+    if(typeof toast==='function') toast(i>=0?'발행됨 표시 해제':'발행됨으로 표시 (대시보드 새로고침 시 알림에서 제외)','success');
+    diagnoseUninvoiced(); // 진단창 즉시 재렌더
+  }catch(e){ console.error('dxToggle err',e); }
+}
+function _dxResetInvoiced(){
+  if(typeof confirm==='function' && !confirm('수동 발행됨 표시를 모두 초기화할까요?')) return;
+  try{ localStorage.removeItem('dc_manual_invoiced'); }catch(e){}
+  diagnoseUninvoiced();
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // 🔍 인보이스 미발행 운행 원인 진단
 //  대시보드 알림과 동일한 캐시(_drCache, _invHistoryCache 등)를 그대로 사용해
@@ -3364,13 +3385,15 @@ function diagnoseUninvoiced(){
     });
     // 정확 일치만 적용했을 때 미발행 (수정 전 동작)
     const exactUninv = baseRows.filter(r=>{ const ag=String(r.Agency||'').trim().toUpperCase(); const tc=pickTourCode(r).toUpperCase(); return !issuedKeys.has(ag+'|'+tc); });
-    // 정규화 + 여행사+날짜+차량 보조까지 적용 (수정 후 동작 = 실제 알림)
+    const _manualInvSet = _manualInvoicedSet();
+    // 정규화 + 여행사+날짜+차량 보조 + 수동 발행표시까지 적용 (수정 후 동작 = 실제 알림)
     const uninvoiced = baseRows.filter(r=>{
       const ag=String(r.Agency||'').trim().toUpperCase(); const tc=pickTourCode(r).toUpperCase();
       if(issuedKeys.has(ag+'|'+tc)) return false;
       const nt=_normTC(tc); if(nt && issuedNormKeys.has(ag+'|'+nt)) return false;
       const rg=_normRego(r.Rego||''); const di=parseToISO(r.Date||'');
       if(rg && di && issuedTripKeys.has(ag+'|'+di+'|'+rg)) return false;
+      if(nt && _manualInvSet.has(ag+'|'+nt)) return false;
       return true;
     });
     const resolvedByNorm = exactUninv.length - uninvoiced.length;
@@ -3405,7 +3428,12 @@ function diagnoseUninvoiced(){
     // ── 렌더 ──
     const esc=(s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
     const chip=(t,c)=>`<span style="display:inline-block;background:${c};color:#fff;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;">${t}</span>`;
-    const sample=(arr,extra)=> arr.slice(0,25).map(x=>`<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--bd);">${esc(x.ag)} <span style="color:var(--t3);">|</span> <b>${esc(x.tc)}</b> <span style="color:var(--t3);">(${x.cnt}건)</span>${extra?extra(x):''}</div>`).join('') + (arr.length>25?`<div style="font-size:10px;color:var(--t3);padding-top:3px;">…외 ${arr.length-25}개 키</div>`:'');
+    window._dxKeyList = []; // 발행됨 처리 버튼용 인덱스 매핑
+    const sample=(arr,extra)=> arr.slice(0,60).map(x=>{
+      const idx=_dxKeyList.length; _dxKeyList.push({ag:x.ag, tc:x.tc});
+      const btn=`<button onclick="_dxToggleInvoiced(${idx})" style="float:right;font-size:9px;padding:1px 6px;border-radius:3px;border:1px solid var(--b2);background:var(--sf);cursor:pointer;">✓ 발행됨 처리</button>`;
+      return `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--bd);">${esc(x.ag)} <span style="color:var(--t3);">|</span> <b>${esc(x.tc)}</b> <span style="color:var(--t3);">(${x.cnt}건)</span>${extra?extra(x):''}${btn}</div>`;
+    }).join('') + (arr.length>60?`<div style="font-size:10px;color:var(--t3);padding-top:3px;">…외 ${arr.length-60}개 키</div>`:'');
 
     let h='';
     h+=`<div style="font-size:11px;color:var(--t2);margin-bottom:8px;line-height:1.6;">`;
@@ -3414,6 +3442,10 @@ function diagnoseUninvoiced(){
     h+=`보정(정규화 + 여행사·날짜·차량) 적용 시: 미발행 <b>${exactUninv.length}건 → ${uninvoiced.length}건</b>`;
     if(resolvedByNorm>0) h+=` <span style="color:#059669;">(보정으로 해결 ${resolvedByNorm}건)</span>`;
     h+=`<br>남은 미발행 키 <b>${Object.keys(keyRows).length}</b>개</div>`;
+    if(_manualInvSet.size>0){
+      h+=`<div style="font-size:10px;color:#059669;margin-bottom:8px;">✓ 수동 '발행됨 처리': ${_manualInvSet.size}개 키 (알림에서 제외됨) <span style="color:#2563eb;cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="_dxResetInvoiced()">전체 초기화</span></div>`;
+    }
+    h+=`<div style="font-size:10px;color:var(--t3);margin-bottom:8px;">💡 아래 항목은 자동 매칭이 안 된 건입니다. 실제로 (대충) 발행하셨다면 각 항목의 <b>✓ 발행됨 처리</b>를 눌러 알림에서 빼세요. 대시보드 새로고침 시 반영됩니다.</div>`;
 
     if(invNoTC>0){
       h+=`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:8px;margin-bottom:8px;font-size:11px;line-height:1.6;">⚠️ <b>투어코드 없는 인보이스 ${invNoTC}개</b> — 이 인보이스들은 항목에 투어코드가 없어서, 실제로 발행했어도 투어코드로는 매칭이 안 됩니다. (미발행으로 오인되는 주요 원인)`;
@@ -4725,6 +4757,7 @@ function rDash(){
       // ★ 정규화 키 세트 (표기 차이 흡수: 한글 메모·공백·하이픈 무시)
       const issuedNormKeys = new Set();
       issuedKeys.forEach(k => { const i = k.indexOf('|'); if(i>0){ const nt=_normTC(k.slice(i+1)); if(nt) issuedNormKeys.add(k.slice(0,i)+'|'+nt); } });
+      const _manualInvSet = _manualInvoicedSet(); // 사용자가 수동 발행됨 처리한 키
 
       const uninvoiced = _drCache.filter(r => {
         const dateISO = parseToISO(r.Date||'');
@@ -4743,6 +4776,8 @@ function rDash(){
         // ★ 보조: 투어코드로 못 찾으면 여행사+날짜+차량으로 발행 여부 확인
         const rg = _normRego(r.Rego||'');
         if(rg && issuedTripKeys.has(`${ag}|${dateISO}|${rg}`)) return false;
+        // ★ 사용자가 수동으로 "발행됨 처리"한 건 제외 (대충 만든 인보이스 등)
+        if(nt && _manualInvSet.has(`${ag}|${nt}`)) return false;
         return true;
       });
 
