@@ -2316,7 +2316,9 @@ function getSydneyOffsetMs(date) {
     return (new Date(sydStr) - new Date(utcStr));
   }
 }
-function isOperationalVehicle(v){return (parseInt(v.Seats||v.Capacity)||0) >= 12;}
+// 비활성('Active'가 'N') 차량은 선택 목록에서 제외. 12인승 이상만 운행차량.
+function _isActiveRow(r){ return String((r && r.Active != null ? r.Active : 'Y')).trim().toUpperCase() !== 'N'; }
+function isOperationalVehicle(v){return (parseInt(v.Seats||v.Capacity)||0) >= 12 && _isActiveRow(v);}
 function fmtDate(val) {
   // dd/mm/yyyy 표시용
   if (!val) return '';
@@ -3030,7 +3032,7 @@ const SDD_CONFIG = {
                +(activeInfo ? ' 🔒 운행중: '+activeInfo.driver : '');
     return {name:v.Rego, sub, disabled:!!activeInfo, lockInfo: activeInfo||null};
   }), type:'prerego' },
-  agency:     { list: ()=> (MASTER.agencies||[]).map(a=>({name:a.Name,sub:a.Mobile||''})),              type:'agency' },
+  agency:     { list: ()=> (MASTER.agencies||[]).filter(a=>_isActiveRow(a)).map(a=>({name:a.Name,sub:a.Mobile||''})), type:'agency' },
   attraction: { list: ()=>{
     // M_PriceDriver 기반 동적 코스 목록 (가격표와 자동 동기화)
     if(MASTER.courses && MASTER.courses.length>0)
