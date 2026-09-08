@@ -3288,6 +3288,130 @@ function pickItemTourCode(it){
   return String(it.tourcode || it.tourCode || it.Tour_Code || it.TourCode || it.tour_code || '').trim();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// 🔍 인보이스 미발행 운행 원인 진단
+//  대시보드 알림과 동일한 캐시(_drCache, _invHistoryCache 등)를 그대로 사용해
+//  "발행 다 했는데 왜 미발행으로 뜨나?"의 실제 원인을 카테고리별로 보여줌.
+// ═══════════════════════════════════════════════════════════════════
+function diagnoseUninvoiced(){
+  try{
+    if(!(_drCache && _drCache.length)){ toast('운행 데이터 미로드 — 새로고침 후 다시','er'); return; }
+    if(!(Array.isArray(_invHistoryCache) && _invHistoryCache.length)){ toast('인보이스 캐시 미로드 — 새로고침 후 다시','er'); return; }
+
+    const today = new Date();
+    const lastMonthFirst = new Date(today.getFullYear(), today.getMonth()-1, 1);
+    const cutoffISO = (d)=> d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    const lastMonthCutoff = cutoffISO(lastMonthFirst);
+
+    // ── 발행된 키 수집 (알림과 동일) + 부가 통계 ──
+    const issuedKeys = new Set();   // AG|TC
+    const issuedTC   = new Set();   // TC 만
+    const issuedAG   = new Set();   // AG 만
+    let invActive=0, invWithTC=0, invNoTC=0;
+    (_invHistoryCache||[]).forEach(inv=>{
+      const status=String(inv.Status||'').toLowerCase();
+      if(status==='cancelled'||status==='void') return;
+      invActive++;
+      const ag=String(inv.Agency||'').trim().toUpperCase();
+      if(ag) issuedAG.add(ag);
+      let gotTC=false;
+      try{
+        JSON.parse(inv.Items||'[]').forEach(it=>{ const tc=pickItemTourCode(it).toUpperCase(); if(tc){ if(ag) issuedKeys.add(ag+'|'+tc); issuedTC.add(tc); gotTC=true; } });
+        JSON.parse(inv.ManualItems||'[]').forEach(it=>{ const tc=pickItemTourCode(it).toUpperCase(); if(tc){ if(ag) issuedKeys.add(ag+'|'+tc); issuedTC.add(tc); gotTC=true; } });
+      }catch(e){}
+      const invTC=String(inv.TourCode||'').trim().toUpperCase();
+      if(invTC){ if(ag) issuedKeys.add(ag+'|'+invTC); issuedTC.add(invTC); gotTC=true; }
+      if(gotTC) invWithTC++; else invNoTC++;
+    });
+    // Agency_Txn 백업
+    if(typeof _balAgencyTxns!=='undefined' && _balAgencyTxns){
+      _balAgencyTxns.forEach(t=>{ if(String(t.Type||'').trim()!=='invoice')return;
+        const ag=(t.Agency||'').toUpperCase();
+        String(t.TourCode||'').split(',').map(c=>c.trim().toUpperCase()).filter(Boolean).forEach(c=>{ if(ag) issuedKeys.add(ag+'|'+c); issuedTC.add(c); if(ag) issuedAG.add(ag); });
+      });
+    }
+
+    // ── 미발행 운행 필터 (알림과 동일) ──
+    const uninvoiced = _drCache.filter(r=>{
+      const dateISO=parseToISO(r.Date||''); if(!dateISO||dateISO<lastMonthCutoff) return false;
+      if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return false;
+      const tc=pickTourCode(r).toUpperCase(); const ag=String(r.Agency||'').trim().toUpperCase();
+      if(!tc||!ag) return false;
+      const be=(typeof _scheduleBillingMap!=='undefined')?_scheduleBillingMap[tc]:undefined;
+      if(be!==undefined && typeof isBillingEntityDC==='function' && !isBillingEntityDC(be)) return false;
+      return !issuedKeys.has(ag+'|'+tc);
+    });
+
+    // ── 카테고리 분류 (키 단위 + 건수) ──
+    const cats={ noTCanywhere:[], agencyMismatch:[], tcMissing:[], neither:[], personal:[] };
+    const keyRows={}; // AG|TC → 건수
+    uninvoiced.forEach(r=>{
+      const ag=String(r.Agency||'').trim().toUpperCase(); const tc=pickTourCode(r).toUpperCase();
+      const key=ag+'|'+tc; keyRows[key]=(keyRows[key]||0)+1;
+    });
+    const seen=new Set();
+    Object.keys(keyRows).forEach(key=>{
+      if(seen.has(key))return; seen.add(key);
+      const [ag,tc]=key.split('|');
+      const cnt=keyRows[key];
+      const rec={ag,tc,cnt};
+      if(ag.includes('개인')||ag.includes('PRIVATE')){ cats.personal.push(rec); return; }
+      if(issuedTC.size===0){ cats.noTCanywhere.push(rec); return; }
+      if(issuedTC.has(tc) && !issuedKeys.has(key)){
+        // 같은 투어코드가 어떤 여행사로 발행됐는지
+        const under=[...issuedKeys].filter(k=>k.endsWith('|'+tc)).map(k=>k.split('|')[0]);
+        rec.under=[...new Set(under)]; cats.agencyMismatch.push(rec); return;
+      }
+      if(issuedAG.has(ag) && !issuedTC.has(tc)){ cats.tcMissing.push(rec); return; }
+      cats.neither.push(rec);
+    });
+    const sumCnt=(arr)=>arr.reduce((s,x)=>s+x.cnt,0);
+
+    // ── 렌더 ──
+    const esc=(s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const chip=(t,c)=>`<span style="display:inline-block;background:${c};color:#fff;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;">${t}</span>`;
+    const sample=(arr,extra)=> arr.slice(0,25).map(x=>`<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--bd);">${esc(x.ag)} <span style="color:var(--t3);">|</span> <b>${esc(x.tc)}</b> <span style="color:var(--t3);">(${x.cnt}건)</span>${extra?extra(x):''}</div>`).join('') + (arr.length>25?`<div style="font-size:10px;color:var(--t3);padding-top:3px;">…외 ${arr.length-25}개 키</div>`:'');
+
+    let h='';
+    h+=`<div style="font-size:11px;color:var(--t2);margin-bottom:8px;line-height:1.6;">`;
+    h+=`활성 인보이스 <b>${invActive}</b>개 · 그중 투어코드 있는 인보이스 <b>${invWithTC}</b>개 / 투어코드 없는 인보이스 <b style="color:${invNoTC>0?'#dc2626':'inherit'}">${invNoTC}</b>개<br>`;
+    h+=`발행된 키(여행사|투어코드) <b>${issuedKeys.size}</b>개 · 발행된 투어코드 <b>${issuedTC.size}</b>종<br>`;
+    h+=`미발행 운행 <b>${uninvoiced.length}건</b> / 미발행 키 <b>${Object.keys(keyRows).length}</b>개</div>`;
+
+    if(invNoTC>0){
+      h+=`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:8px;margin-bottom:8px;font-size:11px;line-height:1.6;">⚠️ <b>투어코드 없는 인보이스 ${invNoTC}개</b> — 이 인보이스들은 항목에 투어코드가 없어서, 실제로 발행했어도 매칭이 안 됩니다. (미발행으로 오인되는 주요 원인)</div>`;
+    }
+
+    const block=(title,color,arr,desc,extra)=>{
+      if(!arr.length) return '';
+      return `<div style="margin-top:10px;">${chip(title,color)} <b style="font-size:12px;">${arr.length}개 키 · ${sumCnt(arr)}건</b>`
+        + `<div style="font-size:10px;color:var(--t3);margin:3px 0 4px;">${desc}</div>`
+        + `<div style="max-height:170px;overflow:auto;border:1px solid var(--bd);border-radius:6px;padding:6px;">${sample(arr,extra)}</div></div>`;
+    };
+
+    h+=block('여행사명 불일치','#d97706',cats.agencyMismatch,
+      '같은 투어코드가 <b>다른 여행사명</b>으로 발행됨 → 운행기록의 여행사와 인보이스 여행사 철자/이름이 달라 매칭 실패.',
+      (x)=> x.under&&x.under.length?` <span style="color:#d97706;">→ 발행된 여행사: ${esc(x.under.join(', '))}</span>`:'');
+    h+=block('투어코드 인보이스에 없음','#2563eb',cats.tcMissing,
+      '이 여행사로 발행한 인보이스는 있으나, 이 투어코드가 그 인보이스 항목에 없음 → 인보이스 저장 시 투어코드 누락 or 코드 표기 차이.');
+    h+=block('발행 이력 전무','#6b7280',cats.neither,
+      '이 여행사·투어코드 조합의 발행 흔적이 전혀 없음 → 진짜 미발행이거나, 여행사·코드 둘 다 표기가 다름.');
+    h+=block('개인일정','#0ea5e9',cats.personal,
+      '여행사명이 "개인일정" 등 → 보통 인보이스 청구 대상이 아님. 제외 대상일 수 있음.');
+    if(cats.noTCanywhere.length){
+      h+=block('인보이스에 투어코드 전무','#dc2626',cats.noTCanywhere,
+        '<b>모든 인보이스에 투어코드가 하나도 없음</b> → 매칭 자체가 불가능. 인보이스 항목에 투어코드를 넣어야 함.');
+    }
+
+    // 참고: 발행된 여행사명 목록 (철자 비교용)
+    h+=`<div style="margin-top:10px;font-size:10px;color:var(--t3);">📄 인보이스에 실제 등장한 여행사명: ${[...issuedAG].slice(0,20).map(esc).join(' · ')||'(없음)'}</div>`;
+
+    document.getElementById('view-modal-title').textContent='🔍 미발행 원인 진단';
+    document.getElementById('view-modal-body').innerHTML=h || '<div style="padding:20px;text-align:center;color:var(--t3);">미발행 항목이 없습니다.</div>';
+    document.getElementById('view-modal').style.display='flex';
+  }catch(e){ console.error('diagnoseUninvoiced err',e); toast('진단 오류: '+e.message,'er'); }
+}
+
 // 범용 날짜 → ISO(YYYY-MM-DD) 변환 (UTC timestamp 포함)
 function parseToISO(ds){
   // 내부 날짜 비교/정렬용 YYYY-MM-DD 변환 (표시용 아님)
@@ -4604,12 +4728,14 @@ function rDash(){
         als.push({sort:-7500,type:'uninvoiced',
           bg:'#fff7ed',bc:'#f97316',fc:'#c2410c',
           icon:'📋',
-          m:`인보이스 미발행 운행: <b>${uninvoiced.length}건</b>${drftMsg} (${agStr}${moreStr}) <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinv','ninv');initInvoice();setTimeout(()=>generateDraftInvoices(true),500)">드래프트 생성 →</span>`});
+          m:`인보이스 미발행 운행: <b>${uninvoiced.length}건</b>${drftMsg} (${agStr}${moreStr}) <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinv','ninv');initInvoice();setTimeout(()=>generateDraftInvoices(true),500)">드래프트 생성 →</span> <span style="cursor:pointer;text-decoration:underline;margin-left:6px;color:#2563eb;" onclick="diagnoseUninvoiced()">🔍 원인 진단</span>`});
       }
     }
   } catch(e){ console.warn('uninvoiced alert err:', e); }
 
   // ★ 누적 미지급 급여 알림 (드라이버별)
+  // (진단 함수 정의는 아래 renderAlerts 밖 전역에 있음: diagnoseUninvoiced)
+
   try {
     if(typeof _wagesData !== 'undefined' && _wagesData){
       // 드라이버별 발생 급여 - 지급 합산
