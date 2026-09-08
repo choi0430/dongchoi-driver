@@ -3358,7 +3358,7 @@ function diagnoseUninvoiced(){
       const invTC=String(inv.TourCode||'').trim().toUpperCase();
       if(invTC){ if(ag) issuedKeys.add(ag+'|'+invTC); issuedTC.add(invTC); gotTC=true; }
       if(gotTC) invWithTC++;
-      else { invNoTC++; itemDates.sort(); noTCInvoices.push({num:inv.InvNumber||inv.InvNo||inv.InvID||'?', ag:inv.Agency||'', pf:inv.PeriodFrom||'', pt:inv.PeriodTo||'', gt:inv.GrandTotal||inv.Total||inv.ExGST||'', cnt:itemDates.length, d0:itemDates[0]||'', d1:itemDates[itemDates.length-1]||''}); }
+      else { invNoTC++; itemDates.sort(); const _pf=parseToISO(inv.PeriodFrom||'')||String(inv.PeriodFrom||'').slice(0,10); const _pt=parseToISO(inv.PeriodTo||'')||String(inv.PeriodTo||'').slice(0,10); noTCInvoices.push({num:inv.InvNumber||inv.InvNo||inv.InvID||'?', ag:inv.Agency||'', pf:_pf, pt:_pt, gt:inv.GrandTotal||inv.Total||inv.ExGST||'', cnt:itemDates.length, d0:itemDates[0]||'', d1:itemDates[itemDates.length-1]||''}); }
     });
     // Agency_Txn 백업
     if(typeof _balAgencyTxns!=='undefined' && _balAgencyTxns){
@@ -3452,7 +3452,8 @@ function diagnoseUninvoiced(){
       h+=`<div style="margin-top:5px;color:var(--t2);">→ 여행사+날짜+차량 보조매칭은 <b>이미 적용됨</b>. 차량까지 무시(여행사+날짜만)하면 남은 ${uninvoiced.length}건 중 ${resolvedByDate}건이 더 잡히지만, 같은날 여러대 중 일부만 청구한 경우 과다매칭 위험이라 제외했습니다.</div>`;
       // 투어코드 없는 인보이스 상세
       h+=`<div style="margin-top:6px;max-height:150px;overflow:auto;border:1px solid #fca5a5;border-radius:6px;padding:6px;background:#fff;">`;
-      h+= noTCInvoices.map(v=>`<div style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--bd);"><b>${esc(v.num)}</b> · ${esc(v.ag)} · 기간 ${esc(v.pf)}~${esc(v.pt)} · 항목 ${v.cnt}개${v.d0?` (${esc(v.d0)}~${esc(v.d1)})`:''} · ${esc(String(v.gt))}</div>`).join('') || '<div style="font-size:10px;color:var(--t3);">(상세 없음)</div>';
+      const _money=(x)=>{ const n=Number(x); return isFinite(n)&&n?('$'+n.toLocaleString('en-AU',{maximumFractionDigits:0})):esc(String(x||'')); };
+      h+= noTCInvoices.map(v=>`<div style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--bd);"><b>${esc(v.num)}</b> · ${esc(v.ag)} · 기간 ${esc(v.pf)}~${esc(v.pt)} · 항목 ${v.cnt}개${v.d0?` (${esc(v.d0)}${v.d1&&v.d1!==v.d0?'~'+esc(v.d1):''})`:''} · ${_money(v.gt)}</div>`).join('') || '<div style="font-size:10px;color:var(--t3);">(상세 없음)</div>';
       h+=`</div></div>`;
     }
 
@@ -24778,6 +24779,28 @@ async function saveInvoiceToSheet(_recoverNum, _skipBalance) {
     ...manualItems.map(m=>pickItemTourCode(m)).filter(Boolean)
   ])];
 
+  // ★ 매칭 완전성 보장 — 모든 항목에 투어코드·차량 키 유지 (미발행 오탐 예방)
+  //   앱 발행 항목은 이미 tourcode/rego를 담지만, 안전하게 재확인 + 단일코드 인보이스면 빈 투어코드 보완
+  const _singleTC = (_invTourCodes.length === 1) ? _invTourCodes[0] : '';
+  itemsSummary.forEach(it => {
+    if(it.tourcode == null) it.tourcode = '';
+    if(it.rego == null) it.rego = '';
+    if(!String(it.tourcode).trim() && _singleTC) it.tourcode = _singleTC;  // DR 항목 투어코드 비면 단일코드로 보완
+  });
+  const manualItemsNorm = (manualItems||[]).map(m => {
+    const mm = Object.assign({}, m);
+    if(!String(mm.tourcode||mm.tourCode||'').trim()){ mm.tourcode = _singleTC || (mm.tourcode||''); }
+    if(mm.rego == null && mm.Rego == null) mm.rego = '';
+    return mm;
+  });
+  // 저장 전 완전성 점검 (경고만 — 저장은 막지 않음)
+  const _missTC   = itemsSummary.filter(it => !String(it.tourcode||'').trim()).length;
+  const _missRego = itemsSummary.filter(it => !String(it.rego||'').trim()).length;
+  if(_missTC || _missRego){
+    console.warn(`[saveInvoice] 완전성 경고 — 투어코드 없음 ${_missTC}건, 차량 없음 ${_missRego}건`);
+    toast(`⚠️ 항목 중 투어코드 없음 ${_missTC}건·차량 없음 ${_missRego}건 (나중에 미발행 오탐 가능 — 확인 권장)`, 'warn');
+  }
+
   // 항목 JSON 안전 직렬화 — 49000자 넘으면 경고 + 데이터 보존
   function _safeStringify(obj, label){
     const json = JSON.stringify(obj);
@@ -24803,7 +24826,7 @@ async function saveInvoiceToSheet(_recoverNum, _skipBalance) {
     Status:      'issued',
     IssuedDate:  '',   // GAS에서 자동 설정
     Items:       _safeStringify(itemsSummary, 'Items'),
-    ManualItems: _safeStringify(manualItems, 'ManualItems'),
+    ManualItems: _safeStringify(manualItemsNorm, 'ManualItems'),
     Deductions:  JSON.stringify(_invDeductions.filter(d=>d.amount>0)),
     Guide:       _invGuides.join(', '),
     TourCode:    _invTourCodes.join(', '),
