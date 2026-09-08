@@ -6070,6 +6070,34 @@ function renderAuditLog(rows){
 // SCHEDULE (운행 일정) — 중기 자동화 핵심 데이터
 // ═══════════════════════════════════════════════════════════════════════════
 let _schCache = [];                 // 서버에서 받은 전체 일정
+let _flightCache = [];              // M_Flights 편명 참조표 (자동 채움/자동 학습)
+// 편명 → 참조표 행 조회 (대문자·공백무시, 비활성 제외)
+function _flightLookup(code){
+  code = String(code||'').trim().toUpperCase().replace(/\s+/g,'');
+  if(!code || !Array.isArray(_flightCache)) return null;
+  return _flightCache.find(function(r){
+    return String(r.Flight||'').trim().toUpperCase().replace(/\s+/g,'') === code
+        && String(r.Active==null?'Y':r.Active).toUpperCase() !== 'N';
+  }) || null;
+}
+// 스케줄 저장 시 편명표 자동 학습 (편명+시간 있을 때 upsert, 백그라운드)
+function _learnFlightsFromSchedule(){
+  try{
+    ['in','out'].forEach(function(which){
+      var code=(document.getElementById(which==='in'?'sm-flightin':'sm-flightout')?.value||'').trim().toUpperCase().replace(/\s+/g,'');
+      var time=(document.getElementById(which==='in'?'sm-flightin-time':'sm-flightout-time')?.value||'').trim();
+      if(!code || !time) return;
+      var type=(document.querySelector('input[name="'+(which==='in'?'sm-fi-type':'sm-fo-type')+'"]:checked')?.value)||'intl';
+      var per=(typeof _flightPeriod==='function')?_flightPeriod(time):'';
+      var slot;
+      if(which==='in') slot = per==='evening'?'evening':per==='morning'?'morning':'fullday';
+      else             slot = per==='morning'?'morning':'fullday'; // 저녁/그외 출발=풀데이
+      fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({ action:'save_flight', data:{ Flight:code, Direction:which, Time:time, Slot:slot, IntlDom:type }, _user:getAdminUser() })
+      }).catch(function(){});
+    });
+  }catch(e){ console.warn('flight learn', e); }
+}
 let _schCurrentFilter = '';         // 현재 상태 필터 ('' = 전체)
 let _schEditTourId = null;          // 모달 편집 중인 TourID
 let _schDays = [];                  // 모달 일별 일정 데이터
@@ -8612,17 +8640,26 @@ function _smFlightAutofill(which){
     if(!codeEl||!timeEl) return;
     var code=(codeEl.value||'').trim().toUpperCase();
     if(!code) return;
-    var rec=_schFlightTimeMap()[code];
-    if(!rec || !rec.time || timeEl.value) return;   // 기록 없거나 이미 시간 있으면 건드리지 않음
+    if(timeEl.value) return;   // 이미 시간이 있으면 건드리지 않음
+    // ★ 1순위: M_Flights 편명 참조표 (사용자 관리·서머타임 반영), 2순위: 과거 일정 기록
+    var fRec=_flightLookup(code);
+    var rec, src;
+    if(fRec && String(fRec.Time||'').trim()){
+      rec={ time:String(fRec.Time).trim(), type:(String(fRec.IntlDom||'intl').toLowerCase()==='dom'?'dom':'intl'), date:'' };
+      src='표';
+    } else {
+      rec=_schFlightTimeMap()[code]; src='지난 일정';
+    }
+    if(!rec || !rec.time) return;
     timeEl.value=rec.time;
     // 국제/국내 타입도 반영
     var typeVal=(rec.type==='dom')?'dom':'intl';
     var rb=document.querySelector('input[name="'+(which==='in'?'sm-fi-type':'sm-fo-type')+'"][value="'+typeVal+'"]');
     if(rb) rb.checked=true;
-    // 시간 변경 후속 처리(날짜 계산 등) + 힌트 갱신
+    // 시간 변경 후속 처리(날짜 계산·슬롯 배치) + 힌트 갱신
     try{ (which==='in'?onSmFlightInTimeChange:onSmFlightOutTimeChange)(); }catch(e){}
     try{ _smUpdateFlightHints(); }catch(e){}
-    if(typeof toast==='function') toast('✈️ '+code+' → '+rec.time+' 자동 채움'+(rec.date?(' (지난 일정 '+((typeof _schFmtAU==='function')?_schFmtAU(rec.date):rec.date)+')'):'')+' · 수정 가능','ok');
+    if(typeof toast==='function') toast('✈️ '+code+' → '+rec.time+' 자동 채움 ('+src+') · 수정 가능','ok');
   }catch(e){ console.warn('flight autofill', e); }
 }
 
@@ -9361,6 +9398,9 @@ async function saveScheduleData(){
     const json = await res.json();
     if(!json.ok) throw new Error(json.error || '저장 실패');
     _done(); toast(`✅ ${json.updated?'수정':'등록'} 완료 · ${json.tourId}`,'ok');
+
+    // ★ 편명 참조표 자동 학습 (편명+시간 → M_Flights upsert, 백그라운드)
+    try { _learnFlightsFromSchedule(); } catch(e){ console.warn('flight learn', e); }
 
     // ★ 마스터에 없는 서브 드라이버 자동 등록 (백그라운드)
     try {
@@ -31616,6 +31656,7 @@ function _loadAdminCache(){
 async function _applyAdminBundle(bundle){
   if(!bundle || !bundle.data) return;
   const d = bundle.data.masters || {};
+  _flightCache = d.M_Flights || [];   // 편명 참조표
 
   // ── M_Vehicles → DB.V ──
   if(d.M_Vehicles?.length) {
@@ -31898,6 +31939,7 @@ async function loadAllFromSheets(){
     const json = await res.json();
     if(!json.ok){ toast('데이터 로드 실패','er'); rDash(); return; }
     const d = json.data;
+    _flightCache = d.M_Flights || [];   // 편명 참조표
 
     // M_Vehicles → DB.V (GAS MASTER_HEADERS 필드명 그대로)
     if(d.M_Vehicles?.length) {
