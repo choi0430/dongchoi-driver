@@ -7336,6 +7336,14 @@ function onSmDateChange(){
 // 입국 시간 또는 국내/국제 선택 변경 → 첫날 공항 픽업 시간 자동 계산
 // 미팅 (공항에서 픽업): 항공 도착 시간 + 1시간(국제) / +30분(국내) = 차량 출발 시간(startTime)
 // 우선순위: morning(샌딩/픽업) → fullday → evening — 활성화된 슬롯 사용
+// 항공 시간대 판정: 오전(<12) / 저녁(>=17) / 그 외(mid)
+function _flightPeriod(hhmm){
+  const h = parseInt(String(hhmm||'').split(':')[0], 10);
+  if(isNaN(h)) return '';
+  if(h < 12) return 'morning';
+  if(h >= 17) return 'evening';
+  return 'mid';
+}
 function onSmFlightInTimeChange(){
   const t = document.getElementById('sm-flightin-time').value;
   if(!t || _schDays.length === 0) return;
@@ -7343,10 +7351,20 @@ function onSmFlightInTimeChange(){
   const addMin = isIntl ? 60 : 30;
   const newTime = _addMinutes(t, addMin);
   const d = _schDays[0];
-  // ★ 첫날 활성 슬롯 우선순위: morning > fullday > evening
+  // ★ 도착 시간대로 첫날 슬롯 결정: 저녁 도착(OZ601·EK413 등)=PM(evening), 오전 도착=AM(morning)
+  //   첫날 슬롯이 모두 비어있으면 원하는 슬롯으로 재배치하고 빈 기본 슬롯 정리
+  const _arrPeriod = _flightPeriod(t);
+  const _firstAllEmpty = ['morning','fullday','evening'].every(k => !d.slots[k] || _schIsSlotEmpty(d.slots[k]));
+  let _arrKey = '';
+  if(_arrPeriod === 'evening') _arrKey = 'evening';
+  else if(_arrPeriod === 'morning') _arrKey = 'morning';
   let target = null;
   let slotName = '';
-  if(d.slots.morning){ target = d.slots.morning; slotName = 'morning'; }
+  if(_arrKey && _firstAllEmpty){
+    if(!d.slots[_arrKey]) d.slots[_arrKey] = _schEmptySlot();
+    ['morning','fullday','evening'].forEach(k => { if(k !== _arrKey && d.slots[k] && _schIsSlotEmpty(d.slots[k])) d.slots[k] = null; });
+    target = d.slots[_arrKey]; slotName = _arrKey + '(도착)';
+  } else if(d.slots.morning){ target = d.slots.morning; slotName = 'morning'; }
   else if(d.slots.fullday){ target = d.slots.fullday; slotName = 'fullday'; }
   else if(d.slots.evening){ target = d.slots.evening; slotName = 'evening'; }
   else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; slotName = 'fullday(신규)'; }
@@ -7390,35 +7408,52 @@ function onSmFlightOutTimeChange(){
   const newTime = _addMinutes(t, -subMin);
   const lastIdx = _schDays.length - 1;
   const d = _schDays[lastIdx];
-  // ★ 마지막날의 활성 슬롯 우선순위: evening > fullday > morning
-  //   AM이 샌딩으로 활성화된 케이스도 처리
+  const _depPeriod = _flightPeriod(t); // morning / evening / mid
+  const _lastAllEmpty = ['morning','fullday','evening'].every(k => !d.slots[k] || _schIsSlotEmpty(d.slots[k]));
+  const _flCodeOut = (document.getElementById('sm-flightout')?.value || '').trim();
+  const _apPlace = `${_flCodeOut} ${t}`.trim() || (isIntl ? 'Sydney INTL' : 'Sydney DOM');
   let target = null;
   let slotName = '';
-  if(d.slots.evening){ target = d.slots.evening; slotName = 'evening'; }
+  const hint = document.getElementById('sm-coach-hint');
+
+  if(_depPeriod === 'evening'){
+    // ★ 저녁 출발(OZ602 등): 아침 호텔 픽업 → 일정 → 공항 = 풀데이 (단순 트랜스퍼 아님)
+    if(_lastAllEmpty){
+      if(!d.slots.fullday) d.slots.fullday = _schEmptySlot();
+      ['morning','evening'].forEach(k => { if(d.slots[k] && _schIsSlotEmpty(d.slots[k])) d.slots[k] = null; });
+      target = d.slots.fullday; slotName = 'fullday(저녁출발 샌딩)';
+    } else if(d.slots.fullday){ target = d.slots.fullday; slotName = 'fullday'; }
+    else if(d.slots.evening){ target = d.slots.evening; slotName = 'evening'; }
+    else if(d.slots.morning){ target = d.slots.morning; slotName = 'morning'; }
+    else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; slotName = 'fullday(신규)'; }
+    // 마지막 도착지 = 공항 (일정 마치고 공항), 출발지 = 호텔(아침 픽업). startTime/코스는 투어라 자동 설정 안 함
+    if(!target.startPlaceType) target.startPlaceType = 'hotel';
+    if(!target.endPlace){ target.endPlace = _apPlace; }
+    target.endPlaceType = 'airport';
+    console.log(`[SandengAuto] 마지막날(${d.date}) ${slotName} — 저녁 출발편 풀데이(공항 드롭)`);
+    _smRebuildDays();
+    if(hint){ hint.textContent = `💡 저녁 출발편 — 마지막날 풀데이(아침 호텔픽업 → 일정 → 공항)로 설정 (시간·코스는 직접 입력)`; hint.style.display = 'block'; }
+    return;
+  }
+
+  // ★ 오전 출발(KE402/JQ047/TW502 등) = AM(샌딩) 트랜스퍼 / 그 외(mid) = 기존 우선순위
+  let _desiredKey = (_depPeriod === 'morning') ? 'morning' : '';
+  if(_desiredKey && _lastAllEmpty){
+    if(!d.slots[_desiredKey]) d.slots[_desiredKey] = _schEmptySlot();
+    ['morning','fullday','evening'].forEach(k => { if(k !== _desiredKey && d.slots[k] && _schIsSlotEmpty(d.slots[k])) d.slots[k] = null; });
+    target = d.slots[_desiredKey]; slotName = _desiredKey + '(샌딩)';
+  } else if(d.slots.evening){ target = d.slots.evening; slotName = 'evening'; }
   else if(d.slots.fullday){ target = d.slots.fullday; slotName = 'fullday'; }
   else if(d.slots.morning){ target = d.slots.morning; slotName = 'morning'; }
   else { d.slots.fullday = _schEmptySlot(); target = d.slots.fullday; slotName = 'fullday(신규)'; }
-  // ★ 샌딩: 호텔에서 차량 출발 시간(startTime) 자동 계산
+  // 샌딩 트랜스퍼: 호텔 출발 시간 자동 + 도착지 공항
   target.startTime = newTime;
-  // 도착지(endPlace)가 비어있으면 공항 자동 입력
-  if(!target.endPlace){
-    const flCode = (document.getElementById('sm-flightout')?.value || '').trim();
-    const flTime = t; // 위에서 사용한 출발 시간
-    const placeStr = `${flCode} ${flTime}`.trim();
-    if(placeStr){
-      target.endPlace = placeStr;
-      target.endPlaceType = 'airport';
-    } else {
-      // 폴백: 항공편 입력 전이면 일반 라벨
-      target.endPlace = isIntl ? 'Sydney INTL' : 'Sydney DOM';
-      target.endPlaceType = 'airport';
-    }
-  }
-  // ★ 호텔↔공항 자동 코스 설정
+  if(!target.endPlace){ target.endPlace = _apPlace; target.endPlaceType = 'airport'; }
+  else if(!target.endPlaceType){ target.endPlaceType = 'airport'; }
+  if(!target.startPlaceType) target.startPlaceType = 'hotel';
   _autoSetAirportTransferCourse(target);
   console.log(`[SandengAuto] 마지막날(${d.date}) ${slotName} 슬롯 startTime=${newTime}`);
   _smRebuildDays();
-  const hint = document.getElementById('sm-coach-hint');
   if(hint){
     hint.textContent = `💡 마지막날 호텔 출발: ${isIntl?'국제선 -3시간':'국내선 -2시간'} = ${newTime} (수정 가능)`;
     hint.style.display = 'block';
@@ -8828,8 +8863,8 @@ function onSmTourCodeParse(){
   // 마지막날 공항 트랜스퍼 설정 버튼 (온리/샌딩 = 시드니에서 출국)
   //  KE/JQ/TW=오전(AM) 슬롯, OZ=저녁 슬롯. 날짜 입력 후 눌러주세요.
   if((p.dir === 'only' || p.dir === 'sending') && p.airline){
-    const amLabel = (p.airline === 'OZ') ? '저녁' : '오전(AM)';
-    lines.push(`<div style="margin-top:5px;"><button type="button" class="btn bac sm" style="font-size:10px;padding:3px 8px;" onclick="_tcSetLastDaySanding('${p.airline}')">🛫 마지막날 공항트랜스퍼 설정 (${amLabel}·도착지 공항)</button></div>`);
+    const amLabel = (p.airline === 'OZ') ? '풀데이·아침픽업→공항' : '오전(AM)·도착지 공항';
+    lines.push(`<div style="margin-top:5px;"><button type="button" class="btn bac sm" style="font-size:10px;padding:3px 8px;" onclick="_tcSetLastDaySanding('${p.airline}')">🛫 마지막날 샌딩 설정 (${amLabel})</button></div>`);
   }
   resEl.innerHTML = lines.join('');
   resEl.style.display = 'block';
@@ -8849,25 +8884,36 @@ function _tcSetLastDaySanding(airline){
     return;
   }
   const d = _schDays[_schDays.length - 1];
-  const slotKey = (airline === 'OZ') ? 'evening' : 'morning'; // KE/JQ/TW=AM, OZ=저녁
+  // OZ602 = 저녁 출발: 아침 호텔픽업→일정→공항 = 풀데이 / KE·JQ·TW = 오전 출발 = AM(샌딩) 트랜스퍼
+  const isOZ = (airline === 'OZ');
+  const slotKey = isOZ ? 'fullday' : 'morning';
   if(!d.slots[slotKey]) d.slots[slotKey] = _schEmptySlot();
   const slot = d.slots[slotKey];
 
-  // 이미 다른 코스가 들어있으면(공항트랜스퍼 아님) 건드리지 않음 → 사용자 입력 보존
+  // 이미 다른 코스가 들어있으면 건드리지 않음 → 사용자 입력 보존 (OZ 풀데이는 코스 강제 안 하므로 빈 슬롯만)
   const curCourse = String(slot.course||'').trim();
-  if(curCourse && !/airport\s*transfer/i.test(curCourse)){
+  if(!isOZ && curCourse && !/airport\s*transfer/i.test(curCourse)){
     toast('마지막날 해당 슬롯에 이미 다른 코스가 있어 변경하지 않았습니다','warn');
+    return;
+  }
+  if(isOZ){
+    // 풀데이: 호텔(아침 픽업) → 공항(일정 마치고). 코스는 투어라 자동 지정 안 함.
+    if(!slot.startPlaceType) slot.startPlaceType = 'hotel';
+    slot.endPlaceType = 'airport';
+    ['morning','evening'].forEach(k => { if(d.slots[k] && _schIsSlotEmpty(d.slots[k])) d.slots[k] = null; });
+    _smRebuildDays();
+    toast('🛫 마지막날 풀데이(아침 호텔픽업 → 일정 → 공항)로 설정 — 시간·코스는 직접 입력','success');
     return;
   }
   // 호텔 → 공항 (도착지 = 공항)
   if(!slot.startPlaceType) slot.startPlaceType = 'hotel';
   slot.endPlaceType = 'airport';        // 도착지 공항
   slot.course = 'Airport Transfer';
-  // 자동 생성된 빈 fullday가 있으면 비활성화하여 마지막날을 AM/저녁 단독 일정으로
-  if(d.slots.fullday && _schIsSlotEmpty(d.slots.fullday)) d.slots.fullday = null;
+  // 자동 생성된 빈 fullday/evening는 비활성화하여 마지막날을 AM 단독 일정으로
+  ['fullday','evening'].forEach(k => { if(d.slots[k] && _schIsSlotEmpty(d.slots[k])) d.slots[k] = null; });
 
   _smRebuildDays();
-  toast(`🛫 마지막날 ${slotKey==='morning'?'오전(AM)':'저녁'} 공항 트랜스퍼로 설정 (도착지 공항)`,'success');
+  toast('🛫 마지막날 오전(AM) 공항 트랜스퍼로 설정 (도착지 공항)','success');
 }
 
 // 같은 일정에서 가까운 시점의 hotel 타입 장소 찾기 (자동 채우기 편의)
