@@ -7895,6 +7895,8 @@ function _smRebuildDays(){
             if(coInp) coInp.value = it.value;
             // ★ 업체 변경 → 드라이버/차량 목록 즉시 재빌드
             _rebuildSubLists(it.value);
+            // ★ 이후 일정에 같은 서브 세트 전파 + 화면 갱신
+            _smSubPropagate(i, k);
           },
           onClear: () => {
             _schDays[i].slots[k].subCompany = '';
@@ -7946,6 +7948,8 @@ function _smRebuildDays(){
             // ★ input 필드 값을 prefix 없는 순수 Rego로 (라벨에 🚐 포함됨)
             const vehInp = _schDayCsels['subveh-'+cellPrefix]?.input;
             if(vehInp) vehInp.value = it.value;
+            // ★ 차량 지정 → 이후 일정에 같은 서브 차량·드라이버 자동채움
+            _smSubPropagate(i, k);
           },
           onClear: () => { _schDays[i].slots[k].subVehicleNote = ''; }
         });
@@ -7994,6 +7998,8 @@ function _smRebuildDays(){
                 });
               }
             }
+            // ★ 드라이버 지정 → 이후 일정에 같은 서브 차량·드라이버 자동채움
+            _smSubPropagate(i, k);
           },
           onClear: () => { _schDays[i].slots[k].subDriver = ''; }
         });
@@ -8703,6 +8709,9 @@ function _propagateSlotField(idx, slotKey, field, newVal){
   for(let j = idx + 1; j < _schDays.length; j++){
     const slot = _schDays[j].slots[slotKey];
     if(!slot) continue; // 슬롯 비활성이면 스킵
+    // ★ 모드가 다른 날(자사↔서브)을 만나면 전파 중단 — 명시적 배차 보존, 찌꺼기 방지
+    //   (예: 자차로 바꾼 날의 드라이버가 뒤 서브 날들로 새어들지 않도록)
+    if((slot.mode||'dc') !== (cur.mode||'dc')) break;
     const v = slot[field] || '';
     if(!v || v === oldVal){
       slot[field] = newVal;
@@ -8712,6 +8721,47 @@ function _propagateSlotField(idx, slotKey, field, newVal){
       break;
     }
   }
+}
+
+// ★ 서브(외주) 세트 이후 일정 자동전파
+//   idx일의 slotKey 슬롯이 서브(mode='sub')면, 그 이후 같은 슬롯에
+//   같은 서브 업체·차량·드라이버·전화를 자동채움 (빈 칸만).
+//   이미 다른 서브 업체/차량이 지정됐거나 자사 배차가 된 날을 만나면 중단(수동 입력 보존).
+function _propagateSubForward(idx, slotKey){
+  const src = _schDays[idx] && _schDays[idx].slots[slotKey];
+  if(!src || src.mode !== 'sub') return 0;
+  const co  = (src.subCompany||'').trim();
+  const veh = (src.subVehicleNote||'').trim();
+  const drv = (src.subDriver||'').trim();
+  const ph  = (src.subDriverPhone||'').trim();
+  if(!co && !veh && !drv) return 0;
+  let filled = 0;
+  for(let j = idx + 1; j < _schDays.length; j++){
+    const slot = _schDays[j].slots[slotKey];
+    if(!slot) continue; // 비활성 슬롯 스킵
+    // 자사(dc)로 이미 구체 배차된 날 → 보존하고 중단
+    if(slot.mode !== 'sub' && (String(slot.rego||'').trim() || String(slot.driver||'').trim())) break;
+    // 이미 다른 서브 업체/차량/드라이버가 지정된 날 → 보존하고 중단
+    const conflict = slot.mode === 'sub' && (
+      (String(slot.subCompany||'').trim()     && slot.subCompany.trim()     !== co ) ||
+      (String(slot.subVehicleNote||'').trim() && slot.subVehicleNote.trim() !== veh) ||
+      (String(slot.subDriver||'').trim()      && slot.subDriver.trim()      !== drv)
+    );
+    if(conflict) break;
+    // 서브 모드로 전환 + 빈 칸만 채움
+    if(slot.mode !== 'sub'){ slot.mode = 'sub'; slot.rego=''; slot.driver=''; }
+    if(co  && !String(slot.subCompany||'').trim())     { slot.subCompany     = co;  filled++; }
+    if(veh && !String(slot.subVehicleNote||'').trim()) { slot.subVehicleNote = veh; filled++; }
+    if(drv && !String(slot.subDriver||'').trim())      { slot.subDriver      = drv; filled++; }
+    if(ph  && !String(slot.subDriverPhone||'').trim()) { slot.subDriverPhone = ph; }
+  }
+  return filled;
+}
+// 서브 선택 후: 이후 일정 전파 + 화면 갱신
+function _smSubPropagate(idx, slotKey){
+  const n = _propagateSubForward(idx, slotKey);
+  _smRebuildDays();
+  if(n > 0) toast(`🏢 이후 일정 ${slotKey==='morning'?'오전':slotKey==='evening'?'저녁':'풀데이'} 슬롯에 같은 서브 차량·드라이버 자동채움`,'success');
 }
 
 // ═══════════════════════════════════════
