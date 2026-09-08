@@ -24061,6 +24061,7 @@ function renderInvPreview(rows, agency, from, to) {
         ✉️ 발송
       </button>
     </div>
+    <button onclick="recoverInvoiceByNumber()" class="btn" style="width:100%;font-size:10px;padding:6px;margin-top:6px;background:var(--sf2);color:var(--t2);border:1px dashed var(--bd);" title="백업 전에 사라진 인보이스를 번호 지정해 되살림 (잔액은 안 건드림)">♻️ 번호 지정 복구 (잔액 유지)</button>
   `;
 }
 
@@ -24206,8 +24207,30 @@ function _updateInvTotals(agency, from, to) {
   if (tfoot) tfoot.textContent = '$' + gt.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 
+// ♻️ 번호 지정 복구 — 여행사·기간을 선택한 상태에서, 사라진 인보이스를 특정 번호로 되살림
+//   잔액(청구·수금)은 그대로 두고 인보이스 행만 재생성 (잔액이 이미 맞는 경우 전용)
+async function recoverInvoiceByNumber(){
+  const agency = document.getElementById('inv-agency')?.value;
+  const from   = document.getElementById('inv-from')?.value;
+  const to     = document.getElementById('inv-to')?.value;
+  if(!agency || !from || !to){ toast('먼저 여행사와 기간을 선택하세요','er'); return; }
+  const rows = _buildInvRows(agency, from, to);
+  if(!rows.length){ toast('해당 기간에 항목이 없습니다 — 기간을 확인하세요','er'); return; }
+  const grandTotal = _calcInvGrandTotal(rows);
+  const num = prompt('되살릴 인보이스 번호를 입력하세요 (예: INV-202607-015)\n\n※ 거래처 잔액(청구·수금)은 그대로 두고 인보이스 행만 복구합니다.\n여행사: '+agency+'\n기간: '+from+' ~ '+to+'\n금액: $'+grandTotal.toLocaleString('en-AU',{maximumFractionDigits:0}), '');
+  if(num===null) return;
+  const invNum=String(num).trim();
+  if(!invNum){ toast('번호를 입력하세요','er'); return; }
+  if(_invHistoryCache && _invHistoryCache.find(inv=>String(inv.InvNumber).trim()===invNum)){ toast('⚠️ '+invNum+' 는 이미 있습니다 (복구 불필요)','er'); return; }
+  if(!confirm(invNum+' 를 이 내용으로 복구합니다.\n금액 $'+grandTotal.toLocaleString('en-AU',{maximumFractionDigits:0})+' · 잔액은 건드리지 않음.\n진행할까요?')) return;
+  await saveInvoiceToSheet(invNum, true);
+  toast('♻️ '+invNum+' 복구 완료 — 발행 이력을 확인하세요','ok');
+}
+
 // ─── 인보이스 GAS 시트 저장 ───
-async function saveInvoiceToSheet() {
+// _recoverNum: 번호 지정 복구 시 사용할 인보이스 번호 (자동채번 대신)
+// _skipBalance: true면 거래처 잔액(Agency_Txn) 기록을 건드리지 않음 (잔액이 이미 맞는 복구용)
+async function saveInvoiceToSheet(_recoverNum, _skipBalance) {
   // ★ 중복 클릭 방지 가드
   const _btn = (typeof event !== 'undefined' && event?.target)
     ? (event.target.closest('button') || event.target) : null;
@@ -24251,7 +24274,8 @@ async function saveInvoiceToSheet() {
     try { await loadInvHistory(false); } catch(e) { _fail(); console.warn('[saveInvoice] cache reload failed:', e); }
   }
   // 현재 여행사/기간에 맞는 번호 조회 (이력 → 현재 생성분 → 신규 순)
-  const invNum = getExistingOrNewInvNum(agency, from, to);
+  //   복구 모드면 지정한 번호를 그대로 사용
+  const invNum = (_recoverNum ? String(_recoverNum).trim() : '') || getExistingOrNewInvNum(agency, from, to);
 
   // ★ 중복 번호 방지: 발행 이력에서 동일 번호가 이미 있는지 확인
   // 단, _lastGeneratedInvNum과 동일하면 수정 모드이므로 업데이트 허용
@@ -24352,8 +24376,9 @@ async function saveInvoiceToSheet() {
     // Type별 개별 행: invoice(DR), prepaid_use(CR), credit_use(CR)
     // ★ 원자성 보강: 각 잔액 기록을 await 하고 실패는 _balErrors에 모아 사용자에게 경고
     //   (인보이스는 저장됐는데 잔액 기록만 조용히 누락되어 거래처 잔액이 어긋나는 것 방지)
+    // ★ 복구 모드(_skipBalance)면 잔액은 이미 맞으므로 건너뜀 (이중 청구 방지)
     let _balErrors = [];
-    try {
+    if(!_skipBalance) try {
       // ★ 실제 첫날/마지막날 계산 (인보이스 항목 기준)
       let firstDate = null, lastDate = null;
       rows.forEach(r => {
@@ -24491,8 +24516,8 @@ async function saveInvoiceToSheet() {
     console.log('[Invoice] 저장 완료 → 크레딧/수동항목 캐시 초기화:', _resetKey);
 
     // ★ Schedule.Status 자동 갱신: scheduled/in_progress/completed → invoiced
-    //   인보이스의 TourCode + 날짜 기준으로 매칭되는 Schedule 찾기
-    try {
+    //   인보이스의 TourCode + 날짜 기준으로 매칭되는 Schedule 찾기 (복구 모드는 건너뜀)
+    if(!_skipBalance) try {
       await _updateSchedulesAfterInvoice(invNum, agency, rows, manualItems, from, to);
     } catch(e){ _fail(); console.warn('[Schedule Update] 인보이스 발행 후 status 갱신 실패:', e); }
 
