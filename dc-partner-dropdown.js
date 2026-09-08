@@ -211,17 +211,20 @@
     refreshDropdown();
 
     select.addEventListener("change", function(){
+      // 사용자가 직접 고른 값은 "dirty"로 표시 — 이후 주기적 refresh가
+      // 캐시(예전 DC 값)로 덮어써서 EG→DC로 되돌리는 것을 방지한다.
+      select.dataset.userDirty = "1";
       window._schEditBillingEntity = select.value;
       pushGlobalBE(select.value);
       var p = getKnownPartners();
       applySelectStyle(select, info, p.partners);
-      console.log("[partner-dropdown] BE selected:", select.value);
+      console.log("[partner-dropdown] BE selected (user):", select.value);
     });
 
     return true;
   }
 
-  function refreshDropdown() {
+  function refreshDropdown(force) {
     var modal = document.getElementById("sch-modal");
     if (!modal) return;
     var select = modal.querySelector(".be-dd-select");
@@ -232,8 +235,16 @@
 
     var tourId = getCurrentTourId();
     var sch = loadSchedule(tourId);
-    var current = (sch && sch.BillingEntity) ? String(sch.BillingEntity).trim() :
-                  (window.__beDdEditBE || window._schEditBillingEntity || "DC");
+    var dirty = select.dataset.userDirty === "1";
+    var current;
+    if (dirty && !force) {
+      // 사용자가 직접 고른 값 유지 — 캐시로 덮어쓰지 않음 (EG→DC 되돌림 방지)
+      current = window._schEditBillingEntity ||
+                (sch && sch.BillingEntity ? String(sch.BillingEntity).trim() : "DC");
+    } else {
+      current = (sch && sch.BillingEntity) ? String(sch.BillingEntity).trim() :
+                (window.__beDdEditBE || window._schEditBillingEntity || "DC");
+    }
 
     var p = getKnownPartners();
     rebuildSelectOptions(select, p.partners, current);
@@ -241,7 +252,7 @@
     pushGlobalBE(current);
     if (info) applySelectStyle(select, info, p.partners);
 
-    console.log("[partner-dropdown] refresh: tourId=" + tourId + ", BE=" + current + ", options=" + select.options.length + ", subs=" + getSubCompaniesArr().length);
+    console.log("[partner-dropdown] refresh: tourId=" + tourId + ", BE=" + current + ", dirty=" + dirty + ", options=" + select.options.length + ", subs=" + getSubCompaniesArr().length);
   }
 
   function injectFetchHook() {
@@ -307,9 +318,22 @@
       var select = modal.querySelector(".be-dd-select");
       var p = getKnownPartners();
       var optsCount = select ? select.options.length : 0;
-      if (lastId !== curId || optsCount < p.partners.length) {
+      if (lastId !== curId) {
+        // 다른 투어로 전환(또는 모달 새로 열림) — dirty 초기화 후 캐시에서 로드
         modal.dataset.beDdInit = curId;
-        refreshDropdown();
+        if (select) select.dataset.userDirty = "";
+        refreshDropdown(true);
+      } else if (optsCount < p.partners.length) {
+        // 같은 투어인데 파트너 목록만 늘어남(서브사/캐시 비동기 로드) —
+        // 옵션만 다시 그리고 현재 선택값은 절대 바꾸지 않는다 (되돌림 방지)
+        var info = modal.querySelector(".be-dd-info");
+        var keep = (select && select.dataset.userDirty === "1")
+                     ? (window._schEditBillingEntity || select.value)
+                     : (window._schEditBillingEntity || (select ? select.value : "DC"));
+        if (select) rebuildSelectOptions(select, p.partners, keep);
+        window._schEditBillingEntity = keep;
+        pushGlobalBE(keep);
+        if (select && info) applySelectStyle(select, info, p.partners);
       }
     }
   }
