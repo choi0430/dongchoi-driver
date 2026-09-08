@@ -3317,20 +3317,24 @@ function diagnoseUninvoiced(){
     const issuedTC   = new Set();   // TC 만
     const issuedAG   = new Set();   // AG 만
     let invActive=0, invWithTC=0, invNoTC=0;
+    const noTCInvoices=[];               // 투어코드 없는 인보이스 상세
+    const issuedDateKeys=new Set();      // AG|ISO — 인보이스 항목 날짜 기준 (투어코드 없는 인보이스 매칭용)
     (_invHistoryCache||[]).forEach(inv=>{
       const status=String(inv.Status||'').toLowerCase();
       if(status==='cancelled'||status==='void') return;
       invActive++;
       const ag=String(inv.Agency||'').trim().toUpperCase();
       if(ag) issuedAG.add(ag);
-      let gotTC=false;
-      try{
-        JSON.parse(inv.Items||'[]').forEach(it=>{ const tc=pickItemTourCode(it).toUpperCase(); if(tc){ if(ag) issuedKeys.add(ag+'|'+tc); issuedTC.add(tc); gotTC=true; } });
-        JSON.parse(inv.ManualItems||'[]').forEach(it=>{ const tc=pickItemTourCode(it).toUpperCase(); if(tc){ if(ag) issuedKeys.add(ag+'|'+tc); issuedTC.add(tc); gotTC=true; } });
-      }catch(e){}
+      let gotTC=false; const itemDates=[];
+      const scan=(arr)=>{ (arr||[]).forEach(it=>{
+        const tc=pickItemTourCode(it).toUpperCase(); if(tc){ if(ag) issuedKeys.add(ag+'|'+tc); issuedTC.add(tc); gotTC=true; }
+        const di=(typeof parseToISO==='function')?parseToISO(it.date||it.Date||''):''; if(di){ itemDates.push(di); if(ag) issuedDateKeys.add(ag+'|'+di); }
+      }); };
+      try{ scan(JSON.parse(inv.Items||'[]')); scan(JSON.parse(inv.ManualItems||'[]')); }catch(e){}
       const invTC=String(inv.TourCode||'').trim().toUpperCase();
       if(invTC){ if(ag) issuedKeys.add(ag+'|'+invTC); issuedTC.add(invTC); gotTC=true; }
-      if(gotTC) invWithTC++; else invNoTC++;
+      if(gotTC) invWithTC++;
+      else { invNoTC++; itemDates.sort(); noTCInvoices.push({num:inv.InvNumber||inv.InvNo||inv.InvID||'?', ag:inv.Agency||'', pf:inv.PeriodFrom||'', pt:inv.PeriodTo||'', gt:inv.GrandTotal||inv.Total||inv.ExGST||'', cnt:itemDates.length, d0:itemDates[0]||'', d1:itemDates[itemDates.length-1]||''}); }
     });
     // Agency_Txn 백업
     if(typeof _balAgencyTxns!=='undefined' && _balAgencyTxns){
@@ -3365,6 +3369,8 @@ function diagnoseUninvoiced(){
       return true;
     });
     const resolvedByNorm = exactUninv.length - uninvoiced.length;
+    // 여행사+날짜 기준(투어코드 없는 인보이스 포함)으로 매칭하면 해결될 건수
+    const resolvedByDate = uninvoiced.filter(r=>{ const ag=String(r.Agency||'').trim().toUpperCase(); const di=parseToISO(r.Date||''); return di && issuedDateKeys.has(ag+'|'+di); }).length;
 
     // ── 카테고리 분류 (키 단위 + 건수) ──
     const cats={ noTCanywhere:[], agencyMismatch:[], tcMissing:[], neither:[], personal:[] };
@@ -3405,7 +3411,12 @@ function diagnoseUninvoiced(){
     h+=`<br>남은 미발행 키 <b>${Object.keys(keyRows).length}</b>개</div>`;
 
     if(invNoTC>0){
-      h+=`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:8px;margin-bottom:8px;font-size:11px;line-height:1.6;">⚠️ <b>투어코드 없는 인보이스 ${invNoTC}개</b> — 이 인보이스들은 항목에 투어코드가 없어서, 실제로 발행했어도 매칭이 안 됩니다. (미발행으로 오인되는 주요 원인)</div>`;
+      h+=`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:8px;margin-bottom:8px;font-size:11px;line-height:1.6;">⚠️ <b>투어코드 없는 인보이스 ${invNoTC}개</b> — 이 인보이스들은 항목에 투어코드가 없어서, 실제로 발행했어도 투어코드로는 매칭이 안 됩니다. (미발행으로 오인되는 주요 원인)`;
+      h+=`<div style="margin-top:5px;color:#059669;font-weight:700;">→ 여행사+날짜로 매칭하면 남은 ${uninvoiced.length}건 중 <b>${resolvedByDate}건</b> 해결 가능</div>`;
+      // 투어코드 없는 인보이스 상세
+      h+=`<div style="margin-top:6px;max-height:150px;overflow:auto;border:1px solid #fca5a5;border-radius:6px;padding:6px;background:#fff;">`;
+      h+= noTCInvoices.map(v=>`<div style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--bd);"><b>${esc(v.num)}</b> · ${esc(v.ag)} · 기간 ${esc(v.pf)}~${esc(v.pt)} · 항목 ${v.cnt}개${v.d0?` (${esc(v.d0)}~${esc(v.d1)})`:''} · ${esc(String(v.gt))}</div>`).join('') || '<div style="font-size:10px;color:var(--t3);">(상세 없음)</div>';
+      h+=`</div></div>`;
     }
 
     const block=(title,color,arr,desc,extra)=>{
