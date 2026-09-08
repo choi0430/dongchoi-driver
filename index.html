@@ -3392,7 +3392,7 @@ function tcFilter() {
   drop.innerHTML = entries.map(e => {
     const codeEsc = e.code.replace(/'/g,"\\'");
     const subParts = [];
-    if(e.date) subParts.push(`<span style="color:var(--accent);font-weight:600;">📅 ${e.date}</span>`);
+    if(e.date) subParts.push(`<span style="color:var(--accent);font-weight:600;">📅 ${fmtDate(e.date)}</span>`);
     if(e.guide) subParts.push(`<span>👤 ${e.guide}</span>`);
     if(e.agency) subParts.push(`<span style="color:var(--muted);">${e.agency.length>20?e.agency.slice(0,20)+'…':e.agency}</span>`);
     if(e.attraction) subParts.push(`<span style="color:var(--muted);">${e.attraction}</span>`);
@@ -14535,7 +14535,7 @@ async function renderSubInvDriverHistory(){
       const color = st==='paid'?'var(--green)':st==='submitted'?'#f59e0b':'var(--accent)';
       return `<div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
         <div><div style="font-size:12px;font-weight:700;color:var(--accent);">${inv.InvNumber}</div>
-          <div style="font-size:10px;color:var(--muted);">${inv.PeriodFrom||''}~${inv.PeriodTo||''} | ${inv.IssuedDate||''}</div>
+          <div style="font-size:10px;color:var(--muted);">${inv.PeriodFrom?fmtDate(inv.PeriodFrom):''}~${inv.PeriodTo?fmtDate(inv.PeriodTo):''} | ${inv.IssuedDate?fmtDate(inv.IssuedDate):''}</div>
         </div>
         <div style="text-align:right;">
           <div style="font-size:13px;font-weight:700;">$${inv.GrandTotal||0}</div>
@@ -14701,7 +14701,7 @@ async function loadSubReportHistory(){
       const isP = (r.Private||r.Agency||'')==='PRIVATE' || r.Private==='Y';
       return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <div style="font-size:11px;font-weight:700;">${parseToISO(r.Date)||r.Date||''} — ${r.Rego||''} ${isP?'<span style="color:#f59e0b;font-size:9px;">🏷️PRIVATE</span>':''}</div>
+          <div style="font-size:11px;font-weight:700;">${r.Date?fmtDate(r.Date):''} — ${r.Rego||''} ${isP?'<span style="color:#f59e0b;font-size:9px;">🏷️PRIVATE</span>':''}</div>
           <div style="font-size:10px;color:var(--muted);">${r.Agency||''} | ${r.Attraction||''} | ${r.Driver||''}</div>
         </div>
         <div style="font-size:10px;color:var(--muted);">${r.Source==='SUB_OWNER'?'📝직접':'📱앱'}</div>
@@ -14727,7 +14727,7 @@ async function submitCorrectionRequest() {
 
   const typeLabel = type==='pre' ? 'Pre Departure' : 'End of Shift';
   const driver = currentDriver?.name || r.Driver || '';
-  const msgText = `[DC Fleet 수정 요청]\n유형: ${typeLabel}\n드라이버: ${driver}\n날짜: ${r.Date||'—'}\n차량: ${r.Rego||'—'}\n\n수정 내용:\n${desc}`;
+  const msgText = `[DC Fleet 수정 요청]\n유형: ${typeLabel}\n드라이버: ${driver}\n날짜: ${r.Date?fmtDate(r.Date):'—'}\n차량: ${r.Rego||'—'}\n\n수정 내용:\n${desc}`;
 
   // 클립보드에 복사 후 카카오톡 오픈채팅으로 이동
   try { await navigator.clipboard.writeText(msgText); } catch(e) {}
@@ -15176,7 +15176,7 @@ function renderMyIncidents(){
           <span style="font-size:10px;font-weight:700;color:#6b7280;background:#f3f4f6;padding:2px 8px;border-radius:6px;">${r.Status||'Open'}</span>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px;">${r.Date||''} ${r.Time||''} · ${r.Rego||''} · ${r.Location||''}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">${r.Date?fmtDate(r.Date):''} ${r.Time||''} · ${r.Rego||''} · ${r.Location||''}</div>
       <div style="font-size:12px;color:var(--text);margin-top:6px;line-height:1.4;">${(r.Description||'').slice(0,150)}${(r.Description||'').length>150?'...':''}</div>
       ${r.AdminNote?'<div style="font-size:11px;color:#2563eb;margin-top:6px;background:#eff6ff;padding:6px 8px;border-radius:6px;">📌 Admin: '+r.AdminNote+'</div>':''}
       <div style="font-size:10px;color:var(--muted);margin-top:4px;">ID: ${r.ID||''}</div>
