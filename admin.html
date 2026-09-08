@@ -4075,6 +4075,9 @@ async function renderIntegrityCheck(){
   }catch(e){ console.warn('integrity check fail', e); el.style.display='none'; }
 }
 
+// 비활성 여부 — Active 값이 명시적으로 'N'일 때만 비활성 (빈값/Y/미지정은 활성)
+function _isActiveRow(r){ return String((r && r.Active != null ? r.Active : 'Y')).trim().toUpperCase() !== 'N'; }
+
 function rDash(){
   try { renderMissingPrices(); } catch(e){}   // ⚠️ 단가 누락 (독립 렌더 — 실패해도 대시보드 무관)
   try { renderARaging(); } catch(e){}          // 📅 미수금/연체 (독립 렌더)
@@ -4109,6 +4112,7 @@ function rDash(){
   }
   // ── 드라이버 면허 / Authority 만료 ──
   DB.D.forEach(d=>{
+    if(!_isActiveRow(d)) return;   // 비활성(그만둔) 드라이버는 알림 제외
     const ld=du(d.License_Expiry),la=du(d.Authority_Expiry);
     if(ld<90){
       const urgent=ld<0,warn=ld<30;
@@ -4144,6 +4148,7 @@ function rDash(){
   //   ★ DC 책임 차량만 알림 (DC 소유 또는 DC Accreditation 사용 차량)
   //   SUB 자체 운영 차량은 외주 자체 책임이므로 알림 제외
   DB.V.forEach(v=>{
+    if(!_isActiveRow(v)) return;   // 비활성(은퇴·번호변경) 차량은 알림 제외
     const isDCOwned = (typeof isDongChoiVehicle === 'function') ? isDongChoiVehicle(v) : !v.Owner;
     const isDCAccr = (typeof isDCAccredited === 'function') ? isDCAccredited(v) : false;
     if(!isDCOwned && !isDCAccr) return;  // SUB 자체 운영 — 알림 제외
@@ -5389,9 +5394,10 @@ async function rV(q=''){
   document.getElementById('vcnt').textContent=`총 ${DB.V.length}대 · 표시 ${list.length}`;
   document.getElementById('vlist').innerHTML=list.map(v=>{
     const i=DB.V.indexOf(v);
-    return`<div class="mrow">
+    const _inactV=!_isActiveRow(v);
+    return`<div class="mrow" style="${_inactV?'opacity:.55;':''}">
       <div class="mav" style="color:var(--ac);font-size:10px">${v.Rego}</div>
-      <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}${newBadgeHtml('nveh',v.Rego)}</div>
+      <div class="min"><div class="mnm">${v.Rego} — ${v.Make||''} ${v.Model||''}${v.Transmission==='Manual'?' <span style="font-size:10px;background:#f97316;color:#fff;border-radius:4px;padding:1px 5px;font-weight:700;">수동</span>':''}${_inactV?' <span class="tag" style="background:#fee2e2;color:#991b1b;font-size:9px;">비활성</span>':''}${newBadgeHtml('nveh',v.Rego)}</div>
         <div class="msb">${(v.Manufacture_Date||v['Manufacture Date'])?((v.Manufacture_Date||v['Manufacture Date'])+'년 · '):''}${v.Capacity||'?'}인승 · ${v.Transmission==='Manual'?'🔧 Manual':'🔄 Auto'} · ${v.Owner||v.Accreditation||'?'}</div>
         <div class="mtg">${(()=>{
           if(isDCAccredited(v)){
@@ -5436,9 +5442,10 @@ async function rD(q=''){
   document.getElementById('dcnt').textContent=`총 ${DB.D.length}명 · 표시 ${list.length}`;
   document.getElementById('dlist').innerHTML=list.map(d=>{
     const i=DB.D.indexOf(d);
-    return`<div class="mrow">
+    const _inactD=!_isActiveRow(d);
+    return`<div class="mrow" style="${_inactD?'opacity:.55;':''}">
       <div class="mav" style="color:var(--or)">${ini(d.Name_EN)}</div>
-      <div class="min"><div class="mnm">${d.Name_KR||''} <span style="color:var(--t3);font-size:12px">${d.Name_EN}</span>${newBadgeHtml('ndrv',d.Name_EN||d.DriverID||'')}</div>
+      <div class="min"><div class="mnm">${d.Name_KR||''} <span style="color:var(--t3);font-size:12px">${d.Name_EN}</span>${_inactD?' <span class="tag" style="background:#fee2e2;color:#991b1b;font-size:9px;">비활성</span>':''}${newBadgeHtml('ndrv',d.Name_EN||d.DriverID||'')}</div>
         <div class="msb">${d.Phone||d.Mobile_1||'—'} · ${d.License_Class||'—'}</div>
         <div class="mtg">${etag(d.License_Expiry,'면허')}${etag(d.Authority_Expiry,'인가')}</div>
       </div>
@@ -5459,9 +5466,10 @@ async function rC(q=''){
   document.getElementById('clist').innerHTML=list.map(c=>{
     const i=DB.C.indexOf(c);
     const hasPrc=!!DB.PC[c.Name];
-    return`<div class="mrow">
+    const _inact=!_isActiveRow(c);
+    return`<div class="mrow" style="${_inact?'opacity:.55;':''}">
       <div class="mav" style="color:var(--gn);font-size:10px">${c.Name?.slice(0,2).toUpperCase()||'??'}</div>
-      <div class="min"><div class="mnm">${c.Name||'(이름없음)'}${newBadgeHtml('ncli',c.Name)}</div>
+      <div class="min"><div class="mnm">${c.Name||'(이름없음)'}${_inact?' <span class="tag" style="background:#fee2e2;color:#991b1b;font-size:9px;">비활성</span>':''}${newBadgeHtml('ncli',c.Name)}</div>
         <div class="msb">ID: ${c.ClientID}${(c.Phone||c.Mobile)?' · '+(c.Phone||c.Mobile):''}</div>
         ${hasPrc?'<span class="tag tg" style="margin-top:4px;display:inline-flex">요금표 있음</span>':'<span class="tag ty" style="margin-top:4px;display:inline-flex">요금표 없음</span>'}
       </div>
@@ -30044,7 +30052,7 @@ function openM(type,idx){
       <div class="fr"><label class="fl">Remarks (비고)</label><textarea class="fta" id="f5">${d.Remarks||''}</textarea></div>`;
   }
   else if(type==='AG'){
-    const agNames=DB.C.map(c=>c.Name).filter(Boolean);
+    const agNames=DB.C.filter(c=>_isActiveRow(c)).map(c=>c.Name).filter(Boolean);
     h=`<p style="color:var(--t2);font-size:13px;margin-bottom:12px">Client Master에 등록된 여행사를 요금표에 추가합니다.</p>
       <div class="fr"><label class="fl">여행사 선택</label>
         <div class="fsw"><select class="fs" id="fagname">
@@ -30177,6 +30185,15 @@ function openM(type,idx){
       </select></div></div>`;
   }
 
+  // ── 공통: 활성/비활성 토글 (차량·드라이버·여행사·가이드·호텔) ──
+  //   비활성으로 두면 선택 목록·알림에서 숨겨지고, 마스터 관리 화면에는 계속 보임(재활성 가능).
+  if(['V','D','C','G','H'].includes(type)){
+    h += `<div class="fr"><label class="fl">사용 상태</label><div class="fsw"><select class="fs" id="f_active">
+      <option value="Y"${_isActiveRow(d)?' selected':''}>Y — 활성 (정상 사용)</option>
+      <option value="N"${!_isActiveRow(d)?' selected':''}>N — 비활성 (선택 목록·알림에서 숨김)</option>
+    </select></div></div>`;
+  }
+
   document.getElementById('mb').innerHTML=h;
   document.getElementById('modal').classList.add('on');
 }
@@ -30203,7 +30220,7 @@ function saveM(){
          Current_KM: _prevV.Current_KM||0,
          Next_Service_KM:gn('f9'),
          VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14'),Transmission:gv('f15')||'Auto',
-         Active: _prevV.Active||'',
+         Active: gv('f_active')||'Y',
          Photo_Front: photoF, Photo_Back: photoB, Photo_Left: photoL, Photo_Right: photoR};
     ie?DB.V[idx]=obj:DB.V.push(obj);
     // 서브 차량이면 DB.PS에 슬롯 보장
@@ -30223,7 +30240,7 @@ function saveM(){
          // ★ 모달에 입력란이 없는 컬럼은 기존 값 보존
          Initials: _prevD.Initials||'',
          Owner:    _prevD.Owner||'',
-         Active:   _prevD.Active||''};
+         Active:   gv('f_active')||'Y'};
     ie?DB.D[idx]=obj:DB.D.push(obj);
   } else if(t==='C'){
     if(!gv('f0')){toast('여행사명 필수','er');return}
@@ -30232,7 +30249,8 @@ function saveM(){
          Name:gv('f0'),ClientID:gv('f1')||Date.now().toString(16).slice(-8),
          ABN:gv('f1b')||'',
          Mobile:gv('f2'),Email:gv('f2b')||'',Email_CC:gv('f2c')||'',Address:gv('f3'),Bank_Name:gv('f4'),BSB:gv('f5'),Account_Number:gv('f6'),
-         Payment_Terms:gv('f7')||''};
+         Payment_Terms:gv('f7')||'',
+         Active:gv('f_active')||'Y'};
     ie?DB.C[idx]=obj:DB.C.push(obj);
     if(obj.Name && !DB.PC[obj.Name]) {
       initPriceClientForAgency(obj.Name); // M_PriceClient에 모든 Course 빈 행 자동 생성
@@ -30242,13 +30260,15 @@ function saveM(){
     sheetName='M_Guides';
     obj={_rowIndex:ie?(DB.G[idx]?._rowIndex||null):null,
          GuideID:gv('f0')||'SG'+(DB.G.length+1).toString().padStart(3,'0'),
-         Guide_Name:gv('f1'),Mobile:gv('f2'),Agency:gv('f3'),Email:gv('f4'),Remarks:gv('f5')};
+         Guide_Name:gv('f1'),Mobile:gv('f2'),Agency:gv('f3'),Email:gv('f4'),Remarks:gv('f5'),
+         Active:gv('f_active')||'Y'};
     ie?DB.G[idx]=obj:DB.G.push(obj);
   } else if(t==='H'){
     if(!gv('f0')){toast('호텔명 필수','er');return}
     sheetName='M_Hotels';
     obj={_rowIndex:ie?(DB.H[idx]?._rowIndex||null):null,
-         Hotel_Name:gv('f0'),Phone:gv('f1'),Address:gv('f2'),Surcharge_Area:gv('f3')||'',Short_Name:gv('f4')||''};
+         Hotel_Name:gv('f0'),Phone:gv('f1'),Address:gv('f2'),Surcharge_Area:gv('f3')||'',Short_Name:gv('f4')||'',
+         Active:gv('f_active')||'Y'};
     ie?DB.H[idx]=obj:DB.H.push(obj);
   } else if(t==='T'){
     if(!gv('f0')){toast('트레일러 번호 필수','er');return}
