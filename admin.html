@@ -1661,6 +1661,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
           <input type="number" id="iim-early" class="profit-finp" style="width:100%;" placeholder="0" min="0" step="0.01">
         </div>
       </div>
+      <!-- ★ 거리할증 사유 — 인보이스에 함께 표시됨 -->
+      <div style="margin-bottom:8px;">
+        <div style="font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:3px;">🧭 거리할증 사유 (Distance reason · 인보이스 표시)</div>
+        <input type="text" id="iim-dist-reason" class="profit-finp" style="width:100%;border-color:#c4b5fd;" placeholder="예: SYDNEY ZOO (원거리 목적지), Blue Mountains 왕복 등">
+        <div style="font-size:9px;color:var(--t3);margin-top:2px;">거리할증이 있을 때 이 사유가 인보이스에 "Distance surcharge (사유)"로 표시됩니다.</div>
+      </div>
       <!-- ★ Meals Allowance / Etc -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
         <div>
@@ -22435,9 +22441,10 @@ function openInvItemModal(id) {
       document.getElementById('iim-etc').value      = item.etc      || '';
       document.getElementById('iim-etc-desc').value = item.etcDesc  || '';
       document.getElementById('iim-note').value     = item.note     || '';
+      const _drEl = document.getElementById('iim-dist-reason'); if(_drEl) _drEl.value = item.distReason || '';
     }
   } else {
-    ['iim-date','iim-start','iim-end','iim-tourcode','iim-driver','iim-guide','iim-rego','iim-pickup','iim-dropoff','iim-amount','iim-ot','iim-hotel','iim-trailer','iim-toll','iim-dist','iim-early','iim-meal','iim-etc','iim-etc-desc','iim-note'].forEach(id=>{
+    ['iim-date','iim-start','iim-end','iim-tourcode','iim-driver','iim-guide','iim-rego','iim-pickup','iim-dropoff','iim-amount','iim-ot','iim-hotel','iim-trailer','iim-toll','iim-dist','iim-early','iim-meal','iim-etc','iim-etc-desc','iim-note','iim-dist-reason'].forEach(id=>{
       const el=document.getElementById(id); if(el) el.value='';
     });
     document.getElementById('iim-tour').value = '';
@@ -23256,6 +23263,7 @@ function saveInvItem() {
     etc:      parseFloat(document.getElementById('iim-etc')?.value)  || 0,
     etcDesc:  document.getElementById('iim-etc-desc')?.value?.trim() || '',
     note:     document.getElementById('iim-note')?.value?.trim()     || '',
+    distReason: document.getElementById('iim-dist-reason')?.value?.trim() || '',
     _manual:  true,
   };
 
@@ -23283,7 +23291,7 @@ function saveInvItem() {
         Tour:item.tour, Seats:item.seats||'', TourCode:item.tourcode||'', Note:item.note||'',
         Amount:item.amount, OT:item.ot||0, Hotel:item.hotel||0, Dist:item.dist||0,
         Trailer:item.trailer||0, Toll:item.toll||0, Early:item.early||0, Start:item.start||'', End:item.end||'',
-        Meal:item.meal||0, Etc:item.etc||0, Etc_Desc:item.etcDesc||'',
+        Meal:item.meal||0, Etc:item.etc||0, Etc_Desc:item.etcDesc||'', DistReason:item.distReason||'',
         Driver:item.driver||'', Guide:item.guide||'', Pickup:item.pickup||'', Dropoff:item.dropoff||''
       }})}).catch(e => console.warn('Manual item save failed:', e));
   }
@@ -23362,6 +23370,7 @@ function _editInvRowAsManual(ri) {
   document.getElementById('iim-etc').value      = c.etcTA || '';
   document.getElementById('iim-etc-desc').value = c.etcDesc || '';
   document.getElementById('iim-note').value     = '';
+  const _drEl2 = document.getElementById('iim-dist-reason'); if(_drEl2) _drEl2.value = r.Dist_Reason || '';
 
   // 원본 행을 자동 제외 (수동 복사본이 대체)
   const rowKey = _invRowKey(r, ri);
@@ -23615,6 +23624,7 @@ function _manualItemsToRows(agency, from) {
     Meal:           item.meal     || 0,
     Etc:            item.etc      || 0,
     Etc_Desc:       item.etcDesc  || '',
+    Dist_Reason:    item.distReason || '',
     SVC_Charge:     item.amount   || 0,
     _timeStart:     item.start    || '',
     _timeEnd:       item.end      || '',
@@ -24616,9 +24626,10 @@ function renderInvPreview(rows, agency, from, to) {
           ${(()=>{
             const parts = [];
             // 각 서차지 항목: [라벨, 현재값, 자동값, override키타입]
+            const _distR = String(r.Dist_Reason||'').trim();
             const items = [
               ['호텔', c.hotel, c._hotelAuto, 'hotel'],
-              ['거리', c.dist, c._distAuto, 'dist'],
+              ['거리'+(_distR?' ('+escH(_distR)+')':''), c.dist, c._distAuto, 'dist'],
               ['Early', c.earlyTA, c._earlyAuto, 'early'],
               ['주차', c.parkingFee, c.autoParking, '_pk'],
               ['트레일러', c.trailerVal, c._trailerAuto, 'trailer'],
@@ -24920,6 +24931,7 @@ async function saveInvoiceToSheet(_recoverNum, _skipBalance) {
       parking: c.parkingFee||0, trailer: c.trailerVal||0,
       night: c.nightTA||0, tip: c.tipVal||0, meal: c.mealVal||0,
       toll: c.tollVal||0, etc: c.etcTA||0, etcDesc: c.etcDesc||'',
+      distReason: String(r.Dist_Reason||'').trim(),
       rateSource: c.rateSource||'svc',
       overridden: !!(ov.base !== undefined || ov.ot !== undefined || ov.extra !== undefined)
     };
@@ -26078,7 +26090,7 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
           amount: Number(m.amount)||0, ot: Number(m.ot)||0, hotel: Number(m.hotel)||0,
           dist: Number(m.dist)||0, trailer: Number(m.trailer)||0, toll: Number(m.toll)||0,
           early: Number(m.early)||0,
-          meal: Number(m.meal)||0, etc: Number(m.etc)||0, etcDesc: m.etcDesc||'',
+          meal: Number(m.meal)||0, etc: Number(m.etc)||0, etcDesc: m.etcDesc||'', distReason: m.distReason||'',
           start: m.start||'', end: m.end||'', driver: m.driver||'',
           guide: m.guide||'', pickup: m.pickup||'', dropoff: m.dropoff||''
         }));
@@ -26118,6 +26130,7 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
         OT:              Number(it.ot)||0,
         Hotel_Surcharge: Number(it.hotel)||0,
         Dist_Surcharge:  Number(it.dist)||0,
+        Dist_Reason:     it.distReason||'',
         Early:           Number(it.early)||0,
         Parking:         Number(it.parking)||0,
         Trailer:         Number(it.trailer)||0,
@@ -26144,7 +26157,7 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
         Tour_Code: m.tourcode||'', Pickup: m.pickup||'', Dropoff: m.dropoff||'',
         _timeStart: m.start||'', _timeEnd: m.end||'',
         SVC_Charge: Number(m.amount)||0, OT: Number(m.ot)||0,
-        Hotel_Surcharge: Number(m.hotel)||0, Dist_Surcharge: Number(m.dist)||0,
+        Hotel_Surcharge: Number(m.hotel)||0, Dist_Surcharge: Number(m.dist)||0, Dist_Reason: m.distReason||'',
         Trailer: Number(m.trailer)||0, Toll: Number(m.toll)||0,
         Early: Number(m.early)||0, Parking: 0, Night_DR: 0, Night_Type: '', Tip: 0, Meal: Number(m.meal)||0, Etc: Number(m.etc)||0, Etc_Desc: m.etcDesc||'',
         _agency: agency, Agency: agency,
@@ -26455,9 +26468,9 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
           const _sm = _manualJSON ? JSON.parse(_manualJSON) : [];
           const _savedRows = _si.map(item => {
             const hasIndiv = item.hotel!==undefined || item.dist!==undefined || item.trailer!==undefined;
-            return { _iso:item.date||'', Date:item.date||'', Attraction:item.tour||'-', Rego:item.rego||'', Seats:item.seats||'', Driver:item.driver||'', Guide:item.guide||'', Tour_Code:item.tourcode||'', Pickup:item.pickup||'', Dropoff:item.dropoff||'', _timeStart:item.timeStart||'', _timeEnd:item.timeEnd||'', _manual:true, _rateSource:item.rateSource||'price_table', SVC_Charge:item.base||0, OT:item.ot||0, Hotel_Surcharge:hasIndiv?(item.hotel||0):(item.extra||0), Dist_Surcharge:item.dist||0, Early:item.early||0, Parking:item.parking||0, Trailer:item.trailer||0, Night_DR:item.night||0, Tip:item.tip||0, Meal:item.meal||0, Toll:item.toll||0, Etc:item.etc||0 };
+            return { _iso:item.date||'', Date:item.date||'', Attraction:item.tour||'-', Rego:item.rego||'', Seats:item.seats||'', Driver:item.driver||'', Guide:item.guide||'', Tour_Code:item.tourcode||'', Pickup:item.pickup||'', Dropoff:item.dropoff||'', _timeStart:item.timeStart||'', _timeEnd:item.timeEnd||'', _manual:true, _rateSource:item.rateSource||'price_table', SVC_Charge:item.base||0, OT:item.ot||0, Hotel_Surcharge:hasIndiv?(item.hotel||0):(item.extra||0), Dist_Surcharge:item.dist||0, Dist_Reason:item.distReason||'', Early:item.early||0, Parking:item.parking||0, Trailer:item.trailer||0, Night_DR:item.night||0, Tip:item.tip||0, Meal:item.meal||0, Toll:item.toll||0, Etc:item.etc||0 };
           });
-          _sm.forEach(m => { _savedRows.push({ _iso:parseToISO(m.date)||m.date||'', Date:m.date||'', Attraction:m.tour||'-', Rego:m.rego||'', Seats:m.seats||'', Driver:m.driver||'', Guide:m.guide||'', Tour_Code:m.tourcode||'', Pickup:m.pickup||'', Dropoff:m.dropoff||'', _timeStart:m.start||'', _timeEnd:m.end||'', _manual:true, SVC_Charge:m.amount||0, OT:m.ot||0, Hotel_Surcharge:m.hotel||0, Dist_Surcharge:m.dist||0, Early:m.early||0, Parking:m.parking||0, Trailer:m.trailer||0, Night_DR:m.night||0, Tip:m.tip||0, Meal:m.meal||0, Toll:m.toll||0, Etc:m.etc||0 }); });
+          _sm.forEach(m => { _savedRows.push({ _iso:parseToISO(m.date)||m.date||'', Date:m.date||'', Attraction:m.tour||'-', Rego:m.rego||'', Seats:m.seats||'', Driver:m.driver||'', Guide:m.guide||'', Tour_Code:m.tourcode||'', Pickup:m.pickup||'', Dropoff:m.dropoff||'', _timeStart:m.start||'', _timeEnd:m.end||'', _manual:true, SVC_Charge:m.amount||0, OT:m.ot||0, Hotel_Surcharge:m.hotel||0, Dist_Surcharge:m.dist||0, Dist_Reason:m.distReason||'', Early:m.early||0, Parking:m.parking||0, Trailer:m.trailer||0, Night_DR:m.night||0, Tip:m.tip||0, Meal:m.meal||0, Toll:m.toll||0, Etc:m.etc||0 }); });
           _savedRows.sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
           const _origExcl = _invExcludes, _origOver = _invOverrides;
           _invExcludes = {}; _invOverrides = {};
@@ -27236,7 +27249,10 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
       }
       surLines.push({label: hotelLabel, amount: c.hotel});
     }
-    if (c.dist > 0) surLines.push({label: 'Distance surcharge', amount: c.dist});
+    if (c.dist > 0) {
+      const _distReason = String(r.Dist_Reason||'').trim();
+      surLines.push({label: 'Distance surcharge' + (_distReason ? ' ('+escH(_distReason)+')' : ''), amount: c.dist});
+    }
     if (c.earlyTA > 0) {
       // ★ Early/Late 구분 + 해당 시간 표시 (OT 표시와 동일한 패턴)
       const ts = r._timeStart || '';
@@ -31904,7 +31920,7 @@ async function _applyAdminBundle(bundle){
         seats: r.Seats||'', tourcode: r.TourCode||'', note: r.Note||'',
         amount: Number(r.Amount)||0, ot: Number(r.OT)||0, hotel: Number(r.Hotel)||0,
         dist: Number(r.Dist)||0, trailer: Number(r.Trailer)||0, toll: Number(r.Toll)||0,
-        early: Number(r.Early)||0, meal: Number(r.Meal)||0, etc: Number(r.Etc)||0, etcDesc: r.Etc_Desc||'',
+        early: Number(r.Early)||0, meal: Number(r.Meal)||0, etc: Number(r.Etc)||0, etcDesc: r.Etc_Desc||'', distReason: r.DistReason||'',
         start: r.Start||'', end: r.End||'', driver: r.Driver||'',
         guide: r.Guide||'', pickup: r.Pickup||'', dropoff: r.Dropoff||''
       });
@@ -32207,7 +32223,7 @@ async function loadAllFromSheets(){
           seats: r.Seats||'', tourcode: r.TourCode||'', note: r.Note||'',
           amount: Number(r.Amount)||0, ot: Number(r.OT)||0, hotel: Number(r.Hotel)||0,
           dist: Number(r.Dist)||0, trailer: Number(r.Trailer)||0, toll: Number(r.Toll)||0,
-          early: Number(r.Early)||0, meal: Number(r.Meal)||0, etc: Number(r.Etc)||0, etcDesc: r.Etc_Desc||'',
+          early: Number(r.Early)||0, meal: Number(r.Meal)||0, etc: Number(r.Etc)||0, etcDesc: r.Etc_Desc||'', distReason: r.DistReason||'',
           start: r.Start||'', end: r.End||'', driver: r.Driver||'',
           guide: r.Guide||'', pickup: r.Pickup||'', dropoff: r.Dropoff||''
         });
@@ -34769,7 +34785,7 @@ async function convertQuoToInvoice() {
         Seats:m.seats||'', TourCode:m.tourcode||'', Note:m.note||'', Amount:m.amount||0,
         OT:m.ot||0, Hotel:m.hotel||0, Dist:m.dist||0, Trailer:m.trailer||0, Toll:m.toll||0,
         Start:m.start||'', End:m.end||'', Driver:m.driver||'', Guide:m.guide||'',
-        Pickup:m.pickup||'', Dropoff:m.dropoff||''}))
+        Pickup:m.pickup||'', Dropoff:m.dropoff||'', DistReason:m.distReason||''}))
     })}).catch(e => console.warn('Manual items save failed:', e));
 
   // 인보이스 페이지로 이동 & 초기화 대기
