@@ -30775,7 +30775,10 @@ function openM(type,idx){
         <div><label class="fl">HVIS 만료일</label><input class="fi" id="f8" type="date" value="${parseToISO(d.HVIS_Date||'')}"></div></div>
       <div class="fr2">
         <div><label class="fl">다음 서비스 KM</label><input class="fi" id="f9" type="number" value="${d.Next_Service_KM||''}" placeholder="예: 601000"></div>
-        <div><label class="fl">현재 최대 KM (자동)</label><input class="fi" type="text" value="${DB.regoMaxKM[d.Rego]?Number(DB.regoMaxKM[d.Rego]).toLocaleString()+' km':'부킹 데이터 없음'}" readonly style="background:var(--s2);color:var(--t2)"></div></div>
+        <div><label class="fl">현재 KM (Current_KM)</label><input class="fi" id="f_curkm" type="number" value="${(d.Current_KM!==undefined&&d.Current_KM!=='')?d.Current_KM:''}" placeholder="${DB.regoMaxKM[d.Rego]?('리포트최대 '+Number(DB.regoMaxKM[d.Rego]).toLocaleString()):'예: 408902'}"><div style="font-size:10px;color:var(--t3);margin-top:2px;">리포트 최대 KM: ${DB.regoMaxKM[d.Rego]?Number(DB.regoMaxKM[d.Rego]).toLocaleString()+' km':'없음'} · 매시간 리포트 KM으로 자동 상향(입력값보다 높을 때만)</div></div></div>
+      <div class="fr2">
+        <div><label class="fl">계기판 교체일 (Odo Reset)</label><input class="fi" id="f_odoreset" type="date" value="${parseToISO(d.Odo_Reset_Date||'')}"><div style="font-size:10px;color:var(--t3);margin-top:2px;">계기판(오도미터) 교체 시에만 입력. 이 날짜 <b>이전</b> 리포트 KM은 자동 집계에서 제외됩니다. 비워두면 전체 리포트 사용.</div></div>
+        <div></div></div>
       <div class="fr2">
         <div><label class="fl">VIN</label><input class="fi" id="f12" value="${d.VIN||''}"></div>
         <div><label class="fl">Engine No.</label><input class="fi" id="f13" value="${engNum}"></div></div>
@@ -31047,9 +31050,13 @@ function saveM(){
     obj={_rowIndex:ie?(_prevV?._rowIndex||null):null,
          Rego:gv('f0'),Current_Status:gv('f1'),Make:gv('f2'),Model:gv('f3'),Manufacture_Date:gn('f4'),
          Capacity:gn('f5'),Owner:gv('f6'),Rego_Date:fmtDate(gv('f7')),HVIS_Date:fmtDate(gv('f8')),
-         Current_KM: _prevV.Current_KM||0,
+         Current_KM: (function(){ var _r=document.getElementById('f_curkm'); var _s=_r?String(_r.value).trim():''; return _s!==''?(parseFloat(_s)||0):(_prevV.Current_KM!==undefined?_prevV.Current_KM:0); })(),
          Next_Service_KM:gn('f9'),
+         // ★ 폼에 입력란이 없는 컬럼은 기존 값 보존 (안 보내면 백엔드가 빈칸으로 덮어씀)
+         Last_Service_KM: _prevV.Last_Service_KM!==undefined?_prevV.Last_Service_KM:'',
+         Service_Interval: _prevV.Service_Interval!==undefined?_prevV.Service_Interval:'',
          VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14'),Transmission:gv('f15')||'Auto',
+         Odo_Reset_Date: gv('f_odoreset') ? fmtDate(gv('f_odoreset')) : '',
          Active: gv('f_active')||'Y',
          Photo_Front: photoF, Photo_Back: photoB, Photo_Left: photoL, Photo_Right: photoR};
     ie?DB.V[idx]=obj:DB.V.push(obj);
