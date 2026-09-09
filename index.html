@@ -949,6 +949,11 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
             </div>
             <input type="hidden" id="f-dist-select" value="0">
             <div id="dist-hint-box" style="margin-top:6px;"></div>
+            <div id="dist-reason-box" style="margin-top:8px;display:none;">
+              <label class="form-label" style="color:#7c3aed;">🧭 거리할증 사유 (인보이스에 표시됨)</label>
+              <input type="text" id="f-dist-reason" class="form-input" placeholder="예: SYDNEY ZOO (원거리), Blue Mountains 왕복 등" style="border-color:#c4b5fd;">
+              <div style="font-size:11px;color:#94a3b8;margin-top:3px;">왜 거리할증이 붙었는지 적어주세요. 인보이스에 "Distance surcharge (사유)"로 표시됩니다.</div>
+            </div>
           </div>
         </div>
         <!-- 호텔 서차지 알림 — 선택란 아래 -->
@@ -6711,6 +6716,7 @@ function _finalizeDailyReportSave(_drBtn){
     svcCharge: getSvcValue(), svcLabel,
     hotelSurcharge: getHotelValue(),  // DR 드라이버 지급 기준
     distSurcharge: getDistValue(),    // DR 드라이버 지급 기준
+    distReason: document.getElementById('f-dist-reason')?.value?.trim() || '',  // 거리할증 사유 (인보이스 표시)
     ot: parseFloat(document.getElementById('f-ot')?.value||0),
     trailer: parseFloat(document.getElementById('f-trailer')?.value||0),
     toll: parseFloat(document.getElementById('f-toll')?.value||0),
@@ -6764,6 +6770,7 @@ function _finalizeDailyReportSave(_drBtn){
     SVC_Charge: report.svcCharge,
     Hotel_Surcharge: report.hotelSurcharge,
     Dist_Surcharge: report.distSurcharge,
+    Dist_Reason: report.distReason || '',
     OT: report.ot,
     Trailer: report.trailer,
     Trailer_Number: (document.getElementById('f-trailer-num')?.value || '').trim(),
@@ -6823,6 +6830,7 @@ function _finalizeDailyReportSave(_drBtn){
   // csel 초기화
   {const h=document.getElementById('f-hotel-select'); if(h){h.value='0';} cselSetValue('f-hotel-select','0');}
   {const d=document.getElementById('f-dist-select'); if(d){d.value='0';} cselSetValue('f-dist-select','0');}
+  {const dr=document.getElementById('f-dist-reason'); if(dr) dr.value=''; const drb=document.getElementById('dist-reason-box'); if(drb) drb.style.display='none';}
   cselSetValue('f-night-type','none');
   {const w=document.getElementById('f-svc-custom-wrap'); if(w)w.style.display='none';}
   {const c=document.getElementById('f-svc-custom'); if(c)c.value='';}
@@ -7627,6 +7635,7 @@ function saveDailyDraft(){
       svcCustom:   document.getElementById('f-svc-custom')?.value || '',
       hotelSelect: document.getElementById('f-hotel-select')?.value || '0',
       distSelect:  document.getElementById('f-dist-select')?.value || '0',
+      distReason:  document.getElementById('f-dist-reason')?.value || '',
       _shiftId: editingShiftId || '',
       _ts: Date.now()
     };
@@ -7855,6 +7864,8 @@ function restoreDailyDraft(){
     }
     if(d.hotelSelect) cselSetValue('f-hotel-select', d.hotelSelect);
     if(d.distSelect)  cselSetValue('f-dist-select',  d.distSelect);
+    { const _dr=document.getElementById('f-dist-reason'); if(_dr) _dr.value=d.distReason||''; }
+    if(typeof updateDistHint==='function') updateDistHint(); // 사유칸 노출/숨김 갱신
 
     // 5) 야간투어
     if(d.nightType && d.nightType !== 'none') cselSetValue('f-night-type', d.nightType);
@@ -8552,6 +8563,10 @@ function updateDistHint(){
   const curVal = parseFloat(document.getElementById('f-dist-select')?.value || 0);
   const rate   = (seats==='40S'||seats==='50S') ? 40 : 30;
   const seatsLabel = seats || '인승 미선택';
+
+  // ★ 거리할증이 있으면 사유 입력칸 노출 (인보이스에 표시됨)
+  const _drBox = document.getElementById('dist-reason-box');
+  if(_drBox) _drBox.style.display = (curVal > 0) ? '' : 'none';
 
   if(!seats){ hintEl.style.display='none'; return; }
 
