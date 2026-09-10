@@ -30984,13 +30984,17 @@ function openM(type,idx){
       </select></div></div>`;
   }
   else if(type==='T'){
-    // 차량에 등록된 실제 Owner 값들 모두 사용 (DC_OWNERS의 'DONG CHOI PTY LTD' 포함)
-    const allOwners = [...new Set((DB.V||[]).map(v=>String(v.Owner||v.SubOwner||'').trim()).filter(Boolean))].sort();
-    // Dong Choi가 차량 Owner에 없으면 추가
-    if(!allOwners.some(o => /dong choi/i.test(o))) allOwners.unshift('DONG CHOI PTY LTD');
-    const ownerOpts = allOwners.map(o =>
-      `<option value="${escH(o)}"${(d.Owner||'')===o?' selected':''}>${escH(o)}</option>`
-    ).join('');
+    // 소유자 후보를 모든 소스에서 수집: DC + 차량 소유자 + 트레일러 소유자 + 서브 회사(M_SUB/DB.PS)
+    //   트레일러만 보유하거나 트레일러만 임대하는 회사도 있으므로,
+    //   아래 datalist로 목록 제안 + 자유 입력(신규/임대 회사)까지 허용해 확장성 확보.
+    const _ownerSet = new Set(['DONG CHOI PTY LTD']);
+    (DB.V||[]).forEach(v=>{ const o=String(v.Owner||v.SubOwner||'').trim(); if(o) _ownerSet.add(o); });
+    (DB.T||[]).forEach(t=>{ const o=String(t.Owner||'').trim(); if(o) _ownerSet.add(o); });
+    Object.keys(DB.PS||{}).forEach(o=>{ const s=String(o||'').trim(); if(s) _ownerSet.add(s); });
+    (typeof _subCompanies!=='undefined'&&Array.isArray(_subCompanies)?_subCompanies:[]).forEach(sc=>{ const n=String((sc&&sc.SubName)||'').trim(); if(n) _ownerSet.add(n); });
+    if(d.Owner) _ownerSet.add(String(d.Owner).trim());
+    const allOwners = [..._ownerSet].filter(Boolean).sort();
+    const ownerOpts = allOwners.map(o => `<option value="${escH(o)}"></option>`).join('');
     // 날짜 변환: ISO/Date → input type="date" 호환 YYYY-MM-DD
     const fmtDateInput = (v) => {
       if(!v) return '';
@@ -31003,10 +31007,10 @@ function openM(type,idx){
       return '';
     };
     h=`<div class="fr"><label class="fl">트레일러 번호*</label><input class="fi" id="f0" value="${escH(d.Trailer_Number||'')}" placeholder="예: TR-001"></div>
-      <div class="fr"><label class="fl">소유자*</label><div class="fsw"><select class="fs" id="f1">
-        <option value="">— 선택 —</option>
-        ${ownerOpts}
-      </select></div></div>
+      <div class="fr"><label class="fl">소유자* <span style="font-weight:400;color:var(--t3);font-size:11px;">(목록 선택 또는 직접 입력 — 임대·신규 회사 가능)</span></label>
+        <input class="fi" id="f1" list="tr-owner-list" value="${escH(d.Owner||'')}" placeholder="회사명 선택 또는 입력" autocomplete="off">
+        <datalist id="tr-owner-list">${ownerOpts}</datalist>
+      </div>
       <div class="fr"><label class="fl">용량/규격</label><input class="fi" id="f2" value="${escH(d.Capacity||'')}" placeholder="예: 4인용, 짐 트레일러"></div>
       <div class="fr"><label class="fl">💰 사용료 ($/회) — 다른 회사가 빌렸을 때 받는 금액</label><input type="number" class="fi" id="f7" value="${d.Rental_Fee !== undefined && d.Rental_Fee !== '' ? d.Rental_Fee : 30}" placeholder="기본 30" min="0" step="5"></div>
       <div class="fr"><label class="fl">🚗 Rego 만료일 (등록 만료)</label><input type="date" class="fi" id="f3" value="${fmtDateInput(d.Rego_Date)}"></div>
