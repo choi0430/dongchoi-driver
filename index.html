@@ -12972,14 +12972,16 @@ async function releaseTrailerFromShift(shiftId){
   try{
     const res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      redirect: 'follow',
+      headers: {'Content-Type': 'text/plain'},  // ★ text/plain — application/json은 CORS preflight를 유발해 GAS에서 차단됨
       body: JSON.stringify({
         action: 'release_trailer',
         driver: currentDriver?.name || '',
         trailerNum: trailerNum
       })
     });
-    const json = await res.json();
+    const _txt = await res.text();
+    let json; try { json = JSON.parse(_txt); } catch(e){ json = {ok:false, error:'서버 응답 파싱 실패'}; }
     if(json.ok){
       // 로컬 shift에서도 trailerNumber 비우기
       shift.trailerNumber = '';
