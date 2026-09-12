@@ -8719,6 +8719,23 @@ function _schFlightTimeMap(){
   });
   return map;
 }
+// 편명 시간값 → "HH:MM" 정규화
+//   M_Flights.Time은 월클럭("21:55")로 저장되지만, 구글 시트가 시간 셀로 변환해
+//   "1899-12-29T21:55:00.000Z" 형태로 되돌려줌. 이때 T 뒤 HH:MM이 실제 입력 시각이므로
+//   그대로 추출(타임존 보정 없음). 텍스트 "21:55"나 하루의 분수(0.9132)도 처리.
+function _smFlightTimeHHMM(v){
+  if(v===null||v===undefined) return '';
+  if(typeof v==='number' && v>=0 && v<1){
+    var mins=Math.round(v*24*60); var hh=Math.floor(mins/60)%24; var mm=mins%60;
+    return String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+  }
+  var s=String(v).trim(); if(!s) return '';
+  var mt=s.match(/T(\d{2}):(\d{2})/);          // 1899-...T21:55:00Z → 21:55
+  if(mt) return mt[1]+':'+mt[2];
+  var m1=s.match(/^(\d{1,2}):(\d{2})/);          // "21:55" 또는 "9:05"
+  if(m1) return String(m1[1]).padStart(2,'0')+':'+m1[2];
+  return '';
+}
 // 편명 입력 후(blur) — 시간칸이 비어있으면 과거 기록으로 자동 채움
 function _smFlightAutofill(which){
   try{
@@ -8732,10 +8749,11 @@ function _smFlightAutofill(which){
     var fRec=_flightLookup(code);
     var rec, src;
     if(fRec && String(fRec.Time||'').trim()){
-      rec={ time:String(fRec.Time).trim(), type:(String(fRec.IntlDom||'intl').toLowerCase()==='dom'?'dom':'intl'), date:'' };
+      rec={ time:_smFlightTimeHHMM(fRec.Time), type:(String(fRec.IntlDom||'intl').toLowerCase()==='dom'?'dom':'intl'), date:'' };
       src='표';
     } else {
       rec=_schFlightTimeMap()[code]; src='지난 일정';
+      if(rec && rec.time) rec = {...rec, time:_smFlightTimeHHMM(rec.time)};
     }
     if(!rec || !rec.time) return;
     timeEl.value=rec.time;
