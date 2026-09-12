@@ -33627,7 +33627,9 @@ async function loadRosterAndRender(){
     const dayOfWeek = (today.getDay()+6)%7;
     const mon = new Date(today); mon.setDate(today.getDate() - dayOfWeek + (_leaveWeekOffset*7));
     const sun = new Date(mon); sun.setDate(mon.getDate()+6);
-    const fromISO = mon.getFullYear()+'-'+String(mon.getMonth()+1).padStart(2,'0')+'-'+String(mon.getDate()).padStart(2,'0');
+    // ★ 연속 근무일수(주 경계 넘어 연결) 계산을 위해 표시 주 이전 6주치도 함께 로드
+    const histStart = new Date(mon); histStart.setDate(mon.getDate()-42);
+    const fromISO = histStart.getFullYear()+'-'+String(histStart.getMonth()+1).padStart(2,'0')+'-'+String(histStart.getDate()).padStart(2,'0');
     const toISO = sun.getFullYear()+'-'+String(sun.getMonth()+1).padStart(2,'0')+'-'+String(sun.getDate()).padStart(2,'0');
     const res = await fetch(APPS_SCRIPT_URL+'?action=get_roster&from='+fromISO+'&to='+toISO);
     const json = await res.json();
@@ -33692,6 +33694,8 @@ function renderLeaveAvailGrid(){
   });
   // 주간 합계 열
   html += '<th style="background:var(--s3);padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;min-width:50px;">근무<br><span style="font-size:10px;font-weight:400;">일수</span></th>';
+  // 연속 근무일수 열 (이전 주까지 연결)
+  html += '<th style="background:var(--s3);padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;min-width:56px;" title="이전 주까지 이어서 쉬지 않고 근무한 연속 일수">연속<br><span style="font-size:10px;font-weight:400;">근무일</span></th>';
   html += '</tr>';
 
   drivers.forEach(drv=>{
@@ -33715,20 +33719,26 @@ function renderLeaveAvailGrid(){
       const onclick = isPending ? '' : `onclick="toggleRosterCell('${drv}','${d.iso}','${status}')"`;
       html += `<td style="background:${st.bg};color:${st.tx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:700;font-size:11px;cursor:${cursor};user-select:none;transition:opacity 0.15s;" title="${title}" ${onclick}>${st.label}</td>`;
     });
-    // ★ 연속 근무일수 계산 (주 경계 무시, 오늘 기준 역순 탐색)
-    let _consDays = 0;
-    const _chkD = new Date(todayISO + 'T00:00:00');
-    const _todaySt = rosterLookup[drv]?.[todayISO] || '';
-    if (_todaySt !== 'WORKED') _chkD.setDate(_chkD.getDate() - 1);
-    for (let _ci = 0; _ci < 30; _ci++) {
-      const _ciso = _chkD.getFullYear() + '-' + String(_chkD.getMonth()+1).padStart(2,'0') + '-' + String(_chkD.getDate()).padStart(2,'0');
-      if (rosterLookup[drv]?.[_ciso] === 'WORKED') { _consDays++; _chkD.setDate(_chkD.getDate()-1); } else break;
+    // ★ 연속 근무일수 계산 (표시 주의 마지막 근무일 기준, 이전 주까지 역순 연결)
+    let _streak = 0, _anchorISO = '';
+    for (let _k = dates.length - 1; _k >= 0; _k--) {
+      if (rosterLookup[drv]?.[dates[_k].iso] === 'WORKED') { _anchorISO = dates[_k].iso; break; }
     }
-    const _maxDays = Math.max(workedCount, _consDays);
-    const countBg = _maxDays >= 6 ? '#fef2f2' : workedCount >= 1 ? '#eff6ff' : '#f9fafb';
-    const countTx = _maxDays >= 6 ? '#dc2626' : workedCount >= 1 ? '#2563eb' : '#9ca3af';
-    const _consExtra = _consDays > workedCount ? `<div style="font-size:9px;color:#dc2626;margin-top:2px;">연속${_consDays}일⚠️</div>` : '';
-    html += `<td style="background:${countBg};color:${countTx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:800;font-size:14px;">${workedCount}${_consExtra}</td>`;
+    if (_anchorISO) {
+      const _cur = new Date(_anchorISO + 'T00:00:00');
+      for (let _ci = 0; _ci < 120; _ci++) {
+        const _ciso = _cur.getFullYear() + '-' + String(_cur.getMonth()+1).padStart(2,'0') + '-' + String(_cur.getDate()).padStart(2,'0');
+        if (rosterLookup[drv]?.[_ciso] === 'WORKED') { _streak++; _cur.setDate(_cur.getDate()-1); } else break;
+      }
+    }
+    // 근무일수 열 (표시 주 기준)
+    const countBg = workedCount >= 6 ? '#fef2f2' : workedCount >= 1 ? '#eff6ff' : '#f9fafb';
+    const countTx = workedCount >= 6 ? '#dc2626' : workedCount >= 1 ? '#2563eb' : '#9ca3af';
+    html += `<td style="background:${countBg};color:${countTx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:800;font-size:14px;">${workedCount}</td>`;
+    // 연속 근무일수 열 (이전 주까지 연결)
+    const _stBg = _streak >= 6 ? '#fef2f2' : _streak >= 1 ? '#eff6ff' : '#f9fafb';
+    const _stTx = _streak >= 6 ? '#dc2626' : _streak >= 1 ? '#2563eb' : '#9ca3af';
+    html += `<td style="background:${_stBg};color:${_stTx};padding:8px 4px;text-align:center;border:1px solid var(--bd);font-weight:800;font-size:14px;" title="이전 주까지 이어서 쉬지 않고 근무한 연속 일수">${_streak}${_streak >= 6 ? ' ⚠️' : ''}</td>`;
     html += '</tr>';
   });
   html += '</table>';
@@ -33740,6 +33750,7 @@ function renderLeaveAvailGrid(){
   html += '<span style="color:#2563eb;">🚌 Worked (근무)</span>';
   html += '<span style="color:#7c3aed;">😴 Off (정기휴일)</span>';
   html += '<span style="color:#ca8a04;">⏳ Pending (대기)</span>';
+  html += '<span style="color:#dc2626;">⚠️ 연속 근무 6일 이상 (휴식 필요)</span>';
   html += '</div>';
   el.innerHTML = html;
 }
