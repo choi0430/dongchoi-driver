@@ -7633,18 +7633,11 @@ function _schDayOfWeek(ymd){
   return dt.getUTCDay(); // 0=일
 }
 
-// ★ 헤더 트레일러 체크박스 → 일정 전체 트레일러 자동 적용
-//   룰:
-//   - 체크 시: 짐 이동 패턴이 있는 날만 d.trailer = true
-//     · 공항 ↔ 호텔 (양방향)
-//     · 호텔 A ↔ 호텔 B (다른 호텔)
-//   - 같은 호텔 내 이동, 또는 그 외 패턴: d.trailer = false
-//   - 체크 해제 시: 모든 d.trailer = false (사용자가 개별 슬롯에서 다시 켤 수 있음)
-function _smApplyTrailerAutoFromHeader(){
-  const cb = document.getElementById('sm-trailer-needed');
-  if(!cb) return;
-  const isChecked = cb.checked;
-  if(!_schDays || _schDays.length === 0) return;
+// ★ 짐 이동(트레일러) 필요 판정 — 한 날의 슬롯 중 하나라도:
+//   · 공항 ↔ 호텔 (양방향)  또는  · 서로 다른 호텔 ↔ 호텔  이면 true
+//   · 같은 호텔 내(시작=종료) 또는 그 외 패턴은 false
+function _smComputeDayTrailer(d){
+  if(!d || !d.slots) return false;
   const hotels = (typeof DB !== 'undefined' && DB.H) ? DB.H : [];
   const _isHotel = (type, place) => {
     if(type === 'hotel') return true;
@@ -7656,37 +7649,73 @@ function _smApplyTrailerAutoFromHeader(){
     if(!place) return false;
     return /\b[A-Z]{2,3}\d{2,4}\b/.test(String(place)) || /\b(INTL|DOM|airport|공항)\b/i.test(String(place));
   };
-
-  _schDays.forEach(d => {
-    if(!isChecked){
-      d.trailer = false;
-      return;
+  let needs = false;
+  ['morning','fullday','evening'].forEach(k => {
+    const s = d.slots[k];
+    if(!s) return;
+    const sIsAirport = _isAirport(s.startPlaceType, s.startPlace);
+    const eIsAirport = _isAirport(s.endPlaceType, s.endPlace);
+    const sIsHotel = _isHotel(s.startPlaceType, s.startPlace);
+    const eIsHotel = _isHotel(s.endPlaceType, s.endPlace);
+    // 공항 ↔ 호텔 (양방향)
+    if((sIsAirport && eIsHotel) || (sIsHotel && eIsAirport)){ needs = true; return; }
+    // 호텔 ↔ 호텔 (서로 다른 호텔)
+    if(sIsHotel && eIsHotel){
+      const sp = String(s.startPlace || '').trim();
+      const ep = String(s.endPlace || '').trim();
+      if(sp && ep && sp !== ep) needs = true;
     }
-    // 체크된 경우: 짐 이동 패턴이 있는 날만 true
-    let needsForThisDay = false;
-    ['morning','fullday','evening'].forEach(k => {
-      const s = d.slots && d.slots[k];
-      if(!s) return;
-      const sIsAirport = _isAirport(s.startPlaceType, s.startPlace);
-      const eIsAirport = _isAirport(s.endPlaceType, s.endPlace);
-      const sIsHotel = _isHotel(s.startPlaceType, s.startPlace);
-      const eIsHotel = _isHotel(s.endPlaceType, s.endPlace);
-      // 공항 ↔ 호텔
-      if((sIsAirport && eIsHotel) || (sIsHotel && eIsAirport)){
-        needsForThisDay = true;
-        return;
-      }
-      // 호텔 ↔ 호텔 (다른 호텔)
-      if(sIsHotel && eIsHotel){
-        const sp = String(s.startPlace || '').trim();
-        const ep = String(s.endPlace || '').trim();
-        if(sp && ep && sp !== ep){
-          needsForThisDay = true;
-        }
-      }
-    });
-    d.trailer = needsForThisDay;
   });
+  return needs;
+}
+
+// ★ 아침 시작 호텔 = 전날 종료 호텔 자동 채움
+//   - _smRebuildDays() 시작 시 매번 호출되어 편집 중 항상 동기화됨
+//   - 비어있을 때만 채움(명시적 입력은 보존). 호텔 출발 슬롯에만 적용(공항 출발 등 제외).
+function _smSyncMorningHotels(){
+  if(!_schDays || !_schDays.length) return;
+  const SLOT_KEYS = ['morning','fullday','evening'];
+  for(let j = 1; j < _schDays.length; j++){
+    const d = _schDays[j];
+    if(!d || !d.slots) continue;
+    let firstKey = null;
+    for(const sk of SLOT_KEYS){ if(d.slots[sk]){ firstKey = sk; break; } }
+    if(!firstKey) continue;
+    const first = d.slots[firstKey];
+    if((first.startPlaceType || '') !== 'hotel') continue;      // 호텔 출발일 때만
+    if(String(first.startPlace || '').trim()) continue;         // 이미 입력됨 → 보존
+    // 전날의 마지막 호텔 찾기
+    const prev = _schDays[j-1];
+    if(!prev || !prev.slots) continue;
+    let prevHotel = '';
+    for(let si = SLOT_KEYS.length - 1; si >= 0; si--){
+      const s = prev.slots[SLOT_KEYS[si]];
+      if(!s) continue;
+      if((s.endPlaceType || '') === 'hotel' && s.endPlace){ prevHotel = s.endPlace; break; }
+      if((s.startPlaceType || '') === 'hotel' && s.startPlace){ prevHotel = s.startPlace; break; }
+    }
+    if(prevHotel) first.startPlace = prevHotel;
+  }
+}
+
+// ★ 헤더 '트레일러 필요' 체크 상태이면, 장소(호텔/공항) 변경 시 짐 이동 날 트레일러 자동 재판정
+//   - 장소가 바뀌는 시점에만 호출(개별 날짜 수동 토글은 보존)
+function _smRecomputeTrailerIfAuto(){
+  const cb = document.getElementById('sm-trailer-needed');
+  if(!cb || !cb.checked) return;
+  if(!_schDays || !_schDays.length) return;
+  _schDays.forEach(d => { d.trailer = _smComputeDayTrailer(d); });
+}
+
+// ★ 헤더 트레일러 체크박스 → 일정 전체 트레일러 자동 적용
+//   - 체크 시: 짐 이동 패턴이 있는 날만 d.trailer = true (공항↔호텔, 다른 호텔↔호텔)
+//   - 체크 해제 시: 모든 d.trailer = false (사용자가 개별 날에서 다시 켤 수 있음)
+function _smApplyTrailerAutoFromHeader(){
+  const cb = document.getElementById('sm-trailer-needed');
+  if(!cb) return;
+  const isChecked = cb.checked;
+  if(!_schDays || _schDays.length === 0) return;
+  _schDays.forEach(d => { d.trailer = isChecked ? _smComputeDayTrailer(d) : false; });
   _smRebuildDays();
 }
 
@@ -7751,6 +7780,8 @@ function _smRebuildDays(){
     wrap.innerHTML = '<div style="padding:20px;text-align:center;color:var(--t3);font-size:11px;">시작일 / 종료일을 먼저 입력하세요</div>';
     return;
   }
+  // ★ 렌더 전 동기화: 아침 시작 호텔 = 전날 종료 호텔 (비어있을 때만)
+  _smSyncMorningHotels();
   // 기존 csel 인스턴스 제거
   Object.keys(_schDayCsels).forEach(k => delete _schDayCsels[k]);
 
@@ -8861,6 +8892,8 @@ function _propagatePlace(dayIdx, slotKey, fieldName, newVal, oldVal){
     }
   }
 
+  // ★ 장소 변경됨 → 헤더 체크 시 트레일러 자동 재판정
+  _smRecomputeTrailerIfAuto();
   _smRebuildDays();
 }
 
@@ -8888,6 +8921,8 @@ function setPlaceType(dayIdx, slotKey, fieldType, newType){
   if(newVal !== oldVal){
     _propagatePlace(dayIdx, slotKey, fieldName, newVal, oldVal);
   } else {
+    // 장소 타입만 바뀐 경우도 헤더 체크 시 트레일러 자동 재판정
+    _smRecomputeTrailerIfAuto();
     _smRebuildDays();
   }
 }
