@@ -7089,8 +7089,14 @@ function openScheduleModal(tourId, focusDate, focusSlot){
 
   // 여행사 검색 드롭다운
   _schCsels.agency = buildSearchSelect('sm-agency-csel', {
-    items: (DB.C||[]).map(c => ({ value: c.Name, label: c.Name, sub: c.ABN || c.Email || '' })),
-    placeholder: '여행사 선택 (타이핑으로 검색)',
+    items: [
+      ...(DB.C||[]).map(c => ({ value: c.Name, label: c.Name, sub: c.ABN || c.Email || '' })),
+      // 코치 회사(서브) — 서브끼리 일정 교환 시 청구 대상이 될 수 있음
+      ...((typeof _subCompanies!=='undefined' && Array.isArray(_subCompanies) ? _subCompanies : [])
+        .filter(sc => sc && sc.SubName && String(sc.Active||'Y').toUpperCase()!=='N')
+        .map(sc => ({ value: sc.SubName, label: '🚌 '+sc.SubName+' (코치사)', sub: sc.ABN || sc.Email || '' })))
+    ],
+    placeholder: '여행사/코치사 선택 (타이핑으로 검색)',
     onSelect: () => {},
     onClear: () => {}
   });
@@ -23851,13 +23857,25 @@ function calcInvRow(r) {
     };
   }
 
+  // ── 서브(코치 회사) 직접 청구 시 요금 기준 여행사 = Tour Hojuro ──
+  //   서브끼리 주고받은 일정은 자체 요금표(M_PriceClient)가 없으므로 Tour Hojuro 기준으로 자동계산.
+  //   (금액이 다를 경우 인보이스 화면에서 행별로 수동 수정)
+  let priceAgency = agency;
+  const _isSubRecipient = (typeof _subCompanies!=='undefined' && Array.isArray(_subCompanies))
+    && _subCompanies.some(s => s && String(s.SubName||'').trim().toLowerCase() === agency.toLowerCase())
+    && !((DB.C||[]).some(c => String(c.Name||'').trim().toLowerCase() === agency.toLowerCase()));
+  if (_isSubRecipient) {
+    const _hj = Object.keys(DB.PC||{}).find(k => /호주로|hojuro/i.test(k));
+    priceAgency = _hj || 'Tour Hojuro Pty Ltd';
+  }
+
   // ── OT DR → TA 역산 ──
   // 21/25S: DR $30/HR → TA $80/HR, 40S: DR $40/HR → TA $150/HR, 50S: DR $40/HR → TA $160/HR
   // 호주로(Tour Hojuro), Plus Australia: 30분 UNIT 단위 (1 UNIT = 0.5HR, DR/TA 모두 시간당의 1/2)
   //   예: $60 OT = 4 UNITs × $15 = 2HR (DR), TA = 4 × $40 = $160
   const _otRateDR = seatNum>=40 ? 40 : 30;
   const _otRateTA = seatNum>=50 ? 160 : seatNum>=40 ? 150 : 80;
-  const _isHojuroOT = /호주로|hojuro|plus\s*australia/i.test(agency);
+  const _isHojuroOT = /호주로|hojuro|plus\s*australia/i.test(priceAgency);
   const _otHalfDR = _otRateDR / 2;  // 30분 UNIT당 DR rate
   const _otHalfTA = _otRateTA / 2;  // 30분 UNIT당 TA rate
   const _otHrs = _isHojuroOT ? (otDR / _otHalfDR) * 0.5 : (_otRateDR>0 ? otDR/_otRateDR : 0);
@@ -23911,7 +23929,7 @@ function calcInvRow(r) {
   // ── M_PriceClient 기본요금 조회 ──
   let baseRate = 0;
   let rateSource = 'svc'; // 'price_table' | 'svc'
-  const agPC = findAgencyPC(agency);
+  const agPC = findAgencyPC(priceAgency);
   const courseEntry = agPC ? findCourse(agPC, attraction) : null;
   if (courseEntry) {
     const seatData = courseEntry[seatKey] || courseEntry['21'];
@@ -23930,10 +23948,10 @@ function calcInvRow(r) {
   // - 그 외: Airport Transfer 요금 × 30%
   let earlyTA = 0;
   // ★ BLUESKY 특수 규칙: Early surcharge 청구 안 함 (사용자 요청, 2026-05-30)
-  const _isBluesky = /bluesky/i.test(agency);
+  const _isBluesky = /bluesky/i.test(priceAgency);
   if (earlyDR > 0 && !_isBluesky) {
     // 1) Tour Hojuro / Plus Australia 21/25S 우선 체크 → $80 고정
-    const _isHojuroEarly = /호주로|hojuro|plus\s*australia/i.test(agency);
+    const _isHojuroEarly = /호주로|hojuro|plus\s*australia/i.test(priceAgency);
     if (_isHojuroEarly && seatNum < 40) {
       earlyTA = 80;
     } else {
@@ -23961,7 +23979,7 @@ function calcInvRow(r) {
   // 호주로(Tour Hojuro), Plus Australia 21/25S는 공항 주차비 청구 불가
   const pickupVal  = String(r.Pickup  || '').trim();
   const apPattern  = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
-  const _isHojuro  = /호주로|hojuro|plus\s*australia/i.test(agency);
+  const _isHojuro  = /호주로|hojuro|plus\s*australia/i.test(priceAgency);
   const autoParking = (apPattern.test(pickupVal) && !(_isHojuro && seatNum < 40)) ? (seatNum >= 40 ? 40 : 30) : 0;
 
   // 행별 주차비 수동 override (localStorage: '1'=강제추가, '0'=강제제외, null=자동)
@@ -24066,10 +24084,20 @@ async function populateInvAgency() {
   // M_Clients 마스터 + 리포트 여행사 병합
   const masterAgencies = (DB.C||[]).map(c=>String(c.Name||'').trim()).filter(Boolean);
   const reportAgencies = (_invReports||[]).map(r=>(r._agency||String(r.Agency||'').trim())).filter(Boolean);
-  const allAgencies = [...new Set([...masterAgencies, ...reportAgencies])].sort();
+  // 코치 회사(서브) — 서브끼리 일정 교환 시 직접 청구 대상
+  const subNames = (typeof _subCompanies!=='undefined' && Array.isArray(_subCompanies) ? _subCompanies : [])
+    .filter(sc => sc && sc.SubName && String(sc.Active||'Y').toUpperCase()!=='N')
+    .map(sc => String(sc.SubName).trim()).filter(Boolean);
+  const subSet = new Set(subNames.map(s=>s.toLowerCase()));
+  // 여행사 그룹 = 마스터+리포트 중 코치가 아닌 것
+  const agencyList = [...new Set([...masterAgencies, ...reportAgencies].filter(a=>!subSet.has(a.toLowerCase())))].sort();
+  const subList = [...new Set(subNames)].sort();
   const cur = sel.value;
-  sel.innerHTML = '<option value="">-- 여행사 선택 --</option>' +
-    allAgencies.map(a => `<option value="${escH(a)}"${a===cur?' selected':''}>${escH(a)}</option>`).join('');
+  const opt = a => `<option value="${escH(a)}"${a===cur?' selected':''}>${escH(a)}</option>`;
+  let html = '<option value="">-- 청구처 선택 --</option>';
+  html += '<optgroup label="여행사">' + agencyList.map(opt).join('') + '</optgroup>';
+  if(subList.length) html += '<optgroup label="🚌 코치 회사 (서브)">' + subList.map(opt).join('') + '</optgroup>';
+  sel.innerHTML = html;
 }
 
 // ── 리포트 로드 & 미리보기 ──
@@ -25369,8 +25397,8 @@ function _showPaymentReceiptConfirm(txnRow){
   const receivedAmt = Number(txnRow.CR)||0;
   const invNo = String(txnRow.InvoiceID||'').trim();
 
-  // 여행사 이메일 확인
-  const client = (DB.C||[]).find(c => String(c.Name||'').trim().toLowerCase() === agency.toLowerCase());
+  // 여행사/코치사 이메일 확인
+  const client = _invRecipientInfo(agency);
   const toEmail = client ? String(client.Email||'').trim() : '';
   const ccEmail = client ? String(client.Email_CC||'').trim() : '';
 
@@ -26435,7 +26463,7 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
   periodTo   = _normInvDate(periodTo);
   if (!agency || !periodFrom || !periodTo) { toast('⚠️ 인보이스 정보가 부족합니다','er'); return; }
 
-  const client = DB.C.find(c => c.Name === agency) || {};
+  const client = _invRecipientInfo(agency);
   let toEmail  = normalizeEmails(client.Email || '');
   const ccEmail = normalizeEmails(client.Email_CC || '');
   if (!toEmail) {
@@ -27177,11 +27205,31 @@ function _isoToSunday(iso) {
   return toLocalISO(d);
 }
 
+// ─── 청구처 정보 조회 (여행사=M_Clients, 없으면 코치 회사=M_SUB 폴백) ───
+//   서브끼리 일정을 주고받아 코치 회사에 직접 인보이스를 발행하는 경우 지원
+function _invRecipientInfo(agency){
+  const nm = String(agency||'').trim();
+  if(!nm) return {};
+  const c = (DB.C||[]).find(x => String(x.Name||'').trim().toLowerCase() === nm.toLowerCase());
+  if(c) return c;
+  // 코치 회사(서브) 폴백 — M_SUB 필드를 client 형태로 매핑
+  const sc = (typeof _subCompanies!=='undefined' && Array.isArray(_subCompanies) ? _subCompanies : [])
+    .find(s => s && String(s.SubName||'').trim().toLowerCase() === nm.toLowerCase());
+  if(sc) return {
+    Name: sc.SubName, ClientID: '', ABN: sc.ABN||'',
+    Mobile: sc.Phone||sc.Contact||'', Email: sc.Email||'', Email_CC: '',
+    Address: sc.Address||'',
+    Bank_Name: sc.Bank_Name||'', BSB: sc.BSB||'', Account_Number: sc.Account_Number||'', Account_Name: sc.Account_Name||'',
+    _isSub: true
+  };
+  return {};
+}
+
 // ─── generateInvoice: 그룹 모드 반영 ───
 // ─── 공용 인보이스 HTML 빌더 ───
 function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverride=null, grandTotalOverride=undefined}={}) {
   const fd = ds => ds ? fmtDate(ds) || ds : '—';
-  const client  = DB.C.find(c => c.Name === agency) || {};
+  const client  = _invRecipientInfo(agency);
   const abn     = String(DC_COMPANY.abn || '');
   let grandTotal = grandTotalOverride !== undefined ? grandTotalOverride : _calcInvGrandTotal(_buildInvRows(agency, from, to));
   const gst = roundMoney(grandTotal / 11);
@@ -27795,7 +27843,7 @@ async function emailInvoice() {
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
 
-  const client = DB.C.find(c => c.Name === agency) || {};
+  const client = _invRecipientInfo(agency);
   let toEmail  = normalizeEmails(client.Email || '');
   const ccEmail = normalizeEmails(client.Email_CC || '');
   // ★ 2026-05 fix: 캐시 미스 시 새 번호 발급 버그 방지
@@ -34679,7 +34727,7 @@ function _buildQuotationHTML({isDraft=false}={}) {
   const quoDate = document.getElementById('quo-date')?.value||new Date().toISOString().slice(0,10);
   const validDate = document.getElementById('quo-valid')?.value||'';
   const memo = document.getElementById('quo-memo')?.value?.trim()||'';
-  const client = (DB.C||[]).find(c=>c.Name===agency)||{};
+  const client = _invRecipientInfo(agency);
   const abn = String(DC_COMPANY.abn||'');
   const fd = ds => ds ? fmtDate(ds)||ds : '—';
   const quoNum = _quoNum();
@@ -34880,7 +34928,7 @@ async function emailQuotation() {
   const agency = _quoGetAgency();
   if (_quoItems.length===0) { toast('견적 항목을 추가하세요','er'); return; }
 
-  const client = (DB.C||[]).find(c=>c.Name===agency)||{};
+  const client = _invRecipientInfo(agency);
   let toEmail = normalizeEmails(client.Email||'');
   const ccEmailQuo = normalizeEmails(client.Email_CC||'');
   const quoNum = _quoNum();
