@@ -9319,7 +9319,9 @@ async function saveScheduleData(){
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
   const errEl = document.getElementById('sm-err');
-  const showErr = (msg) => { if(errEl){ errEl.textContent = msg; errEl.style.display = 'block'; } };
+  // ★ 오류 표시 시 저장 버튼 잠금도 항상 해제 — 내용 수정 후 다시 '저장' 클릭 가능하도록
+  //   (기존: 검증 실패 return 경로들이 버튼을 잠근 채 남겨 '처리 중'으로 굳던 문제)
+  const showErr = (msg) => { _fail(); if(errEl){ errEl.textContent = msg; errEl.style.display = 'block'; } };
   errEl && (errEl.style.display = 'none');
 
   // ★ 저장 전 cleanup — slot.rego/driver에 emoji prefix 남아있으면 제거
@@ -9527,7 +9529,7 @@ async function saveScheduleData(){
     const msg = '⚠️ 다음 충돌이 감지되었습니다:\n\n' + conflicts.slice(0, 8).join('\n') +
                 (conflicts.length > 8 ? `\n\n... 외 ${conflicts.length-8}건` : '') +
                 '\n\n계속 저장하시겠습니까?';
-    if(!confirm(msg)) return;
+    if(!confirm(msg)){ _fail(); return; }  // 취소 시에도 버튼 잠금 해제
   }
 
   toast('💾 저장 중...','in');
