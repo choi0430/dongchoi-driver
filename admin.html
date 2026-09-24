@@ -5528,7 +5528,7 @@ async function deleteHvisBooking(id){
   const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
-  if(!confirm('Delete this booking?'))return;
+  if(!confirm('Delete this booking?')){ _fail(); return; }
   try {
     _done(); toast('삭제 중...','ok');
     const res = await fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
@@ -5714,7 +5714,7 @@ async function deleteMaint(id){
   const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
-  if(!confirm('Delete this maintenance record?'))return;
+  if(!confirm('Delete this maintenance record?')){ _fail(); return; }
   setMaintRecordsCache(getMaintRecords().filter(function(r){return r.id!==id;}));
   renderMaint();_done(); toast('Deleted','ok');
   try {
@@ -9834,9 +9834,9 @@ async function saveBulkBlocks(){
 
   // 유효성 검사 + 빈 행 제거
   const valid = _schBulkRows.filter(r => r.agency && r.startDate && r.endDate);
-  if(valid.length === 0) return showErr('여행사 + 시작일 + 종료일을 입력한 행이 최소 1개 필요합니다');
+  if(valid.length === 0){ _fail(); return showErr('여행사 + 시작일 + 종료일을 입력한 행이 최소 1개 필요합니다'); }
   for(const r of valid){
-    if(r.endDate < r.startDate) return showErr(`"${r.tourCode||r.agency}" — 종료일이 시작일보다 빠릅니다`);
+    if(r.endDate < r.startDate){ _fail(); return showErr(`"${r.tourCode||r.agency}" — 종료일이 시작일보다 빠릅니다`); }
   }
 
   toast(`💾 ${valid.length}건 등록 중...`, 'in');
@@ -9906,8 +9906,8 @@ async function deleteScheduleConfirm(){
   const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
-  if(!_schEditTourId) return;
-  if(!confirm('이 일정을 삭제하시겠습니까?\n(인보이스가 발행된 일정은 신중히 삭제하세요)')) return;
+  if(!_schEditTourId){ _fail(); return; }
+  if(!confirm('이 일정을 삭제하시겠습니까?\n(인보이스가 발행된 일정은 신중히 삭제하세요)')){ _fail(); return; }
   toast('🗑️ 삭제 중...','in');
   try{
     const res = await fetch(APPS_SCRIPT_URL, {
@@ -9925,7 +9925,7 @@ async function deleteScheduleConfirm(){
     closeScheduleModal();
     await loadSchedule();
   }catch(e){
-    toast('삭제 실패: ' + e.message,'er');
+    _fail(); toast('삭제 실패: ' + e.message,'er');
   }
 }
 
@@ -14055,11 +14055,11 @@ async function deleteLedgerEntryFromSheet(rowIndex){
   const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
-  if(!rowIndex) return;
+  if(!rowIndex){ _fail(); return; }
   try{
     await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'delete_ledger',rowIndex})});
-  }catch(e){console.warn('Ledger delete 실패:',e);}
+      body:JSON.stringify({action:'delete_ledger',rowIndex})}); _done();
+  }catch(e){ _fail();console.warn('Ledger delete 실패:',e);}
 }
 
 function getWeekLabel(dateStr){
@@ -14114,10 +14114,10 @@ async function deleteLedgerWeek(){
   if(!ST.ledgerWeek){_fail();toast('주간을 선택하세요','er');return;}
   const ledger = getLedger();
   const week = ledger.find(w=>w.weekStart===ST.ledgerWeek);
-  if(!week) return;
+  if(!week){ _fail(); return; }
   const label = getWeekLabel(ST.ledgerWeek);
   const cnt = week.entries?.length||0;
-  if(!confirm(label+' 주간을 삭제하시겠습니까?'+(cnt>0?'\n(포함된 '+cnt+'건의 내역도 함께 삭제됩니다)':''))) return;
+  if(!confirm(label+' 주간을 삭제하시겠습니까?'+(cnt>0?'\n(포함된 '+cnt+'건의 내역도 함께 삭제됩니다)':''))){ _fail(); return; }
   const newLedger = ledger.filter(w=>w.weekStart!==ST.ledgerWeek);
   saveLedger(newLedger);
   ST.ledgerWeek = newLedger[0]?.weekStart||null;
@@ -14927,7 +14927,7 @@ async function saveSubCompany(idx){
       window._psLastSync = 0;
       await syncSub();
       if(ST.subTab==='rates') rSub();
-    } else { toast('❌ 저장 실패: '+(json.error||''),'er'); }
+    } else { _fail(); toast('❌ 저장 실패: '+(json.error||''),'er'); }
   }catch(e){ _fail();
     console.error('saveSubCompany error:', e);
     toast('❌ 저장 오류: '+e.message,'er');
@@ -14944,8 +14944,8 @@ async function deleteSubCompany(idx){
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
   const s = _subCompanies[idx];
-  if(!s) return;
-  if(!confirm(`"${s.SubName}" 업체를 삭제하시겠습니까?`)) return;
+  if(!s){ _fail(); return; }
+  if(!confirm(`"${s.SubName}" 업체를 삭제하시겠습니까?`)){ _fail(); return; }
   try{
     const json = await gasPost({action:'delete_master', sheet:'M_SUB', rowIndex: s._rowIndex});
     if(json.ok){
@@ -14955,8 +14955,8 @@ async function deleteSubCompany(idx){
       window._psLastSync = 0;
       await syncSub();
       if(ST.subTab==='rates') rSub();
-    } else { toast('❌ 삭제 실패: '+(json.error||''),'er'); }
-  }catch(e){ toast('❌ 삭제 실패: '+e.message,'er'); }
+    } else { _fail(); toast('❌ 삭제 실패: '+(json.error||''),'er'); }
+  }catch(e){ _fail(); toast('❌ 삭제 실패: '+e.message,'er'); }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -22390,7 +22390,7 @@ async function deleteBalTxn(type, idx){
   const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
-  if(!confirm('이 거래를 삭제하시겠습니까?')) return;
+  if(!confirm('이 거래를 삭제하시겠습니까?')){ _fail(); return; }
   try {
     if(type==='agency'){
       const rowIndex = _balAgencyTxns[idx]?._rowIndex;
@@ -22410,7 +22410,7 @@ async function deleteBalTxn(type, idx){
     renderBalDetail();
     // ★ 인보이스 탭 동기화
     _invHistoryCache = null;
-  } catch(e){ toast('삭제 실패: '+e.message,'err'); }
+  } catch(e){ _fail(); toast('삭제 실패: '+e.message,'err'); }
 }
 
 // ── 잔액 ↔ 인보이스 양방향 동기화 ──
@@ -25261,7 +25261,7 @@ async function saveInvoiceToSheet(_recoverNum, _skipBalance) {
 
     _refreshInvPreview();
   } catch(e) {
-    toast('❌ 저장 실패: '+e.message,'er');
+    _fail(); toast('❌ 저장 실패: '+e.message,'er');
   } finally {
     if(btn){ btn.disabled=false; btn.textContent='💾 저장'; }
   }
@@ -26746,7 +26746,7 @@ async function updateInvStatus(invNumber, status, field) {
   const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
-  if (!confirm(`인보이스 ${invNumber} 상태를 "${status}"로 변경하시겠습니까?`)) return;
+  if (!confirm(`인보이스 ${invNumber} 상태를 "${status}"로 변경하시겠습니까?`)){ _fail(); return; }
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
       method:'POST', headers:{'Content-Type':'text/plain'},
@@ -26840,7 +26840,7 @@ async function deleteInvoiceRecord(invNumber) {
   const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
-  if (!confirm(`인보이스 ${invNumber}을(를) 완전히 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+  if (!confirm(`인보이스 ${invNumber}을(를) 완전히 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)){ _fail(); return; }
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
       method:'POST', headers:{'Content-Type':'text/plain'},
@@ -26851,7 +26851,7 @@ async function deleteInvoiceRecord(invNumber) {
     _done(); toast(`🗑️ ${invNumber} 삭제 완료`,'ok');
     await loadInvHistory(true);
     _syncBalanceAndInvoice(); // ★ 잔액 탭 동기화
-  } catch(e) { toast('❌ '+e.message,'er'); }
+  } catch(e) { _fail(); toast('❌ '+e.message,'er'); }
 }
 
 // ─────────────────────────────────────────
@@ -28224,8 +28224,8 @@ function saveNotice() {
   const type  = document.querySelector('input[name="notice-type"]:checked')?.value || 'info';
   const errEl = document.getElementById('notice-modal-err');
 
-  if (!title) { errEl.textContent='제목을 입력하세요.'; errEl.style.display='block'; return; }
-  if (!body)  { errEl.textContent='내용을 입력하세요.'; errEl.style.display='block'; return; }
+  if (!title) { errEl.textContent='제목을 입력하세요.'; errEl.style.display='block'; _fail(); return; }
+  if (!body)  { errEl.textContent='내용을 입력하세요.'; errEl.style.display='block'; _fail(); return; }
 
   const now = new Date();
   const dateStr = String(now.getDate()).padStart(2,'0') + '/' +
@@ -28263,7 +28263,7 @@ function deleteNotice(id) {
   const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
-  if (!confirm('이 공지를 삭제하시겠습니까?')) return;
+  if (!confirm('이 공지를 삭제하시겠습니까?')){ _fail(); return; }
   const notices = (getAdminNotices() || []).filter(x => String(x.id) !== String(id));
   saveAdminNotices(notices);
   renderAdminNotices();
@@ -29345,7 +29345,7 @@ async function saveDREdit(){
   // 날짜 유효성
   const dateVal = document.getElementById('drm-date').value.trim();
   if(!/^\d{2}\/\d{2}\/\d{4}$/.test(dateVal)){
-    errEl.textContent='날짜 형식: DD/MM/YYYY'; errEl.style.display='block'; return;
+    errEl.textContent='날짜 형식: DD/MM/YYYY'; errEl.style.display='block'; _fail(); return;
   }
 
   // 업데이트된 데이터 구성 (원본 유지 + 수정값 덮어쓰기)
@@ -29434,9 +29434,9 @@ async function deleteDR(rowIndex){
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
   const r = (_drCache||[]).find(x=>x._rowIndex===rowIndex);
-  if(!r) return;
+  if(!r){ _fail(); return; }
   const label = `${fmtDate(r.Date)} · ${r.Driver} · ${r.Agency}`;
-  if(!confirm(`이 리포트를 삭제하시겠습니까?\n\n${label}`)) return;
+  if(!confirm(`이 리포트를 삭제하시겠습니까?\n\n${label}`)){ _fail(); return; }
 
   try{
     const res  = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
@@ -29454,7 +29454,7 @@ async function deleteDR(rowIndex){
 
     renderDR();
     _done(); toast('🗑 리포트 삭제 완료','ok');
-  }catch(e){ toast('삭제 실패: '+e.message,'er'); }
+  }catch(e){ _fail(); toast('삭제 실패: '+e.message,'er'); }
 }
 
 // ── GAS Daily_Report 캐시 (관리자용 dr 계산) ──────────────────────
@@ -30409,7 +30409,7 @@ async function deleteWageEntry(idx, weekKey){
   const _done = (txt) => { if(_g) _markDone(_g, txt || '✅ 완료'); };
   const _fail = () => { if(_g) _unlockBtn(_g); };
 
-  if(!confirm('이 지급 기록을 삭제하시겠습니까?')) return;
+  if(!confirm('이 지급 기록을 삭제하시겠습니까?')){ _fail(); return; }
   const wk = weekKey || (ST.wageWeek==='ALL' ? null : ST.wageWeek);
   if(!wk){_fail();toast('주차 정보 오류','er');return;}
   const wages = getWages();
@@ -30450,13 +30450,13 @@ async function deleteWageWeek(){
   if(!ST.wageWeek||!ST.wageDriver){_fail();toast('드라이버와 주간을 선택하세요','er');return;}
   const wages = getWages();
   const cnt = wages[ST.wageDriver]?.[ST.wageWeek]?.entries?.length||0;
-  if(!confirm(getWeekLabel(ST.wageWeek)+' 주간 기록을 삭제하시겠습니까?'+(cnt>0?'\n('+cnt+'건의 지급 기록도 함께 삭제됩니다)':''))) return;
+  if(!confirm(getWeekLabel(ST.wageWeek)+' 주간 기록을 삭제하시겠습니까?'+(cnt>0?'\n('+cnt+'건의 지급 기록도 함께 삭제됩니다)':''))){ _fail(); return; }
   if(wages[ST.wageDriver]) delete wages[ST.wageDriver][ST.wageWeek];
   saveWages(wages);
   ST.wageWeek = null;
   initWageWeeks();
   const ok = await pushWagesToSheet();
-  toast(ok?'✅ 주간 삭제 & 시트 반영':'⚠️ 삭제됨 (시트 sync 실패)','ok');
+  toast(ok?'✅ 주간 삭제 & 시트 반영':'⚠️ 삭제됨 (시트 sync 실패)','ok'); _done();
   _wagesLastSync=0;
 }
 
@@ -31377,10 +31377,17 @@ function _lockBtn(btnOrSelector, loadingText){
   btn.innerHTML = loadingText || '⏳ 저장 중...';
   btn.style.opacity = '0.7';
   btn.style.cursor = 'not-allowed';
+  // ★ 안전망: 해제/완료 처리가 누락된 채 15초 이상 잠겨 있으면 자동 복구
+  //   (검증/취소/오류 경로에서 _fail()/_done() 누락 시 버튼이 '처리 중'으로 굳는 것 방지)
+  if(btn._lockWatchdog){ clearTimeout(btn._lockWatchdog); }
+  btn._lockWatchdog = setTimeout(function(){
+    if(btn.dataset.submitting === '1'){ try{ _unlockBtn(btn); }catch(e){} }
+  }, 15000);
   return btn;
 }
 function _unlockBtn(btn){
   if(!btn) return;
+  if(btn._lockWatchdog){ clearTimeout(btn._lockWatchdog); btn._lockWatchdog = null; }
   if(btn._restoreTimer){ clearTimeout(btn._restoreTimer); btn._restoreTimer = null; }
   btn.dataset.submitting = '';
   btn.disabled = false;
@@ -31392,6 +31399,7 @@ function _unlockBtn(btn){
 }
 function _markDone(btn, doneText){
   if(!btn) return;
+  if(btn._lockWatchdog){ clearTimeout(btn._lockWatchdog); btn._lockWatchdog = null; }
   btn.disabled = true;
   btn.innerHTML = doneText || '✅ 완료';
   btn.style.background = '#16a34a';
@@ -31441,8 +31449,8 @@ async function saveAdminPin(){
   const conf = document.getElementById('pin-confirm').value.trim();
   const adminName = localStorage.getItem('dc_admin_session') || '';
   if(!adminName){ _fail();toast('로그인 상태가 아닙니다','er'); return; }
-  if(nw.length < 4 || !/^\d{4,}$/.test(nw)){toast('새 PIN은 최소 4자리 이상의 숫자여야 합니다','er');return}
-  if(nw!==conf){toast('새 PIN이 일치하지 않습니다','er');return}
+  if(nw.length < 4 || !/^\d{4,}$/.test(nw)){toast('새 PIN은 최소 4자리 이상의 숫자여야 합니다','er');_fail();return}
+  if(nw!==conf){toast('새 PIN이 일치하지 않습니다','er');_fail();return}
 
   // 현재 PIN 서버 검증 (action=login 시도 → 성공 시 토큰 즉시 폐기, 현재 세션 유지)
   try {
@@ -31472,7 +31480,7 @@ async function saveAdminPin(){
     closePinModal();
     toast('✅ PIN이 변경되었습니다 (서버 저장 완료)','ok');
   } catch(e){
-    toast('❌ PIN 변경 실패: '+e.message,'er');
+    _fail(); toast('❌ PIN 변경 실패: '+e.message,'er');
   }
 }
 
@@ -31644,8 +31652,8 @@ async function savePSToSheets(){
       body:JSON.stringify({action:'replace_price_sub',rows})});
     if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
     const json=await res.json();
-    toast(json.ok?'서브 요금 저장 완료 ☁️':'서브 요금 저장됨 (Sheets 오류)','ok');
-  } catch(e){ toast('서브 요금 저장됨 (오프라인)','ok'); }
+    toast(json.ok?'서브 요금 저장 완료 ☁️':'서브 요금 저장됨 (Sheets 오류)','ok'); _done();
+  } catch(e){ _fail(); toast('서브 요금 저장됨 (오프라인)','ok'); }
 }
 
 async function loadPSFromSheets(){
@@ -32665,8 +32673,8 @@ async function savePCToSheets(){
       });
     });
     await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'replace_master',sheet:'M_PriceClient',rows})});
-  } catch(e){ console.error('savePCToSheets error:',e); }
+      body:JSON.stringify({action:'replace_master',sheet:'M_PriceClient',rows})}); _done();
+  } catch(e){ _fail(); console.error('savePCToSheets error:',e); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -33444,9 +33452,9 @@ async function deleteShiftReport(rowIndex, type) {
 
   const cache = type==='pre' ? _shiftCache.pre : _shiftCache.eos;
   const r = cache.find(x=>x._rowIndex===rowIndex);
-  if (!r) return;
+  if (!r){ _fail(); return; }
   const label = `${fmtDate(r.Date)||r.Date} · ${r.Driver} · ${r.Rego}`;
-  if (!confirm(`이 리포트를 삭제하시겠습니까?\n\n${label}`)) return;
+  if (!confirm(`이 리포트를 삭제하시겠습니까?\n\n${label}`)){ _fail(); return; }
 
   const sheet = type==='pre' ? 'Pre_Departure' : 'End_of_Shift';
   try {
@@ -33460,7 +33468,7 @@ async function deleteShiftReport(rowIndex, type) {
     if (idx!==-1) cache.splice(idx,1);
     renderShiftTab();
     _done(); toast('🗑️ 삭제 완료','ok');
-  } catch(e) { toast('❌ 삭제 실패: '+e.message,'er'); }
+  } catch(e) { _fail(); toast('❌ 삭제 실패: '+e.message,'er'); }
 }
 
 // ── 새 항목 추가 (Admin) ──
