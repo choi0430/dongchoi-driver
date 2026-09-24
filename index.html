@@ -5000,23 +5000,42 @@ async function doLogin() {
   renderTodayReports();
   renderSalary();
   renderExpiryAlerts();
-  // ★ 홈 로딩 가속: 가벼운 번들을 먼저 받아두면 아래 loadMyLeaves/syncShifts/runSync의 첫 호출들이 즉시 응답됨
+  // ★ 홈 로딩 가속: 가벼운 번들을 먼저 받아두면 아래 초기 동기화 첫 호출들이 즉시 응답됨
   await primeDriverBundle();
-  loadDriverSchedule();
   restoreSectionStates();
   initMyInfoPage();
-  // 지난 운행 일지 로드 (비동기)
+  // 지난 운행 일지 로드 (비동기, 비핵심 — 배지와 무관)
   _myPastShiftsLoaded = false;
   loadMyPastShifts();
-  // ★ 휴무 요청 상태 로드 (홈 화면 배너 표시용)
-  loadMyLeaves();
   // ★ SUB 오너드라이버 인보이스 탭 표시 여부 확인
   checkSubDriverAccess();
-  // ── 서버에서 미완료 shift 동기화 (비동기) ──
-  syncShiftsFromServer(name);
-  // ── GAS 전체 동기화 + 자동 폴링 시작 (오늘 리포트, 마스터 최신화) ──
-  // ★ 마스터는 loadFullMasterData()가 이미 처리 (또는 백그라운드에서 진행 중) → skipMaster
-  runSync(false, {skipMaster: true});
+
+  // ── 로그인 직후 초기 동기화 ──
+  // ★ 핵심 데이터(스케줄·시프트·오늘 리포트·공지·급여·결함·휴무·마스터)가 실제로 모두
+  //   받아질 때까지 '동기화 중'을 유지하고, 완료된 뒤에만 녹색 '동기화됨'을 표시.
+  //   (기존: runSync의 일부 항목만 끝나면 스케줄/시프트가 아직 로딩 중인데도 완료로 표시되던 문제)
+  setSyncBadge('syncing');
+  try { await flushRetryQueue(); } catch(e){}
+  const _initTasks = [
+    loadDriverSchedule(),
+    syncShiftsFromServer(name),
+    syncNotices(),
+    syncDRReports(),
+    loadDriverWagesFromGAS(currentDriver.name),
+    syncDefectReportsFromGAS(),
+    loadMyLeaves()
+  ];
+  if (_masterRefreshPromise) _initTasks.push(_masterRefreshPromise);
+  Promise.allSettled(_initTasks).then(function(results){
+    const failCount = results.filter(function(r){ return r.status === 'rejected'; }).length;
+    _lastSyncTime = Date.now();
+    // 전부 실패면 error, 하나라도 성공하면 ok
+    setSyncBadge(failCount >= results.length ? 'error' : 'ok');
+    // 완료 후 현재 화면 재렌더
+    const activePage = document.querySelector('.page.active')?.id;
+    if(activePage === 'page-home'){ try{ syncSalary(); }catch(e){} renderTodayReports(); }
+    if(activePage === 'page-pay'){ try{ renderPay(); }catch(e){} }
+  });
   startAutoSync();
 }
 
