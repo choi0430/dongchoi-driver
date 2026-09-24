@@ -5998,7 +5998,10 @@ async function completePre(){
 
   const rego = document.getElementById('pre-rego').value;
   const km = document.getElementById('pre-km').value;
+  const preTime = document.getElementById('pre-time').value;
   if(!rego||!km){_unlockSubmitBtn(_preBtn);showToast('차량(Rego)과 출발 KM을 입력하세요. Please enter Rego & KM.','error');return;}
+  // ★ 출발 시간 필수 — 누락 시 저장 차단 후 재입력
+  if(!preTime||!preTime.trim()){_unlockSubmitBtn(_preBtn);showToast('⏰ 출발 시간을 입력하세요. Start Time required.','error');return;}
   // Safety Declaration 확인
   const declChecked = document.getElementById('pre-decl-check').checked;
   if(!declChecked){_unlockSubmitBtn(_preBtn);showToast('⚖️ Safety Declaration을 먼저 확인하세요. Please confirm the Safety Declaration.','error');return;}
@@ -6393,6 +6396,16 @@ function submitDailyReport(){
   /* ── 개선: 인승 미선택 경고 ── */
   const _seatsVal = document.getElementById('dr-seats')?.value;
   if(!_skipValidation && !_seatsVal){ _unlockSubmitBtn(_drBtn);showToast('⚠️ 요청 인승을 선택하세요','error'); return; }
+
+  // ★ 시작/종료 시간·KM 필수 — 누락 시 저장 차단 후 재입력
+  {
+    const _drStartV = document.getElementById('dr-start')?.value?.trim() || '';
+    const _drEndV   = document.getElementById('dr-end')?.value?.trim() || '';
+    const _drKmSV   = document.getElementById('dr-km-start')?.value?.trim() || '';
+    const _drKmEV   = document.getElementById('dr-km-end')?.value?.trim() || '';
+    if(!_drStartV || !_drEndV){ _unlockSubmitBtn(_drBtn); showToast('⏰ 시작/종료 시간을 모두 입력하세요. Start & End time required.','error'); return; }
+    if(!_drKmSV || !_drKmEV){ _unlockSubmitBtn(_drBtn); showToast('🛣 시작/종료 KM을 모두 입력하세요. Start & End KM required.','error'); return; }
+  }
 
   // ★ 작성 날짜가 오늘이 아니면 한 번 확인
   {
@@ -7368,6 +7381,9 @@ function submitEndShift(){
 
   const km = document.getElementById('end-km').value;
   if(!km){_unlockSubmitBtn(_eosBtn);showToast('종료 KM을 입력하세요. End KM required.','error');return;}
+  // ★ 종료 시간 필수 — 누락 시 저장 차단 후 재입력
+  const _endTimeV = document.getElementById('end-time')?.value;
+  if(!_endTimeV||!_endTimeV.trim()){_unlockSubmitBtn(_eosBtn);showToast('⏰ 종료 시간을 입력하세요. End Time required.','error');return;}
 
   // ★ 작성 날짜가 오늘이 아니면 한 번 확인
   {
