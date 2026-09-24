@@ -6897,11 +6897,11 @@ function loadMyInfoToForm() {
     'mi-bank':     saved.bank     || d.Bank_Name || '',
     'mi-nok-name': saved.nokName  || d.NEXT_OF_KIN || '',
     'mi-nok-phone':saved.nokPhone || fixPhone(d.Mobile_2||d['Mobile 2']||d.Mobile_2||d['Mobile 2']||'') || '',
-    'mi-lic-no':   saved.licNo    || d['License_#']   || '',
+    'mi-lic-no':   saved.licNo    || d.License_No   || d['License_#']   || '',
     'mi-lic-exp':  fmtDate(saved.licExp   || d.License_Expiry)  || '',
-    'mi-auth-no':  saved.authNo   || d['Authority_#'] || '',
+    'mi-auth-no':  saved.authNo   || d.Authority_No || d['Authority_#'] || '',
     'mi-auth-exp': fmtDate(saved.authExp  || d.Authority_Expiry) || '',
-    'mi-wwc-no':   saved.wwcNo    || d['WWC_#'] || '',
+    'mi-wwc-no':   saved.wwcNo    || d.WWC_No       || d['WWC_#'] || '',
     'mi-wwc-exp':  fmtDate(saved.wwcExp   || d.WWC_Expiry) || '',
     'mi-bsb':      saved.bsb      || d.BSB || '',
     'mi-account':  saved.account  || d.Account_Number || '',
@@ -6969,7 +6969,8 @@ async function saveMyInfo() {
   const _badDates = [];
   if (_rawLicExp  && !_normLicExp)  _badDates.push('License Expiry (면허 만료일)');
   if (_rawAuthExp && !_normAuthExp) _badDates.push('Authority Expiry (자격증 만료일)');
-  if (_rawWwcExp  && !_normWwcExp)  _badDates.push('WWC Expiry (WWC 만료일)');
+  // ★ WWC는 선택 항목 — 없는 드라이버도 있으므로 빈칸/미인식 값이어도 저장을 막지 않음.
+  //   (인식 안 되는 값은 아래에서 빈칸으로 저장하고 그대로 진행)
   if (_badDates.length) {
     _unlockSubmitBtn(_myinfoBtn);
     showToast('⚠️ 날짜 형식 오류: ' + _badDates.join(', ') + '\ndd/mm/yyyy 형식으로 입력해주세요 (예: 13/01/2027)');
@@ -6979,6 +6980,11 @@ async function saveMyInfo() {
   if (_normLicExp)  document.getElementById('mi-lic-exp').value  = _normLicExp;
   if (_normAuthExp) document.getElementById('mi-auth-exp').value = _normAuthExp;
   if (_normWwcExp)  document.getElementById('mi-wwc-exp').value  = _normWwcExp;
+  // ★ WWC 만료일을 입력했으나 형식 인식 실패 → 저장은 진행하되 비워서 저장(안내만)
+  if (_rawWwcExp && !_normWwcExp) {
+    document.getElementById('mi-wwc-exp').value = '';
+    showToast('ℹ️ WWC 만료일 형식을 인식하지 못해 비워두고 저장합니다 (선택 항목)');
+  }
 
   const data = {
     ...existing,
