@@ -4411,6 +4411,9 @@ function postToSheets(action, data) {
 function buildLoginSelect() {
   const sel = document.getElementById('login-driver-select');
   if (!sel) return;
+  // ★ 재생성 전 현재 선택 보존 — 이름 목록이 늦게(콜드 스타트) 로드되며 드롭다운이 다시 그려질 때
+  //   사용자가 이미 고른 드라이버가 초기화돼, PIN 자동 로그인이 "드라이버 미선택"으로 실패하던 문제 방지
+  const _prevValue = sel.value || '';
   sel.innerHTML = '<option value="" style="background:#1e293b">— Select (선택하세요) —</option>';
 
   // ★ GAS M_Drivers를 단일 소스로 사용 (하드코딩 CONTACTS 드라이버 제거)
@@ -4454,11 +4457,19 @@ function buildLoginSelect() {
     sel.appendChild(opt);
   });
 
-  // 마지막 로그인 드라이버 자동 선택
-  const lastLogin = localStorage.getItem('dc_last_driver');
-  if (lastLogin) {
-    const found = [...sel.options].find(o => o.value === lastLogin);
-    if (found) sel.value = lastLogin;
+  // ★ 현재 선택 우선 복원 (재생성 전 값). 값이 완전히 일치 안 하면 이름(첫 세그먼트)으로 매칭
+  if (_prevValue) {
+    const keep = [...sel.options].find(o => o.value === _prevValue)
+              || [...sel.options].find(o => o.value.split('|')[0] === _prevValue.split('|')[0]);
+    if (keep) sel.value = keep.value;
+  }
+  // 선택이 없을 때만 마지막 로그인 드라이버 자동 선택
+  if (!sel.value) {
+    const lastLogin = localStorage.getItem('dc_last_driver');
+    if (lastLogin) {
+      const found = [...sel.options].find(o => o.value === lastLogin);
+      if (found) sel.value = lastLogin;
+    }
   }
 
   // ★ GAS 워밍업: 이름 선택 시 백그라운드에서 ping 호출 (콜드 스타트 제거)
