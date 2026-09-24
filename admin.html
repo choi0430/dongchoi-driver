@@ -32990,7 +32990,9 @@ function renderShiftPaired() {
   if (!container) return;
 
   // ── 상태 판정 함수 ──
-  // 우선순위: 중복 → 미완료(Pre만/EOS만) → DR 누락(Pre+EOS는 있지만 DR=0) → 완료
+  // 우선순위: 중복 → 미완료(운행중/종료누락/EOS만) → DR 누락(Pre+EOS는 있지만 DR=0) → 완료
+  //   ★ Pre만 있고 EOS 없는 경우: 당일(또는 미래)이면 '운행 중'(정상), 과거면 '종료 누락'(문제)로 구분
+  const _todayISO = (typeof toLocalISO === 'function') ? toLocalISO(new Date()) : new Date().toISOString().slice(0,10);
   const statusOf = p => {
     const hasDup = (p.preDupes.length > 0) || (p.eosDupes.length > 0);
     const hasPre = !!p.pre;
@@ -32998,20 +33000,26 @@ function renderShiftPaired() {
     const drCount = p.drs.length;
     if (hasDup) return 'duplicate';
     if (!hasPre && hasEos) return 'eos_only';
-    if (hasPre && !hasEos) return 'pre_only';
+    if (hasPre && !hasEos) {
+      const iso = parseToISO(p.date||'') || '';
+      return (iso && iso < _todayISO) ? 'eos_missing' : 'in_progress';
+    }
     if (hasPre && hasEos && drCount === 0) return 'dr_missing';
     if (hasPre && hasEos && drCount >= 1) return 'complete';
     return 'unknown';
   };
 
   // 카운트
-  const counts = { complete:0, pre_only:0, eos_only:0, dr_missing:0, duplicate:0, unknown:0 };
+  const counts = { complete:0, in_progress:0, eos_missing:0, eos_only:0, dr_missing:0, duplicate:0, unknown:0 };
   sorted.forEach(p => counts[statusOf(p)]++);
 
   // 요약 (한 줄 + 두 번째 줄)
   const sumEl = document.getElementById('shift-summary');
   if (sumEl) {
-    sumEl.innerHTML = `총 ${sorted.length}건 · ✅완료 ${counts.complete} · ⚠️Pre만 ${counts.pre_only} · ⚠️EOS만 ${counts.eos_only}` +
+    sumEl.innerHTML = `총 ${sorted.length}건 · ✅완료 ${counts.complete}` +
+      (counts.eos_missing ? ` · <span style="color:#b91c1c;font-weight:800;">⚠️종료누락 ${counts.eos_missing}</span>` : '') +
+      (counts.in_progress ? ` · 🚌운행중 ${counts.in_progress}` : '') +
+      (counts.eos_only ? ` · ⚠️EOS만 ${counts.eos_only}` : '') +
       (counts.dr_missing ? ` · 📋DR누락 ${counts.dr_missing}` : '') +
       (counts.duplicate ? ` · 🔁중복 ${counts.duplicate}` : '');
   }
@@ -33024,7 +33032,8 @@ function renderShiftPaired() {
   // ── 상태별 색상/라벨 매핑 ──
   const STATUS_META = {
     complete:   { bg:'#dcfce7', fg:'#166534', label:'✅ 완료',         border:'#22c55e' },
-    pre_only:   { bg:'#fef3c7', fg:'#92400e', label:'⚠️ Pre만',         border:'#f59e0b' },
+    in_progress:{ bg:'#dbeafe', fg:'#1e40af', label:'🚌 운행 중',      border:'#3b82f6' },
+    eos_missing:{ bg:'#fef2f2', fg:'#b91c1c', label:'⚠️ 종료 누락',    border:'#ef4444' },
     eos_only:   { bg:'#fef3c7', fg:'#92400e', label:'⚠️ EOS만',         border:'#f59e0b' },
     dr_missing: { bg:'#fef2f2', fg:'#b91c1c', label:'📋 DR 누락',       border:'#ef4444' },
     duplicate:  { bg:'#fae8ff', fg:'#86198f', label:'🔁 중복 입력',     border:'#d946ef' },
@@ -33152,9 +33161,10 @@ function _ensureShiftPairedFilterUI(counts) {
   }
   const opt = (v, label) => `<option value="${v}">${label}</option>`;
   sel.innerHTML = [
-    opt('', `전체 (${counts.complete + counts.pre_only + counts.eos_only + counts.dr_missing + counts.duplicate + counts.unknown})`),
+    opt('', `전체 (${counts.complete + counts.in_progress + counts.eos_missing + counts.eos_only + counts.dr_missing + counts.duplicate + counts.unknown})`),
+    opt('eos_missing', `⚠️ 종료 누락 (${counts.eos_missing})`),
     opt('complete',   `✅ 완료 (${counts.complete})`),
-    opt('pre_only',   `⚠️ Pre만 (${counts.pre_only})`),
+    opt('in_progress',`🚌 운행 중 (${counts.in_progress})`),
     opt('eos_only',   `⚠️ EOS만 (${counts.eos_only})`),
     opt('dr_missing', `📋 DR 누락 (${counts.dr_missing})`),
     opt('duplicate',  `🔁 중복 (${counts.duplicate})`)
