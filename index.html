@@ -13247,10 +13247,16 @@ function _lockSubmitBtn(btnOrSelector, loadingText){
   btn.innerHTML = loadingText || '⏳ 저장 중...';
   btn.style.opacity = '0.7';
   btn.style.cursor = 'not-allowed';
+  // ★ 안전망: 해제/완료 처리가 누락된 채 15초 이상 잠겨 있으면 자동 복구
+  if(btn._lockWatchdog){ clearTimeout(btn._lockWatchdog); }
+  btn._lockWatchdog = setTimeout(function(){
+    if(btn.dataset.submitting === '1'){ try{ _unlockSubmitBtn(btn); }catch(e){} }
+  }, 15000);
   return btn;
 }
 function _unlockSubmitBtn(btn){
   if(!btn) return;
+  if(btn._lockWatchdog){ clearTimeout(btn._lockWatchdog); btn._lockWatchdog = null; }
   if(btn._restoreTimer){ clearTimeout(btn._restoreTimer); btn._restoreTimer = null; }
   btn.dataset.submitting = '';
   btn.disabled = false;
@@ -13261,6 +13267,7 @@ function _unlockSubmitBtn(btn){
 }
 function _markBtnDone(btn, doneText){
   if(!btn) return;
+  if(btn._lockWatchdog){ clearTimeout(btn._lockWatchdog); btn._lockWatchdog = null; }
   btn.disabled = true;
   btn.innerHTML = doneText || '✅ 제출 완료';
   btn.style.background = '#16a34a';
