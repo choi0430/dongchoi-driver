@@ -562,9 +562,13 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   <!-- ACTIVE SHIFT (오늘 운행 중 상태 + Start Pre Departure 버튼) -->
   <div id="home-shift-section" style="margin-top:10px;"></div>
 
-  <!-- 운행 루틴 안내 (항상 표시) -->
+  <!-- 운행 루틴 안내 (접기 가능) -->
   <div style="margin:10px 12px 0;background:linear-gradient(135deg,#eff6ff,#f0fdf4);border:1px solid #bfdbfe;border-radius:12px;padding:12px 14px;">
-    <div style="font-size:12px;font-weight:800;color:#1e3a8a;margin-bottom:8px;">📋 운행 루틴 (하루 순서)</div>
+    <div onclick="toggleRoutineCard()" style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+      <div style="font-size:12px;font-weight:800;color:#1e3a8a;flex:1;">📋 운행 루틴 (하루 순서)</div>
+      <span id="routine-card-arrow" style="font-size:11px;color:#1e3a8a;font-weight:700;">접기 ▲</span>
+    </div>
+    <div id="routine-card-body" style="margin-top:8px;">
     <div style="display:flex;flex-direction:column;gap:6px;">
       <div style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:#1f2937;line-height:1.45;">
         <span style="flex-shrink:0;font-weight:800;color:#1a56db;">①</span>
@@ -582,6 +586,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
     <div style="font-size:10.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-top:8px;line-height:1.45;">
       💡 Daily Report를 <b>모두 작성한 뒤</b> 차량 반납 시 End of Shift를 작성하세요.
     </div>
+    </div><!-- /routine-card-body -->
   </div>
 
   <!-- TODAY'S SCHEDULE (오늘 배정된 일정 — Schedule에서 가져옴) -->
@@ -5601,6 +5606,7 @@ renderContacts();
 renderAttractions();
 renderNotices();
 renderSalary();
+try { _initRoutineCard(); } catch(e){}
 
 // ── 마지막 로그인 세션 자동 복원 ──────────────────────────────────
 function autoRestoreSession() {
@@ -10404,6 +10410,27 @@ function _fmtAU(iso){
   return `${d}/${m}/${y}`;
 }
 const _SLOT_LABELS = { morning:'🌅 AM', fullday:'🌞 풀데이', evening:'🌙 PM' };
+
+// ★ 운행 루틴 카드 접기/펼치기 (상태 localStorage 기억)
+function toggleRoutineCard(){
+  const body = document.getElementById('routine-card-body');
+  const arrow = document.getElementById('routine-card-arrow');
+  if(!body) return;
+  const willCollapse = body.style.display !== 'none';
+  body.style.display = willCollapse ? 'none' : '';
+  if(arrow) arrow.textContent = willCollapse ? '펼치기 ▼' : '접기 ▲';
+  try { localStorage.setItem('dc_routine_collapsed', willCollapse ? '1' : '0'); } catch(e){}
+}
+function _initRoutineCard(){
+  try {
+    if(localStorage.getItem('dc_routine_collapsed') === '1'){
+      const body = document.getElementById('routine-card-body');
+      const arrow = document.getElementById('routine-card-arrow');
+      if(body) body.style.display = 'none';
+      if(arrow) arrow.textContent = '펼치기 ▼';
+    }
+  } catch(e){}
+}
 
 async function loadDriverSchedule(){
   // currentDriver는 {name, englishName, ...} 객체
