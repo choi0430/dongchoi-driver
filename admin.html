@@ -21346,6 +21346,36 @@ function _quickAddPayment(type, name, balance, targetKey){
     // 통합 목록 — 인보이스 → 인보이스 거래 → TourCode 거래 순
     const allUnpaid = [...unpaidInvs, ...unpaidTxns, ...unpaidTCs];
 
+    // ★ 잔액 카드(_subBalances)와 동일 기준으로 정합화 —
+    //   투어코드별 실제 잔액(DR−CR, 제외/가림 반영)이 남은 건만 표시하고 금액도 카드값으로 맞춤.
+    //   (기존 버그: 지급을 PAID_TC:/PAID: 태그로만 인식해, 총액/인보이스 단위로 지급된 건은
+    //    투어코드별로 '기지급 0'이 돼 이미 지급 완료인데도 전부 미지급으로 뜨던 문제. 잔액 카드는 0인데 지급목록만 길게 나옴)
+    try {
+      const _bcList = (typeof _subBalances === 'function') ? _subBalances() : [];
+      const _bc = _bcList.find(x => String(x.name||'').trim() === name);
+      if(_bc && Array.isArray(_bc.tourGroups)){
+        const _tcBal = {};   // upper(tourCode) → {balance, excluded, dr, cr}
+        _bc.tourGroups.forEach(g => {
+          const key = String(g.tourCode||'').trim().toUpperCase();
+          if(key) _tcBal[key] = { balance: g.balance, excluded: !!g.excluded, dr: g.dr, cr: g.cr };
+        });
+        const _filtered = [];
+        allUnpaid.forEach(it => {
+          if(it.type !== 'tourcode'){ _filtered.push(it); return; }   // 인보이스/거래 항목은 기존대로
+          const key = String(it.tourCode||it.invNum||'').trim().toUpperCase();
+          const bc = _tcBal[key];
+          if(!bc){ _filtered.push(it); return; }   // 잔액 카드에 없으면(미식별) 안전하게 유지
+          if(bc.excluded) return;                  // 지급대상 제외 → 목록에서 뺌
+          if(bc.balance <= 0.01) return;           // 이미 지급완료 → 뺌
+          // 남은 건: 표시 금액을 잔액 카드값으로 정렬
+          it.total = bc.dr; it.paid = bc.cr; it.remaining = bc.balance;
+          _filtered.push(it);
+        });
+        allUnpaid.length = 0;
+        Array.prototype.push.apply(allUnpaid, _filtered);
+      }
+    } catch(e){ console.warn('[quickAddPayment] 잔액 카드 정합화 실패:', e); }
+
     // ★ targetKey가 지정되면 selector 우회 — 해당 항목으로 바로 점프
     if(targetKey && targetKey.value){
       const tkVal = String(targetKey.value).trim().toUpperCase();
