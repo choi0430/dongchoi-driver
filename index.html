@@ -2928,6 +2928,8 @@ function populateContacts() {
         initials: d.Initials,
         phone: getPhoneFromRow(d),
         note: [d.License_Class, d.License_Expiry ? '면허 ' + fmtDate(String(d.License_Expiry)) : ''].filter(Boolean).join(' · ') || '—',
+        // ★ 활성 여부 — Active='N'이면 비활성(연락처에서 별도 섹션으로 분리)
+        inactive: String(d.Active||'Y').toUpperCase() === 'N',
         color: ['#d97706','#1a56db','#0e9f6e','#7e3af2','#e02424','#0891b2','#be185d'][i % 7]
       })),
       ...MASTER.guides.map(g => ({
@@ -10174,7 +10176,10 @@ function renderContacts(filter,search){
   const contactData = window.CONTACTS || CONTACTS;
   let list=contactData.filter(c=>(filter==='all'||c.type===filter)&&(c.name.toLowerCase().includes(search.toLowerCase())||c.phone.includes(search)));
   // driver-guide는 드라이버 탭과 가이드 탭 모두에 표시
-  const drivers=list.filter(c=>c.type==='driver'||c.type==='driver-guide');
+  const allDrivers=list.filter(c=>c.type==='driver'||c.type==='driver-guide');
+  // ★ 활성/비활성 분리 — Active='N'은 별도 섹션
+  const drivers=allDrivers.filter(c=>!c.inactive);
+  const inactiveDrivers=allDrivers.filter(c=>c.inactive);
   const guides=list.filter(c=>c.type==='guide'||c.type==='driver-guide');
   let html='';
   if(drivers.length>0&&(filter==='all'||filter==='driver')){
@@ -10182,6 +10187,10 @@ function renderContacts(filter,search){
   }
   if(guides.length>0&&(filter==='all'||filter==='guide')){
     html+=`<div class="contact-section"><div class="contact-label">Guides (가이드) (${guides.length})</div>${guides.map(renderContactItem).join('')}</div>`;
+  }
+  // ★ 비활성(퇴사/휴직 등) 드라이버 — 맨 아래 별도 섹션, 흐리게 표시
+  if(inactiveDrivers.length>0&&(filter==='all'||filter==='driver')){
+    html+=`<div class="contact-section" style="opacity:.55;margin-top:10px;"><div class="contact-label" style="color:var(--muted);">⏸️ 비활성 드라이버 (Inactive) (${inactiveDrivers.length})</div>${inactiveDrivers.map(renderContactItem).join('')}</div>`;
   }
   el.innerHTML=html||`<div style="padding:40px;text-align:center;color:var(--muted);">검색 결과 없음</div>`;
 }
