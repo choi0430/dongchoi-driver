@@ -19095,8 +19095,8 @@ function _egQuadrantMatrixHTML(){
           const tc = String(r.Tour_Code||r.TourCode||'').trim();
           const gd = String(r.Guide||'').trim();
           const att = String(r.Attraction||r.Tour||'').trim();
-          const stTime = String(r.Start_Time||'').trim();
-          const enTime = String(r.End_Time||'').trim();
+          const stTime = parseSheetTime(r.Start_Time)||String(r.Start_Time||'').trim();
+          const enTime = parseSheetTime(r.End_Time)||String(r.End_Time||'').trim();
           const stPlace = String(r.Start_Place||'').trim();
           const enPlace = String(r.End_Place||'').trim();
           const otAmt    = parseFloat(r.OT)||0;
@@ -28519,7 +28519,7 @@ function renderMotAdmin() {
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">' +
           '<div>' +
             '<div style="font-size:13px;font-weight:800;color:var(--t1);">' + escH(r.Driver||'') + ' · ' + escH(r.Rego||'') + newBadgeHtml('nmot',String(r._rowIndex||r.ID||'')) + '</div>' +
-            '<div style="font-size:11px;color:var(--t3);margin-top:2px;">' + escH(String(r.Date||'')) + ' ' + escH(r.Time||'') +
+            '<div style="font-size:11px;color:var(--t3);margin-top:2px;">' + escH(fmtDate(String(r.Date||''))||String(r.Date||'')) + ' ' + escH(parseSheetTime(r.Time)||'') +
               (r.Location ? ' · ' + escH(r.Location) : '') + '</div>' +
           '</div>' +
           '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">' +
@@ -29415,7 +29415,7 @@ function openDREdit(rowIndex){
   window._drEditRow = rowIndex;
 
   document.getElementById('dr-modal-meta').textContent =
-    `제출: ${r.Submitted||'-'}  |  드라이버: ${r.Driver||'-'}`;
+    `제출: ${fmtDateTime(r.Submitted)||r.Submitted||'-'}  |  드라이버: ${r.Driver||'-'}`;
   document.getElementById('drm-date').value        = fmtDate(r.Date)||'';
   document.getElementById('drm-rego').value        = r.Rego||'';
   document.getElementById('drm-seats').value       = r.Seats||'';
@@ -33553,7 +33553,7 @@ function openShiftPdfAdmin(r, type) {
 </div>
 <div style="padding:0 16px;">${body}</div>
 <div style="margin:20px 16px 0;padding-top:12px;border-top:1px solid #e5e7eb;font-size:10px;color:#aaa;">
-  제출일시 Submitted: ${h(r.Submitted||'—')} &nbsp;|&nbsp; DONG CHOI PTY LTD Fleet Management System
+  제출일시 Submitted: ${h(fmtDateTime(r.Submitted)||r.Submitted||'—')} &nbsp;|&nbsp; DONG CHOI PTY LTD Fleet Management System
 </div>
 <div class="no-print" style="position:fixed;bottom:20px;left:0;right:0;display:flex;gap:10px;justify-content:center;padding:0 16px;">
   <button onclick="try{parent._closeDocModal();}catch(e){window.close();}" style="flex:1;max-width:140px;background:#f0f4ff;color:#1a56db;border:2px solid #bfdbfe;border-radius:12px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;">✕ 닫기</button>
@@ -36723,7 +36723,7 @@ function renderAdminIncidents(){
           <span style="font-size:10px;font-weight:600;color:var(--t3);background:${statBg(inc.Status)};padding:2px 8px;border-radius:10px;border:1px solid ${sc}33;">${inc.Status||'Open'}</span>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--t2);margin-bottom:4px;">${inc.Driver||'Unknown'} · ${inc.Rego||''} · ${inc.Date?fmtDate(inc.Date):''} ${inc.Time||''}</div>
+      <div style="font-size:11px;color:var(--t2);margin-bottom:4px;">${inc.Driver||'Unknown'} · ${inc.Rego||''} · ${inc.Date?fmtDate(inc.Date):''} ${parseSheetTime(inc.Time)||''}</div>
       <div style="font-size:11px;color:var(--t3);margin-bottom:4px;">${inc.Location||''}</div>
       <div style="font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${inc.Description||''}</div>
       ${inc.AdminNote?'<div style="font-size:10px;color:var(--ac);margin-top:4px;font-weight:600;">Admin: '+inc.AdminNote+'</div>':''}
@@ -36753,7 +36753,7 @@ function showIncidentDetail(id){
         <div class="crd" style="padding:8px;border-left:3px solid ${sc}"><div style="font-size:9px;color:var(--t3);font-weight:700;">Severity</div><div style="font-size:12px;font-weight:700;color:${sc}">${inc.Severity||''}</div></div>
         <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Driver</div><div style="font-size:12px;font-weight:700;">${inc.Driver||''}</div></div>
         <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Rego</div><div style="font-size:12px;font-weight:700;">${inc.Rego||''}</div></div>
-        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Date/Time</div><div style="font-size:12px;font-weight:700;">${inc.Date?fmtDate(inc.Date):''} ${inc.Time||''}</div></div>
+        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Date/Time</div><div style="font-size:12px;font-weight:700;">${inc.Date?fmtDate(inc.Date):''} ${parseSheetTime(inc.Time)||''}</div></div>
         <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Location</div><div style="font-size:12px;font-weight:700;">${inc.Location||''}</div></div>
       </div>
 
