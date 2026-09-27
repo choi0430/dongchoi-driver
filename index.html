@@ -2527,6 +2527,7 @@ let MASTER = { drivers:[], guides:[], vehicles:[], agencies:[], courses:[], trai
 
 // CONTACTS 연락처 탭 운행 상태 캐시 (전체 선언을 상단에 배치 - TDZ 방지)
 let _otherDriverRegos = {};
+let _otherDriverInfo = {}; // {driver: {rego, trailerNo, course, schedStart, guide, ...}} — 연락처 상세 표시용
 let _activeRegosFetched = false;
 let _activeRegosCache = []; // {rego, driver} — Pre Departure 차량 선택 시 중복 방지용
 
@@ -10192,7 +10193,8 @@ async function fetchActiveRegosForContacts(){
     const json = await res.json();
     if(json.ok && json.regos){
       _otherDriverRegos = {};
-      json.regos.forEach(r => { _otherDriverRegos[r.driver] = r.rego; });
+      _otherDriverInfo = {};
+      json.regos.forEach(r => { _otherDriverRegos[r.driver] = r.rego; _otherDriverInfo[r.driver] = r; });
       // Pre Departure 차량 드롭다운 비활성화용 캐시 (자신 제외)
       const myName = currentDriver?.name || '';
       _activeRegosCache = json.regos.filter(r => r.driver !== myName);
@@ -10213,9 +10215,30 @@ async function refreshActiveRegosForPre(){
       _activeRegosFetched = true;
       // 연락처용도 업데이트
       _otherDriverRegos = {};
-      json.regos.forEach(r => { _otherDriverRegos[r.driver] = r.rego; });
+      _otherDriverInfo = {};
+      json.regos.forEach(r => { _otherDriverRegos[r.driver] = r.rego; _otherDriverInfo[r.driver] = r; });
     }
   } catch(e){ /* 네트워크 오류 무시 */ }
+}
+
+// ★ 연락처 '운행 중' 상세 HTML — 차량 + 트레일러 + (현재 시간대) 일정/가이드
+//   여러 일정이 있으면 백엔드(getActiveRegos)가 현재 시각에 맞는 슬롯 1개만 골라 보냄
+function _activeStatusLines(name){
+  const info = _otherDriverInfo[name];
+  if(!info || !info.rego) return '';
+  // 1줄: 차량 + 트레일러
+  let l1 = `🚌 운행 중 · ${info.rego}`;
+  if(info.trailerNo) l1 += ` · 🚚 ${info.trailerNo}`;
+  else if(info.trailerFlag) l1 += ` · 🚚 트레일러`;
+  // 2줄: 코스(또는 경로) · 시간 · 가이드
+  const p2 = [];
+  if(info.course) p2.push(`📋 ${info.course}`);
+  else if(info.endPlace) p2.push(`📋 ${info.startPlace?info.startPlace+' → ':''}${info.endPlace}`);
+  if(info.schedStart) p2.push(`⏰ ${info.schedStart}${info.schedEnd?'~'+info.schedEnd:''}`);
+  if(info.guide) p2.push(`👤 ${info.guide}`);
+  let html = `<div class="contact-sub" style="color:var(--accent);font-weight:600;">${l1}</div>`;
+  if(p2.length) html += `<div class="contact-sub" style="color:var(--muted);font-size:11px;margin-top:1px;">${p2.join(' · ')}</div>`;
+  return html;
 }
 
 function renderContactItem(c){
@@ -10232,12 +10255,12 @@ function renderContactItem(c){
     // ★ 운행 중 차량 — 자신뿐 아니라 관리자 뷰에서는 모든 드라이버의 현재 운행 차량 표시
     //   (기존: isSelf일 때만 표시 → 관리자가 드라이버 앱으로 로그인하면 다른 드라이버의
     //    '운행 중' 상태가 안 보이던 문제. 데이터(_otherDriverRegos)는 이미 있음)
-    const _runRego = (c.type==='driver'||c.type==='driver-guide') ? _otherDriverRegos[c.name] : '';
+    const _runHtml = (c.type==='driver'||c.type==='driver-guide') ? _activeStatusLines(c.name) : '';
     return `<div class="contact-item">
       <div class="contact-avatar ${c.type}" style="background:${c.type==='driver'?'#eff4ff':'#f0fdf4'};color:${c.color};">${c.initials}</div>
       <div style="flex:1;min-width:0;">
         <div class="contact-name">${c.name}${isSelf?' <span style=\"font-size:10px;background:#eff4ff;color:#1a56db;padding:2px 6px;border-radius:10px;font-weight:700;\">나</span>':''}</div>
-        ${_runRego?`<div class="contact-sub" style="color:var(--accent);font-weight:600;">🚌 운행 중 · ${_runRego}</div>`:''}
+        ${_runHtml}
         <div class="contact-sub" style="${warn?'color:var(--red);font-weight:600;':''}">
           ${c.note}
         </div>
@@ -10250,15 +10273,14 @@ function renderContactItem(c){
     </div>`;
   }
 
-  // ── 다른 드라이버: 이름 + 전화번호만 (운행 중이면 차량도)
+  // ── 다른 드라이버: 이름 + 전화번호 (운행 중이면 차량·트레일러·현재 일정·가이드)
   if(isOther){
-    const rego = _otherDriverRegos[c.name];
-    const subLine = rego ? `🚌 운행 중 · ${rego}` : '';
+    const runHtml = _activeStatusLines(c.name);
     return `<div class="contact-item">
       <div class="contact-avatar ${c.type}" style="background:#eff4ff;color:${c.color};">${c.initials}</div>
       <div style="flex:1;min-width:0;">
         <div class="contact-name">${c.name}</div>
-        ${subLine ? `<div class="contact-sub" style="color:var(--accent);font-weight:600;">${subLine}</div>` : ''}
+        ${runHtml}
         ${c.phone ? `<div class="contact-sub" style="color:var(--accent);font-family:'DM Mono',monospace;font-size:12px;margin-top:2px;">${c.phone}</div>` : ''}
       </div>
       <div class="contact-actions">
