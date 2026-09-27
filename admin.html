@@ -8091,7 +8091,8 @@ function _smRebuildDays(){
 
   // 드라이버 기본 옵션 (Active 필터) — Owner 정보 포함
   const baseDriverItems = (DB.D||[])
-    .filter(dr => String(dr.Active||'').toUpperCase() !== 'N')
+    // ★ 비활성(Active='N') 드라이버도 숨기지 않고 포함 → 아래 enrich에서 '⏸️ 비활성'으로 구분,
+    //   정렬 시 맨 아래로 보냄 (활성 드라이버가 위에 모여 고르기 쉬움 / 필요 시 선택은 가능)
     .map(dr => {
       const owner = (dr.Owner||'').trim();
       const isDC = !owner || DC_OWNERS.includes(owner) || /dong\s*choi/i.test(owner);
@@ -8100,7 +8101,8 @@ function _smRebuildDays(){
         _label: dr.Name_KR || dr.Name_EN || '',
         _baseSub: [dr.Name_EN, dr.Mobile].filter(Boolean).join(' · '),
         _isDC: isDC,
-        _owner: owner
+        _owner: owner,
+        _inactive: String(dr.Active||'').toUpperCase() === 'N'
       };
     })
     .filter(it => it.value);
@@ -8130,11 +8132,18 @@ function _smRebuildDays(){
       const ownerPrefix = it._isDC ? '🏠 ' : `🏢 `;
       let label = ownerPrefix + it._label;
       let sub = it._baseSub;
-      if(stt.status === 'leave'){ label = '🚫 ' + label; sub = '⛔ 휴무중' + (sub?' · '+sub:''); }
+      if(it._inactive){
+        // ★ 비활성 드라이버 — 맨 아래로, 선택 시 자동 활성화 안내
+        label = '⏸️ ' + it._label;
+        sub = '비활성 (선택 시 활성화)' + (sub?' · '+sub:'');
+      }
+      else if(stt.status === 'leave'){ label = '🚫 ' + label; sub = '⛔ 휴무중' + (sub?' · '+sub:''); }
       else if(stt.status === 'busy'){ label = '⚠️ ' + label; sub = stt.reason + (sub?' · '+sub:''); }
-      return { value: it.value, label, sub, _status: stt.status, _isDC: it._isDC, _owner: it._owner };
+      return { value: it.value, label, sub, _status: stt.status, _isDC: it._isDC, _owner: it._owner, _inactive: !!it._inactive };
     });
     enriched.sort((a,b) => {
+      // 0차: 활성 우선 — 비활성은 무조건 맨 아래
+      if(!!a._inactive !== !!b._inactive) return a._inactive ? 1 : -1;
       // 1차: 가용성 (available > busy > leave)
       const so = STATUS_ORDER[a._status] - STATUS_ORDER[b._status];
       if(so !== 0) return so;
@@ -8242,6 +8251,8 @@ function _smRebuildDays(){
             // ★ input 값을 prefix 제거된 순수 이름으로
             const inp = _schDayCsels['driver-'+cellPrefix]?.input;
             if(inp) inp.value = it.value;
+            // ★ 비활성 드라이버를 선택하면 확인 후 자동 활성화
+            if(it && it._inactive){ try{ _schMaybeReactivateDriver(it.value); }catch(e){} }
           },
           onClear: () => { _schDays[i].slots[k].driver = ''; }
         });
@@ -32791,6 +32802,32 @@ async function apiSaveMaster(sheetName, obj, isEdit, idx){
     toast('❌ 저장 오류: '+(e.message||e),'er');
     return null;
   }
+}
+
+// ★ 일정에서 비활성 드라이버를 선택했을 때 → 확인 후 M_Drivers.Active='Y'로 자동 활성화
+async function _schMaybeReactivateDriver(name){
+  try{
+    const nm = String(name||'').trim();
+    if(!nm) return;
+    const idx = (DB.D||[]).findIndex(d =>
+      (d.Name_KR||d.Name_EN) === nm || d.Name_EN === nm || d.Name_KR === nm);
+    if(idx < 0) return;
+    const dr = DB.D[idx];
+    if(String(dr.Active||'').toUpperCase() !== 'N') return;  // 이미 활성
+    const ok = confirm(`"${nm}" 드라이버는 현재 비활성 상태입니다.\n이 일정에 배정하면서 다시 활성화할까요?`);
+    if(!ok) return;
+    const rowIndex = dr._rowIndex || (idx + 2);
+    const body = { action:'update_master', sheet:'M_Drivers', data:{ Active:'Y' }, rowIndex: rowIndex, _user:getAdminUser() };
+    const r = await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'}, body:JSON.stringify(body) });
+    const j = await r.json().catch(()=>null);
+    if(j && j.ok){
+      dr.Active = 'Y';   // 로컬 반영
+      try{ rD(); rDash(); }catch(e){}
+      toast(`✅ "${nm}" 드라이버를 활성화했습니다`, 'ok');
+    } else {
+      toast('활성화 실패: ' + ((j&&(j.msg||j.error))||'서버 응답 없음'), 'er');
+    }
+  }catch(e){ console.warn('reactivate driver fail', e); toast('활성화 오류: '+(e.message||e), 'er'); }
 }
 
 async function apiDeleteMaster(sheetName, rowIndex){
