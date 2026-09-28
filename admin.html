@@ -5957,6 +5957,14 @@ async function rD(q=''){
     await syncDrivers();
   }
   const list=DB.D.filter(d=>!q||d.Name_EN?.toLowerCase().includes(q.toLowerCase())||(d.Name_KR&&d.Name_KR.includes(q)));
+  // ★ 활성 드라이버를 위로, 각 그룹은 한글 이름(없으면 영문) 가나다순 정렬
+  list.sort((a,b)=>{
+    const ai=!_isActiveRow(a), bi=!_isActiveRow(b);
+    if(ai!==bi) return ai?1:-1;              // 활성 먼저, 비활성 아래로
+    const na=String(a.Name_KR||a.Name_EN||'').trim();
+    const nb=String(b.Name_KR||b.Name_EN||'').trim();
+    return na.localeCompare(nb,'ko');        // 가나다순
+  });
   document.getElementById('dcnt').textContent=`총 ${DB.D.length}명 · 표시 ${list.length}`;
   document.getElementById('dlist').innerHTML=list.map(d=>{
     const i=DB.D.indexOf(d);
