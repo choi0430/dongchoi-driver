@@ -6006,7 +6006,9 @@ function renderShiftSection(){
       ${!s.eosStarted ? `<div style="font-size:11px;color:var(--red,#e53e3e);font-weight:600;margin:4px 0 0;padding:5px 8px;background:rgba(229,62,62,0.08);border-radius:8px;">⚠️ 운행 종료 시 End of Shift를 반드시 완료하세요</div>` : ''}
       <div class="shift-actions">
         <button class="shift-btn shift-btn-secondary" data-sid="${s.id}" data-action="daily">+ Daily Report</button>
-        ${s.trailerNumber ? `<button class="shift-btn shift-btn-secondary" data-sid="${s.id}" data-action="release-trailer" style="background:#fef3c7;color:#92400e;">🚐 트레일러 반납</button>` : ''}
+        ${s.trailerNumber
+          ? `<button class="shift-btn shift-btn-secondary" data-sid="${s.id}" data-action="release-trailer" style="background:#fef3c7;color:#92400e;">🚐 트레일러 반납</button>`
+          : `<button class="shift-btn shift-btn-secondary" data-sid="${s.id}" data-action="pickup-trailer" style="background:#ede9fe;color:#5b21b6;">🚐 트레일러 픽업</button>`}
         <button class="shift-btn ${s.eosStarted?'shift-btn-secondary':'shift-btn-danger'}" data-sid="${s.id}" data-action="eos">${s.eosStarted?'🏁 EOS 진행 중...':'🏁 End of Shift'}</button>
       </div>`;
     div.querySelectorAll('button[data-sid]').forEach(btn=>{
@@ -6014,6 +6016,7 @@ function renderShiftSection(){
         const sid = this.dataset.sid;
         if(this.dataset.action==='daily') addDailyReport(sid);
         else if(this.dataset.action==='release-trailer') releaseTrailerFromShift(sid);
+        else if(this.dataset.action==='pickup-trailer') pickupTrailerForShift(sid);
         else startEndShift(sid);
       });
     });
@@ -13232,6 +13235,52 @@ async function releaseTrailerFromShift(shiftId){
     }
   } catch(err){
     console.error('Trailer release error:', err);
+    showToast('⚠️ 네트워크 오류 — 잠시 후 다시 시도해주세요','error');
+  }
+}
+
+// ─── 🚐 운행 중 트레일러 픽업 (중간에 전달받은 경우) ───
+//   이미 트레일러 없이 Pre Departure를 제출한 뒤, 운행 중간에 다른 차량에서 트레일러를
+//   전달받은 상황. 이 버튼으로 받은 트레일러 번호를 입력하면 이미 제출한 Pre Departure에
+//   트레일러 번호가 자동으로 붙습니다(patch_pd_trailer). Pre를 새로 쓰거나 수정할 필요 없음.
+async function pickupTrailerForShift(shiftId){
+  const shift = activeShifts.find(s => s.id === shiftId);
+  if(!shift){ showToast('운행 정보를 찾을 수 없습니다','error'); return; }
+  if(shift.trailerNumber){ showToast('이미 트레일러가 등록되어 있습니다','error'); return; }
+  let num = prompt(
+    '🚐 트레일러 픽업 (전달받음)\n\n' +
+    '운행 중간에 다른 차량에서 트레일러를 전달받으셨나요?\n' +
+    '받은 트레일러 번호를 입력하세요.\n' +
+    '(이미 작성한 Pre Departure에 자동으로 부착됩니다)\n\n' +
+    '※ 이전 차량 드라이버는 EOS를 하지 않아도, 자기 화면에서 "🚐 트레일러 반납"을 누르면 넘길 수 있습니다.'
+  );
+  if(num === null) return;   // 취소
+  num = String(num||'').trim().toUpperCase();
+  if(!num){ showToast('트레일러 번호를 입력하세요','error'); return; }
+  showToast('🔄 트레일러 등록 중...','info');
+  try{
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action:'patch_pd_trailer',
+        date: fmtDate(shift.date),
+        driver: currentDriver?.name || '',
+        rego: shift.rego,
+        trailerNum: num
+      })
+    });
+    const _txt = await res.text();
+    let json; try{ json = JSON.parse(_txt); }catch(e){ json = {ok:false, error:'서버 응답 파싱 실패'}; }
+    if(json.ok){
+      shift.trailerNumber = num;
+      if(currentDriver?.name) _persistShifts(currentDriver.name);
+      showToast(`✅ 트레일러 ${num} 픽업 등록 완료`,'success');
+      renderShiftSection();
+    } else {
+      showToast('❌ 등록 실패: ' + (json.error||'해당 Pre Departure를 찾지 못했습니다'), 'error');
+    }
+  }catch(err){
+    console.error('Trailer pickup error:', err);
     showToast('⚠️ 네트워크 오류 — 잠시 후 다시 시도해주세요','error');
   }
 }
