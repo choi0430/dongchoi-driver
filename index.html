@@ -10609,14 +10609,19 @@ function renderDriverSchedule(){
     });
   };
 
-  const todaySlots = _driverScheduleCache.filter(s => s.date === today);
-  const tomorrowSlots = _driverScheduleCache.filter(s => s.date === tomorrow);
-  const futureSlots = _driverScheduleCache.filter(s => s.date > tomorrow).slice(0, 3);
+  // ★ 같은 날짜는 시작 시간순 정렬 헬퍼
+  const _slotStartMin = (s) => { const m=String((s&&s.slot&&s.slot.startTime)||'').match(/(\d{1,2}):(\d{2})/); return m ? (parseInt(m[1])*60+parseInt(m[2])) : 9999; };
+  const _byDateTime = (a,b) => { if(a.date!==b.date) return a.date<b.date?-1:1; return _slotStartMin(a)-_slotStartMin(b); };
+
+  const todaySlots = _driverScheduleCache.filter(s => s.date === today).sort(_byDateTime);
+  const tomorrowSlots = _driverScheduleCache.filter(s => s.date === tomorrow).sort(_byDateTime);
+  // ★ 정렬(날짜→시작시간) 후 앞 3건만 표시
+  const futureSlots = _driverScheduleCache.filter(s => s.date > tomorrow).sort(_byDateTime).slice(0, 3);
   // ★ 미작성 과거 일정 — 어제까지(today 미만)에서 DR 매칭이 없는 슬롯만
-  //   상태가 cancelled가 아닌 것만 GAS에서 이미 걸러져 있음
+  //   상태가 cancelled가 아닌 것만 GAS에서 이미 걸러져 있음. 최근 날짜 먼저, 같은 날은 시작 시간순
   const missedSlots = _driverScheduleCache
     .filter(s => s.date < today && !_isSlotReported(s))
-    .sort((a,b) => b.date < a.date ? -1 : (b.date > a.date ? 1 : 0)); // 최근 미작성 먼저
+    .sort((a,b) => { if(a.date!==b.date) return b.date<a.date?-1:1; return _slotStartMin(a)-_slotStartMin(b); });
 
   if(todaySlots.length === 0 && tomorrowSlots.length === 0 && futureSlots.length === 0 && missedSlots.length === 0){
     wrap.innerHTML = '';
