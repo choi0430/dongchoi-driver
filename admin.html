@@ -9657,6 +9657,23 @@ async function saveScheduleData(){
         }
       });
     }
+    // ★ 같은 투어코드가 '겹치는 날짜'에 이미 있는지 — 다른 날짜면 허용, 날짜가 겹치면 알림
+    if(data.TourCode && _schCache){
+      const _tcNorm = data.TourCode.trim().toUpperCase();
+      const tcStart = data.StartDate, tcEnd = data.EndDate;
+      _schCache.forEach(s => {
+        if(s.TourID === _schEditTourId) return;                       // 자기 자신 제외
+        if(String(s.TourCode||'').trim().toUpperCase() !== _tcNorm) return;  // 같은 코드만
+        const sStart = _tryParseDate(s.StartDate);
+        const sEnd = _tryParseDate(s.EndDate) || sStart;
+        if(!sStart) return;
+        // 기간 겹침 검사 (겹치면 알림, 안 겹치면 다른 날짜 → 허용)
+        if(sStart <= tcEnd && sEnd >= tcStart){
+          const overlap = (sStart > tcStart ? sStart : tcStart) + ' ~ ' + (sEnd < tcEnd ? sEnd : tcEnd);
+          conflicts.push(`🎫 투어코드 ${data.TourCode} 가 겹치는 날짜에 이미 있습니다 (${overlap})`);
+        }
+      });
+    }
   } catch(e) { _fail(); console.warn('충돌 검사 오류:', e); }
 
   if(conflicts.length > 0){
