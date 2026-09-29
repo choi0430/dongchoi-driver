@@ -6900,10 +6900,61 @@ function filterSchedule(){
   renderScheduleList();
 }
 
+// ★ 중복 투어코드 점검 — 같은 코드가 '날짜가 겹치게' 2건 이상 등록된 경우를 찾는다
+//   (같은 코드라도 날짜가 안 겹치면 정상 → 제외. 취소된 일정은 제외)
+function _schFindDuplicateTourCodes(){
+  const byTc = {};
+  (_schCache||[]).forEach(r => {
+    if(String(r.Status||'').trim().toLowerCase() === 'cancelled') return;
+    const tc = String(r.TourCode||'').trim();
+    if(!tc) return;
+    const key = tc.toUpperCase();
+    const s = _schToISO(r.StartDate);
+    const e = _schToISO(r.EndDate) || s;
+    (byTc[key] = byTc[key] || []).push({ tc, tourId: r.TourID||'', s, e });
+  });
+  const dups = [];
+  Object.keys(byTc).forEach(key => {
+    const arr = byTc[key];
+    if(arr.length < 2) return;
+    let overlap = false;
+    for(let i=0;i<arr.length && !overlap;i++){
+      for(let j=i+1;j<arr.length;j++){
+        if(arr[i].s && arr[j].s && arr[i].s <= arr[j].e && arr[j].s <= arr[i].e){ overlap = true; break; }
+      }
+    }
+    if(overlap) dups.push({ code: arr[0].tc, entries: arr });
+  });
+  return dups;
+}
+// 배너 클릭 → 해당 코드로 검색 필터
+function schSearchCode(code){
+  const el = document.getElementById('sch-search');
+  if(el) el.value = code || '';
+  if(typeof filterSchedule === 'function') filterSchedule();
+}
+
 function renderScheduleList(){
   const listEl = document.getElementById('sch-list');
   const cntEl  = document.getElementById('sch-cnt');
   if(!listEl) return;
+
+  // ★ 중복 투어코드 경고 배너 (전체 일정 기준 — 필터와 무관하게 항상 점검)
+  let dupBanner = '';
+  try {
+    const _dups = _schFindDuplicateTourCodes();
+    if(_dups.length){
+      dupBanner = '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:10px 14px;margin:8px 0 12px;">'
+        + '<div style="font-size:12px;font-weight:800;color:#b91c1c;margin-bottom:6px;">⚠️ 중복 투어코드 ' + _dups.length + '건 — 같은 코드가 날짜가 겹치게 2건 이상 등록됨</div>'
+        + _dups.map(d => {
+            const rng = d.entries.map(e => (e.s||'?') + '~' + (e.e||'?')).join(' , ');
+            const codeAttr = String(d.code).replace(/'/g,"\\'");
+            return '<div style="font-size:11px;color:#7f1d1d;margin:3px 0;cursor:pointer;" onclick="schSearchCode(\''+codeAttr+'\')">'
+                 + '🎫 <b>' + escH(d.code) + '</b> (' + d.entries.length + '건: ' + escH(rng) + ') — 눌러서 보기 →</div>';
+          }).join('')
+        + '</div>';
+    }
+  } catch(e){ console.warn('중복 투어코드 점검 오류:', e); }
 
   let rows = _schCache.slice();
   if(_schCurrentFilter){
@@ -6927,7 +6978,7 @@ function renderScheduleList(){
   }
 
   if(rows.length === 0){
-    listEl.innerHTML = '<div style="padding:40px;text-align:center;color:var(--t3);font-size:13px;">일정이 없습니다.<br><br><button class="btn bac sm" onclick="openScheduleModal(null)" style="font-size:12px;padding:8px 16px;">+ 신규 일정 등록</button></div>';
+    listEl.innerHTML = dupBanner + '<div style="padding:40px;text-align:center;color:var(--t3);font-size:13px;">일정이 없습니다.<br><br><button class="btn bac sm" onclick="openScheduleModal(null)" style="font-size:12px;padding:8px 16px;">+ 신규 일정 등록</button></div>';
     return;
   }
 
@@ -6936,7 +6987,7 @@ function renderScheduleList(){
     invoiced:'🧾 발행', paid:'💰 결제', cancelled:'❌ 취소'
   };
 
-  listEl.innerHTML = rows.map(r => {
+  listEl.innerHTML = dupBanner + rows.map(r => {
     const st = String(r.Status||'scheduled').trim();
     const sd = _schToISO(r.StartDate);
     const ed = _schToISO(r.EndDate);
