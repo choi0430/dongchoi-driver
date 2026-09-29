@@ -6135,6 +6135,38 @@ async function completePre(){
     return;
   }
 
+  // ★ 일정에 트레일러가 있는데 트레일러를 픽업하지 않은 경우 — 확인 후 진행
+  //   (오늘 이 차량의 스케줄 슬롯 중 trailer=true가 있는데 트레일러 번호가 없으면 경고)
+  try{
+    if(!trailerNum){
+      const _dmyToISO = (v)=>{ const m=String(v||'').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? (m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0')) : String(v||'').slice(0,10); };
+      const _preDateISO = _dmyToISO(document.getElementById('pre-date').value);
+      const _regoNorm = (v)=>String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+      const _rn = _regoNorm(rego);
+      const _slotRego = (s)=>{ const slot=s.slot||{}; const own=_regoNorm(slot.rego); const sub=_regoNorm(slot.subVehicleNote); return (s.isSubMode||slot.mode==='sub') ? (sub||own) : (own||sub); };
+      const _cache = (typeof _driverScheduleCache!=='undefined' && Array.isArray(_driverScheduleCache)) ? _driverScheduleCache : [];
+      const _needsTrailer = _cache.some(s =>
+        String(s.date||'').slice(0,10) === _preDateISO &&
+        s.trailer &&
+        (_slotRego(s) === _rn || !_slotRego(s))   // 같은 차량 일정, 또는 차량 미지정 일정
+      );
+      if(_needsTrailer){
+        const _ok = confirm(
+          '🚐 트레일러 일정 확인\n\n' +
+          '오늘 이 차량 일정은 트레일러 사용 일정입니다.\n' +
+          '트레일러 사용을 체크/입력하지 않았습니다.\n\n' +
+          '트레일러 없이 진행하시겠습니까?\n' +
+          '(반납 후 재픽업 등 예외 상황이면 "확인")'
+        );
+        if(!_ok){
+          _unlockSubmitBtn(_preBtn);
+          showToast('🚐 트레일러 사용을 체크하고 번호를 입력하세요','error');
+          return;
+        }
+      }
+    }
+  }catch(e){ /* 검증 실패해도 저장은 진행 */ }
+
   // ★ 검증 통과 → 저장 단계 표시
   if(_preBtn){ _preBtn.innerHTML = '⏳ 저장 중...'; }
 
