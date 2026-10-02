@@ -13439,24 +13439,39 @@ let _gcCtx = null;
 
 function openGuideConsent(guideEnc, phoneEnc, tourEnc, agencyEnc, driverEnc, regoEnc){
   const dec = (s) => { try { return decodeURIComponent(s||''); } catch(e){ return s||''; } };
+  const _drvKr = dec(driverEnc) || (currentDriver?.name || '');
+  // 드라이버 영문 이름 조회 (MASTER.drivers에서 Name_KR/Name_EN 매칭)
+  let _drvEn = '';
+  try {
+    const _d = MASTER.drivers?.find(d => d.Name_KR === _drvKr || d.Name_EN === _drvKr);
+    _drvEn = (_d?.Name_EN || '').trim();
+    // 보강: 매칭 실패 시, 로그인한 드라이버 본인 정보에서 영문 이름 사용
+    if(!_drvEn && currentDriver && (currentDriver.name === _drvKr || !_drvKr)){
+      _drvEn = (currentDriver.Name_EN || currentDriver.nameEn || currentDriver.name_en || '').trim();
+    }
+    if(_drvEn === _drvKr) _drvEn = '';
+  } catch(e){}
   _gcCtx = {
     guide: dec(guideEnc),
     guidePhone: dec(phoneEnc),
     tourCode: dec(tourEnc),
     agency: dec(agencyEnc),
-    driver: dec(driverEnc) || (currentDriver?.name || ''),
+    driver: _drvKr,
+    driverEn: _drvEn,
     rego: dec(regoEnc)
   };
-  // 메타 정보 표시
+  // 드라이버 표시명: 한글 (영문) 형태
+  const _drvDisp = _drvEn ? (_drvKr + ' (' + _drvEn + ')') : _drvKr;
+  // 메타 정보 표시 (한/영 병기)
   const meta = document.getElementById('gc-meta');
   if(meta){
     meta.innerHTML =
-      '👤 가이드: <b>' + (_gcCtx.guide||'-') + '</b>' + (_gcCtx.guidePhone?' ('+_gcCtx.guidePhone+')':'') + '<br>'
-      + '🚐 드라이버: <b>' + (_gcCtx.driver||'-') + '</b>' + (_gcCtx.rego?' · '+_gcCtx.rego:'') + '<br>'
-      + '🎫 투어코드: <b>' + (_gcCtx.tourCode||'-') + '</b>' + (_gcCtx.agency?' · '+_gcCtx.agency:'');
+      '👤 가이드 / Guide: <b>' + (_gcCtx.guide||'-') + '</b>' + (_gcCtx.guidePhone?' ('+_gcCtx.guidePhone+')':'') + '<br>'
+      + '🚐 드라이버 / Driver: <b>' + (_drvDisp||'-') + '</b>' + (_gcCtx.rego?' · '+_gcCtx.rego:'') + '<br>'
+      + '🎫 투어코드 / Tour Code: <b>' + (_gcCtx.tourCode||'-') + '</b>' + (_gcCtx.agency?' · '+_gcCtx.agency:'');
   }
   const gl = document.getElementById('gc-guide-name-lbl'); if(gl) gl.textContent = _gcCtx.guide ? '· '+_gcCtx.guide : '';
-  const dl = document.getElementById('gc-driver-name-lbl'); if(dl) dl.textContent = _gcCtx.driver ? '· '+_gcCtx.driver : '';
+  const dl = document.getElementById('gc-driver-name-lbl'); if(dl) dl.textContent = _drvDisp ? '· '+_drvDisp : '';
 
   // 초기화: 체크/서명 영역 리셋
   const gchk = document.getElementById('gc-guide-check'); if(gchk) gchk.checked = false;
@@ -13568,6 +13583,7 @@ async function submitGuideConsent(){
           tourCode: _gcCtx.tourCode,
           agency: _gcCtx.agency,
           driver: _gcCtx.driver,
+          driverEn: _gcCtx.driverEn,
           rego: _gcCtx.rego,
           licenseNumber: licNum,
           licenseFront: licFront,
