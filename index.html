@@ -2296,6 +2296,27 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 </div>
 <style>#guide-consent-modal .gc-h{font-size:13px;font-weight:800;color:#4338ca;margin:14px 0 6px;border-bottom:1px solid #e0e7ff;padding-bottom:3px;}#guide-consent-modal .gc-h .gc-en-h{font-size:11px;font-weight:600;color:#818cf8;}#guide-consent-modal.open{display:flex;}#guide-consent-modal p{margin:6px 0;}#guide-consent-modal .gc-en{display:block;margin-top:2px;font-size:11px;color:#6b7280;font-style:italic;line-height:1.5;}</style>
 
+<!-- ══════ 서명 완료 문서 미리보기 (풀스크린) ══════ -->
+<div id="gc-preview-modal" style="display:none;position:fixed;inset:0;background:#fff;z-index:10000;flex-direction:column;">
+  <div style="flex:none;background:#16a34a;color:#fff;padding:calc(10px + var(--st,0)) 14px 10px;display:flex;align-items:center;gap:10px;">
+    <div style="flex:1;">
+      <div style="font-size:15px;font-weight:800;">✅ 서명 완료 — 문서 미리보기</div>
+      <div style="font-size:11px;opacity:.9;">Signed · Document Preview</div>
+    </div>
+    <button onclick="closeGcPreview()" style="background:rgba(255,255,255,.2);border:none;color:#fff;font-size:20px;width:34px;height:34px;border-radius:10px;cursor:pointer;line-height:1;">✕</button>
+  </div>
+  <div style="flex:1;background:#f1f5f9;position:relative;">
+    <iframe id="gc-preview-frame" src="" style="width:100%;height:100%;border:none;" allow="autoplay"></iframe>
+    <div id="gc-preview-loading" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#64748b;font-size:13px;background:#f1f5f9;">
+      <div style="font-size:30px;">📄</div>문서를 불러오는 중...
+    </div>
+  </div>
+  <div style="flex:none;padding:12px 14px calc(12px + var(--sb,0));border-top:1px solid #e5e7eb;background:#fff;display:flex;gap:8px;">
+    <button class="btn btn-secondary" style="flex:1;" id="gc-preview-open" onclick="window.open(_gcPreviewUrl,'_blank')">🔗 새 탭에서 열기</button>
+    <button class="btn btn-primary" style="flex:1;" onclick="closeGcPreview()">완료 (Done)</button>
+  </div>
+</div>
+
 <script>
 
 // ============================================================================
@@ -13465,6 +13486,32 @@ function closeGuideConsent(){
   _gcCtx = null;
 }
 
+// 서명 완료 후 저장된 PDF 문서 미리보기
+let _gcPreviewUrl = '';
+function openGcPreview(viewUrl){
+  _gcPreviewUrl = viewUrl || '';
+  const frame = document.getElementById('gc-preview-frame');
+  const loading = document.getElementById('gc-preview-loading');
+  if(loading) loading.style.display = 'flex';
+  // Drive 뷰 링크(.../view)를 임베드용 미리보기(.../preview)로 변환
+  let embed = _gcPreviewUrl;
+  const m = String(_gcPreviewUrl).match(/\/file\/d\/([^/]+)/);
+  if(m) embed = 'https://drive.google.com/file/d/' + m[1] + '/preview';
+  if(frame){
+    frame.onload = () => { if(loading) loading.style.display = 'none'; };
+    frame.src = embed;
+  }
+  const modal = document.getElementById('gc-preview-modal');
+  if(modal) modal.style.display = 'flex';
+}
+function closeGcPreview(){
+  const modal = document.getElementById('gc-preview-modal');
+  if(modal) modal.style.display = 'none';
+  const frame = document.getElementById('gc-preview-frame');
+  if(frame) frame.src = '';
+  _gcPreviewUrl = '';
+}
+
 function onGcGuideCheck(){
   const chk = document.getElementById('gc-guide-check');
   const wrap = document.getElementById('gc-guide-sig-wrap');
@@ -13535,6 +13582,7 @@ async function submitGuideConsent(){
     if(json.ok){
       showToast('✅ 안전동의서 저장 완료','success');
       closeGuideConsent();
+      if(json.url) openGcPreview(json.url);
     } else {
       showToast('❌ 저장 실패: ' + (json.error||'알 수 없는 오류'), 'error');
       if(btn){ btn.disabled = false; btn.textContent = '제출 및 저장 (Submit)'; }
