@@ -10850,7 +10850,9 @@ function renderDriverSchedule(){
       const _ca = encodeURIComponent(s.agency||'');
       const _cd = encodeURIComponent(slot.driver||'');
       const _cr = encodeURIComponent(slot.rego||'');
-      consentBtn = `<button type="button" onclick="event.stopPropagation();openGuideConsent('${_cg}','${_cp}','${_ct}','${_ca}','${_cd}','${_cr}')" style="margin-top:7px;width:100%;padding:9px 10px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;">📝 가이드 안전서명 받기 (${s.guide})</button>`;
+      const _cen = encodeURIComponent(s.guideNameEn||'');
+      const _clic = encodeURIComponent(s.guideLicense||'');
+      consentBtn = `<button type="button" onclick="event.stopPropagation();openGuideConsent('${_cg}','${_cp}','${_ct}','${_ca}','${_cd}','${_cr}','${_cen}','${_clic}')" style="margin-top:7px;width:100%;padding:9px 10px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;">📝 가이드 안전서명 받기 (${s.guide})</button>`;
     }
 
     // ★ 일정 요청사항/메모 — 관리자가 입력한 Notes (예: 1인당 물 1병, 팁/식사/초과근무/트레일러 요청 등)
@@ -13450,8 +13452,20 @@ function _normAuPhone(p){
   return digits;
 }
 
-function openGuideConsent(guideEnc, phoneEnc, tourEnc, agencyEnc, driverEnc, regoEnc){
+function openGuideConsent(guideEnc, phoneEnc, tourEnc, agencyEnc, driverEnc, regoEnc, guideEnEnc, guideLicEnc){
   const dec = (s) => { try { return decodeURIComponent(s||''); } catch(e){ return s||''; } };
+  const _guideName = dec(guideEnc);
+  // 가이드 영문명·면허번호: 일정에 저장된 값 우선, 없으면 가이드 마스터에서 이름으로 조회
+  let _guideEn = dec(guideEnEnc||'');
+  let _guideLic = dec(guideLicEnc||'');
+  try {
+    if((!_guideEn || !_guideLic) && typeof MASTER !== 'undefined' && MASTER.guides){
+      const _gm = MASTER.guides.find(g => (g.Guide_Name||g['Guide Name']||g.Name||'') === _guideName
+        || (g.Name_EN||g['Name EN']||'') === _guideName) || {};
+      if(!_guideEn)  _guideEn  = _gm.Name_EN || _gm['Name EN'] || '';
+      if(!_guideLic) _guideLic = _gm.LicenseNumber || _gm.License_No || _gm['License No'] || '';
+    }
+  } catch(e){}
   const _drvKr = dec(driverEnc) || (currentDriver?.name || '');
   // 드라이버 영문 이름 조회 (MASTER.drivers에서 Name_KR/Name_EN 매칭)
   let _drvEn = '';
@@ -13465,7 +13479,9 @@ function openGuideConsent(guideEnc, phoneEnc, tourEnc, agencyEnc, driverEnc, reg
     if(_drvEn === _drvKr) _drvEn = '';
   } catch(e){}
   _gcCtx = {
-    guide: dec(guideEnc),
+    guide: _guideName,
+    guideEn: _guideEn,
+    guideLicense: _guideLic,
     guidePhone: _normAuPhone(dec(phoneEnc)),
     tourCode: dec(tourEnc),
     agency: dec(agencyEnc),
@@ -13475,15 +13491,17 @@ function openGuideConsent(guideEnc, phoneEnc, tourEnc, agencyEnc, driverEnc, reg
   };
   // 드라이버 표시명: 한글 (영문) 형태
   const _drvDisp = _drvEn ? (_drvKr + ' (' + _drvEn + ')') : _drvKr;
+  // 가이드 표시명: 한글 (영문) 형태
+  const _guideDisp = _guideEn ? (_guideName + ' (' + _guideEn + ')') : _guideName;
   // 메타 정보 표시 (한/영 병기)
   const meta = document.getElementById('gc-meta');
   if(meta){
     meta.innerHTML =
-      '👤 가이드 / Guide: <b>' + (_gcCtx.guide||'-') + '</b>' + (_gcCtx.guidePhone?' ('+_gcCtx.guidePhone+')':'') + '<br>'
+      '👤 가이드 / Guide: <b>' + (_guideDisp||'-') + '</b>' + (_gcCtx.guidePhone?' ('+_gcCtx.guidePhone+')':'') + '<br>'
       + '🚐 드라이버 / Driver: <b>' + (_drvDisp||'-') + '</b>' + (_gcCtx.rego?' · '+_gcCtx.rego:'') + '<br>'
       + '🎫 투어코드 / Tour Code: <b>' + (_gcCtx.tourCode||'-') + '</b>' + (_gcCtx.agency?' · '+_gcCtx.agency:'');
   }
-  const gl = document.getElementById('gc-guide-name-lbl'); if(gl) gl.textContent = _gcCtx.guide ? '· '+_gcCtx.guide : '';
+  const gl = document.getElementById('gc-guide-name-lbl'); if(gl) gl.textContent = _guideDisp ? '· '+_guideDisp : '';
   const dl = document.getElementById('gc-driver-name-lbl'); if(dl) dl.textContent = _drvDisp ? '· '+_drvDisp : '';
 
   // 초기화: 체크/서명 영역 리셋
@@ -13491,8 +13509,8 @@ function openGuideConsent(guideEnc, phoneEnc, tourEnc, agencyEnc, driverEnc, reg
   const dchk = document.getElementById('gc-driver-check'); if(dchk) dchk.checked = false;
   const gw = document.getElementById('gc-guide-sig-wrap'); if(gw) gw.style.display = 'none';
   const dw = document.getElementById('gc-driver-sig-wrap'); if(dw) dw.style.display = 'none';
-  // 면허 정보 리셋
-  const lic = document.getElementById('gc-license-number'); if(lic) lic.value = '';
+  // 면허 정보: 가이드 마스터/일정에 등록된 면허번호가 있으면 자동 입력(수정 가능)
+  const lic = document.getElementById('gc-license-number'); if(lic) lic.value = _guideLic || '';
   try { delete _pendingPhotos['gcLicFront']; delete _pendingPhotos['gcLicBack']; } catch(e){}
   ['front','back'].forEach(side => {
     const img = document.getElementById('gc-lic-'+side+'-img');
@@ -13585,13 +13603,19 @@ async function submitGuideConsent(){
   if(btn){ btn.disabled = true; btn.textContent = '저장 중...'; }
   showToast('🔄 동의서 저장 중...','info');
 
+  // ★ 서버(PDF 생성+드라이브 업로드)가 느릴 때 무한 "저장 중..." 방지용 타임아웃
+  const _ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  let _timedOut = false;
+  const _timer = setTimeout(() => { _timedOut = true; if(_ctrl) _ctrl.abort(); }, 90000);
   try{
     const res = await fetch(APPS_SCRIPT_URL, {
       method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain'},
+      signal: _ctrl ? _ctrl.signal : undefined,
       body: JSON.stringify({
         action:'save_guide_consent',
         data: {
           guide: _gcCtx.guide,
+          guideEn: _gcCtx.guideEn,
           guidePhone: _gcCtx.guidePhone,
           tourCode: _gcCtx.tourCode,
           agency: _gcCtx.agency,
@@ -13606,8 +13630,12 @@ async function submitGuideConsent(){
         }
       })
     });
+    clearTimeout(_timer);
     const _txt = await res.text();
-    let json; try{ json = JSON.parse(_txt); }catch(e){ json = {ok:false, error:'서버 응답 파싱 실패'}; }
+    let json; try{ json = JSON.parse(_txt); }catch(e){
+      console.error('Guide consent — 서버 응답 파싱 실패. 응답 일부:', String(_txt).slice(0,300));
+      json = {ok:false, error:'서버 응답 파싱 실패 (백엔드 Code.js 최신 버전 배포 여부를 확인하세요)'};
+    }
     if(json.ok){
       showToast('✅ 안전동의서 저장 완료','success');
       closeGuideConsent();
@@ -13617,8 +13645,14 @@ async function submitGuideConsent(){
       if(btn){ btn.disabled = false; btn.textContent = '제출 및 저장 (Submit)'; }
     }
   }catch(err){
+    clearTimeout(_timer);
     console.error('Guide consent save error:', err);
-    showToast('⚠️ 네트워크 오류 — 잠시 후 다시 시도해주세요','error');
+    if(_timedOut){
+      // 서버가 아직 처리 중일 수 있음 — 중복 저장 방지 위해 재시도 전 확인 안내
+      showToast('⏱️ 저장이 지연되고 있습니다. 이미 저장됐을 수 있으니 관리자 앱 "동의서 보관"에서 확인 후 다시 시도하세요','error');
+    } else {
+      showToast('⚠️ 네트워크 오류 — 잠시 후 다시 시도해주세요','error');
+    }
     if(btn){ btn.disabled = false; btn.textContent = '제출 및 저장 (Submit)'; }
   }
 }
