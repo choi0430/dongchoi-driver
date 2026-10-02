@@ -765,6 +765,22 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div id="glist"></div>
 </div>
 
+<!-- 가이드 동의서 자료 보관 -->
+<div class="pg" id="pconsent">
+  <div class="shd" style="padding-top:8px">
+    <div><div class="stl">🗂️ 가이드 동의서 자료 보관</div><div class="ssb" id="cr-sub">서명 동의서 · 면허증 사진 보관 현황</div></div>
+    <button class="btn bgh sm" onclick="initConsentRetention()" style="font-size:11px;padding:6px 10px;">🔄</button>
+  </div>
+  <div id="cr-summary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;"></div>
+  <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:10px 12px;font-size:12px;color:#7c2d12;line-height:1.6;margin-bottom:10px;">
+    <b>비대칭 보관 정책</b> — 면허증 사진은 민감정보이므로 <b id="cr-lic-days">90</b>일 경과 시 삭제를 권장합니다(삭제 시 Drive 휴지통으로 이동, 30일 내 복구 가능). 서명 동의서 PDF와 면허번호는 보존됩니다.
+  </div>
+  <div style="margin-bottom:12px;">
+    <button class="btn brd sm" id="cr-purge-btn" onclick="crPurgeAll()" style="font-size:12px;">🧹 만료된 면허증 사진 일괄 정리</button>
+  </div>
+  <div id="cr-list"><div style="text-align:center;padding:24px;color:var(--t3)">🔄 불러오는 중...</div></div>
+</div>
+
 <!-- PRICE -->
 <div class="pg" id="pprc">
   <div style="padding-top:8px;margin-bottom:12px">
@@ -2732,6 +2748,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="ni" id="negrep" onclick="nv('pegrep','negrep');initEGReport()"><div class="nie">📤</div><div class="nil">EG 리포트</div><span class="tab-badge" id="badge-negrep"></span></div>
     <div class="ni" id="npcy" onclick="nv('ppcy','npcy');initPCYReport()"><div class="nie">📤</div><div class="nil">PCY 리포트</div><span class="tab-badge" id="badge-npcy"></span></div>
     <div class="ni" id="ninc" onclick="nv('pinc','ninc');loadAdminIncidents()"><div class="nie">🚨</div><div class="nil">사고보고</div><span class="tab-badge" id="badge-ninc"></span></div>
+    <div class="ni" id="nconsent" onclick="nv('pconsent','nconsent');initConsentRetention()"><div class="nie">🗂️</div><div class="nil">동의서 보관</div><span class="tab-badge" id="badge-nconsent"></span></div>
     <div class="ni" id="nsms" onclick="nv('psms','nsms');renderSMSChecklist()"><div class="nie">📋</div><div class="nil">SMS</div><span class="tab-badge" id="badge-nsms"></span></div>
     <div class="ni" id="nnotice" onclick="nv('pnotice','nnotice');renderAdminNotices()"><div class="nie">📢</div><div class="nil">공지</div><span class="tab-badge" id="badge-nnotice"></span></div>
   </div>
@@ -6862,6 +6879,89 @@ async function showDRDiagnostics(tourId){
       </div>
     </div>`;
   modal.style.display = 'flex';
+}
+
+// ═══════════════════════════════════════
+// 가이드 동의서 자료 보관 현황 / 정리
+// ═══════════════════════════════════════
+let _crCache = [];
+function _crChip(txt,bg,fg){ return '<span style="background:'+bg+';color:'+fg+';border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;">'+escH(txt)+'</span>'; }
+
+async function initConsentRetention(){
+  const listEl = document.getElementById('cr-list');
+  const subEl = document.getElementById('cr-sub');
+  if(listEl) listEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--t3)">🔄 불러오는 중...</div>';
+  try{
+    const res = await fetch(APPS_SCRIPT_URL + '?action=get_consent_retention');
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error||'조회 실패');
+    _crCache = json.records || [];
+    const ret = json.retention || {license:90, consent:2555};
+    const sum = json.summary || {};
+    const ld = document.getElementById('cr-lic-days'); if(ld) ld.textContent = ret.license;
+    const sumEl = document.getElementById('cr-summary');
+    if(sumEl) sumEl.innerHTML =
+      _crChip('총 '+(sum.total||0)+'건', '#eef2ff', '#3730a3')
+      + _crChip('면허증 보관 '+(sum.withLicense||0)+'건', '#ecfdf5', '#047857')
+      + _crChip('정리 대상 '+(sum.licenseOverdue||0)+'건', (sum.licenseOverdue? '#fee2e2':'#f3f4f6'), (sum.licenseOverdue?'#b91c1c':'#6b7280'));
+    const purgeBtn = document.getElementById('cr-purge-btn');
+    if(purgeBtn) purgeBtn.style.display = (sum.licenseOverdue>0) ? '' : 'none';
+    if(subEl) subEl.textContent = '총 '+(sum.total||0)+'건 · 면허증 보관 '+(sum.withLicense||0)+'건 · 정리 대상 '+(sum.licenseOverdue||0)+'건';
+    renderConsentRetention();
+  }catch(e){
+    if(listEl) listEl.innerHTML = '<div style="text-align:center;padding:24px;color:#b91c1c">오류: '+escH(e.message)+'</div>';
+  }
+}
+
+function renderConsentRetention(){
+  const listEl = document.getElementById('cr-list');
+  if(!listEl) return;
+  if(!_crCache.length){ listEl.innerHTML='<div style="text-align:center;padding:24px;color:var(--t3)">기록이 없습니다</div>'; return; }
+  listEl.innerHTML = _crCache.map(r=>{
+    const age = (r.ageDays==null)?'—':(r.ageDays+'일 전');
+    const overdue = r.licenseOverdue;
+    const licBadge = !r.hasLicenseImages
+      ? '<span style="color:#9ca3af;font-size:11px;">면허증 사진 없음</span>'
+      : (overdue
+          ? '<span style="background:#fee2e2;color:#b91c1c;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;">⚠️ 정리 대상</span>'
+          : '<span style="background:#ecfdf5;color:#047857;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;">보관 중</span>');
+    const linksHtml = [
+      r.fileURL?'<a href="'+escH(r.fileURL)+'" target="_blank" style="color:#4338ca;font-size:11px;text-decoration:none;">📄 동의서 PDF</a>':'',
+      r.licenseFrontURL?'<a href="'+escH(r.licenseFrontURL)+'" target="_blank" style="color:#b45309;font-size:11px;text-decoration:none;">🪪 면허 앞</a>':'',
+      r.licenseBackURL?'<a href="'+escH(r.licenseBackURL)+'" target="_blank" style="color:#b45309;font-size:11px;text-decoration:none;">🪪 면허 뒤</a>':''
+    ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+    return '<div class="mrow" style="'+(overdue?'border-left:3px solid #ef4444;':'')+'">'
+      + '<div class="min">'
+      + '<div class="mnm">'+escH(r.guide||'(이름없음)')+' <span style="color:var(--t3);font-size:11px;">'+escH(r.tourCode||'')+'</span></div>'
+      + '<div class="msb">'+escH(r.date||r.signedAt||'')+' · '+escH(age)+' · 면허: '+escH(r.licenseNumber||'-')+' &nbsp;'+licBadge+'</div>'
+      + (linksHtml?'<div style="margin-top:4px;">'+linksHtml+'</div>':'')
+      + '</div>'
+      + '<div class="mac">'+(r.hasLicenseImages
+          ? '<button class="btn brd xs" onclick="crDeleteLicense('+r.rowIndex+')">🪪 면허증 삭제</button>'
+          : '')+'</div>'
+      + '</div>';
+  }).join('');
+}
+
+async function crDeleteLicense(rowIndex){
+  const rec = _crCache.find(r=>r.rowIndex===rowIndex) || {};
+  if(!confirm('['+(rec.guide||'')+'] 가이드의 면허증 사진을 삭제할까요?\n\nDrive 휴지통으로 이동되며(30일 내 복구 가능), 동의서 PDF와 면허번호는 그대로 보존됩니다.')) return;
+  try{
+    const json = await gasPost({action:'delete_license_images', data:{rowIndex:rowIndex}});
+    if(json.ok){ toast('면허증 사진 삭제 완료 ('+(json.trashed||0)+'개)','ok'); initConsentRetention(); }
+    else toast('삭제 실패: '+(json.error||''),'er');
+  }catch(e){ toast('오류: '+e.message,'er'); }
+}
+
+async function crPurgeAll(){
+  const n = _crCache.filter(r=>r.licenseOverdue).length;
+  if(!n){ toast('정리할 만료 면허증이 없습니다','ok'); return; }
+  if(!confirm('만료된 면허증 사진 '+n+'건을 일괄 정리할까요?\n\nDrive 휴지통으로 이동됩니다(30일 내 복구 가능). 동의서 PDF와 면허번호는 보존됩니다.')) return;
+  try{
+    const json = await gasPost({action:'purge_expired_license_images'});
+    if(json.ok){ toast('일괄 정리 완료 ('+(json.rowsCleared||0)+'건 · '+(json.filesTrashed||0)+'개 파일)','ok'); initConsentRetention(); }
+    else toast('정리 실패: '+(json.error||''),'er');
+  }catch(e){ toast('오류: '+e.message,'er'); }
 }
 
 async function loadSchedule(){
