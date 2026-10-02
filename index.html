@@ -13437,6 +13437,18 @@ async function pickupTrailerForShift(shiftId){
 // ════════════════════════════════════════════════════════════════════
 let _gcCtx = null;
 
+// 호주 전화번호 정규화 — 시트가 숫자로 저장하며 앞자리 0을 떨어뜨리는 문제 복원
+function _normAuPhone(p){
+  var raw = String(p==null?'':p).trim();
+  if(!raw) return '';
+  var digits = raw.replace(/[^0-9]/g,'');
+  if(!digits) return raw;
+  if(digits.length===11 && digits.indexOf('61')===0) digits = '0'+digits.slice(2);
+  else if(digits.length===9) digits = '0'+digits;                      // 앞자리 0 복원
+  else if(digits.length===10 && digits.charAt(0)!=='0') digits = '0'+digits;
+  return digits;
+}
+
 function openGuideConsent(guideEnc, phoneEnc, tourEnc, agencyEnc, driverEnc, regoEnc){
   const dec = (s) => { try { return decodeURIComponent(s||''); } catch(e){ return s||''; } };
   const _drvKr = dec(driverEnc) || (currentDriver?.name || '');
@@ -13453,7 +13465,7 @@ function openGuideConsent(guideEnc, phoneEnc, tourEnc, agencyEnc, driverEnc, reg
   } catch(e){}
   _gcCtx = {
     guide: dec(guideEnc),
-    guidePhone: dec(phoneEnc),
+    guidePhone: _normAuPhone(dec(phoneEnc)),
     tourCode: dec(tourEnc),
     agency: dec(agencyEnc),
     driver: _drvKr,
