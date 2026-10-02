@@ -21704,19 +21704,32 @@ function _quickAddPayment(type, name, balance, targetKey){
       const _bcList = (typeof _subBalances === 'function') ? _subBalances() : [];
       const _bc = _bcList.find(x => String(x.name||'').trim() === name);
       if(_bc && Array.isArray(_bc.tourGroups)){
-        const _tcBal = {};   // upper(tourCode) → {balance, excluded, dr, cr}
+        // ★ 투어코드 포맷 차이(공백/하이픈/언더스코어)까지 흡수하는 정규화 키
+        //   예: "0507 VG-12-KE-5N" 와 "0507-VG-12-KE-5N" 를 같은 코드로 인식
+        const _normTC = (s) => String(s||'').toUpperCase().replace(/[\s\-_]+/g,'');
+        // 잔액 카드의 투어코드별 상태를 정규화 키로 집계 (포맷변형 합산)
+        const _tcBal = {};   // normKey → {balance, excluded, dr, cr}
         _bc.tourGroups.forEach(g => {
-          const key = String(g.tourCode||'').trim().toUpperCase();
-          if(key) _tcBal[key] = { balance: g.balance, excluded: !!g.excluded, dr: g.dr, cr: g.cr };
+          const key = _normTC(g.tourCode);
+          if(!key) return;
+          if(!_tcBal[key]) _tcBal[key] = { balance:0, dr:0, cr:0, excluded:false };
+          _tcBal[key].balance += Number(g.balance)||0;
+          _tcBal[key].dr      += Number(g.dr)||0;
+          _tcBal[key].cr      += Number(g.cr)||0;
+          if(g.excluded) _tcBal[key].excluded = true;
         });
         const _filtered = [];
         allUnpaid.forEach(it => {
           if(it.type !== 'tourcode'){ _filtered.push(it); return; }   // 인보이스/거래 항목은 기존대로
-          const key = String(it.tourCode||it.invNum||'').trim().toUpperCase();
+          const key = _normTC(it.tourCode || it.invNum);
           const bc = _tcBal[key];
-          if(!bc){ _filtered.push(it); return; }   // 잔액 카드에 없으면(미식별) 안전하게 유지
-          if(bc.excluded) return;                  // 지급대상 제외 → 목록에서 뺌
-          if(bc.balance <= 0.01) return;           // 이미 지급완료 → 뺌
+          // ★ 정산(잔액 카드) 화면을 유일 기준으로 — 카드에서 '남은 잔액'인 투어코드만 표시한다.
+          //    카드에 없거나(=이미 정산/인보이스로 가려짐) · 지급완료(balance≤0) · 지급제외면 목록에서 숨긴다.
+          //    (기존 버그: 포맷이 조금 달라 카드와 매칭 실패하면 "안전하게 유지"로 두어,
+          //     정산에는 '지급완료'인데 지급 처리 목록엔 미지급으로 계속 뜨던 문제)
+          if(!bc) return;                 // 카드에 없음 → 이미 지급완료/가려짐 → 숨김
+          if(bc.excluded) return;         // 지급대상 제외 → 숨김
+          if(bc.balance <= 0.01) return;  // 지급완료 → 숨김
           // 남은 건: 표시 금액을 잔액 카드값으로 정렬
           it.total = bc.dr; it.paid = bc.cr; it.remaining = bc.balance;
           _filtered.push(it);
