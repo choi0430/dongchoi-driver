@@ -2233,7 +2233,20 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
 
     <!-- 가이드 면허 정보 -->
     <div style="background:#fff;border:1px solid #c7d2fe;border-radius:12px;padding:14px;margin-top:12px;">
-      <div style="font-size:13px;font-weight:800;color:#4338ca;margin-bottom:10px;">🪪 가이드 면허 정보</div>
+      <div style="font-size:13px;font-weight:800;color:#4338ca;margin-bottom:10px;">🪪 가이드 정보</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:5px;">가이드 이름 (한글) <span style="color:#dc2626;">*</span></div>
+          <input type="text" id="gc-guide-name" placeholder="가이드 이름" autocomplete="off" oninput="_gcSyncGuideName()"
+            style="width:100%;padding:11px 12px;border:1.5px solid #c7d2fe;border-radius:10px;font-size:14px;box-sizing:border-box;">
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:5px;">영문 이름 (Name EN)</div>
+          <input type="text" id="gc-guide-en" placeholder="예: Annie Kim" autocomplete="off"
+            style="width:100%;padding:11px 12px;border:1.5px solid #c7d2fe;border-radius:10px;font-size:14px;box-sizing:border-box;">
+        </div>
+      </div>
+      <div style="font-size:11px;color:#9ca3af;margin:-6px 0 10px;">일정에 등록된 가이드면 자동 입력됩니다. 미등록(이름 없음)이면 직접 입력하세요.</div>
       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:5px;">면허번호 (Licence Number) <span style="color:#dc2626;">*</span></div>
       <input type="text" id="gc-license-number" placeholder="예: 12345678" autocomplete="off"
         style="width:100%;padding:11px 12px;border:1.5px solid #c7d2fe;border-radius:10px;font-size:14px;box-sizing:border-box;margin-bottom:12px;">
@@ -10840,10 +10853,10 @@ function renderDriverSchedule(){
       dateBadge = `<span style="font-size:10px;font-weight:700;color:#7c3aed;background:#f3e8ff;border-radius:6px;padding:2px 7px;margin-right:4px;">📅 ${_fmtAU(s.date)}</span>`;
     }
 
-    // ★ 가이드 안전동의서 전자서명 버튼 — 오늘 일정 + 가이드 배정된 경우에만 표시
+    // ★ 가이드 안전동의서 전자서명 버튼 — 오늘 일정이면 표시 (가이드 미배정도 현장 입력 가능)
     //   카드 전체 onclick(DR 시작)과 충돌 방지를 위해 event.stopPropagation() 사용
     let consentBtn = '';
-    if(isToday && s.guide){
+    if(isToday){
       const _cg = encodeURIComponent(s.guide||'');
       const _cp = encodeURIComponent(s.guidePhone||'');
       const _ct = encodeURIComponent(s.tourCode||s.tourId||'');
@@ -10852,7 +10865,8 @@ function renderDriverSchedule(){
       const _cr = encodeURIComponent(slot.rego||'');
       const _cen = encodeURIComponent(s.guideNameEn||'');
       const _clic = encodeURIComponent(s.guideLicense||'');
-      consentBtn = `<button type="button" onclick="event.stopPropagation();openGuideConsent('${_cg}','${_cp}','${_ct}','${_ca}','${_cd}','${_cr}','${_cen}','${_clic}')" style="margin-top:7px;width:100%;padding:9px 10px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;">📝 가이드 안전서명 받기 (${s.guide})</button>`;
+      const _blabel = s.guide ? `📝 가이드 안전서명 받기 (${s.guide})` : '📝 가이드 안전서명 받기';
+      consentBtn = `<button type="button" onclick="event.stopPropagation();openGuideConsent('${_cg}','${_cp}','${_ct}','${_ca}','${_cd}','${_cr}','${_cen}','${_clic}')" style="margin-top:7px;width:100%;padding:9px 10px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;">${_blabel}</button>`;
     }
 
     // ★ 일정 요청사항/메모 — 관리자가 입력한 Notes (예: 1인당 물 1병, 팁/식사/초과근무/트레일러 요청 등)
@@ -13459,7 +13473,7 @@ function openGuideConsent(guideEnc, phoneEnc, tourEnc, agencyEnc, driverEnc, reg
   let _guideEn = dec(guideEnEnc||'');
   let _guideLic = dec(guideLicEnc||'');
   try {
-    if((!_guideEn || !_guideLic) && typeof MASTER !== 'undefined' && MASTER.guides){
+    if(_guideName && (!_guideEn || !_guideLic) && typeof MASTER !== 'undefined' && MASTER.guides){
       const _gm = MASTER.guides.find(g => (g.Guide_Name||g['Guide Name']||g.Name||'') === _guideName
         || (g.Name_EN||g['Name EN']||'') === _guideName) || {};
       if(!_guideEn)  _guideEn  = _gm.Name_EN || _gm['Name EN'] || '';
@@ -13504,6 +13518,10 @@ function openGuideConsent(guideEnc, phoneEnc, tourEnc, agencyEnc, driverEnc, reg
   const gl = document.getElementById('gc-guide-name-lbl'); if(gl) gl.textContent = _guideDisp ? '· '+_guideDisp : '';
   const dl = document.getElementById('gc-driver-name-lbl'); if(dl) dl.textContent = _drvDisp ? '· '+_drvDisp : '';
 
+  // 가이드 이름·영문명 입력란 — 등록돼 있으면 자동 입력, 없으면 현장에서 직접 입력
+  const gnEl = document.getElementById('gc-guide-name'); if(gnEl) gnEl.value = _guideName || '';
+  const genEl = document.getElementById('gc-guide-en'); if(genEl) genEl.value = _guideEn || '';
+
   // 초기화: 체크/서명 영역 리셋
   const gchk = document.getElementById('gc-guide-check'); if(gchk) gchk.checked = false;
   const dchk = document.getElementById('gc-driver-check'); if(dchk) dchk.checked = false;
@@ -13530,6 +13548,22 @@ function closeGuideConsent(){
   const modal = document.getElementById('guide-consent-modal');
   if(modal){ modal.classList.remove('open'); modal.style.display = 'none'; }
   _gcCtx = null;
+}
+
+// 가이드 이름 입력 시 상단 정보/서명 라벨 즉시 반영
+function _gcSyncGuideName(){
+  const nm = (document.getElementById('gc-guide-name')?.value || '').trim();
+  const en = (document.getElementById('gc-guide-en')?.value || '').trim();
+  const disp = en ? (nm + ' (' + en + ')') : nm;
+  const gl = document.getElementById('gc-guide-name-lbl'); if(gl) gl.textContent = disp ? '· '+disp : '';
+  const meta = document.getElementById('gc-meta');
+  if(meta && _gcCtx){
+    const _drvDisp = _gcCtx.driverEn ? (_gcCtx.driver + ' (' + _gcCtx.driverEn + ')') : _gcCtx.driver;
+    meta.innerHTML =
+      '👤 가이드 / Guide: <b>' + (disp||'-') + '</b>' + (_gcCtx.guidePhone?' ('+_gcCtx.guidePhone+')':'') + '<br>'
+      + '🚐 드라이버 / Driver: <b>' + (_drvDisp||'-') + '</b>' + (_gcCtx.rego?' · '+_gcCtx.rego:'') + '<br>'
+      + '🎫 투어코드 / Tour Code: <b>' + (_gcCtx.tourCode||'-') + '</b>' + (_gcCtx.agency?' · '+_gcCtx.agency:'');
+  }
 }
 
 // 서명 완료 후 저장된 PDF 문서 미리보기
@@ -13586,9 +13620,12 @@ function onGcDriverCheck(){
 
 async function submitGuideConsent(){
   if(!_gcCtx){ showToast('동의서 정보를 찾을 수 없습니다','error'); return; }
+  const guideNm = (document.getElementById('gc-guide-name')?.value || '').trim();
+  const guideEnNm = (document.getElementById('gc-guide-en')?.value || '').trim();
   const licNum = (document.getElementById('gc-license-number')?.value || '').trim();
   const gchk = document.getElementById('gc-guide-check');
   const dchk = document.getElementById('gc-driver-check');
+  if(!guideNm){ showToast('가이드 이름을 입력하세요','error'); document.getElementById('gc-guide-name')?.focus(); return; }
   if(!licNum){ showToast('가이드 면허번호를 입력하세요','error'); document.getElementById('gc-license-number')?.focus(); return; }
   if(!gchk || !gchk.checked){ showToast('가이드 확인 체크가 필요합니다','error'); return; }
   if(isSigEmpty('gc-guide-canvas')){ showToast('가이드 서명이 필요합니다','error'); return; }
@@ -13614,8 +13651,8 @@ async function submitGuideConsent(){
       body: JSON.stringify({
         action:'save_guide_consent',
         data: {
-          guide: _gcCtx.guide,
-          guideEn: _gcCtx.guideEn,
+          guide: guideNm,
+          guideEn: guideEnNm,
           guidePhone: _gcCtx.guidePhone,
           tourCode: _gcCtx.tourCode,
           agency: _gcCtx.agency,
