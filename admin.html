@@ -12365,9 +12365,15 @@ function calcSubReport(r) {
   //   소유 판정은 여기서 금액을 바꾸지 않음. DC 소유 트레일러일 때만
   //   아래 trailerSplitToDC에서 별도 -$30 렌트비 회수 거래를 붙인다.
   const _isBlueskySub = /bluesky/i.test(agency);
-  let trailerSub = (_isBlueskySub && trailerDR_raw > 0 && capNum < 40)
-    ? 50
-    : _trailerDRtoTA(trailerDR_raw, capNum);
+  // ★ MERCURY를 EG에 서브 줄 경우: 트레일러 서차지를 여행사 청구액과 동일($30)로 지급
+  //   (Bluesky는 기존 $50 그대로 — 여행사 청구액과 동일하게 pass-through)
+  const _isMercurySub = /mercury/i.test(agency);
+  const _isEGOwner = /\beg\b|eg\s*travel/i.test(owner);
+  let trailerSub = (_isMercurySub && _isEGOwner && trailerDR_raw > 0 && capNum < 40)
+    ? 30
+    : (_isBlueskySub && trailerDR_raw > 0 && capNum < 40)
+      ? 50
+      : _trailerDRtoTA(trailerDR_raw, capNum);
   const _trlOwn = _trailerOwnership(String(r.Trailer_Number||'').trim());
   // OT TA값
   const otDR = parseFloat(r.OT)||0;
