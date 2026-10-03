@@ -23484,6 +23484,8 @@ async function applyInvScheduleImport(){
         const seats = c._seatKey || '21';
         trailer = parseFloat((trEntry[seats]||trEntry['21'])?.rate) || 0;
       }
+      // ★ MERCURY 특수 규칙: 트레일러 서차지 $30 고정 ($80 대신)
+      if(/mercury/i.test(String(agency||''))) trailer = 30;
       dayTrailerSeen[it.date] = true;
     }
 
@@ -24426,6 +24428,7 @@ function calcInvRow(r) {
 
   // ── Trailer Surcharge (DR→TA 역산) ──
   // ★ BLUESKY 특수 규칙: 21/25석에서 트레일러 사용 시 $50 고정 (사용자 요청, 2026-05-30)
+  // ★ MERCURY 특수 규칙: 21/25석에서 트레일러 사용 시 $30 고정 ($80 대신, 사용자 요청 2026-10-03)
   //   - 40/50석 대형 차량은 트레일러 없음 → $0
   //   - 트레일러 DR이 0이면 사용 안 함 → $0
   const trailerDR = parseFloat(r.Trailer) || 0;
@@ -24435,9 +24438,12 @@ function calcInvRow(r) {
     return dr===30?80:Math.round(dr*2.67);
   }
   // _isBluesky는 위에서 earlyTA 섹션에서 이미 선언됨
-  const _trailerAuto = (_isBluesky && trailerDR > 0 && seatNum < 40)
-    ? 50
-    : trailerDRtoTA(trailerDR, seatNum);
+  const _isMercury = /mercury/i.test(priceAgency);
+  const _trailerAuto = (_isMercury && trailerDR > 0 && seatNum < 40)
+    ? 30
+    : (_isBluesky && trailerDR > 0 && seatNum < 40)
+      ? 50
+      : trailerDRtoTA(trailerDR, seatNum);
   const trailerVal = _ovGet('trailer') === '0' ? 0 : _trailerAuto;
 
   // ── Night Tour TA ──
