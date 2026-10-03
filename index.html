@@ -2204,7 +2204,7 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
   </div>
   <div id="gc-scroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;background:#f8fafc;">
     <div id="gc-meta" style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:10px 12px;font-size:12.5px;color:#3730a3;margin-bottom:12px;line-height:1.7;"></div>
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;font-size:12.5px;color:#1f2937;line-height:1.65;">
+    <div id="gc-doc-card" style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;font-size:12.5px;color:#1f2937;line-height:1.65;">
       <div style="font-size:11px;color:#6b7280;margin-bottom:10px;">시드니 지역 상업용 버스 투어의 안전 규정 준수 및 법적 책임을 명확히 하기 위한 문서입니다. 가이드는 본 규정을 숙지·준수해야 합니다.<br><i>This document clarifies safety compliance and legal liability for commercial bus tours in Sydney. Guides must review and comply with these regulations.</i></div>
 
       <div class="gc-h">1. 관련 법규 및 안전 원칙 <span class="gc-en-h">/ Applicable Regulations & Safety Principles</span></div>
@@ -2300,6 +2300,11 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
         <button class="btn btn-secondary btn-sm" style="margin-top:6px;" onclick="clearSigById('gc-driver-canvas')">↺ Clear 초기화</button>
       </div>
     </div>
+
+    <!-- 손으로 서명받기: 빈 양식 인쇄 / PDF 저장 -->
+    <button type="button" onclick="printBlankConsentForm()" style="margin-top:14px;width:100%;padding:11px;background:#fff;color:#374151;border:1.5px solid #cbd5e1;border-radius:10px;font-size:12.5px;font-weight:700;cursor:pointer;">🖨️ 서명 양식 인쇄 / PDF 저장 (손으로 서명받기)</button>
+    <div style="font-size:11px;color:#9ca3af;margin-top:5px;text-align:center;">전자서명이 어려우면 빈 양식을 출력(또는 PDF 저장)해 직접 서명받으세요.</div>
+
     <div style="height:90px;"></div>
   </div>
   <div style="flex:none;padding:12px 14px calc(12px + var(--sb,0));border-top:1px solid #e5e7eb;background:#fff;display:flex;gap:8px;">
@@ -13563,6 +13568,87 @@ function _gcSyncGuideName(){
       '👤 가이드 / Guide: <b>' + (disp||'-') + '</b>' + (_gcCtx.guidePhone?' ('+_gcCtx.guidePhone+')':'') + '<br>'
       + '🚐 드라이버 / Driver: <b>' + (_drvDisp||'-') + '</b>' + (_gcCtx.rego?' · '+_gcCtx.rego:'') + '<br>'
       + '🎫 투어코드 / Tour Code: <b>' + (_gcCtx.tourCode||'-') + '</b>' + (_gcCtx.agency?' · '+_gcCtx.agency:'');
+  }
+}
+
+// 🖨️ 빈 서명 양식 인쇄 / PDF 저장 — 전자서명 대신 직접(손) 서명받기용
+function printBlankConsentForm(){
+  const esc = (s) => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // 문서 본문은 모달에 있는 원문을 그대로 사용 (한/영)
+  const docCard = document.getElementById('gc-doc-card');
+  const bodyText = docCard ? docCard.innerHTML : '';
+  // 알고 있는 정보는 미리 채우고, 서명·날짜는 손으로 쓰도록 빈 줄 처리
+  const gName = (document.getElementById('gc-guide-name')?.value||'').trim();
+  const gEn   = (document.getElementById('gc-guide-en')?.value||'').trim();
+  const lic   = (document.getElementById('gc-license-number')?.value||'').trim();
+  const ctx = _gcCtx || {};
+  const drvDisp = ctx.driverEn ? (ctx.driver + ' (' + ctx.driverEn + ')') : (ctx.driver||'');
+  const line = (v, min) => v ? esc(v) : '<span style="display:inline-block;border-bottom:1px solid #111;min-width:'+(min||150)+'px;">&nbsp;</span>';
+  const sigLine = '<span style="display:inline-block;border-bottom:1px solid #111;min-width:220px;height:34px;">&nbsp;</span>';
+  const dateLine = '<span style="display:inline-block;border-bottom:1px solid #111;min-width:110px;">&nbsp;</span>';
+
+  const html =
+    '<!doctype html><html><head><meta charset="utf-8"><title>Guide Safety Consent</title><style>'
+    + '@page{size:A4;margin:14mm;}'
+    + "body{font-family:Arial,'Malgun Gothic','맑은 고딕',sans-serif;color:#1f2937;font-size:11pt;line-height:1.6;margin:0;}"
+    + 'h1{font-size:16pt;text-align:center;margin:0 0 3px;color:#111827;}'
+    + '.subtitle{text-align:center;color:#4b5563;font-size:10.5pt;margin-bottom:8px;}'
+    + '.rule{height:2px;background:#1d4ed8;width:70px;margin:10px auto 16px;border-radius:2px;}'
+    + '.gc-h{font-size:12pt;font-weight:800;color:#1d4ed8;border-bottom:1.3px solid #bfdbfe;padding-bottom:3px;margin:16px 0 8px;}'
+    + '.gc-h .gc-en-h{font-size:10pt;font-weight:600;color:#818cf8;}'
+    + 'p{margin:8px 0;} .gc-en{display:block;margin-top:3px;font-size:9.5pt;color:#6b7280;font-style:italic;line-height:1.5;}'
+    + '.meta{margin:4px 0 14px;font-size:10pt;color:#374151;background:#f3f4f6;border-radius:6px;padding:9px 12px;line-height:2;}'
+    + '.notice{margin:14px 0;font-size:8.8pt;color:#374151;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:10px 12px;line-height:1.6;} .notice i{color:#6b7280;}'
+    + '.sign{margin-top:16px;border-top:2px solid #111827;padding-top:14px;}'
+    + '.ackline{font-size:10.5pt;font-weight:700;color:#111827;margin:14px 0 8px;} .ackline .en{display:block;font-weight:normal;color:#6b7280;font-size:9pt;margin-top:2px;}'
+    + '.srow{margin:12px 0;} .slabel{display:inline-block;width:210px;font-weight:700;}'
+    + '@media print{.noprint{display:none;}}'
+    + '.printbar{position:fixed;top:0;left:0;right:0;background:#4338ca;color:#fff;padding:10px;text-align:center;font-size:13px;}'
+    + '.printbar button{background:#fff;color:#4338ca;border:none;border-radius:6px;padding:6px 14px;font-weight:700;cursor:pointer;margin-left:8px;}'
+    + '</style></head><body>'
+    + '<div class="printbar noprint">인쇄 또는 PDF로 저장하세요. <button onclick="window.print()">🖨️ 인쇄 / PDF 저장</button></div>'
+    + '<div style="height:44px;" class="noprint"></div>'
+    + '<h1>버스 투어 중 가이드 안전 수칙 및 책임 규정 동의서</h1>'
+    + '<div class="subtitle">Tour Guide Safety Guidelines and Liability Acknowledgement</div>'
+    + '<div class="rule"></div>'
+    + bodyText
+    + '<div class="meta">'
+    + '투어코드 (Tour Code): <b>' + line(ctx.tourCode, 120) + '</b> &nbsp;·&nbsp; 여행사 (Agency): ' + line(ctx.agency, 140) + '<br>'
+    + '담당 드라이버 (Driver): ' + line(drvDisp, 160) + (ctx.rego?(' &nbsp;·&nbsp; 차량: '+esc(ctx.rego)):'') + ' &nbsp;·&nbsp; 날짜 (Date): ' + dateLine
+    + '</div>'
+    + '<div class="notice"><b>개인정보 수집·이용 안내 / Privacy Collection Notice</b><br>'
+    + '가이드의 성명·연락처·면허번호 및 면허증 사본은 신원 확인 및 상기 안전·책임 규정의 이행·집행 목적으로만 수집·이용되며, DONG CHOI PTY LTD가 접근이 제한된 저장소에 안전하게 보관하고 목적 종료 시 관련 법령에 따라 파기합니다. 서명 시 위 수집·이용에 동의하는 것으로 간주됩니다.<br>'
+    + '<i>The Guide\'s name, contact, licence number and licence copy are collected solely for identity verification and for performing/enforcing the above terms, stored securely with restricted access and destroyed per applicable law once the purpose is fulfilled. Signing constitutes consent.</i></div>'
+    + '<div class="sign">'
+    + '<div class="ackline">☐ 가이드 확인: 본인은 위 안전 수칙 및 책임 규정의 내용을 모두 확인·이해하였으며 이에 동의합니다. '
+    + '<span class="en">(The Guide confirms having read, understood, and agreed to the above safety guidelines and liability terms.)</span></div>'
+    + '<div class="srow"><span class="slabel">가이드 성명 (Guide Name):</span> ' + line(gName, 200) + '</div>'
+    + '<div class="srow"><span class="slabel">영문 이름 (Name EN):</span> ' + line(gEn, 200) + '</div>'
+    + '<div class="srow"><span class="slabel">면허번호 (Licence No.):</span> ' + line(lic, 200) + '</div>'
+    + '<div class="srow"><span class="slabel">가이드 서명 (Guide Signature):</span> ' + sigLine + ' &nbsp; 날짜(Date): ' + dateLine + '</div>'
+    + '<div class="ackline" style="margin-top:22px;">☐ 드라이버 확인: 본인은 위 안전 수칙 및 책임 규정의 내용을 가이드에게 설명하였음을 확인합니다. '
+    + '<span class="en">(The Driver confirms having explained the above terms to the Guide.)</span></div>'
+    + '<div class="srow"><span class="slabel">드라이버 성명 (Driver Name):</span> ' + line(drvDisp, 200) + '</div>'
+    + '<div class="srow"><span class="slabel">드라이버 서명 (Driver Signature):</span> ' + sigLine + ' &nbsp; 날짜(Date): ' + dateLine + '</div>'
+    + '</div></body></html>';
+
+  // 새 창으로 열어 인쇄/PDF 저장 (팝업 차단 시 iframe 폴백)
+  let w = null;
+  try { w = window.open('', '_blank'); } catch(e){ w = null; }
+  if(w && w.document){
+    w.document.open(); w.document.write(html); w.document.close();
+    setTimeout(() => { try { w.focus(); } catch(e){} }, 300);
+  } else {
+    // 팝업 차단 — 숨은 iframe으로 인쇄
+    let ifr = document.getElementById('gc-print-iframe');
+    if(ifr) ifr.remove();
+    ifr = document.createElement('iframe');
+    ifr.id = 'gc-print-iframe';
+    ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(ifr);
+    const idoc = ifr.contentWindow.document;
+    idoc.open(); idoc.write(html); idoc.close();
+    setTimeout(() => { try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch(e){ showToast('인쇄 창을 열 수 없습니다','error'); } }, 400);
   }
 }
 
