@@ -2860,7 +2860,21 @@ async function loadRegoMaxKM() {
         const rows = await r.json();
         const map = {};
         (rows||[]).forEach(x => { if(x.rego) map[x.rego] = Number(x.current_km)||0; });
-        if (Object.keys(map).length) { DB.regoMaxKM = map; return; }
+        if (Object.keys(map).length) {
+          // ★ Supabase 뷰는 계기판 교체일(Odo_Reset_Date)을 모름 → 교체 차량만 GAS(교체일 반영) 값으로 덮어씀
+          const _resetRegos = (DB.V||[]).filter(v => v && v.Rego && String(v.Odo_Reset_Date||'').trim()).map(v => v.Rego);
+          if (_resetRegos.length) {
+            let _gasMap = null;
+            try {
+              const _gr = await fetch(APPS_SCRIPT_URL + '?action=get_max_km');
+              const _gj = await _gr.json();
+              if (_gj.ok && _gj.kmMap) _gasMap = _gj.kmMap;
+            } catch(e){ console.warn('[maxKM] 교체 차량 GAS 조회 실패:', e); }
+            // GAS 실패 시에도 옛 계기판 값은 쓰지 않음 (0 = 현재 KM 데이터 없음)
+            _resetRegos.forEach(rg => { map[rg] = (_gasMap && Number(_gasMap[rg])) || 0; });
+          }
+          DB.regoMaxKM = map; return;
+        }
       } else {
         console.warn('[maxKM] 직접 읽기 실패, 프록시 폴백:', r.status);
       }
@@ -4705,8 +4719,8 @@ function rDash(){
           m:`${v.Rego} — HVIS ${fmtDays(hd, v.HVIS_Date)}`});
       }
     }
-    // ★ 서비스 KM 알림
-    const _nSKM=Number(v.Next_Service_KM)||0;
+    // ★ 서비스 KM 알림 — 12인승 이상(버스)만. 12인승 미만은 Rego 갱신일만 알림
+    const _nSKM=_isHvis?(Number(v.Next_Service_KM)||0):0;
     const _mKM=DB.regoMaxKM[v.Rego]||0;
     if(_nSKM>0&&_mKM>0){
       const _svcRem=_nSKM-_mKM;
@@ -12596,7 +12610,7 @@ function checkVehicleRecords(v, opts={}){
               detail:`${dRec.Name_KR||dRec.Name_EN} — Authority 만료일 미등록`});
         }
       });
-    } else {
+    } else if(isHvisVehicle(v)){  // ★ 12인승 미만은 운행기록을 안 남기는 게 정상 → 경고 제외
       missing.push({field:'No_Reports', label:'운행기록 없음', severity:'warn',
         detail:'이 차량의 Daily Report가 없습니다'});
     }
@@ -32116,7 +32130,11 @@ async function syncVehicles(){
     Current_KM:r.Current_KM||0, Next_Service_KM:r.Next_Service_KM||0,
     VIN:r.VIN||'',
     Engine_Number: rf(r,'Engine_Number','Engine Number'),
-    Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
+    Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto',
+    // ★ 폼/로직이 쓰는 컬럼 보존 (누락 시 편집·저장 때 빈칸으로 덮어써짐)
+    Odo_Reset_Date:fmtDate(r.Odo_Reset_Date||''), Active:(r.Active!=null&&r.Active!=='')?r.Active:'Y',
+    Last_Service_KM:r.Last_Service_KM!=null?r.Last_Service_KM:'', Service_Interval:r.Service_Interval!=null?r.Service_Interval:'',
+    Photo_Front:r.Photo_Front||'', Photo_Back:r.Photo_Back||'', Photo_Left:r.Photo_Left||'', Photo_Right:r.Photo_Right||''
   }));
   getSubVehicles().forEach(v=>{ if(v.Owner&&!DB.PS[v.Owner]) DB.PS[v.Owner]={}; });
 }
@@ -32296,7 +32314,11 @@ async function _applyAdminBundle(bundle){
       Current_KM:r.Current_KM||0, Next_Service_KM:r.Next_Service_KM||0,
       VIN:r.VIN||'',
       Engine_Number: _rf(r,'Engine_Number','Engine Number'),
-      Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
+      Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto',
+    // ★ 폼/로직이 쓰는 컬럼 보존 (누락 시 편집·저장 때 빈칸으로 덮어써짐)
+    Odo_Reset_Date:fmtDate(r.Odo_Reset_Date||''), Active:(r.Active!=null&&r.Active!=='')?r.Active:'Y',
+    Last_Service_KM:r.Last_Service_KM!=null?r.Last_Service_KM:'', Service_Interval:r.Service_Interval!=null?r.Service_Interval:'',
+    Photo_Front:r.Photo_Front||'', Photo_Back:r.Photo_Back||'', Photo_Left:r.Photo_Left||'', Photo_Right:r.Photo_Right||''
     }));
   }
   // ── M_Drivers → DB.D ──
@@ -32582,7 +32604,11 @@ async function loadAllFromSheets(){
         Current_KM:r.Current_KM||0, Next_Service_KM:r.Next_Service_KM||0,
         VIN:r.VIN||'',
         Engine_Number: _rf(r,'Engine_Number','Engine Number'),
-        Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto'
+        Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto',
+    // ★ 폼/로직이 쓰는 컬럼 보존 (누락 시 편집·저장 때 빈칸으로 덮어써짐)
+    Odo_Reset_Date:fmtDate(r.Odo_Reset_Date||''), Active:(r.Active!=null&&r.Active!=='')?r.Active:'Y',
+    Last_Service_KM:r.Last_Service_KM!=null?r.Last_Service_KM:'', Service_Interval:r.Service_Interval!=null?r.Service_Interval:'',
+    Photo_Front:r.Photo_Front||'', Photo_Back:r.Photo_Back||'', Photo_Left:r.Photo_Left||'', Photo_Right:r.Photo_Right||''
       }));
     }
 
