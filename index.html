@@ -4335,14 +4335,32 @@ function _softReauth(reason){
       }
     } catch(e){ /* 문제 시 실제 fetch로 진행 */ }
 
+    let _legacyGet = null;
     try {
       const url = typeof input === 'string' ? input : (input && input.url);
       if (url && url.indexOf(GAS_URL) === 0) {
         const token = getAuthToken();
         if (!init || !init.method || String(init.method).toUpperCase() === 'GET') {
-          if (token && !/[?&]token=/.test(url)) {
-            const sep = url.indexOf('?') >= 0 ? '&' : '?';
-            input = url + sep + 'token=' + encodeURIComponent(token);
+          // ★ A10/DA2: GET → POST 본문 전송 (토큰을 URL에 싣지 않음 — 로그·히스토리·리퍼러 노출 방지)
+          //   서버 doPost가 {_get:1}을 doGet으로 위임. 구버전 서버면 'Unknown action' → 아래에서 기존 GET으로 1회 재시도
+          try {
+            const _u = new URL(url);
+            const _b = {_get: 1};
+            _u.searchParams.forEach((v, k) => { _b[k] = v; });
+            if (token && !_b.token) _b.token = token;
+            const _legacySep = url.indexOf('?') >= 0 ? '&' : '?';
+            _legacyGet = { input: (token && !/[?&]token=/.test(url)) ? url + _legacySep + 'token=' + encodeURIComponent(token) : url, init: init };
+            input = _u.origin + _u.pathname;
+            init = Object.assign({}, init || {}, {
+              method: 'POST', redirect: 'follow',
+              headers: {'Content-Type': 'text/plain'},
+              body: JSON.stringify(_b)
+            });
+          } catch(_ce) {
+            if (token && !/[?&]token=/.test(url)) {
+              const sep = url.indexOf('?') >= 0 ? '&' : '?';
+              input = url + sep + 'token=' + encodeURIComponent(token);
+            }
           }
         } else if (init && init.body && typeof init.body === 'string' && token) {
           try {
@@ -4356,7 +4374,15 @@ function _softReauth(reason){
       }
     } catch(e){}
 
-    const p = _originalFetch(input, init);
+    let p = _originalFetch(input, init);
+    // ★ A10: 구버전 서버(doPost에 _get 경로 없음) 호환 — Unknown action 이면 기존 GET 방식으로 1회 재시도
+    if (_legacyGet) {
+      const _lg = _legacyGet;
+      p = p.then(res => res.clone().text().then(t => {
+        if (/Unknown action/.test(t)) { input = _lg.input; init = _lg.init; return _originalFetch(_lg.input, _lg.init); }
+        return res;
+      }).catch(() => res));
+    }
     return p.then(res => {
       try {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
@@ -10429,23 +10455,26 @@ async function refreshActiveRegosForPre(){
   } catch(e){ /* 네트워크 오류 무시 */ }
 }
 
+// ★ DA1: 시트 유래 텍스트를 innerHTML에 넣을 때 쓰는 공용 escape
+function escH(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
 // ★ 연락처 '운행 중' 상세 HTML — 차량 + 트레일러 + (현재 시간대) 일정/가이드
 //   여러 일정이 있으면 백엔드(getActiveRegos)가 현재 시각에 맞는 슬롯 1개만 골라 보냄
 function _activeStatusLines(name){
   const info = _otherDriverInfo[name];
   if(!info || !info.rego) return '';
   // 1줄: 차량 + 트레일러
-  let l1 = `🚌 운행 중 · ${info.rego}`;
-  if(info.trailerNo) l1 += ` · 🚚 ${info.trailerNo}`;
+  let l1 = `🚌 운행 중 · ${escH(info.rego)}`;
+  if(info.trailerNo) l1 += ` · 🚚 ${escH(info.trailerNo)}`;
   else if(info.trailerFlag) l1 += ` · 🚚 트레일러`;
   // 2줄: 코스 · 시간 · 가이드
   const p2 = [];
-  if(info.course) p2.push(`📋 ${info.course}`);
-  if(info.schedStart) p2.push(`⏰ ${info.schedStart}${info.schedEnd?'~'+info.schedEnd:''}`);
-  if(info.guide) p2.push(`👤 ${info.guide}`);
+  if(info.course) p2.push(`📋 ${escH(info.course)}`);
+  if(info.schedStart) p2.push(`⏰ ${escH(info.schedStart)}${info.schedEnd?'~'+escH(info.schedEnd):''}`);
+  if(info.guide) p2.push(`👤 ${escH(info.guide)}`);
   // 3줄: 픽업 → 드롭
   const p3 = [];
-  if(info.startPlace || info.endPlace) p3.push(`📍 ${info.startPlace||'—'} → ${info.endPlace||'—'}`);
+  if(info.startPlace || info.endPlace) p3.push(`📍 ${escH(info.startPlace||'—')} → ${escH(info.endPlace||'—')}`);
   let html = `<div class="contact-sub" style="color:var(--accent);font-weight:600;">${l1}</div>`;
   if(p2.length) html += `<div class="contact-sub" style="color:var(--muted);font-size:11px;margin-top:1px;">${p2.join(' · ')}</div>`;
   if(p3.length) html += `<div class="contact-sub" style="color:var(--muted);font-size:11px;margin-top:1px;">${p3.join(' · ')}</div>`;
@@ -10468,14 +10497,14 @@ function renderContactItem(c){
     //    '운행 중' 상태가 안 보이던 문제. 데이터(_otherDriverRegos)는 이미 있음)
     const _runHtml = (c.type==='driver'||c.type==='driver-guide') ? _activeStatusLines(c.name) : '';
     return `<div class="contact-item">
-      <div class="contact-avatar ${c.type}" style="background:${c.type==='driver'?'#eff4ff':'#f0fdf4'};color:${c.color};">${c.initials}</div>
+      <div class="contact-avatar ${c.type}" style="background:${c.type==='driver'?'#eff4ff':'#f0fdf4'};color:${c.color};">${escH(c.initials)}</div>
       <div style="flex:1;min-width:0;">
-        <div class="contact-name">${c.name}${isSelf?' <span style=\"font-size:10px;background:#eff4ff;color:#1a56db;padding:2px 6px;border-radius:10px;font-weight:700;\">나</span>':''}</div>
+        <div class="contact-name">${escH(c.name)}${isSelf?' <span style=\"font-size:10px;background:#eff4ff;color:#1a56db;padding:2px 6px;border-radius:10px;font-weight:700;\">나</span>':''}</div>
         ${_runHtml}
         <div class="contact-sub" style="${warn?'color:var(--red);font-weight:600;':''}">
-          ${c.note}
+          ${escH(c.note)}
         </div>
-        ${c.phone ? `<div class="contact-sub" style="color:var(--accent);font-family:'DM Mono',monospace;font-size:12px;margin-top:2px;">${c.phone}</div>` : ''}
+        ${c.phone ? `<div class="contact-sub" style="color:var(--accent);font-family:'DM Mono',monospace;font-size:12px;margin-top:2px;">${escH(c.phone)}</div>` : ''}
       </div>
       <div class="contact-actions">
         ${c.phone ? `<a href="tel:${telPhone(c.phone)}" class="contact-btn contact-btn-call" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">📞</a>` : ''}
@@ -10488,11 +10517,11 @@ function renderContactItem(c){
   if(isOther){
     const runHtml = _activeStatusLines(c.name);
     return `<div class="contact-item">
-      <div class="contact-avatar ${c.type}" style="background:#eff4ff;color:${c.color};">${c.initials}</div>
+      <div class="contact-avatar ${c.type}" style="background:#eff4ff;color:${c.color};">${escH(c.initials)}</div>
       <div style="flex:1;min-width:0;">
-        <div class="contact-name">${c.name}</div>
+        <div class="contact-name">${escH(c.name)}</div>
         ${runHtml}
-        ${c.phone ? `<div class="contact-sub" style="color:var(--accent);font-family:'DM Mono',monospace;font-size:12px;margin-top:2px;">${c.phone}</div>` : ''}
+        ${c.phone ? `<div class="contact-sub" style="color:var(--accent);font-family:'DM Mono',monospace;font-size:12px;margin-top:2px;">${escH(c.phone)}</div>` : ''}
       </div>
       <div class="contact-actions">
         ${c.phone ? `<a href="tel:${telPhone(c.phone)}" class="contact-btn contact-btn-call" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">📞</a>` : ''}
@@ -10503,11 +10532,11 @@ function renderContactItem(c){
 
   // ── 가이드: 이름 + 연락처 + note 그대로
   return `<div class="contact-item">
-    <div class="contact-avatar ${c.type}" style="background:#f0fdf4;color:${c.color};">${c.initials}</div>
+    <div class="contact-avatar ${c.type}" style="background:#f0fdf4;color:${c.color};">${escH(c.initials)}</div>
     <div style="flex:1;min-width:0;">
-      <div class="contact-name">${c.name}</div>
-      <div class="contact-sub">${c.note}</div>
-      ${c.phone ? `<div class="contact-sub" style="color:var(--accent);font-family:'DM Mono',monospace;font-size:12px;margin-top:2px;">${c.phone}</div>` : ''}
+      <div class="contact-name">${escH(c.name)}</div>
+      <div class="contact-sub">${escH(c.note)}</div>
+      ${c.phone ? `<div class="contact-sub" style="color:var(--accent);font-family:'DM Mono',monospace;font-size:12px;margin-top:2px;">${escH(c.phone)}</div>` : ''}
     </div>
     <div class="contact-actions">
       ${c.phone ? `<a href="tel:${telPhone(c.phone)}" class="contact-btn contact-btn-call" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">📞</a>` : ''}
