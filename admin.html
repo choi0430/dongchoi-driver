@@ -3178,15 +3178,33 @@ function _softReauth(reason){
   const _originalFetch = window.fetch.bind(window);
 
   window.fetch = function(input, init){
+    let _legacyGet = null;
     try {
       const url = typeof input === 'string' ? input : (input && input.url);
       if (url && url.indexOf(GAS_URL) === 0) {
         const token = getAuthToken();
-        // GET: URL 쿼리에 token 추가
+        // GET → POST 변환
         if (!init || !init.method || String(init.method).toUpperCase() === 'GET') {
-          if (token && !/[?&]token=/.test(url)) {
-            const sep = url.indexOf('?') >= 0 ? '&' : '?';
-            input = url + sep + 'token=' + encodeURIComponent(token);
+          // ★ A10/DA2: GET → POST 본문 전송 (토큰을 URL에 싣지 않음 — 로그·히스토리·리퍼러 노출 방지)
+          //   서버 doPost가 {_get:1}을 doGet으로 위임. 구버전 서버면 'Unknown action' → 아래에서 기존 GET으로 1회 재시도
+          try {
+            const _u = new URL(url);
+            const _b = {_get: 1};
+            _u.searchParams.forEach((v, k) => { _b[k] = v; });
+            if (token && !_b.token) _b.token = token;
+            const _legacySep = url.indexOf('?') >= 0 ? '&' : '?';
+            _legacyGet = { input: (token && !/[?&]token=/.test(url)) ? url + _legacySep + 'token=' + encodeURIComponent(token) : url, init: init };
+            input = _u.origin + _u.pathname;
+            init = Object.assign({}, init || {}, {
+              method: 'POST', redirect: 'follow',
+              headers: {'Content-Type': 'text/plain'},
+              body: JSON.stringify(_b)
+            });
+          } catch(_ce) {
+            if (token && !/[?&]token=/.test(url)) {
+              const sep = url.indexOf('?') >= 0 ? '&' : '?';
+              input = url + sep + 'token=' + encodeURIComponent(token);
+            }
           }
         }
         // POST: body JSON에 token 주입
@@ -3202,7 +3220,15 @@ function _softReauth(reason){
       }
     } catch(e){ console.warn('[fetch interceptor]', e); }
 
-    const p = _originalFetch(input, init);
+    let p = _originalFetch(input, init);
+    // ★ A10: 구버전 서버(doPost에 _get 경로 없음) 호환 — Unknown action 이면 기존 GET 방식으로 1회 재시도
+    if (_legacyGet) {
+      const _lg = _legacyGet;
+      p = p.then(res => res.clone().text().then(t => {
+        if (/Unknown action/.test(t)) { input = _lg.input; init = _lg.init; return _originalFetch(_lg.input, _lg.init); }
+        return res;
+      }).catch(() => res));
+    }
     return p.then(res => {
       try {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
@@ -3793,7 +3819,13 @@ function gv(id){return document.getElementById(id)?.value||''}
 function gn(id){const v=parseFloat(document.getElementById(id)?.value);return isNaN(v)?null:v}
 function pcel(v,ot){return v!=null?`<span class="pv">$${v}</span><span class="pot">OT:$${ot??'—'}</span>`:`<span class="pem">—</span>`}
 function pcelB(v,ot){return v!=null?`<span class="pv">$${v}</span><span class="pot">OT:$${ot??'—'}</span>`:`<span class="pem">—</span>`}
-function esc(s){return String(s||'').replace(/'/g,"\'")}
+// ★ A9: onclick="f('${esc(x)}')" 처럼 'HTML 속성 안의 JS 문자열'에 넣는 값 전용 escape
+//   1) JS 문자열 escape(\ ' 줄바꿈) → 2) HTML 속성 escape(& " < >). (기존 버전은 replace가 no-op이라 O'Brien 등에서 깨짐)
+function esc(s){
+  return String(s==null?'':s)
+    .replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\r?\n/g,'\\n')
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 function nores(){return'<div style="text-align:center;padding:26px;color:var(--t3)">결과 없음</div>'}
 
 // ═══════════════════════════════════════
@@ -4824,7 +4856,7 @@ function rDash(){
       const range = dateFrom===dateTo ? dateFrom : dateFrom+' ~ '+dateTo;
       als.push({sort:-9000,type:'leave_pending',
         bg:'#fef3c7',bc:'#f59e0b',fc:'#92400e',icon:'🔔',
-        m:`NEW (신규) — ${l.Driver} Leave Request (휴무 요청) ${range} (${l.Days||1} day(s)) · ${l.Reason||''} <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pleave','nleave');loadAdminLeaves()">Review → (검토하기)</span>`});
+        m:`NEW (신규) — ${l.Driver} Leave Request (휴무 요청) ${range} (${l.Days||1} day(s)) · ${escH(l.Reason||'')} <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pleave','nleave');loadAdminLeaves()">Review → (검토하기)</span>`});
     });
     // Approved — 확정된 휴무
     window._adminLeaves.filter(l=>l.Status==='Approved').forEach(l=>{
@@ -4836,7 +4868,7 @@ function rDash(){
         const range = dateFrom===dateTo ? dateFrom : dateFrom+' ~ '+dateTo;
         als.push({sort:-500,type:'leave',
           bg:'#eff6ff',bc:'#3b82f6',fc:'#1d4ed8',icon:'📅',
-          m:`${l.Driver} — LEAVE (휴무) ${range} (${l.Days||1} day(s)) · ${l.Reason||''}`});
+          m:`${l.Driver} — LEAVE (휴무) ${range} (${l.Days||1} day(s)) · ${escH(l.Reason||'')}`});
       }
     });
   }
@@ -4914,7 +4946,7 @@ function rDash(){
           als.push({sort:-9500,type:'incident_critical',
             bg:'#fef2f2',bc:'#ef4444',fc:'#dc2626',
             icon:'🚨',
-            m:`<b>${inc.Type}</b> — ${inc.Driver||'Unknown'} (${inc.Date?fmtDate(inc.Date):''}) — ${inc.Severity} — ${inc.Location||''} <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinc','ninc');loadAdminIncidents()">상세보기 →</span>`});
+            m:`<b>${inc.Type}</b> — ${inc.Driver||'Unknown'} (${inc.Date?fmtDate(inc.Date):''}) — ${inc.Severity} — ${escH(inc.Location||'')} <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="nv('pinc','ninc');loadAdminIncidents()">상세보기 →</span>`});
         });
       }
       if(openInc.length-criticals.length>0){
@@ -4943,7 +4975,7 @@ function rDash(){
       _defHigh.forEach(d => {
         als.push({sort:-9300,type:'defect_high',
           bg:'#fef2f2',bc:'#ef4444',fc:'#dc2626',icon:'⚠️',
-          m:`<b>${d.rego||''}</b> ${d.category||''} — ${d.driver||''} — ${String(d.description||'').replace(/\n/g,' ').slice(0,45)} <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="${_goDefect}">상세보기 →</span>`});
+          m:`<b>${d.rego||''}</b> ${d.category||''} — ${d.driver||''} — ${escH(String(d.description||'').replace(/\n/g,' ').slice(0,45))} <span style="cursor:pointer;text-decoration:underline;margin-left:6px;" onclick="${_goDefect}">상세보기 →</span>`});
       });
       als.push({sort:-8900,type:'defect_open',
         bg:'#fff7ed',bc:'#f97316',fc:'#ea580c',icon:'🔧',
@@ -5906,7 +5938,7 @@ function renderDefects(){
       +'<button onclick="deleteDefect(\''+r.id+'\')" style="background:none;border:none;color:var(--rd);cursor:pointer;font-size:12px;">&#x1F5D1;</button></div></div>'
       +'<div style="font-size:13px;font-weight:600;color:var(--t1);margin-bottom:4px;">'+(r.category||'Other')+'</div>'
       +'<div style="font-size:12px;color:var(--t2);">'+(r.description||'')+'</div>'
-      +(r.location?'<div style="font-size:11px;color:var(--t3);margin-top:3px;">&#x1F4CD; '+r.location+'</div>':'')
+      +(r.location?'<div style="font-size:11px;color:var(--t3);margin-top:3px;">&#x1F4CD; '+escH(r.location)+'</div>':'')
       +(r.photos?'<div style="margin-top:6px;">'+_dcPhotoStripHtml(r.photos,'📷 사진').replace('margin-bottom:8px;','margin-bottom:0;')+'</div>':'')
       +'<input id="note-'+r.id+'" type="text" placeholder="Admin note..." value="'+(r.adminNote||'')+'"'
       +' style="width:100%;font-size:11px;border:1px solid var(--bd);border-radius:6px;padding:5px 8px;background:var(--sf);color:var(--t1);box-sizing:border-box;margin-top:6px;"'
@@ -12654,13 +12686,13 @@ function showMissingRecordAlert(rego){
   if(errors.length){
     html += '<div style="font-size:11px;font-weight:700;color:#dc2626;margin:8px 0 4px;">🔴 필수 누락 ('+errors.length+'건)</div>';
     errors.forEach(e=>{
-      html += '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;margin-bottom:4px;font-size:12px;color:#991b1b;">'+e.detail+'</div>';
+      html += '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;margin-bottom:4px;font-size:12px;color:#991b1b;">'+escH(e.detail)+'</div>';
     });
   }
   if(warns.length){
     html += '<div style="font-size:11px;font-weight:700;color:#d97706;margin:8px 0 4px;">🟡 권장 항목 ('+warns.length+'건)</div>';
     warns.forEach(w=>{
-      html += '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-bottom:4px;font-size:12px;color:#92400e;">'+w.detail+'</div>';
+      html += '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-bottom:4px;font-size:12px;color:#92400e;">'+escH(w.detail)+'</div>';
     });
   }
 
@@ -21366,7 +21398,7 @@ function renderBalDetail(){
         html += `<tr style="border-bottom:1px solid var(--b1);${rowDim}">
           <td style="padding:6px 4px;white-space:nowrap;padding-left:18px;">${fmtDate(r.Date)||'—'}</td>
           <td style="padding:6px 4px;"><span style="background:${r.Category==='Wage'?'var(--pud)':'var(--acd)'};padding:1px 6px;border-radius:4px;font-size:9px;">${cat}</span></td>
-          <td style="padding:6px 4px;">${r.Description||r.InvoiceNo||'—'}</td>
+          <td style="padding:6px 4px;">${escH(r.Description||r.InvoiceNo||'—')}</td>
           <td style="padding:6px 4px;font-size:10px;color:var(--t3);">${escH(remark)}</td>
           <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
           <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
@@ -21407,7 +21439,7 @@ function renderBalDetail(){
         html += `<tr style="border-bottom:1px solid var(--b1);">
           <td style="padding:6px 4px;white-space:nowrap;padding-left:18px;">${fmtDate(r.Date)||'—'}</td>
           <td style="padding:6px 4px;"><span style="background:${r.Category==='Wage'?'var(--pud)':'var(--acd)'};padding:1px 6px;border-radius:4px;font-size:9px;">${cat}</span></td>
-          <td style="padding:6px 4px;">${r.Description||r.InvoiceNo||'—'}</td>
+          <td style="padding:6px 4px;">${escH(r.Description||r.InvoiceNo||'—')}</td>
           <td style="padding:6px 4px;font-size:10px;color:var(--t3);">${escH(remark)}</td>
           <td style="padding:6px 4px;text-align:right;color:var(--ac);font-family:var(--fn);">${Number(r.DR)?'$'+Number(r.DR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
           <td style="padding:6px 4px;text-align:right;color:var(--gn);font-family:var(--fn);">${Number(r.CR)?'$'+Number(r.CR).toLocaleString('en',{minimumFractionDigits:2}):''}</td>
@@ -22552,7 +22584,7 @@ function openBalTxnModal(type, idx){
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">청구 (DR)</div><input type="number" id="btx-dr" class="profit-finp" style="width:100%;" value="${existing?.DR||''}" placeholder="0.00" step="0.01"></div>
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">수금 (CR)</div><input type="number" id="btx-cr" class="profit-finp" style="width:100%;" value="${existing?.CR||''}" placeholder="0.00" step="0.01"></div>
         </div>
-        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">Remarks (비고)</div><input id="btx-remark" class="profit-finp" style="width:100%;" value="${existing?.Remark||''}" placeholder="메모"></div>
+        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">Remarks (비고)</div><input id="btx-remark" class="profit-finp" style="width:100%;" value="${escH(existing?.Remark||'')}" placeholder="메모"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">시작일</div><input type="date" id="btx-start" class="profit-finp" style="width:100%;" value="${_eStart}"></div>
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">종료일</div><input type="date" id="btx-finish" class="profit-finp" style="width:100%;" value="${_eFinish}"></div>
@@ -22592,13 +22624,13 @@ function openBalTxnModal(type, idx){
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">인보이스 No</div><input id="btx-invno" class="profit-finp" style="width:100%;" value="${existing?.InvoiceNo||''}" placeholder="INV-001"></div>
-          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">설명</div><input id="btx-desc" class="profit-finp" style="width:100%;" value="${existing?.Description||''}" placeholder="설명"></div>
+          <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">설명</div><input id="btx-desc" class="profit-finp" style="width:100%;" value="${escH(existing?.Description||'')}" placeholder="설명"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">발생 (DR)</div><input type="number" id="btx-dr" class="profit-finp" style="width:100%;" value="${existing?.DR||''}" placeholder="0.00" step="0.01"></div>
           <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">지급 (CR)</div><input type="number" id="btx-cr" class="profit-finp" style="width:100%;" value="${existing?.CR||''}" placeholder="0.00" step="0.01"></div>
         </div>
-        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">Remarks (비고)</div><input id="btx-remark" class="profit-finp" style="width:100%;" value="${existing?.Remark||''}" placeholder="메모"></div>
+        <div><div style="font-size:10px;color:var(--t3);margin-bottom:3px;">Remarks (비고)</div><input id="btx-remark" class="profit-finp" style="width:100%;" value="${escH(existing?.Remark||'')}" placeholder="메모"></div>
       </div>`;
     document.getElementById('btx-sub').addEventListener('change',function(){
       document.getElementById('btx-sub-new').style.display = this.value==='_NEW'?'':'none';
@@ -31121,8 +31153,8 @@ function openView(type, idx) {
         const _errs = _vIssues.filter(i=>i.severity==='error');
         const _warns = _vIssues.filter(i=>i.severity==='warn');
         html += '<div style="font-size:11px;font-weight:700;color:#dc2626;letter-spacing:.5px;margin:12px 0 8px;padding:0 2px;">⚠️ DC 기록 누락 ('+_vIssues.length+'건)</div>';
-        _errs.forEach(e=>{ html += '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:5px 10px;margin-bottom:3px;font-size:11px;color:#991b1b;">🔴 '+e.detail+'</div>'; });
-        _warns.forEach(w=>{ html += '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:5px 10px;margin-bottom:3px;font-size:11px;color:#92400e;">🟡 '+w.detail+'</div>'; });
+        _errs.forEach(e=>{ html += '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:5px 10px;margin-bottom:3px;font-size:11px;color:#991b1b;">🔴 '+escH(e.detail)+'</div>'; });
+        _warns.forEach(w=>{ html += '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:5px 10px;margin-bottom:3px;font-size:11px;color:#92400e;">🟡 '+escH(w.detail)+'</div>'; });
       } else {
         html += '<div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:12px;color:#065f46;font-weight:600;text-align:center;">✅ DC Accreditation — 기록 완비</div>';
       }
@@ -31421,7 +31453,7 @@ function openM(type,idx){
         <div><label class="fl">연락처</label><input class="fi" id="f2" value="${fixPhone(d.Phone||d.Mobile)}"></div>
         <div><label class="fl">소속 여행사</label><input class="fi" id="f3" value="${d.Agency||''}"></div></div>
       <div class="fr"><label class="fl">이메일</label><input class="fi" id="f4" value="${d.Email||''}"></div>
-      <div class="fr"><label class="fl">Remarks (비고)</label><textarea class="fta" id="f5">${d.Remarks||''}</textarea></div>`;
+      <div class="fr"><label class="fl">Remarks (비고)</label><textarea class="fta" id="f5">${escH(d.Remarks||'')}</textarea></div>`;
   }
   else if(type==='AG'){
     const agNames=DB.C.filter(c=>_isActiveRow(c)).map(c=>c.Name).filter(Boolean);
@@ -34430,7 +34462,7 @@ function renderAdminLeaveList(){
         <div>
           <div style="font-weight:800;font-size:15px;color:var(--t1);">👤 ${r.Driver||'-'}</div>
           <div style="font-weight:700;font-size:13px;color:var(--t2);margin-top:4px;">📅 ${dateRange}</div>
-          <div style="font-size:12px;color:var(--t3);margin-top:3px;">${r.Days||1} day(s) (일) · ${r.Reason||'No reason (사유 없음)'}</div>
+          <div style="font-size:12px;color:var(--t3);margin-top:3px;">${r.Days||1} day(s) (일) · ${escH(r.Reason||'No reason (사유 없음)')}</div>
         </div>
         <div style="background:${s.bg};color:${s.tx};padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap;">${s.lb}</div>
       </div>
@@ -34463,7 +34495,7 @@ function openLeaveReview(idx){
     </div>
     <div style="padding:8px 0;border-top:1px solid var(--b1);">
       <div style="font-size:11px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Reason (사유)</div>
-      <div style="font-size:14px;color:var(--t1);margin-top:4px;">${r.Reason||'No reason (사유 없음)'}</div>
+      <div style="font-size:14px;color:var(--t1);margin-top:4px;">${escH(r.Reason||'No reason (사유 없음)')}</div>
     </div>
     <div style="padding:8px 0;border-top:1px solid var(--b1);">
       <div style="font-size:11px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Requested At (요청 일시)</div>
@@ -37057,8 +37089,8 @@ function renderAdminIncidents(){
         </div>
       </div>
       <div style="font-size:11px;color:var(--t2);margin-bottom:4px;">${inc.Driver||'Unknown'} · ${inc.Rego||''} · ${inc.Date?fmtDate(inc.Date):''} ${parseSheetTime(inc.Time)||''}</div>
-      <div style="font-size:11px;color:var(--t3);margin-bottom:4px;">${inc.Location||''}</div>
-      <div style="font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${inc.Description||''}</div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:4px;">${escH(inc.Location||'')}</div>
+      <div style="font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escH(inc.Description||'')}</div>
       ${inc.AdminNote?'<div style="font-size:10px;color:var(--ac);margin-top:4px;font-weight:600;">Admin: '+inc.AdminNote+'</div>':''}
       <div style="font-size:9px;color:var(--t3);margin-top:4px;">${inc.ID} · Submitted: ${inc.Submitted?fmtDateTime(inc.Submitted):''}</div>
     </div>`;
@@ -37087,12 +37119,12 @@ function showIncidentDetail(id){
         <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Driver</div><div style="font-size:12px;font-weight:700;">${inc.Driver||''}</div></div>
         <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Rego</div><div style="font-size:12px;font-weight:700;">${inc.Rego||''}</div></div>
         <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Date/Time</div><div style="font-size:12px;font-weight:700;">${inc.Date?fmtDate(inc.Date):''} ${parseSheetTime(inc.Time)||''}</div></div>
-        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Location</div><div style="font-size:12px;font-weight:700;">${inc.Location||''}</div></div>
+        <div class="crd" style="padding:8px;"><div style="font-size:9px;color:var(--t3);font-weight:700;">Location</div><div style="font-size:12px;font-weight:700;">${escH(inc.Location||'')}</div></div>
       </div>
 
       <div class="crd" style="padding:10px;margin-bottom:8px;">
         <div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:4px;">Description (사고 설명)</div>
-        <div style="font-size:12px;color:var(--t1);">${inc.Description||'N/A'}</div>
+        <div style="font-size:12px;color:var(--t1);">${escH(inc.Description||'N/A')}</div>
       </div>
 
       ${inc.Injuries?'<div class="crd" style="padding:10px;margin-bottom:8px;"><div style="font-size:10px;color:var(--t3);font-weight:700;margin-bottom:4px;">Injuries (부상)</div><div style="font-size:12px;color:var(--t1);">'+inc.Injuries+'</div></div>':''}
