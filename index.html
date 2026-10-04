@@ -7336,7 +7336,8 @@ async function saveMyInfo() {
           })
         });
         const json = await res.json();
-        if (json.ok) {
+        // ★ A5: 응답 url은 data URL(사진 본문) → localStorage에 저장하지 않음 (용량 폭증 방지)
+        if (json.ok && json.url && String(json.url).indexOf('data:') !== 0) {
           localData['photoUrl_'+pk] = json.url;
         }
       } catch(e) { console.warn('Photo upload failed:', pk, e); }
@@ -7402,6 +7403,20 @@ async function saveMyInfo() {
   }
 }
 
+// ★ A5: data URL 이미지를 새 탭으로 열기 (브라우저가 data: 직접 열기를 차단하므로 Blob URL 사용)
+function _openImgSrc(src){
+  try{
+    if(!src) return;
+    const m = String(src).match(/^data:([^;]+);base64,(.*)$/);
+    if(!m){ window.open(src,'_blank'); return; }
+    const bin = atob(m[2]); const arr = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([arr], {type:m[1]}));
+    window.open(url,'_blank');
+    setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} }, 60000);
+  }catch(e){ console.warn('_openImgSrc failed', e); }
+}
+
 /** Google Drive에서 사진 URL 로드 */
 async function loadDriverPhotosFromDrive() {
   try {
@@ -7419,7 +7434,7 @@ async function loadDriverPhotosFromDrive() {
     const saved = JSON.parse(localStorage.getItem(key) || '{}');
     let updated = false;
     Object.entries(json.photos).forEach(([pk, info]) => {
-      if (info.url && saved['photoUrl_'+pk] !== info.url) {
+      if (info.url && String(info.url).indexOf('data:') !== 0 && saved['photoUrl_'+pk] !== info.url) {
         saved['photoUrl_'+pk] = info.url;
         updated = true;
       }
@@ -7446,7 +7461,7 @@ function showPhotosInView(photos) {
     const el = document.getElementById(elId);
     if (!el) return;
     if (photos[key]?.url) {
-      el.innerHTML = '<img src="'+photos[key].url+'" style="width:100%;height:100%;object-fit:cover;border-radius:10px;cursor:pointer;" onclick="window.open(this.src,\'_blank\')">';
+      el.innerHTML = '<img src="'+photos[key].url+'" style="width:100%;height:100%;object-fit:cover;border-radius:10px;cursor:pointer;" onclick="_openImgSrc(this.src)">';
     } else {
       el.innerHTML = '<div style="font-size:11px;color:var(--muted);text-align:center;">미등록</div>';
     }
