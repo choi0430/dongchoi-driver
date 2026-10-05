@@ -24458,6 +24458,17 @@ function calcInvRow(r) {
   return taBreakdown(r);
 }
 
+// ★ B9: 인보이스 행별 override — 새 키 → 예전 키 매핑 + 유효값 조회
+window._invLegacyKeyMap = window._invLegacyKeyMap || {};
+function _invRegisterLegacyKey(newKey, legacyKey){ if(newKey && legacyKey && newKey !== legacyKey) window._invLegacyKeyMap[newKey] = legacyKey; }
+function _invOvEff(key){
+  const ov = window._invoiceOverrides || {};
+  if(ov[key] !== undefined) return ov[key];
+  const lk = window._invLegacyKeyMap[key];
+  return (lk && ov[lk] !== undefined) ? ov[lk] : null;
+}
+function _invHasLegacy(key){ const lk = window._invLegacyKeyMap[key]; return !!(lk && window._invoiceOverrides && window._invoiceOverrides[lk] !== undefined); }
+
 // ═══════════════════════════════════════════════════════
 // ★ B1 (2026-10-05): 여행사 청구(TA) 계산 단일 소스
 //   인보이스(calcInvRow) · 수익/마진(calcAgencyTA) · 서브 정산(calcSubReport)의 TA가
@@ -24595,16 +24606,26 @@ function taBreakdown(r) {
   const autoParking = (apPattern.test(pickupVal) && !(_isHojuro && seatNum < 40)) ? (seatNum >= 40 ? 40 : 30) : 0;
 
   // 행별 주차비 수동 override (localStorage: '1'=강제추가, '0'=강제제외, null=자동)
-  const _pkKey = 'dcpk_' + (r._iso||String(r.Date||'')).slice(0,10) + '_' + (r.Rego||'') + '_' + (r.Attraction||'').replace(/\s+/g,'').slice(0,8);
-  const _pkOv  = (window._invoiceOverrides && window._invoiceOverrides[_pkKey] !== undefined) ? window._invoiceOverrides[_pkKey] : null;
+  // ★ B9 (2026-10-05): override 키 = 날짜 + 차량 + 코스명 전체 + 출발시간(HHMM)
+  //   예전 키(코스명 앞 8자)는 같은 날·같은 차량의 'Airport Transfer' 2회 등이 같은 키라 한쪽 토글이 다른 쪽에도 적용됐음.
+  //   기존 저장 설정 보존: 새 키에 값이 없으면 예전 키 값을 읽음(_invOvEff). 새로 누르는 토글은 새 키로 저장.
+  const _legacyPrefix = (r._iso||String(r.Date||'')).slice(0,10) + '_' + (r.Rego||'') + '_' + (r.Attraction||'').replace(/\s+/g,'').slice(0,8);
+  const _tsRaw = r._timeStart || r.Time_Start || '';
+  const _tsKey = (typeof parseSheetTime === 'function' ? parseSheetTime(_tsRaw) : String(_tsRaw)).replace(/[^0-9]/g,'');
+  const _rowPrefix = (r._iso||String(r.Date||'')).slice(0,10) + '_' + String(r.Rego||'').replace(/[^A-Za-z0-9]/g,'') + '_'
+    + String(r.Attraction||'').replace(/[^A-Za-z0-9가-힣]/g,'')
+    // 출발시간 우선. 시간이 없는 행만 투어코드로 구분 (투어코드만으로는 같은 투어의 하루 2회 운행을 못 가림)
+    + (_tsKey ? '_' + _tsKey : (function(){ const _tc = String((typeof pickTourCode==='function' ? pickTourCode(r) : (r.Tour_Code||r.TourCode)) || '').replace(/[^A-Za-z0-9가-힣]/g,''); return _tc ? '_TC' + _tc : ''; })());
+  const _pkKey = 'dcpk_' + _rowPrefix;
+  _invRegisterLegacyKey(_pkKey, 'dcpk_' + _legacyPrefix);
+  const _pkOv  = _invOvEff(_pkKey);
   const parkingFee = _pkOv === '1' ? (seatNum >= 40 ? 40 : 30)
                    : _pkOv === '0' ? 0
                    : autoParking;
 
-  // ── 행별 서차지 override 공통 키 접두사 ──
-  const _rowPrefix = (r._iso||String(r.Date||'')).slice(0,10) + '_' + (r.Rego||'') + '_' + (r.Attraction||'').replace(/\s+/g,'').slice(0,8);
+  // ── 행별 서차지 override 공통 키 (★ B9: 위 _rowPrefix 사용, 예전 키는 호환 조회) ──
   function _ovKey(type){ return 'dcinv_'+type+'_'+_rowPrefix; }
-  function _ovGet(type){ const k=_ovKey(type); return (window._invoiceOverrides && window._invoiceOverrides[k] !== undefined) ? window._invoiceOverrides[k] : null; }
+  function _ovGet(type){ const k=_ovKey(type); _invRegisterLegacyKey(k, 'dcinv_'+type+'_'+_legacyPrefix); return _invOvEff(k); }
 
   // ── Trailer Surcharge (DR→TA 역산) ──
   // ★ BLUESKY 특수 규칙: 21/25석에서 트레일러 사용 시 $50 고정 (사용자 요청, 2026-05-30)
@@ -24660,7 +24681,8 @@ function taBreakdown(r) {
   const etcVal = parseFloat(r.Etc) || 0;
   const etcDesc = String(r.Etc_Desc||'').trim();
   const _etcKey = 'dcetc_' + _rowPrefix;
-  const _etcOv  = (window._invoiceOverrides && window._invoiceOverrides[_etcKey] !== undefined) ? window._invoiceOverrides[_etcKey] : null;
+  _invRegisterLegacyKey(_etcKey, 'dcetc_' + _legacyPrefix);
+  const _etcOv  = _invOvEff(_etcKey);
   const etcTA   = _etcOv === '1' ? etcVal : 0;
 
   const total = baseRate + ot + hotel + dist + earlyTA + parkingFee + trailerVal + nightTA + tipVal + mealVal + tollVal + etcTA;
@@ -25367,16 +25389,22 @@ function renderInvPreview(rows, agency, from, to) {
 function toggleSurchargeOv(type, rowPrefix, pkKey, autoVal, agency, from, to) {
   if(!window._invoiceOverrides) window._invoiceOverrides = {};
   let saveKey, saveVal;
+  // ★ B9: 현재 상태는 새 키→예전 키 순으로 판정. 예전 키 설정이 남아 있으면 '삭제'하면 예전 값이 되살아나므로
+  //   자동 상태로 되돌릴 때 명시값('a'=자동)을 새 키에 저장해 이 행에만 적용되게 함.
   if(type === '_pk'){
-    const cur = window._invoiceOverrides[pkKey];
+    const cur = _invOvEff(pkKey);
+    const _toAuto = () => { if(_invHasLegacy(pkKey)){ window._invoiceOverrides[pkKey]='a'; saveKey=pkKey; saveVal='a'; } else { delete window._invoiceOverrides[pkKey]; saveKey=pkKey; saveVal=null; } };
     if      (cur === '1') { window._invoiceOverrides[pkKey] = '0'; saveKey=pkKey; saveVal='0'; }
-    else if (cur === '0') { delete window._invoiceOverrides[pkKey]; saveKey=pkKey; saveVal=null; }
+    else if (cur === '0') { _toAuto(); }
     else if (autoVal > 0) { window._invoiceOverrides[pkKey] = '0'; saveKey=pkKey; saveVal='0'; }
     else                  { window._invoiceOverrides[pkKey] = '1'; saveKey=pkKey; saveVal='1'; }
   } else {
     const key = 'dcinv_'+type+'_'+rowPrefix;
-    const cur = window._invoiceOverrides[key];
-    if(cur === '0') { delete window._invoiceOverrides[key]; saveKey=key; saveVal=null; }
+    const cur = _invOvEff(key);
+    if(cur === '0') {
+      if(_invHasLegacy(key)){ window._invoiceOverrides[key] = 'a'; saveKey=key; saveVal='a'; }
+      else { delete window._invoiceOverrides[key]; saveKey=key; saveVal=null; }
+    }
     else            { window._invoiceOverrides[key] = '0'; saveKey=key; saveVal='0'; }
   }
   // 서버 저장 (비동기)
@@ -25398,7 +25426,7 @@ function toggleParkingOverride(pkKey, autoParking, agency, from, to) {
 // ─────────────────────────────────────────
 function toggleEtcOverride(etcKey, agency, from, to) {
   if(!window._invoiceOverrides) window._invoiceOverrides = {};
-  const cur = window._invoiceOverrides[etcKey];
+  const cur = _invOvEff(etcKey);   // ★ B9: 예전 키 설정도 반영
   let saveVal;
   if (cur === '1') { window._invoiceOverrides[etcKey] = '0'; saveVal='0'; }
   else             { window._invoiceOverrides[etcKey] = '1'; saveVal='1'; }
@@ -32640,7 +32668,7 @@ async function _applyAdminBundle(bundle){
   window._invoiceOverrides = {};
   if(d.Invoice_Overrides?.length) {
     d.Invoice_Overrides.forEach(r => {
-      if(r.RowKey) window._invoiceOverrides[r.RowKey] = r.Value;
+      if(r.RowKey) window._invoiceOverrides[r.RowKey] = (r.Value===null||r.Value===undefined) ? r.Value : String(r.Value);   // ★ B9: 시트가 '0'/'1'을 숫자로 바꿔도 === '0' 비교가 되도록
     });
   }
   // ── Company_Profile → DC_COMPANY ──
@@ -32947,7 +32975,7 @@ async function loadAllFromSheets(){
     window._invoiceOverrides = {};
     if(d.Invoice_Overrides?.length) {
       d.Invoice_Overrides.forEach(r => {
-        if(r.RowKey) window._invoiceOverrides[r.RowKey] = r.Value;
+        if(r.RowKey) window._invoiceOverrides[r.RowKey] = (r.Value===null||r.Value===undefined) ? r.Value : String(r.Value);   // ★ B9: 시트가 '0'/'1'을 숫자로 바꿔도 === '0' 비교가 되도록
       });
     }
 
