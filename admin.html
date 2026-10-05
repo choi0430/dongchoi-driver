@@ -3750,9 +3750,10 @@ function parseToISO(ds){
   const s = String(ds).trim();
   // dd/mm/yyyy (선택적 시간 부분 HH:mm 또는 HH:mm:ss 허용)
   // 예: "27/04/2026", "23/04/2026 01:27", "23/04/2026 01:27:45"
-  const ddMmMatch = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[\sT]\d{1,2}:\d{2}(?::\d{2})?)?$/);
+  // ★ B7 (2026-10-05): 한 자리 일/월(1/5/2026) 허용 — 예전엔 '' 반환 → 기간 필터에서 빠져 인보이스·잔액 누락
+  const ddMmMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[\sT]\d{1,2}:\d{2}(?::\d{2})?)?$/);
   if(ddMmMatch){
-    return ddMmMatch[3]+'-'+ddMmMatch[2]+'-'+ddMmMatch[1];
+    return ddMmMatch[3]+'-'+String(ddMmMatch[2]).padStart(2,'0')+'-'+String(ddMmMatch[1]).padStart(2,'0');
   }
   // ★ GAS Date 오브젝트가 JSON 직렬화된 UTC ISO (e.g. "2026-03-08T13:00:00.000Z")
   // — 반드시 YYYY-MM-DD 체크보다 먼저! (T 포함 문자열을 시간대 변환해야 함)
@@ -3767,6 +3768,9 @@ function parseToISO(ds){
   }
   // YYYY-MM-DD (ISO) — T가 없는 순수 날짜 문자열
   if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  // ★ B7: 0 없는 ISO (2026-5-1)
+  const _isoLoose = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(_isoLoose) return _isoLoose[1]+'-'+String(_isoLoose[2]).padStart(2,'0')+'-'+String(_isoLoose[3]).padStart(2,'0');
   return '';
 }
 
@@ -3776,6 +3780,8 @@ function fmtDate(ds){
   const s=String(ds).trim();
   // 이미 dd/mm/yyyy
   if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  // ★ B7: 한 자리 일/월(1/5/2026) → 01/05/2026
+  { const _m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if(_m) return String(_m[1]).padStart(2,'0')+'/'+String(_m[2]).padStart(2,'0')+'/'+_m[3]; }
   // ISO timestamp (구글 시트: 2026-03-11T00:00:00.000Z) → UTC+10 로컬 날짜
   if(s.includes('T')){
     const d=new Date(s);
