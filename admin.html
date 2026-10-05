@@ -3467,6 +3467,17 @@ function _normTC(s){
 }
 // 차량번호(Rego) 정규화 — 매칭용 (대문자·영숫자만)
 function _normRego(s){ return String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,''); }
+// ★ B4 (2026-10-05): 차량 조회 — 정확 일치 우선, 없으면 정규화 일치(대소문자·공백·하이픈 무시)
+//   예전엔 'tv 1072' / 'TV-1072' 같은 표기 차이로 SUB 차량을 못 찾아 서브 지급이 통째로 누락됐음
+function _findVehByRego(rego){
+  const list = (typeof DB!=='undefined' && Array.isArray(DB.V)) ? DB.V : [];
+  const raw = String(rego==null?'':rego).trim();
+  if(!raw) return null;
+  const exact = list.find(v => v.Rego === raw);
+  if(exact) return exact;
+  const n = _normRego(raw);
+  return n ? (list.find(v => _normRego(v.Rego) === n) || null) : null;
+}
 
 // 수동 "발행됨 처리" — 자동 매칭이 불가한(수동/총액만 인보이스) 운행을 사용자가 직접 발행됨으로 표시
 //  localStorage 'dc_manual_invoiced' = ["AG|정규화투어코드", ...]
@@ -4456,7 +4467,51 @@ async function renderMissingPrices(){
       if(iso && iso > groups[key].last) groups[key].last = iso;
     });
     var list = Object.keys(groups).map(function(k){ return groups[k]; }).sort(function(a,b){ return b.count - a.count; });
-    if(!list.length){ el.style.display='none'; el.innerHTML=''; return; }
+    // ★ B4: 서브 기본요금 없음 / 마스터에 없는 차량번호 (최근 120일)
+    var subGroups = {}, unknownRego = {};
+    _drCache.forEach(function(r){
+      if(r.Private==='Y' || String(r.Agency||'').toUpperCase()==='PRIVATE') return;
+      var iso2 = r._iso || (typeof parseToISO==='function' ? parseToISO(r.Date||'') : '');
+      if(iso2){ var d2 = new Date(iso2+'T00:00:00'); if(!isNaN(d2.getTime()) && d2 < cutoff) return; }
+      var rg = String(r.Rego||'').trim();
+      if(!rg) return;
+      var veh = _findVehByRego(rg);
+      if(!veh){
+        var uk = _normRego(rg);
+        if(!unknownRego[uk]) unknownRego[uk] = { rego: rg, count: 0, last: '' };
+        unknownRego[uk].count++; if(iso2 && iso2 > unknownRego[uk].last) unknownRego[uk].last = iso2;
+        return;
+      }
+      var own = String(veh.Owner||'').trim();
+      if(!own || DC_OWNERS.includes(own)) return;
+      var sc; try { sc = calcSubReport(r); } catch(e){ return; }
+      if(!sc || !sc._subRateMissing) return;
+      var sk = own+'|'+String(r.Attraction||'').trim()+'|'+(sc.capKey||'');
+      if(!subGroups[sk]) subGroups[sk] = { owner: own, course: String(r.Attraction||'').trim(), seats: sc.capKey||'', count: 0, last: '' };
+      subGroups[sk].count++; if(iso2 && iso2 > subGroups[sk].last) subGroups[sk].last = iso2;
+    });
+    var subList = Object.keys(subGroups).map(function(k){ return subGroups[k]; }).sort(function(a,b){ return b.count - a.count; });
+    var ukList = Object.keys(unknownRego).map(function(k){ return unknownRego[k]; }).sort(function(a,b){ return b.count - a.count; });
+    var _row = function(left, cnt, last){
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--b1);">'
+        + '<span style="flex:1;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+ left +'</span>'
+        + '<span style="width:44px;text-align:right;font-family:var(--fn);color:#b45309;font-weight:700;">'+ cnt +'건</span>'
+        + '<span style="width:74px;text-align:right;color:var(--t3);font-size:11px;">'+ (last? fmtDate(last):'') +'</span></div>';
+    };
+    var extraHtml = '';
+    if(subList.length){
+      extraHtml += '<div class="shd" style="margin-top:10px"><div class="stl" style="color:#b45309;">⚠️ 서브 요금 없음 — 서브 기본급 $0으로 계산된 운행 '+ subList.reduce(function(s,g){return s+g.count;},0) +'건</div>'
+        + '<div class="ssb"><code>M_PriceSub</code>에 이 서브·코스·좌석 요금이 없어 <b>서브에게 서차지만 지급</b>되고 있습니다. 서브 요금표에 채우면 다음 SUB 동기화부터 반영됩니다.</div></div>'
+        + '<div class="crd" style="padding:10px 12px;">' + subList.slice(0,20).map(function(g){ return _row('<b>'+escH(g.owner)+'</b> · '+escH(g.course)+(g.seats?' <span style="color:var(--t3);">('+escH(g.seats)+'석)</span>':''), g.count, g.last); }).join('')
+        + (subList.length>20?'<div style="font-size:11px;color:var(--t3);margin-top:6px;">…외 '+(subList.length-20)+'개 조합 더</div>':'') + '</div>';
+    }
+    if(ukList.length){
+      extraHtml += '<div class="shd" style="margin-top:10px"><div class="stl" style="color:#b45309;">⚠️ 마스터에 없는 차량번호 — '+ ukList.reduce(function(s,g){return s+g.count;},0) +'건</div>'
+        + '<div class="ssb">Daily Report의 차량번호가 <code>M_Vehicles</code>에 없어 <b>소유자(서브/자사)를 판정할 수 없습니다</b> — 서브 차량이면 지급이 누락됩니다. 오타면 리포트를, 새 차량이면 차량 마스터를 등록하세요.</div></div>'
+        + '<div class="crd" style="padding:10px 12px;">' + ukList.slice(0,20).map(function(g){ return _row('<b>'+escH(g.rego)+'</b>', g.count, g.last); }).join('') + '</div>';
+    }
+    if(!list.length && !extraHtml){ el.style.display='none'; el.innerHTML=''; return; }
+    if(!list.length){ el.style.display=''; el.innerHTML = extraHtml; return; }
     var totalTrips = list.reduce(function(s,g){ return s + g.count; }, 0);
     var rows = list.slice(0,20).map(function(g){
       return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--b1);">'
@@ -4468,7 +4523,8 @@ async function renderMissingPrices(){
     el.style.display='';
     el.innerHTML = '<div class="shd" style="margin-top:10px"><div class="stl" style="color:#b45309;">⚠️ 단가 누락 — 가격표에 단가 없는 운행 '+ totalTrips +'건 <span style="font-size:11px;font-weight:600;">('+ list.length +'개 조합)</span></div>'
       + '<div class="ssb">이 여행사·코스는 <code>M_PriceClient</code>에 단가가 없어 <b>청구가 드라이버 비용으로 잘못 잡힙니다</b>. 마스터 → 가격표에서 단가를 채우면 청구가 정확해집니다. <span style="color:var(--t3);">(최근 120일 · DC 빌링만)</span></div></div>'
-      + '<div class="crd" style="padding:10px 12px;">'+ rows + (list.length>20 ? '<div style="font-size:11px;color:var(--t3);margin-top:6px;">…외 '+(list.length-20)+'개 조합 더</div>' : '') +'</div>';
+      + '<div class="crd" style="padding:10px 12px;">'+ rows + (list.length>20 ? '<div style="font-size:11px;color:var(--t3);margin-top:6px;">…외 '+(list.length-20)+'개 조합 더</div>' : '') +'</div>'
+      + extraHtml;
   } catch(e){ console.warn('[단가누락] 렌더 실패:', e); el.style.display='none'; }
 }
 
@@ -12332,7 +12388,7 @@ function _trailerDRtoTA(dr, sn){
 // 리포트 행 → { isSub, subOwner, rego, capKey, taAmount, subCost:{base,ot,hotel,dist,trailer,total}, drCost, profit }
 function calcSubReport(r) {
   const rego = (r.Rego||'').trim();
-  const veh = DB.V.find(v=>v.Rego===rego);
+  const veh = _findVehByRego(rego);   // ★ B4: 표기 차이 허용
   const owner = (veh?.Owner||'').trim();
   const isSub = !!rego && !!veh && !DC_OWNERS.includes(owner);
   const isPrivate = r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE';
@@ -12375,6 +12431,8 @@ function calcSubReport(r) {
   const _srCourses = _srOwnerKey ? subRates[_srOwnerKey] : null;
   const _srCourseKey = _findKey(_srCourses, attraction);
   const subBase = parseFloat(_srCourseKey && _srCourses[_srCourseKey]?.[capKey]) || psRate;
+  // ★ B4: 서브 요금표(M_PriceSub)에 이 코스·좌석 요금이 없으면 기본급 $0 → 서차지만 지급됨. 플래그로 노출
+  const _subRateMissing = !(subBase > 0);
 
   // TA base 계산 (M_PriceClient에서 같은 방식으로)
   const agPC = DB.PC[agency];
@@ -12426,6 +12484,8 @@ function calcSubReport(r) {
     ? Math.round((otDR / (otRateDR/2)) * (otRateTA/2))
     : Math.round((otRateDR>0 ? otDR/otRateDR : 0) * otRateTA);
   // Night_Owner (야경 차주 납입금)
+  //   ★ 2026-10-05 확인: 차주↔드라이버 사이 금액(차주가 드라이버 지급액에서 차감). DC→SUB 지급과 무관.
+  //   그래서 subCost.night 는 '표시용'일 뿐 subCost.total(DC 지급액)에 절대 더하지 않음.
   const nightOwner = parseFloat(r.Night_Owner)||0;
 
   // ★ EG TRAVEL 정책: SUB 차량이 EG TRAVEL이면 공항 주차비도 SUB에게 지급
@@ -12534,7 +12594,8 @@ function calcSubReport(r) {
     hasTrailerSplit, // 시나리오 4 (Dong Choi 트레일러 사용)
     trailerNum,
     trailerOwner,
-    trailerSplitToDC // Dong Choi가 가져가는 트레일러 수익
+    trailerSplitToDC, // Dong Choi가 가져가는 트레일러 수익
+    _subRateMissing   // ★ B4: 서브 기본요금 없음 (대시보드 경고)
   };
 }
 
@@ -12557,7 +12618,7 @@ async function getSubReportData(from, to) {
       // Private 운행 제외
       if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return false;
       const rego = (r.Rego||'').trim();
-      const veh = DB.V.find(v=>v.Rego===rego);
+      const veh = _findVehByRego(rego);   // ★ B4
       return !!veh && !DC_OWNERS.includes((veh.Owner||'').trim());
     })
     .map(r => {
@@ -12720,7 +12781,7 @@ function getSubRates(){
 }
 // 차량 Rego → Owner(서브 회사명) 조회 헬퍼
 function getOwnerByRego(rego){
-  const veh = DB.V.find(v=>v.Rego===rego);
+  const veh = _findVehByRego(rego);   // ★ B4
   return (veh?.Owner||'').trim();
 }
 async function loadSubRatesFromSheet(){
@@ -18718,8 +18779,8 @@ async function _syncDailyReportSubToSubTxn(){
       if(r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE') return;
       const rego = (r.Rego||'').trim();
       if(!rego) return;
-      // 차량 owner 조회
-      const veh = vehicles.find(v => v.Rego === rego);
+      // 차량 owner 조회 (★ B4: 표기 차이 허용)
+      const veh = _findVehByRego(rego);
       if(!veh) return;
       const owner = (veh.Owner||'').trim();
       if(!owner) return;
@@ -19622,7 +19683,7 @@ function _subBalances(){
     (_drCache || []).forEach(r => {
       if(isBillingEntityDC(r.Billing_Entity || r.BillingEntity || '')) return;
       const rego = String(r.Rego||'').trim();
-      const veh = DB.V.find(v => v.Rego === rego);
+      const veh = _findVehByRego(rego);   // ★ B4
       const owner = veh ? String(veh.Owner||'').trim() : '';
       const isDCVehicle = !owner || DC_OWNERS.includes(owner);
       if(isDCVehicle) return; // 시나리오 3 — 통과
