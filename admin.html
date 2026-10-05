@@ -16114,8 +16114,12 @@ async function adminSaveNewDR(){
   }
 
   // 제출 시간 자동 채우기 (관리자가 작성한 시각)
-  const _now = new Date();
-  data.Submitted = _now.toLocaleString('en-AU', {timeZone:'Australia/Sydney'});
+  // ★ C5 (2026-10-05): 드라이버 앱·서버와 같은 'dd/MM/yyyy HH:mm'(시드니) 형식 — 예전 '05/10/2026, 11:35:00 pm'은 날짜 파싱·정렬 불가
+  data.Submitted = (function(){
+    const p = {}; new Intl.DateTimeFormat('en-GB', {timeZone:'Australia/Sydney', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hourCycle:'h23'})
+      .formatToParts(new Date()).forEach(x => { p[x.type] = x.value; });
+    return p.day+'/'+p.month+'/'+p.year+' '+p.hour+':'+p.minute;
+  })();
 
   // 저장 버튼 비활성화
   const btn = document.querySelector('#dr-edit-wrap button.bac');
@@ -17197,7 +17201,7 @@ async function generateSubInvoice(){
   const invData = {
     InvNumber: invNum, Agency: agencyLabel, PeriodFrom: autoFrom, PeriodTo: autoTo,
     GrandTotal: grandTotal.toFixed(2), GST: gst.toFixed(2), ExGST: exGst.toFixed(2),
-    Status: 'Issued', IssuedDate: new Date().toLocaleDateString('en-AU'),
+    Status: 'Issued', IssuedDate: '',   // ★ C5: 서버가 시드니 기준 'dd/MM/yyyy HH:mm:ss'로 자동 설정 (다른 인보이스와 동일 형식)
     Items: JSON.stringify(items), ManualItems:'', Deductions:'',
     Notes: 'SUB 재발행: '+subName, CreatedBy: ST.user||'admin',
     Source: 'SUB', SubCompany: subName
