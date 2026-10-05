@@ -3222,7 +3222,30 @@ function _softReauth(reason){
       }
     } catch(e){ console.warn('[fetch interceptor]', e); }
 
+    // ★ D1 (2026-10-05): GAS 요청 시간 제한 — 서버 지연 시 '저장 중…'에 영구히 멈추던 문제
+    //   호출부가 자체 signal을 준 경우는 그대로 둠. 조회 60초 / 저장 120초.
+    //   시간 초과 → fetch가 AbortError로 실패 → 각 화면의 catch(_fail 등)가 버튼 복구.
+    let _d1Tid = null;
+    try {
+      const _u0 = typeof input === 'string' ? input : (input && input.url) || '';
+      if (_u0.indexOf(GAS_URL) === 0 && !(init && init.signal) && typeof AbortController !== 'undefined') {
+        const _isRead = !!_legacyGet || /"_get"\s*:\s*1/.test(String((init && init.body) || ''));
+        const _ms = _isRead ? 60000 : 120000;
+        const _ctl = new AbortController();
+        _d1Tid = setTimeout(() => {
+          _ctl.abort();
+          try {
+            if (typeof toast === 'function') toast(_isRead
+              ? '⏱ 서버 응답이 늦습니다 — 잠시 후 다시 시도하세요'
+              : '⏱ 서버 응답이 늦습니다 — 저장됐을 수 있으니 새로고침 후 확인하세요', 'er');
+          } catch(_te){}
+        }, _ms);
+        init = Object.assign({}, init || {}, { signal: _ctl.signal });
+        if (_legacyGet) _legacyGet.init = Object.assign({}, _legacyGet.init || {}, { signal: _ctl.signal });
+      }
+    } catch(_de){}
     let p = _originalFetch(input, init);
+    if (_d1Tid) p = p.finally(() => clearTimeout(_d1Tid));
     // ★ A10: 구버전 서버(doPost에 _get 경로 없음) 호환 — Unknown action 이면 기존 GET 방식으로 1회 재시도
     if (_legacyGet) {
       const _lg = _legacyGet;
