@@ -27436,7 +27436,7 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
     // ★ FIX: sendAction 전달하여 두 번째 미리보기에서도 동일 인보이스 번호 유지
     _showDocModal(docHtml, {invNumber, agency, from:periodFrom, to:periodTo});
     const s = encodeURIComponent(subject), b = encodeURIComponent(body);
-    setTimeout(() => { window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(toEmail)}&su=${s}&body=${b}`, '_blank'); }, 1000);
+    _openOrOfferLink(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(toEmail)}&su=${s}&body=${b}`, '✉️ Gmail 열기');   // ★ D6
   }
 }
 
@@ -28370,11 +28370,39 @@ async function previewInvoiceDoc() {
 }
 
 // ─── 인보이스 PDF 다운로드 ───
+// ★ D6 (2026-10-05): 서버 응답을 기다린 뒤 window.open 하면 브라우저 팝업 차단 → 열기 시도 후 막히면 클릭용 링크 배너 표시
+function _openOrOfferLink(url, label){
+  let w = null;
+  try { w = window.open(url, '_blank'); } catch(e){}
+  if (w) return;
+  try {
+    const old = document.getElementById('d6-link-banner'); if (old) old.remove();
+    const d = document.createElement('div');
+    d.id = 'd6-link-banner';
+    d.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:10050;background:#111827;color:#fff;border-radius:12px;padding:10px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:13px;max-width:92vw;';
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = label || '새 창 열기';
+    a.style.cssText = 'background:#4f46e5;color:#fff;padding:7px 12px;border-radius:8px;font-weight:700;text-decoration:none;white-space:nowrap;';
+    a.onclick = () => setTimeout(() => d.remove(), 300);
+    const t = document.createElement('span'); t.textContent = '팝업이 차단되었습니다 —';
+    const x = document.createElement('button'); x.textContent = '✕';
+    x.style.cssText = 'background:none;border:none;color:#9ca3af;font-size:15px;cursor:pointer;';
+    x.onclick = () => d.remove();
+    d.appendChild(t); d.appendChild(a); d.appendChild(x);
+    document.body.appendChild(d);
+  } catch(e){}
+}
+
 async function downloadInvoicePdf() {
   const agency = document.getElementById('inv-agency')?.value;
   const from   = document.getElementById('inv-from')?.value;
   const to     = document.getElementById('inv-to')?.value;
   if (!agency || !from || !to) { toast('여행사와 기간을 선택하세요', 'er'); return; }
+
+  // ★ D6: 서버 로딩(await) 전에 클릭 즉시 창을 먼저 연다 (이후 열면 팝업 차단 → win=null 오류로 PDF 전체 실패)
+  let win = null;
+  try { win = window.open('', '_blank', 'width=900,height=700'); if (win) win.document.write('<p style="font-family:sans-serif;padding:20px;color:#666;">📄 인보이스 준비 중...</p>'); } catch(e){ win = null; }
 
   // ★ 캐시가 비어 있으면 다시 로드 (리포트/SUB 항목 누락 방지)
   if (!_invReports) {
@@ -28401,14 +28429,21 @@ async function downloadInvoicePdf() {
 
   let rows = _buildInvRows(agency, from, to).sort((a, b) => a._iso.localeCompare(b._iso));
   rows = rows.filter((r,ri) => !_invExcludes[_invRowKey(r,ri)]);
-  if (rows.length === 0) { toast('해당 기간 리포트 없음', 'er'); return; }
+  if (rows.length === 0) { try { if (win) win.close(); } catch(e){} toast('해당 기간 리포트 없음', 'er'); return; }
 
   const invNum = _lastGeneratedInvNum || getInvNum(agency, from);
   const html = _buildInvoiceHTML(agency, from, to, rows, {isDraft:false, invNumOverride:invNum});
-  const win = window.open('', '_blank', 'width=900,height=700');
+  if (!win || win.closed) {
+    // 팝업이 막힌 경우 → 앱 안 미리보기로 대체 (여기서 인쇄/PDF 저장 가능)
+    toast('팝업이 차단되어 미리보기로 엽니다 — 미리보기에서 인쇄/PDF 저장하세요', 'er');
+    try { _showDocModal(html, {invNumber:invNum, agency, from, to}); } catch(e){}
+    return;
+  }
+  win.document.open();
   win.document.write(html);
   win.document.close();
-  win.onload = () => { win.focus(); win.print(); };
+  // 이미 열린 창을 다시 쓰는 경우 onload 재발생 여부가 브라우저마다 달라 → 렌더 후 1회 인쇄
+  setTimeout(() => { try { win.focus(); win.print(); } catch(e){} }, 400);
 }
 
 // ─── 인보이스 생성 (발행) ───
@@ -28708,7 +28743,7 @@ async function emailInvoice() {
     const s = encodeURIComponent(subject);
     const b = encodeURIComponent(body);
     const fromEmail = encodeURIComponent(DC_COMPANY.email || 'branden.dongchoi@gmail.com');
-    setTimeout(() => { window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(toEmail)}&su=${s}&body=${b}&from=${fromEmail}`, '_blank'); }, 1000);
+    _openOrOfferLink(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(toEmail)}&su=${s}&body=${b}&from=${fromEmail}`, '✉️ Gmail 열기');   // ★ D6
   } finally {
     if (emailBtn) { emailBtn.disabled = false; emailBtn.textContent = '✉️ 발송'; }
   }
@@ -35849,7 +35884,7 @@ async function emailQuotation() {
     const s = encodeURIComponent(subject);
     const b = encodeURIComponent(body);
     const fromEmail = encodeURIComponent(DC_COMPANY.email || 'branden.dongchoi@gmail.com');
-    window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(toEmail)}&su=${s}&body=${b}&from=${fromEmail}`, '_blank');
+    _openOrOfferLink(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(toEmail)}&su=${s}&body=${b}&from=${fromEmail}`, '✉️ Gmail 열기');   // ★ D6
   } finally {
     if (emailBtn) { emailBtn.disabled=false; emailBtn.textContent='✉️ 발송'; }
   }
