@@ -25442,6 +25442,21 @@ function getExistingOrNewInvNum(agency, from, to) {
   return getInvNum(agency, from);
 }
 
+// ★ B6: 저장된 인보이스 항목 → 다시 열 때 '서차지(extra) 수정값' 복원
+//   저장 시 extra(수정값)와 개별 서차지(자동값)를 함께 저장하지만, 재로드는 개별 서차지만 더해서
+//   수정값이 사라지고 발행 금액과 달라졌음. 차이를 Etc '수정 금액 조정'으로 넣어 합계를 발행값과 일치시킴.
+function _savedItemEtcAdjust(it){
+  const n = v => Number(v)||0;
+  const etc = n(it.etc);
+  const desc = String(it.etcDesc||'');
+  const hasIndiv = it.hotel!==undefined || it.dist!==undefined || it.trailer!==undefined;
+  if(!hasIndiv || it.extra === undefined || it.extra === null || it.extra === '') return { etc, etcDesc: desc };
+  const comps = n(it.hotel)+n(it.dist)+n(it.early)+n(it.parking)+n(it.trailer)+n(it.night)+n(it.tip)+n(it.meal)+n(it.toll)+etc;
+  const diff = Math.round((n(it.extra) - comps)*100)/100;
+  if(Math.abs(diff) < 0.005) return { etc, etcDesc: desc };
+  return { etc: Math.round((etc + diff)*100)/100, etcDesc: (desc ? desc+' · ' : '') + '수정 금액 조정' };
+}
+
 // 항목 고유 키 (날짜+차량+인덱스)
 function _invRowKey(r, idx) {
   return (r._iso||r.Date||'') + '_' + (r.Rego||'') + '_' + idx;
@@ -25568,7 +25583,9 @@ async function saveInvoiceToSheet(_recoverNum, _skipBalance) {
   }
 
   // 항목 요약 JSON (DR 항목)
-  const itemsSummary = rows.filter((r,ri)=>!_invExcludes[_invRowKey(r,ri)] && !r._manual).map((r,ri) => {
+  // ★ B6 (2026-10-05): filter 후 map의 인덱스는 '필터 후 위치'라 override 키(_invRowKey=원래 위치)와 어긋났음
+  //   → 앞에 제외/수동 행이 있으면 수정값이 다른 행에 붙거나 사라짐. 원래 인덱스를 보존해 조회.
+  const itemsSummary = rows.map((r,ri)=>({r,ri})).filter(({r,ri})=>!_invExcludes[_invRowKey(r,ri)] && !r._manual).map(({r,ri}) => {
     const c  = calcInvRow(r);
     const ov = _invOverrides[_invRowKey(r,ri)] || {};
     const _extra = c.earlyTA+c.hotel+c.dist+(c.parkingFee||0)+(c.trailerVal||0)+(c.nightTA||0)+(c.tipVal||0)+(c.mealVal||0)+(c.tollVal||0)+(c.etcTA||0);
@@ -26766,7 +26783,7 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
     try {
       const savedItems = JSON.parse(savedInv.Items);
       // Items JSON → report-row 형식 변환 (_fromSaved=true → calcInvRow에서 TA 역산 건너뛰기)
-      const editRows = savedItems.map(it => ({
+      const editRows = savedItems.map(it => { const _adj = _savedItemEtcAdjust(it); return ({
         _iso:            (it.date||'').slice(0,10),
         Date:            it.date||'',
         Rego:            it.rego||'',
@@ -26792,13 +26809,13 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
         Tip:             Number(it.tip)||0,
         Meal:            Number(it.meal)||0,
         Toll:            Number(it.toll)||0,
-        Etc:             Number(it.etc)||0,
-        Etc_Desc:        it.etcDesc||'',
+        Etc:             _adj.etc,          // ★ B6: 서차지 수정값 복원 포함
+        Etc_Desc:        _adj.etcDesc,
         _agency:         agency,
         Agency:          agency,
         _fromSaved:      true,       // ★ calcInvRow에서 TA 역산 건너뛰기
         _rateSource:     it.rateSource||'svc',
-      }));
+      }); });
 
       // 수동 항목도 행으로 추가
       const mKey = agency + '_' + periodFrom.slice(0,7);
@@ -26972,6 +26989,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
       const _savedRows = _si.map(item => {
         // ★ 개별 서차지가 있으면 사용, 없으면 레거시 extra → Hotel_Surcharge 폴백
         const hasIndiv = item.hotel!==undefined || item.dist!==undefined || item.trailer!==undefined;
+        const _adj = _savedItemEtcAdjust(item);   // ★ B6: 서차지 수정값 복원
         return {
           _iso: item.date||'', Date: item.date||'',
           Attraction: item.tour||'-', Rego: item.rego||'', Seats: item.seats||'',
@@ -26985,7 +27003,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
           Dist_Surcharge: item.dist||0, Early: item.early||0,
           Parking: item.parking||0, Trailer: item.trailer||0,
           Night_DR: item.night||0, Tip: item.tip||0,
-          Meal: item.meal||0, Toll: item.toll||0, Etc: item.etc||0, Etc_Desc: item.etcDesc||''
+          Meal: item.meal||0, Toll: item.toll||0, Etc: _adj.etc, Etc_Desc: _adj.etcDesc
         };
       });
       _sm.forEach(m => {
@@ -27947,11 +27965,11 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     if ((c.tipVal||0) > 0) surLines.push({label: 'Tip', amount: c.tipVal});
     if ((c.mealVal||0) > 0) surLines.push({label: 'Meal', amount: c.mealVal});
     if ((c.tollVal||0) > 0) surLines.push({label: 'Toll', amount: c.tollVal});
-    if ((c.etcTA||0) > 0) surLines.push({label: 'Etc'+(c.etcDesc?' ('+escH(c.etcDesc)+')':''), amount: c.etcTA});
+    if ((c.etcTA||0) !== 0) surLines.push({label: 'Etc'+(c.etcDesc?' ('+escH(c.etcDesc)+')':''), amount: c.etcTA});   // ★ B6: 감액 조정(음수)도 표시
 
     if (surLines.length > 0) {
       surLines.forEach(s => {
-        svcHtml += '<div style="font-size:10px;color:#64748b;margin-top:2px;padding-left:10px;">+ '+s.label+': +'+_fmtAmt(s.amount)+'</div>';
+        svcHtml += '<div style="font-size:10px;color:#64748b;margin-top:2px;padding-left:10px;">'+(s.amount<0?'− ':'+ ')+s.label+': '+(s.amount<0?'−':'+')+_fmtAmt(Math.abs(s.amount))+'</div>';
       });
     }
 
