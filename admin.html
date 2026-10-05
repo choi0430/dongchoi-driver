@@ -3177,8 +3177,13 @@ function _softReauth(reason){
   const GAS_URL = APPS_SCRIPT_URL;
   const _originalFetch = window.fetch.bind(window);
 
+  // ★ D2: 서버 멱등성 게이트(_IDEMPOTENT_ACTIONS)와 같은 목록 중 관리자 앱이 data를 보내는 저장 액션
+  const _D2_IDEM = { save_report:1, update_report:1, save_invoice:1, update_invoice_status:1,
+    add_agency_txn:1, update_agency_txn:1, add_sub_txn:1, update_sub_txn:1, add_ledger:1, update_ledger:1,
+    add_wage:1, update_wage:1, add_master:1, update_master:1, save_schedule:1, update_schedule_status:1 };
   window.fetch = function(input, init){
     let _legacyGet = null;
+    let _d2Key = null;
     try {
       const url = typeof input === 'string' ? input : (input && input.url);
       if (url && url.indexOf(GAS_URL) === 0) {
@@ -3215,6 +3220,19 @@ function _softReauth(reason){
               parsed.token = token;
               // ★ C3: 행 번호 기반 수정/삭제에 원래 행 식별값 첨부 (서버가 대상 행 검증)
               try { if (parsed.rowIndex && !parsed._match && typeof _rowMatchFor === 'function') { const _m = _rowMatchFor(parsed.action, parsed.sheet, parsed.rowIndex); if (_m) parsed._match = _m; } } catch(_me){}
+              // ★ D2: 저장 요청에 Request_ID — 응답을 못 받은(시간초과·네트워크) 같은 내용 재저장은 같은 번호 재사용 → 서버가 중복 차단
+              try {
+                if (_D2_IDEM[parsed.action] && parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data) && !parsed.data.Request_ID) {
+                  const _k = parsed.action + '|' + (parsed.sheet||'') + '|' + (parsed.rowIndex||'') + '|' + JSON.stringify(parsed.data);
+                  const _pend = window._d2Pending || (window._d2Pending = {});
+                  const _now = Date.now();
+                  Object.keys(_pend).forEach(k => { if (_now - _pend[k].t > 10*60*1000) delete _pend[k]; });   // 10분 지난 것 정리
+                  const _id = (_pend[_k] && _pend[_k].id) || ('ADM-' + _now.toString(36) + '-' + Math.random().toString(36).slice(2, 8));
+                  _pend[_k] = { id: _id, t: _now };
+                  parsed.data.Request_ID = _id;
+                  _d2Key = _k;
+                }
+              } catch(_ie){}
               init = Object.assign({}, init, {body: JSON.stringify(parsed)});
             }
           } catch(e) { /* body가 JSON이 아니면 건드리지 않음 */ }
@@ -3246,6 +3264,7 @@ function _softReauth(reason){
     } catch(_de){}
     let p = _originalFetch(input, init);
     if (_d1Tid) p = p.finally(() => clearTimeout(_d1Tid));
+    if (_d2Key) { const _k2 = _d2Key; p = p.then(res => { try { if (window._d2Pending) delete window._d2Pending[_k2]; } catch(_){ } return res; }); }   // ★ D2: 응답 받음 → 번호 폐기
     // ★ A10: 구버전 서버(doPost에 _get 경로 없음) 호환 — Unknown action 이면 기존 GET 방식으로 1회 재시도
     if (_legacyGet) {
       const _lg = _legacyGet;
