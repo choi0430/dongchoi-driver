@@ -3213,6 +3213,8 @@ function _softReauth(reason){
             const parsed = JSON.parse(init.body);
             if (parsed && typeof parsed === 'object' && !parsed.token) {
               parsed.token = token;
+              // ★ C3: 행 번호 기반 수정/삭제에 원래 행 식별값 첨부 (서버가 대상 행 검증)
+              try { if (parsed.rowIndex && !parsed._match && typeof _rowMatchFor === 'function') { const _m = _rowMatchFor(parsed.action, parsed.sheet, parsed.rowIndex); if (_m) parsed._match = _m; } } catch(_me){}
               init = Object.assign({}, init, {body: JSON.stringify(parsed)});
             }
           } catch(e) { /* body가 JSON이 아니면 건드리지 않음 */ }
@@ -3269,6 +3271,31 @@ function _softReauth(reason){
     });
   };
 })();
+
+// ★ C3: 수정/삭제 요청의 원래 행 식별값 — 로컬 캐시에서 rowIndex로 찾아 핵심 필드만 반환 (없으면 null → 검증 생략)
+//   마스터 '수정'은 저장 전에 캐시를 먼저 바꾸는 흐름이라 원래 값을 알 수 없어 제외(삭제만 검증).
+function _rowMatchFor(action, sheet, rowIndex){
+  const ri = Number(rowIndex);
+  const pick = (row, keys) => { if(!row) return null; const m = {}; keys.forEach(k => { if(row[k]!==undefined && row[k]!==null && String(row[k]).trim()!=='') m[k] = row[k]; }); return Object.keys(m).length ? m : null; };
+  const find = arr => Array.isArray(arr) ? arr.find(r => r && Number(r._rowIndex) === ri) : null;
+  if(/_agency_txn$/.test(action)) return pick(find(typeof _balAgencyTxns!=='undefined' ? _balAgencyTxns : null), ['RowID']);
+  if(/_sub_txn$/.test(action))    return pick(find(typeof _balSubTxns!=='undefined' ? _balSubTxns : null), ['RowID']);
+  if(action === 'update_report' || action === 'delete_report'){
+    if(sheet === 'Daily_Report') return pick(find(typeof _drCache!=='undefined' ? _drCache : null), ['Driver','Date','Rego','Attraction']);
+    if(typeof _shiftCache !== 'undefined' && _shiftCache){
+      if(sheet === 'Pre_Departure') return pick(find(_shiftCache.pre), ['Driver','Date','Rego']);
+      if(sheet === 'End_of_Shift')  return pick(find(_shiftCache.eos), ['Driver','Date','Rego']);
+    }
+    return null;
+  }
+  if(action === 'delete_master'){
+    const map = { M_Vehicles:[DB.V,['Rego']], M_Drivers:[DB.D,['Name_EN','Name_KR']], M_Clients:[DB.C,['Name']],
+                  M_Guides:[DB.G,['Guide_Name','GuideID']], M_Hotels:[DB.H,['Hotel_Name']], M_Trailers:[DB.T,['Trailer_Number']],
+                  M_SUB:[(typeof _subCompanies!=='undefined'?_subCompanies:null),['SubName']] };
+    const e = map[sheet]; return e ? pick(find(e[0]), e[1]) : null;
+  }
+  return null;
+}
 
 // ===== GAS POST 안전 호출 헬퍼 =====
 async function gasPost(bodyObj){
@@ -29938,8 +29965,8 @@ async function clearDREtc(rowIdx){
   const updated = {...orig, Etc:'0', Etc_Desc:''};
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'update_report', sheet:'Daily_Report', rowIndex:rowIdx, data:updated})
+      method:'POST', headers:{'Content-Type':'text/plain'},   // ★ application/json은 CORS preflight로 GAS에서 차단됨
+      body:JSON.stringify({action:'update_report', sheet:'Daily_Report', rowIndex:rowIdx, data:(({_rowIndex,_isoDate,...x})=>x)(updated)})
     });
     const data = await res.json();
     if(!data.ok) throw new Error(data.error||'서버 오류');
