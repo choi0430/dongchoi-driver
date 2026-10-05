@@ -12388,10 +12388,8 @@ function calcSubReport(r) {
     }
     return e || null;
   };
-  const ce = agPC ? _findCourse(agPC, attraction) : null;
-  let taBase = 0;
-  if(ce){ const sd = ce[capKey] || ce['21']; taBase = parseFloat(sd?.rate)||0; }
-  if(taBase === 0) taBase = parseFloat(r.SVC_Charge)||0;
+  // ★ B1: TA base 도 인보이스와 동일 소스 (여행사명 대소문자·서브 수신처 호주로 기준 포함)
+  const taBase = taBreakdown(r).baseRate;
 
   // TA 서차지 합계 = taAmount - taBase (TA 표시용)
   const taSurchargeTotal = taAmount - taBase;
@@ -12411,9 +12409,12 @@ function calcSubReport(r) {
   //   소유 판정은 여기서 금액을 바꾸지 않음. DC 소유 트레일러일 때만
   //   아래 trailerSplitToDC에서 별도 -$30 렌트비 회수 거래를 붙인다.
   const _isBlueskySub = /bluesky/i.test(agency);
-  let trailerSub = (_isBlueskySub && trailerDR_raw > 0 && capNum < 40)
-    ? 50
-    : _trailerDRtoTA(trailerDR_raw, capNum);
+  const _isMercurySub = /mercury/i.test(agency);   // ★ B1: Mercury 청구 $30 = 서브 지급 $30 (2026-10-05 결정)
+  let trailerSub = (_isMercurySub && trailerDR_raw > 0 && capNum < 40)
+    ? 30
+    : (_isBlueskySub && trailerDR_raw > 0 && capNum < 40)
+      ? 50
+      : _trailerDRtoTA(trailerDR_raw, capNum);
   const _trlOwn = _trailerOwnership(String(r.Trailer_Number||'').trim());
   // OT TA값
   const otDR = parseFloat(r.OT)||0;
@@ -12970,6 +12971,13 @@ function calcProfit(){
 // ── 에이전시 TA 실시간 계산 (M_PriceClient 기반) ──
 // Daily_Report 행 데이터에서 M_PriceClient rate + 서차지 역산으로 에이전시 청구금액 산출
 function calcAgencyTA(r){
+  // ★ B1: 인보이스와 동일한 계산(taBreakdown) 사용 — 수익/마진이 실제 청구액과 일치
+  const _b = taBreakdown(r);
+  calcAgencyTA._lastMissing = !!_b._rateMissing;
+  return _b.total;
+}
+// (B1 이전 계산식 — 전후 비교/검증용으로만 보존, 화면에서는 사용 안 함)
+function _calcAgencyTA_legacy(r){
   const agency     = String(r.Agency||r.agency||'').trim();
   const attraction = String(r.Attraction||r.tour||'').trim();
   const seatsRaw   = String(r.Seats||r.seats||'').replace('S','').trim();
@@ -12992,8 +13000,7 @@ function calcAgencyTA(r){
     _rateMissing = true;   // 청구 단가 없음 — 데이터 보정 필요
     taBase = svc;          // 합계 폭주 방지용 임시값 (화면엔 ⚠️ 로 표시)
   }
-  // 마지막 호출의 누락 여부를 side-channel 로 노출 (렌더가 calcAgencyTA 직후 확인)
-  calcAgencyTA._lastMissing = _rateMissing;
+  // (legacy) side-channel 미사용
 
   // 2) 서차지 DR→TA 역산
   const htl = parseFloat(r.Hotel_Surcharge||r.hotel||0);
@@ -13043,6 +13050,43 @@ function calcAgencyTA(r){
 
   return taBase + otTA + htlTA + dstTA + erlTA + parking + tollTA + trlTA;
 }
+
+// ★ B1 검증 도구 — 관리자 앱 콘솔(F12)에서 실행:  await _b1Compare('2026-09-01','2026-09-30')
+//   기간 내 Daily Report마다 '이전 수익 계산(TA)' vs '새 계산(=인보이스와 동일)'을 비교해 표로 출력.
+//   좌석 값이 요금표 열(21/25/40/50)과 달라 인보이스 금액 자체가 바뀌는 행도 따로 표시.
+window._b1Compare = async function(from, to){
+  let cache = (typeof _drCache !== 'undefined') ? _drCache : null;
+  if(!cache || !cache.length){
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report');
+      const json = await res.json();
+      if(json.ok && json.rows){ cache = json.rows; try { _drCache = cache; } catch(e){} }
+    } catch(e){ console.error('Daily_Report 로드 실패', e); return; }
+  }
+  const inRange = r => { const d = parseToISO(r.Date||'') || ''; return (!from || d >= from) && (!to || d <= to); };
+  const out = []; const byAg = {};
+  (cache||[]).filter(inRange).forEach(r => {
+    let oldTA = 0, newTA = 0;
+    try { oldTA = Number(_calcAgencyTA_legacy(r))||0; } catch(e){}
+    try { newTA = Number(calcAgencyTA(r))||0; } catch(e){}
+    const seatDigits = String(r.Seats||'').replace(/[^0-9]/g,'');
+    const oddSeat = seatDigits && ['21','25','40','50'].indexOf(seatDigits) < 0;
+    const merTrl = /mercury/i.test(r.Agency||'') && (parseFloat(r.Trailer)||0) > 0;
+    const diff = Math.round((newTA - oldTA)*100)/100;
+    const ag = String(r.Agency||'(없음)').trim();
+    byAg[ag] = byAg[ag] || {여행사:ag, 건수:0, 이전합계:0, 새합계:0, 차이:0};
+    byAg[ag].건수++; byAg[ag].이전합계 += oldTA; byAg[ag].새합계 += newTA; byAg[ag].차이 += diff;
+    if(diff !== 0 || oddSeat || merTrl){
+      out.push({날짜: fmtDate(r.Date||''), 드라이버: r.Driver||'', 여행사: ag, 코스: r.Attraction||'', 좌석: r.Seats||'',
+        이전TA: oldTA, 새TA: newTA, 차이: diff,
+        비고: [oddSeat?'좌석열 정규화(인보이스 금액도 변경)':'', merTrl?'Mercury 트레일러(서브 지급 $30)':''].filter(Boolean).join(' / ')});
+    }
+  });
+  const summary = Object.values(byAg).filter(x => x.차이 !== 0).sort((a,b)=>Math.abs(b.차이)-Math.abs(a.차이));
+  console.log('▶ 여행사별 수익(TA) 차이 — 이전 계산 vs 새 계산(인보이스와 동일)'); console.table(summary);
+  console.log('▶ 차이 나는 운행 ' + out.length + '건'); console.table(out);
+  return { summary, rows: out };
+};
 
 // ── 청구 단가 누락 판정 (call-order 의존 없는 독립 헬퍼) ──
 // agency/course 매칭은 되지만 해당 좌석수 rate 가 공란이면 true.
@@ -23152,7 +23196,7 @@ function _calcSlotInvoiceItem(tour, day, slot, slotKey){
   if(slot.startTime){
     const isEarly = slot.startPlaceType === 'hotel' && slot.endPlaceType === 'airport' && slot.startTime < '06:00';
     const isLate = slot.startPlaceType === 'airport' && slot.endPlaceType === 'hotel' && slot.startTime >= '23:00';
-    if(isEarly || isLate){
+    if((isEarly || isLate) && !/bluesky/i.test(agency)){   // ★ B1: Bluesky는 Early/Late 미청구 (인보이스와 동일)
       const _isHojuro = /호주로|hojuro|plus\s*australia/i.test(agency);
       const seatNum = parseInt(seats) || 21;
       if(_isHojuro && seatNum < 40){
@@ -24335,6 +24379,26 @@ function calcInvRow(r) {
     };
   }
 
+  return taBreakdown(r);
+}
+
+// ═══════════════════════════════════════════════════════
+// ★ B1 (2026-10-05): 여행사 청구(TA) 계산 단일 소스
+//   인보이스(calcInvRow) · 수익/마진(calcAgencyTA) · 서브 정산(calcSubReport)의 TA가
+//   모두 이 함수를 사용 → 화면마다 금액이 어긋나지 않음. 규칙 변경은 여기 한 곳만.
+//   (Bluesky Early 미청구·트레일러 $50, Mercury 트레일러 $30, 호주로 OT UNIT/주차 제외,
+//    야간·팁·식비 포함, Etc 기본 미포함, 인보이스 행별 토글 override 반영)
+// ═══════════════════════════════════════════════════════
+function taBreakdown(r) {
+  const agency     = (r._agency || String(r.Agency||r.agency||'')).trim();
+  const attraction = String(r.Attraction||r.tour||'').trim();
+  const seats      = String(r.Seats||r.seats||'').trim();
+  const otDR       = parseFloat(r.OT!=null&&r.OT!==''?r.OT:r.ot)                  || 0;
+  const hotelDR    = parseFloat(r.Hotel_Surcharge!=null&&r.Hotel_Surcharge!==''?r.Hotel_Surcharge:r.hotel) || 0;
+  const distDR     = parseFloat(r.Dist_Surcharge!=null&&r.Dist_Surcharge!==''?r.Dist_Surcharge:r.dist)    || 0;
+  const earlyDR    = parseFloat(r.Early) || 0;
+  const seatNum = parseInt(seats.replace(/[^0-9]/g,''))||21;
+
   // ── 서브(코치 회사) 직접 청구 시 요금 기준 여행사 = Tour Hojuro ──
   //   서브끼리 주고받은 일정은 자체 요금표(M_PriceClient)가 없으므로 Tour Hojuro 기준으로 자동계산.
   //   (금액이 다를 경우 인보이스 화면에서 행별로 수동 수정)
@@ -24357,7 +24421,7 @@ function calcInvRow(r) {
   const _otHalfDR = _otRateDR / 2;  // 30분 UNIT당 DR rate
   const _otHalfTA = _otRateTA / 2;  // 30분 UNIT당 TA rate
   const _otHrs = _isHojuroOT ? (otDR / _otHalfDR) * 0.5 : (_otRateDR>0 ? otDR/_otRateDR : 0);
-  const ot = _isHojuroOT ? Math.round((otDR / _otHalfDR) * _otHalfTA) : Math.round(_otHrs * _otRateTA);
+  let ot = _isHojuroOT ? Math.round((otDR / _otHalfDR) * _otHalfTA) : Math.round(_otHrs * _otRateTA);
 
   // ── Hotel/Dist DR → TA 역산 ──
   // Hotel: 21/25S DR $10→TA $40, DR $20→TA $80 / 40S DR $15→TA $75, DR $30→TA $150 / 50S DR $15→TA $80, DR $30→TA $160
@@ -24374,11 +24438,12 @@ function calcInvRow(r) {
     if(sn>=40) return dr===40?150:dr*3.75;            // 40S: DR $40→TA $150
     return dr===30?80:Math.round(dr*2.67);            // 21/25S: DR $30→TA $80
   }
-  const hotel = hotelDRtoTA(hotelDR, seatNum);
-  const dist  = distDRtoTA(distDR, seatNum);
+  let hotel = hotelDRtoTA(hotelDR, seatNum);
+  let dist  = distDRtoTA(distDR, seatNum);
 
   // seats 숫자 추출: "21S" → "21"
-  const seatKey = seats.replace(/[^0-9]/g,'') || '21';
+  // ★ B1: 요금표 열(21/25/40/50) 구간으로 정규화 — 예전엔 '45'·'57' 같은 값이 열을 못 찾아 21석 요금으로 떨어졌음
+  const seatKey = seatNum>=50?'50':seatNum>=40?'40':seatNum>=25?'25':'21';
 
   // ── 헬퍼: DB.PC에서 코스 엔트리 찾기 (대소문자 무시) ──
   function findCourse(pc, courseName) {
@@ -24534,7 +24599,7 @@ function calcInvRow(r) {
     trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal, etcTA, _etcKey, etcDesc, total, rateSource,
     _rowPrefix,
     _hotelAuto, _distAuto, _earlyAuto, _otAuto, _trailerAuto, _nightAuto, _tipAuto, _mealAuto, _tollAuto,
-    _otHrs };
+    _otHrs, _rateMissing: rateSource !== 'price_table' };
 }
 async function initInvoice(forceReload) {
   if (forceReload) _invReports = null; // 명시적 새로고침 시에만 리포트 재로드
