@@ -2619,7 +2619,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div id="bal-view-sub" style="display:none;">
     <div id="bal-sub-summary" style="padding:10px 14px 0;"></div>
     <div style="padding:6px 14px 0;display:flex;gap:6px;align-items:center;">
-      <input type="text" id="bal-sub-search" class="profit-finp" placeholder="서브 회사 검색..." oninput="renderBalSubList()" style="flex:1;font-size:12px;">
+      <input type="text" id="bal-sub-search" class="profit-finp" placeholder="서브 회사 검색..." oninput="_balSubSearchInput()" style="flex:1;font-size:12px;">
       <button class="btn bac sm" onclick="openBalTxnModal('sub',null)">+ 거래 추가</button>
     </div>
     <div id="bal-sub-list" style="padding:8px 14px 80px;"></div>
@@ -19908,9 +19908,27 @@ function _subBalances(){
   }).sort((a,b)=>b.balance-a.balance);
 }
 
-function renderBalSubList(){
+// ★ D3 (2026-10-05): 검색창 글자마다 서브 잔액 전체(_subBalances)를 재계산하던 문제
+//   → 입력 0.2초 디바운스 + '검색어만 바뀐 경우'에 한해 직전 계산 재사용(입력 데이터 참조·길이가 같을 때만).
+//   일반 렌더/저장 후에는 항상 새로 계산(금액 로직 변경 없음).
+let _balSubSearchTimer = null;
+function _balSubSearchInput(){
+  clearTimeout(_balSubSearchTimer);
+  _balSubSearchTimer = setTimeout(() => renderBalSubList(true), 200);
+}
+function _balSubInputsSig(){
+  const L = a => Array.isArray(a) ? a.length : -1;
+  let ovn = 0; try { ovn = JSON.stringify(_payoutOverrides||{}).length; } catch(e){}
+  return [L(_balSubTxns), L(typeof _balWageTxns!=='undefined'?_balWageTxns:null), L(_drCache), L(_invHistoryCache), ovn, L(DB.V)].join('|');
+}
+function renderBalSubList(fromSearch){
   const search = (document.getElementById('bal-sub-search')?.value||'').toLowerCase();
-  const balances = _subBalances().filter(a=> !search || a.name.toLowerCase().includes(search));
+  const _c = window._balSubAllCache;
+  const _sig = _balSubInputsSig();
+  const _refsSame = _c && _c.subTxns === _balSubTxns && _c.drCache === _drCache && _c.inv === _invHistoryCache && _c.sig === _sig;
+  const _all = (fromSearch === true && _refsSame) ? _c.list : _subBalances();
+  if(!(fromSearch === true && _refsSame)) window._balSubAllCache = { list:_all, subTxns:_balSubTxns, drCache:_drCache, inv:_invHistoryCache, sig:_sig };
+  const balances = _all.filter(a=> !search || a.name.toLowerCase().includes(search));
   _balSubListCache = balances;
   // 가려진 LEDGER 건수 카운트 (안내용)
   const suppressedCount = (_balSubTxns||[]).filter(t => _isSubLedgerSuppressed(t)).length;
