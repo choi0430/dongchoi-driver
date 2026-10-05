@@ -12508,7 +12508,8 @@ function calcSubReport(r) {
   //   조건은 calcAgencyTA의 parking 조건과 동일: 공항 픽업 + (호주로/Plus Australia + 21/25S 아님)
   let subParking = 0;
   if(/eg\s*travel/i.test(owner)){
-    const apPat = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
+    // ★ B10 (2026-10-05): 픽업지가 정확히 'AIRPORT' 한 단어일 때만 주차비 (일정표 입력 규칙). 다른 이름이 붙으면(예: 'AIRPORT HOTEL') 제외
+    const apPat = /^\s*airport\s*$/i;
     const _isHojuroP = /호주로|hojuro|plus\s*australia/i.test(agency);
     const _isLargeP = capNum >= 40;  // ★ fix: isLarge가 이 함수 스코프에 없음 — capNum으로 직접 계산
     if(apPat.test(r.Pickup||'') && !(_isHojuroP && !_isLargeP)){
@@ -24601,7 +24602,8 @@ function taBreakdown(r) {
   // (dropoff=Airport는 승객을 내려주는 것이므로 주차비 없음)
   // 호주로(Tour Hojuro), Plus Australia 21/25S는 공항 주차비 청구 불가
   const pickupVal  = String(r.Pickup  || '').trim();
-  const apPattern  = /\b(airport|syd|kingsford|mascot|international|domestic|terminal)\b/i;
+  // ★ B10 (2026-10-05): 픽업지가 정확히 'AIRPORT' 한 단어일 때만 주차비 (일정표 입력 규칙). 다른 이름이 붙으면(예: 'AIRPORT HOTEL') 제외
+  const apPattern  = /^\s*airport\s*$/i;
   const _isHojuro  = /호주로|hojuro|plus\s*australia/i.test(priceAgency);
   const autoParking = (apPattern.test(pickupVal) && !(_isHojuro && seatNum < 40)) ? (seatNum >= 40 ? 40 : 30) : 0;
 
