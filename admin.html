@@ -506,6 +506,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
   <!-- 🔎 돈 계산 정합성 점검 — 문제 없으면 자동 숨김 -->
   <div id="integrity-check" style="display:none;"></div>
+  <div id="auto-task-fail" style="display:none;"></div>
 
   <!-- 📊 운행 통계 (Supabase 집계 · 읽기전용) — 데이터 없으면 자동 숨김 -->
   <div id="ops-stats" style="display:none;"></div>
@@ -4680,6 +4681,31 @@ async function renderARaging(){
   } catch(e){ console.warn('[미수aging] 렌더 실패:', e); el.style.display='none'; }
 }
 
+// ⚠️ D7 (2026-10-05): DR 저장 시 후속 자동작업(트레일러 렌탈 거래·인보이스 초안) 실패 — 최근 7일 감사 로그에서 표시
+//   감사 로그는 페이지 로드당 1회만 조회(5분 캐시).
+async function renderAutoTaskFailures(){
+  const el = document.getElementById('auto-task-fail'); if(!el) return;
+  try {
+    const now = Date.now();
+    if(!window._atfCache || now - window._atfCache.t > 5*60*1000){
+      const r = await fetch(APPS_SCRIPT_URL + '?action=get_audit_log&limit=300');
+      const j = await r.json();
+      window._atfCache = { t: now, rows: (j && j.ok && Array.isArray(j.rows)) ? j.rows : [] };
+    }
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 7);
+    const cutISO = cutoff.getFullYear()+'-'+String(cutoff.getMonth()+1).padStart(2,'0')+'-'+String(cutoff.getDate()).padStart(2,'0');
+    const fails = window._atfCache.rows.filter(x => String(x.Action||'') === 'auto_task_failed' && (parseToISO(x.Timestamp||'') || '9999') >= cutISO);
+    if(!fails.length){ el.style.display='none'; el.innerHTML=''; return; }
+    el.style.display='';
+    el.innerHTML = '<div class="shd" style="margin-top:10px"><div class="stl" style="color:#b91c1c;">⚠️ 자동 정산 작업 실패 '+fails.length+'건 <span style="font-size:11px;font-weight:600;">(최근 7일)</span></div>'
+      + '<div class="ssb">Daily Report는 저장됐지만 뒤따르는 <b>트레일러 렌탈 거래</b> 또는 <b>인보이스 초안 항목</b> 자동생성이 실패했습니다. 해당 운행의 서브 잔액/인보이스를 확인하고 필요하면 수동으로 추가하세요.</div></div>'
+      + '<div class="crd" style="padding:10px 12px;">' + fails.slice(0,15).map(x =>
+          '<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--b1);color:var(--t2);">'
+          + '<span style="color:var(--t3);font-size:11px;">'+escH(fmtDateTime(x.Timestamp||''))+'</span> · '+escH(String(x.Summary||'')).slice(0,220)+'</div>').join('')
+      + (fails.length>15?'<div style="font-size:11px;color:var(--t3);margin-top:6px;">…외 '+(fails.length-15)+'건 (감사 로그에서 확인)</div>':'') + '</div>';
+  } catch(e){ console.warn('[auto-task-fail] 렌더 실패:', e); el.style.display='none'; }
+}
+
 // 🔎 돈 계산 정합성 점검 — 인보이스 ↔ 거래처 잔액(Agency_Txn) 대조 (읽기전용, 최근 120일)
 async function renderIntegrityCheck(){
   var el=document.getElementById('integrity-check'); if(!el) return;
@@ -4768,6 +4794,7 @@ function rDash(){
   try { renderMissingPrices(); } catch(e){}   // ⚠️ 단가 누락 (독립 렌더 — 실패해도 대시보드 무관)
   try { renderARaging(); } catch(e){}          // 📅 미수금/연체 (독립 렌더)
   try { renderIntegrityCheck(); } catch(e){}   // 🔎 돈 계산 정합성 점검 (독립 렌더)
+  try { renderAutoTaskFailures(); } catch(e){}  // ⚠️ D7: DR 저장 후속 자동작업 실패 (독립 렌더)
   try { renderOpsStats(); } catch(e){}   // 📊 운행 통계 (독립 렌더 — 실패해도 대시보드 영향 없음)
   try { renderMargin(); } catch(e){}     // 📈 마진 분석 (독립 렌더)
   try { renderRevStats(); } catch(e){}   // 💰 매출 리포트 (독립 렌더)
@@ -16181,6 +16208,11 @@ async function adminSaveNewDR(){
     if(!json.ok) throw new Error(json.error || json.msg || '저장 실패');
 
     toast('✅ DR 저장 완료 (관리자 대신 작성)','ok');
+    // ★ D7: 저장은 됐지만 후속 자동작업 실패 시 즉시 안내
+    if(Array.isArray(json.warnings) && json.warnings.length){
+      setTimeout(() => toast('⚠️ ' + json.warnings.join(' / ') + ' — 서브 잔액·인보이스를 확인하세요', 'er'), 1200);
+      window._atfCache = null;
+    }
 
     // 캐시 무효화
     _drCache = null;
