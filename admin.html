@@ -3185,6 +3185,7 @@ function _softReauth(reason){
   window.fetch = function(input, init){
     let _legacyGet = null;
     let _d2Key = null;
+    let _bgAct = null;   // ★ D9
     try {
       const url = typeof input === 'string' ? input : (input && input.url);
       if (url && url.indexOf(GAS_URL) === 0) {
@@ -3234,6 +3235,7 @@ function _softReauth(reason){
                   _d2Key = _k;
                 }
               } catch(_ie){}
+              if (parsed._bg) _bgAct = parsed.action || 'save';   // ★ D9: 결과를 확인하지 않는 백그라운드 저장
               init = Object.assign({}, init, {body: JSON.stringify(parsed)});
             }
           } catch(e) { /* body가 JSON이 아니면 건드리지 않음 */ }
@@ -3265,6 +3267,8 @@ function _softReauth(reason){
     } catch(_de){}
     let p = _originalFetch(input, init);
     if (_d1Tid) p = p.finally(() => clearTimeout(_d1Tid));
+    // ★ D9: 백그라운드 저장이 네트워크 오류로 실패하면 안내 (호출부는 결과를 확인하지 않음)
+    if (_bgAct) { const _ba = _bgAct; p = p.catch(e => { _bgSaveFailToast(_ba, (e && e.name === 'AbortError') ? '시간 초과' : '네트워크 오류'); throw e; }); }
     if (_d2Key) { const _k2 = _d2Key; p = p.then(res => { try { if (window._d2Pending) delete window._d2Pending[_k2]; } catch(_){ } return res; }); }   // ★ D2: 응답 받음 → 번호 폐기
     // ★ A10: 구버전 서버(doPost에 _get 경로 없음) 호환 — Unknown action 이면 기존 GET 방식으로 1회 재시도
     if (_legacyGet) {
@@ -3296,6 +3300,8 @@ function _softReauth(reason){
                 j.error === 'unauthorized' ||
                 (j.error === 'forbidden' && j.reason === 'admin_only')
               );
+              // ★ D9: 백그라운드 저장이 서버에서 실패(ok:false)하면 안내
+              if (_bgAct && j && j.ok === false && !isAuthFail) _bgSaveFailToast(_bgAct, j.error || j.msg || j.message || '서버 오류');
               if (isAuthFail) {
                 const body = (init && init.body) || '';
                 const isPublic = /"action"\s*:\s*"(login|ping|logout|get_login_names)"/.test(body)
@@ -3314,6 +3320,17 @@ function _softReauth(reason){
     });
   };
 })();
+
+// ★ D9 (2026-10-05): 결과를 확인하지 않던 백그라운드 저장(서차지 토글·회사정보·공제·수동항목 등) 실패 안내
+//   예전엔 실패해도 화면엔 저장된 것처럼 보이고 새로고침하면 수정이 사라졌음.
+const _BG_LABEL = { save_invoice_override:'서차지 토글', delete_invoice_override:'서차지 토글', save_company_profile:'회사 정보',
+  save_invoice_deductions_bulk:'인보이스 공제', save_invoice_manual_item:'인보이스 수동 항목', delete_invoice_manual_item:'인보이스 수동 항목 삭제',
+  save_invoice_manual_items_bulk:'인보이스 수동 항목', save_flight:'항공편', save_invoice:'인보이스', add_sub_txn:'서브 거래', add_price_client_agency:'여행사 요금표' };
+let _bgToastAt = 0;
+function _bgSaveFailToast(action, why){
+  const now = Date.now(); if (now - _bgToastAt < 3000) return; _bgToastAt = now;   // 연속 실패 시 도배 방지
+  try { if (typeof toast === 'function') toast('⚠️ ' + (_BG_LABEL[action] || action) + ' 저장 실패 (' + String(why).slice(0,60) + ') — 새로고침 후 다시 시도하세요', 'er'); } catch(e){}
+}
 
 // ★ C3: 수정/삭제 요청의 원래 행 식별값 — 로컬 캐시에서 rowIndex로 찾아 핵심 필드만 반환 (없으면 null → 검증 생략)
 //   마스터 '수정'은 저장 전에 캐시를 먼저 바꾸는 흐름이라 원래 값을 알 수 없어 제외(삭제만 검증).
@@ -6531,7 +6548,7 @@ function _learnFlightsFromSchedule(){
       if(which==='in') slot = per==='evening'?'evening':'fullday';   // 저녁 도착=PM, 그 외=풀데이(공항픽업+종일)
       else             slot = per==='morning'?'morning':'fullday';   // 오전 출발=AM 샌딩, 저녁/그외=풀데이
       fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
-        body: JSON.stringify({ action:'save_flight', data:{ Flight:code, Direction:which, Time:time, Slot:slot, IntlDom:type }, _user:getAdminUser() })
+        body: JSON.stringify({_bg:1,  action:'save_flight', data:{ Flight:code, Direction:which, Time:time, Slot:slot, IntlDom:type }, _user:getAdminUser() })
       }).catch(function(){});
     });
   }catch(e){ console.warn('flight learn', e); }
@@ -22967,7 +22984,7 @@ async function saveBalTxn(){
               const updatedItems = JSON.stringify(items).slice(0,49000);
               linkedInv.Items = updatedItems;
               fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-                body:JSON.stringify({action:'save_invoice', data:{InvNumber:_syncInvId, Items:updatedItems, Agency:linkedInv.Agency, PeriodFrom:linkedInv.PeriodFrom, PeriodTo:linkedInv.PeriodTo, GrandTotal:linkedInv.GrandTotal, GST:linkedInv.GST, ExGST:linkedInv.ExGST, Status:linkedInv.Status, IssuedDate:linkedInv.IssuedDate, EmailSentDate:linkedInv.EmailSentDate||'', PaidDate:linkedInv.PaidDate||'', ManualItems:linkedInv.ManualItems||'', Notes:linkedInv.Notes||'', CreatedBy:linkedInv.CreatedBy||''}, _user:getAdminUser()})
+                body:JSON.stringify({_bg:1, action:'save_invoice', data:{InvNumber:_syncInvId, Items:updatedItems, Agency:linkedInv.Agency, PeriodFrom:linkedInv.PeriodFrom, PeriodTo:linkedInv.PeriodTo, GrandTotal:linkedInv.GrandTotal, GST:linkedInv.GST, ExGST:linkedInv.ExGST, Status:linkedInv.Status, IssuedDate:linkedInv.IssuedDate, EmailSentDate:linkedInv.EmailSentDate||'', PaidDate:linkedInv.PaidDate||'', ManualItems:linkedInv.ManualItems||'', Notes:linkedInv.Notes||'', CreatedBy:linkedInv.CreatedBy||''}, _user:getAdminUser()})
               }).then(r=>r.json()).then(j=>{
                 if(j.ok) console.log('[TxnEdit→Invoice] Items 동기화 완료:', _syncInvId);
               }).catch(e=>console.warn('[TxnEdit→Invoice] sync error:', e));
@@ -23833,7 +23850,7 @@ async function applyInvScheduleImport(){
     if(agency && period){
       fetch(APPS_SCRIPT_URL, {
         method:'POST', headers:{'Content-Type':'text/plain'},
-        body:JSON.stringify({action:'save_invoice_manual_item', data:{
+        body:JSON.stringify({_bg:1, action:'save_invoice_manual_item', data:{
           ID:item.id, Agency:agency, Period:period, Date:item.date, Rego:item.rego,
           Tour:item.tour, Seats:item.seats, TourCode:item.tourcode, Note:item.note,
           Amount:item.amount, OT:item.ot, Hotel:item.hotel, Dist:item.dist,
@@ -23940,7 +23957,7 @@ async function applyInvScheduleImport(){
     Promise.all(subTxnsToCreate.map(txn =>
       fetch(APPS_SCRIPT_URL, {
         method:'POST', headers:{'Content-Type':'text/plain'},
-        body: JSON.stringify({action:'add_sub_txn', data: txn, _user: getAdminUser()})
+        body: JSON.stringify({_bg:1, action:'add_sub_txn', data: txn, _user: getAdminUser()})
       }).then(r => r.json()).then(j => ({j, txn})).catch(e => { console.warn('add_sub_txn failed:', e); return {j:{ok:false}, txn}; })
     )).then(results => {
       // ★ FIX 2026-05-31: 성공한 거래를 _balSubTxns에 즉시 반영 (다음 import 시 stale 방지)
@@ -24038,7 +24055,7 @@ function saveInvItem() {
   const _fr = document.getElementById('inv-from')?.value||'';
   if(_ag && _fr) {
     fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'save_invoice_manual_item', data:{
+      body:JSON.stringify({_bg:1, action:'save_invoice_manual_item', data:{
         ID:item.id, Agency:_ag, Period:_fr.slice(0,7), Date:item.date, Rego:item.rego||'',
         Tour:item.tour, Seats:item.seats||'', TourCode:item.tourcode||'', Note:item.note||'',
         Amount:item.amount, OT:item.ot||0, Hotel:item.hotel||0, Dist:item.dist||0,
@@ -24062,7 +24079,7 @@ function deleteInvItem(id) {
   _setInvManualItems(key, items);
   // 서버 삭제 (비동기)
   fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify({action:'delete_invoice_manual_item', id:id})
+    body:JSON.stringify({_bg:1, action:'delete_invoice_manual_item', id:id})
   }).catch(e => console.warn('Manual item delete failed:', e));
   renderInvManualList();
   _refreshInvPreview();
@@ -24266,7 +24283,7 @@ function _onDeductionChange(idx, field, val) {
   const fr = document.getElementById('inv-from')?.value||'';
   if (ag && fr) {
     fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'save_invoice_deductions_bulk', agency:ag, period:fr.slice(0,7),
+      body:JSON.stringify({_bg:1, action:'save_invoice_deductions_bulk', agency:ag, period:fr.slice(0,7),
         items: _invDeductions.map(d=>({ID:d.id||Date.now().toString()+Math.random().toString(36).slice(2,6), Type:d.type||'prepaid', Amount:d.amount||0, Note:d.note||''}))
       })}).catch(e => console.warn('Deduction save failed:', e));
   }
@@ -24430,7 +24447,7 @@ function saveCompanyInfo() {
   DC_COMPANY.abn = abn;
   // 서버 저장 (비동기)
   fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify({action:'save_company_profile', data:{abn:abn}})
+    body:JSON.stringify({_bg:1, action:'save_company_profile', data:{abn:abn}})
   }).catch(e => console.warn('Company info save failed:', e));
 }
 
@@ -24518,7 +24535,7 @@ function saveInvSettings() {
   DC_COMPANY.accname = accname || DC_COMPANY.accname;
   // 서버 저장 (비동기)
   fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify({action:'save_company_profile', data:{
+    body:JSON.stringify({_bg:1, action:'save_company_profile', data:{
       name: DC_COMPANY.name, abn: DC_COMPANY.abn, phone: DC_COMPANY.phone,
       email: DC_COMPANY.email, address: DC_COMPANY.address, bank: DC_COMPANY.bank,
       bsb: DC_COMPANY.bsb, acc: DC_COMPANY.acc, accname: DC_COMPANY.accname
@@ -25534,7 +25551,7 @@ function toggleSurchargeOv(type, rowPrefix, pkKey, autoVal, agency, from, to) {
   }
   // 서버 저장 (비동기)
   fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify(saveVal !== null ? {action:'save_invoice_override', rowKey:saveKey, value:saveVal} : {action:'delete_invoice_override', rowKey:saveKey})
+    body:JSON.stringify(saveVal !== null ? {_bg:1, action:'save_invoice_override', rowKey:saveKey, value:saveVal} : {_bg:1, action:'delete_invoice_override', rowKey:saveKey})
   }).catch(e => console.warn('Override save failed:', e));
   if (agency && from && to) {
     const rows = _buildInvRows(agency, from, to);
@@ -25557,7 +25574,7 @@ function toggleEtcOverride(etcKey, agency, from, to) {
   else             { window._invoiceOverrides[etcKey] = '1'; saveVal='1'; }
   // 서버 저장 (비동기)
   fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify({action:'save_invoice_override', rowKey:etcKey, value:saveVal})
+    body:JSON.stringify({_bg:1, action:'save_invoice_override', rowKey:etcKey, value:saveVal})
   }).catch(e => console.warn('Etc override save failed:', e));
   if (agency && from && to) {
     const rows = _buildInvRows(agency, from, to);
@@ -32343,7 +32360,7 @@ function saveCompanyModal(){
 
   // 서버 저장 (비동기)
   fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify({action:'save_company_profile', data:{
+    body:JSON.stringify({_bg:1, action:'save_company_profile', data:{
       name: DC_COMPANY.name, abn: DC_COMPANY.abn, phone: DC_COMPANY.phone,
       email: DC_COMPANY.email, address: DC_COMPANY.address, bank: DC_COMPANY.bank,
       bsb: DC_COMPANY.bsb, acc: DC_COMPANY.acc, accname: DC_COMPANY.accname
@@ -32425,7 +32442,7 @@ function initPriceClientForAgency(agencyName) {
   fetch(APPS_SCRIPT_URL, {
     method: 'POST',
     headers: {'Content-Type': 'text/plain'},
-    body: JSON.stringify({action: 'add_price_client_agency', agency: agencyName, rows})
+    body: JSON.stringify({_bg:1, action: 'add_price_client_agency', agency: agencyName, rows})
   }).then(r => r.json()).then(r => {
     if (r.ok) toast(`✅ ${agencyName} 요금표 ${courses.length}개 코스 생성됨`, 'ok');
     else toast('요금표 GAS 생성 실패', 'er');
@@ -35796,7 +35813,7 @@ async function convertQuoToInvoice() {
   _setInvManualItems(_quoManualKey, merged);
   // 서버 저장 (비동기)
   fetch(APPS_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify({action:'save_invoice_manual_items_bulk', agency:agency, period:monthKey,
+    body:JSON.stringify({_bg:1, action:'save_invoice_manual_items_bulk', agency:agency, period:monthKey,
       items: merged.map(m=>({ID:m.id||Date.now().toString(), Date:m.date||'', Rego:m.rego||'', Tour:m.tour||'',
         Seats:m.seats||'', TourCode:m.tourcode||'', Note:m.note||'', Amount:m.amount||0,
         OT:m.ot||0, Hotel:m.hotel||0, Dist:m.dist||0, Trailer:m.trailer||0, Toll:m.toll||0,
