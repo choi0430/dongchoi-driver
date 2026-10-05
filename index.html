@@ -2499,6 +2499,8 @@ function fmtDate(val) {
   const s = String(val).trim();
   // 이미 dd/mm/yyyy 형식
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  // ★ DA4: 한 자리 일/월(1/5/2026) → 01/05/2026
+  { const _m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[\sT]\d{1,2}:\d{2}(?::\d{2})?)?$/); if (_m) return String(_m[1]).padStart(2,'0')+'/'+String(_m[2]).padStart(2,'0')+'/'+_m[3]; }   // 시간 붙은 dd/mm도 일·월 뒤바뀜 방지
   // 깨진 형식 (예: -13012027) 또는 8자리 숫자만 → 정규화 시도
   if (/^-?\d{8}$/.test(s)) {
     const digits = s.replace(/[^0-9]/g, '');
@@ -11734,10 +11736,9 @@ function parseToISO(ds){
   // 내부 날짜 비교/정렬용 YYYY-MM-DD 변환 (표시용 아님)
   if(!ds) return '';
   const s = String(ds).trim();
-  // dd/mm/yyyy
-  if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){
-    const [dd,mm,yyyy]=s.split('/'); return yyyy+'-'+mm+'-'+dd;
-  }
+  // dd/mm/yyyy  (★ DA4: 한 자리 일/월 1/5/2026 도 허용)
+  { const _m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[\sT]\d{1,2}:\d{2}(?::\d{2})?)?$/);   // 시간 부분(HH:mm) 허용
+    if(_m) return _m[3]+'-'+String(_m[2]).padStart(2,'0')+'-'+String(_m[1]).padStart(2,'0'); }
   // ISO timestamp → UTC+10 기준 날짜
   if(s.includes('T')) {
     const d = new Date(s);
@@ -11750,6 +11751,8 @@ function parseToISO(ds){
   }
   // YYYY-MM-DD
   if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  // ★ DA4: 0 없는 ISO (2026-5-1)
+  { const _m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); if(_m) return _m[1]+'-'+String(_m[2]).padStart(2,'0')+'-'+String(_m[3]).padStart(2,'0'); }
   return '';
 }
 
