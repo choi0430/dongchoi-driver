@@ -12451,10 +12451,9 @@ function calcSubReport(r) {
     if(_isHojuroEarlySub && capNum < 40){
       earlySub = 80;
     } else {
-      let atE = agPC ? _findCourse(agPC, 'Airport Transfer') : null;
-      if(!atE){
-        for(const ag of Object.keys(DB.PC||{})){ atE = _findCourse(DB.PC[ag], 'Airport Transfer'); if(atE) break; }
-      }
+      // ★ B2: 청구 여행사 요금만 사용 (대소문자 무시) — 없으면 $0 (DC도 청구 못 하므로 서브도 0)
+      const _agPCci = agPC || (()=>{ const k = Object.keys(DB.PC||{}).find(x => x.trim().toLowerCase() === agency.toLowerCase()); return k ? DB.PC[k] : null; })();
+      const atE = _agPCci ? _findCourse(_agPCci, 'Airport Transfer') : null;
       if(atE){ const sd2 = atE[capKey] || atE['21']; earlySub = Math.round((parseFloat(sd2?.rate)||0) * 0.3); }
     }
   }
@@ -24490,6 +24489,7 @@ function taBreakdown(r) {
   // - Bluesky tours & overseas consulting pty ltd: 청구 안 함 ($0)
   // - 그 외: Airport Transfer 요금 × 30%
   let earlyTA = 0;
+  let _earlyNoRate = false;   // ★ B2: Early 있는데 청구 여행사에 Airport Transfer 요금 없음 → $0 + 경고
   // ★ BLUESKY 특수 규칙: Early surcharge 청구 안 함 (사용자 요청, 2026-05-30)
   const _isBluesky = /bluesky/i.test(priceAgency);
   if (earlyDR > 0 && !_isBluesky) {
@@ -24498,21 +24498,13 @@ function taBreakdown(r) {
     if (_isHojuroEarly && seatNum < 40) {
       earlyTA = 80;
     } else {
-      // 2) 기본: 해당 여행사의 Airport Transfer 요금 × 30%
-      const allPC = DB.PC;
+      // 2) 기본: '청구 여행사'의 Airport Transfer 요금 × 30%
+      //   ★ B2 (2026-10-05): 예전엔 없으면 아무 여행사 요금이나 빌려 썼음 → 이제 $0 + '요금 없음' 경고
       let atEntry = agPC ? findCourse(agPC, 'Airport Transfer') : null;
-      if (!atEntry) {
-        // 어떤 여행사든 Airport Transfer 요금이 있으면 사용
-        for (const ag of Object.keys(allPC)) {
-          atEntry = findCourse(allPC[ag], 'Airport Transfer');
-          if (atEntry) break;
-        }
-      }
-      if (atEntry) {
-        const seatData = atEntry[seatKey] || atEntry['21'];
-        const airportRate = parseFloat(seatData?.rate) || 0;
-        earlyTA = Math.round(airportRate * 0.3);
-      }
+      const seatData = atEntry ? (atEntry[seatKey] || atEntry['21']) : null;
+      const airportRate = parseFloat(seatData?.rate) || 0;
+      if (airportRate > 0) earlyTA = Math.round(airportRate * 0.3);
+      else _earlyNoRate = true;
     }
   }
 
@@ -24599,7 +24591,7 @@ function taBreakdown(r) {
     trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal, etcTA, _etcKey, etcDesc, total, rateSource,
     _rowPrefix,
     _hotelAuto, _distAuto, _earlyAuto, _otAuto, _trailerAuto, _nightAuto, _tipAuto, _mealAuto, _tollAuto,
-    _otHrs, _rateMissing: rateSource !== 'price_table' };
+    _otHrs, _rateMissing: rateSource !== 'price_table', _earlyNoRate };
 }
 async function initInvoice(forceReload) {
   if (forceReload) _invReports = null; // 명시적 새로고침 시에만 리포트 재로드
@@ -25241,6 +25233,7 @@ function renderInvPreview(rows, agency, from, to) {
               if(cur>0) parts.push(label+' $'+cur);
               else if(auto>0) parts.push('<s style="color:#d4d4d8;">'+label+' $'+auto+'</s>');
             });
+            if(c._earlyNoRate) parts.push('<span style="color:#b45309;font-weight:700;" title="이 여행사 요금표에 Airport Transfer 요금이 없어 Early를 계산할 수 없습니다. M_PriceClient에 등록하거나 수정 모드에서 직접 입력하세요.">⚠️ Early 요금 없음</span>');
             if((c.etcTA||0)>0) parts.push('기타 $'+c.etcTA+(c.etcDesc?' ('+escH(c.etcDesc)+')':''));
             else if((c.etcVal||0)>0) parts.push('<s style="color:#d4d4d8;">기타 $'+c.etcVal+(c.etcDesc?' ('+escH(c.etcDesc)+')':'')+'</s>');
 
