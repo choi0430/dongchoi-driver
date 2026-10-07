@@ -835,7 +835,9 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
               <option value="">Select (선택)</option>
               <option value="21S">21 Seats (21인승)</option>
               <option value="25S">25 Seats (25인승)</option>
+              <option value="35S">35 Seats (35인승)</option>
               <option value="40S">40 Seats (40인승)</option>
+              <option value="45S">45 Seats (45인승)</option>
               <option value="50S">50 Seats (50인승)</option>
             </select>
             <div id="seats-hint" style="font-size:11px;color:var(--muted);margin-top:4px;display:none;"></div>
@@ -3316,8 +3318,8 @@ function sddSelect(key, value) {
     // 차량 실제 인승 힌트 표시
     const seatsHint = document.getElementById('seats-hint');
     if(seatsHint) {
-      if(v?.Seats) {
-        seatsHint.textContent = '🚌 실제 차량: ' + v.Seats + '인승 — 요금은 아래 요청 인승 기준';
+      if(v?.Capacity || v?.Seats) {
+        seatsHint.textContent = '🚌 실제 차량: ' + (v.Capacity || v.Seats) + '인승 — 여행사 청구는 요청 인승, 드라이버 비용은 실제 차량 기준';
         seatsHint.style.display = 'block';
       } else {
         seatsHint.style.display = 'none';
@@ -6423,8 +6425,8 @@ function addDailyReport(shiftId){
   if(shift?.rego) {
     const v = MASTER.vehicles?.find(v=>v.Rego===shift.rego);
     const seatsHint = document.getElementById('seats-hint');
-    if(seatsHint && v?.Seats) {
-      seatsHint.textContent = '🚌 실제 차량: ' + v.Seats + '인승 — 요금은 아래 요청 인승 기준';
+    if(seatsHint && (v?.Capacity || v?.Seats)) {
+      seatsHint.textContent = '🚌 실제 차량: ' + (v.Capacity || v.Seats) + '인승 — 여행사 청구는 요청 인승, 드라이버 비용은 실제 차량 기준';
       seatsHint.style.display = 'block';
     }
     updateManualHint(v);
@@ -7129,6 +7131,7 @@ function _finalizeDailyReportSave(_drBtn){
     SVC_Mismatch: report.svcMismatch || '',
     Manual_Bonus: report.manualBonus || 0,
     Total_TA: report.svcCharge,   // ★ M_PriceDriver base (= SVC_Charge) 저장 — 에이전시 TA는 admin에서 실시간 계산
+    Pay_Seats: (typeof getSeatsFromShift === 'function' ? getSeatsFromShift() : '') || '',   // ★ PC6: 드라이버 비용 기준 인승(실제 차량)
     DR_Cost: report.dr,
     Toll_Detail: report.tollDetail || '',
     Remarks: report.remarks,
@@ -9761,10 +9764,30 @@ document.addEventListener('click', (e)=>{
   }
 });
 
-function getSeatsFromShift(){
+// ★ PC6 (2026-10-07): 인승 기준 분리
+//   · 요청 인승(리포트 'Seats', 일정표 값) = 여행사 청구 기준 → getRequestedSeats()
+//   · 드라이버 비용 인승 = 실제 차량 좌석수 기준 → getSeatsFromShift() (드라이버 수당·서차지 옵션 함수들이 사용)
+//       차량 50석 이상 → 50S, 26석 이상 → 40S, 25석 이하 → 요청 인승(21S/25S) 그대로
+//       차량 좌석수를 모르면 요청 인승 숫자로 같은 규칙 적용 (35S→40S, 45S→40S)
+function getRequestedSeats(){
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(shift?.seats) return shift.seats;
   return document.getElementById('dr-seats')?.value || '';
+}
+function _paySeatsFor(req){
+  if(!req) return '';
+  const v = (typeof getCurrentVehicle === 'function') ? getCurrentVehicle() : null;
+  const cap = parseInt(String((v && (v.Capacity || v.Seats)) || '').replace(/[^0-9]/g,'')) || 0;
+  const rn = parseInt(String(req).replace(/[^0-9]/g,'')) || 0;
+  const n = cap || rn;
+  if(!n) return req;
+  if(n >= 50) return '50S';
+  if(n >= 26) return '40S';
+  if(rn === 21 || rn === 25) return req;
+  return n >= 25 ? '25S' : '21S';
+}
+function getSeatsFromShift(){
+  return _paySeatsFor(getRequestedSeats());
 }
 // 현재 선택된 차량 rego (SDD input 또는 shift 기준)
 function getCurrentRego(){
@@ -9900,7 +9923,7 @@ const NIGHT_RATES = {
 function getNightRate(){
   const type  = document.getElementById('f-night-type')?.value || 'none';
   if(type==='none') return null;
-  const seats = document.getElementById('dr-seats')?.value || '';
+  const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';   // ★ PC6: 드라이버 비용 = 실제 차량 기준
   const isLarge = (seats==='40S'||seats==='50S');
   return NIGHT_RATES[type]?.[isLarge?'large':'small'] || null;
 }
@@ -10106,13 +10129,14 @@ function updateSurchargeOptions(){
   const reqHintEl = document.getElementById('req-seats-hint');
   if(reqHintEl) {
     const vehicle = getCurrentVehicle();
-    const actualSeats = vehicle?.Seats || '';
-    const seatNum = parseInt(seats);
+    const actualSeats = String((vehicle && (vehicle.Capacity || vehicle.Seats)) || '').replace(/[^0-9]/g,'');
+    const _reqS = getRequestedSeats();   // ★ PC6: 안내 문구는 요청 인승 기준
+    const seatNum = parseInt(_reqS);
     const actualNum = parseInt(actualSeats);
-    if(seats && actualSeats && actualNum > seatNum) {
-      reqHintEl.innerHTML = `⚠️ 실제 차량 <b>${actualSeats} seats (${actualSeats}인승)</b>이지만 여행사 요청 <b>${seats} seats rate (${seats}인승 요금)</b>으로 청구됩니다`;
+    if(_reqS && actualSeats && actualNum !== seatNum) {
+      reqHintEl.innerHTML = `ℹ️ 여행사 청구: 요청 <b>${_reqS}</b> 요금 · 드라이버 비용: 실제 차량 ${actualSeats}인승 → <b>${seats}</b> 기준`;
       reqHintEl.style.display = 'block';
-    } else if(seats && actualSeats && actualNum === seatNum) {
+    } else if(_reqS && actualSeats && actualNum === seatNum) {
       reqHintEl.innerHTML = `✅ 요청 인승과 실제 차량 일치 (${actualSeats} seats (${actualSeats}인승))`;
       reqHintEl.style.cssText += ';color:#16a34a;display:block';
     } else {
@@ -10268,7 +10292,7 @@ function getOTRateDR(seats){
 
 function calcTotal(){
   const seats = document.getElementById('dr-seats')?.value || '';
-  const isLarge = (seats==='40S'||seats==='50S');
+  const isLarge = (parseInt(seats)||0) >= 40;   // ★ PC6: 45S 포함
   const tollVal  = parseFloat(document.getElementById('f-toll')?.value||0);
   const fuelVal  = parseFloat(document.getElementById('f-fuel')?.value||0);
   const washVal  = parseFloat(document.getElementById('f-wash')?.value||0);
@@ -10340,7 +10364,7 @@ function calcTotal(){
   // ── 드라이버 기본 수당 계산 ──
   // 드라이버가 선택한 SVC 금액 = 드라이버 수당 base
   // M_PriceDriver base와 다르면 _svcMismatch 플래그 (관리자 알림용)
-  const seatK = seatKey(seats);
+  const seatK = seatKey(getSeatsFromShift() || seats);   // ★ PC6: 드라이버 비용 = 실제 차량 기준 인승
   const drBase = svcVal; // 드라이버가 선택한 금액이 곧 수당
   const courseData = att ? getCourseData(att) : null;
   const _pdBase = (courseData && courseData[seatK]) ? courseData[seatK].base : 0;
