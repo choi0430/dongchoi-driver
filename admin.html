@@ -31927,9 +31927,14 @@ function openM(type,idx){
         <div><label class="fl">제조사</label><input class="fi" id="f2" value="${d.Make||''}" placeholder="TOYOTA"></div>
         <div><label class="fl">모델</label><input class="fi" id="f3" value="${d.Model||''}" placeholder="COASTER"></div>
         <div><label class="fl">연도</label><input class="fi" id="f4" type="number" value="${mfrDate}" placeholder="2017"></div></div>
-      <div class="fr2">
+      <div class="fr3">
         <div><label class="fl">좌석수</label><input class="fi" id="f5" type="number" value="${d.Capacity||''}"></div>
+        <div><label class="fl">드라이버 요금 인승</label><div class="fsw"><select class="fs" id="f_payseats">
+          <option value=""${!String(d.Driver_Pay_Seats||'').trim()?' selected':''}>자동 (좌석수 기준)</option>
+          ${['21','25','40','50'].map(k=>`<option value="${k}"${String(d.Driver_Pay_Seats||'').replace(/[^0-9]/g,'')===k?' selected':''}>${k}인승 요금</option>`).join('')}
+        </select></div></div>
         <div><label class="fl">소유자</label><input class="fi" id="f6" value="${d.Owner||''}"></div></div>
+      <div style="font-size:10px;color:var(--t3);margin:-4px 0 8px;">드라이버 비용은 운전한 차량 기준. '자동'이면 좌석수로 정함(50석↑→50 · 26석↑→40 · 25석→25 · 그 이하→21). 여행사 청구는 일정표 요청 인승 기준.</div>
       <div class="fr2">
         <div><label class="fl">Rego 만료일</label><input class="fi" id="f7" type="date" value="${parseToISO(d.Rego_Date||'')}"></div>
         <div><label class="fl">HVIS 만료일</label><input class="fi" id="f8" type="date" value="${parseToISO(d.HVIS_Date||'')}"></div></div>
@@ -32226,6 +32231,7 @@ function saveM(){
          Service_Interval: _prevV.Service_Interval!==undefined?_prevV.Service_Interval:'',
          VIN:gv('f12'),Engine_Number:gv('f13'),Accreditation:gv('f14'),Transmission:gv('f15')||'Auto',
          Odo_Reset_Date: gv('f_odoreset') ? fmtDate(gv('f_odoreset')) : '',
+         Driver_Pay_Seats: gv('f_payseats')||'',
          Active: gv('f_active')||'Y',
          Photo_Front: photoF, Photo_Back: photoB, Photo_Left: photoL, Photo_Right: photoR};
     ie?DB.V[idx]=obj:DB.V.push(obj);
@@ -32768,6 +32774,7 @@ async function syncVehicles(){
     Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto',
     // ★ 폼/로직이 쓰는 컬럼 보존 (누락 시 편집·저장 때 빈칸으로 덮어써짐)
     Odo_Reset_Date:fmtDate(r.Odo_Reset_Date||''), Active:(r.Active!=null&&r.Active!=='')?r.Active:'Y',
+    Driver_Pay_Seats: String(r.Driver_Pay_Seats==null?'':r.Driver_Pay_Seats).trim(),
     Last_Service_KM:r.Last_Service_KM!=null?r.Last_Service_KM:'', Service_Interval:r.Service_Interval!=null?r.Service_Interval:'',
     Photo_Front:r.Photo_Front||'', Photo_Back:r.Photo_Back||'', Photo_Left:r.Photo_Left||'', Photo_Right:r.Photo_Right||''
   }));
@@ -32954,6 +32961,7 @@ async function _applyAdminBundle(bundle){
       Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto',
     // ★ 폼/로직이 쓰는 컬럼 보존 (누락 시 편집·저장 때 빈칸으로 덮어써짐)
     Odo_Reset_Date:fmtDate(r.Odo_Reset_Date||''), Active:(r.Active!=null&&r.Active!=='')?r.Active:'Y',
+    Driver_Pay_Seats: String(r.Driver_Pay_Seats==null?'':r.Driver_Pay_Seats).trim(),
     Last_Service_KM:r.Last_Service_KM!=null?r.Last_Service_KM:'', Service_Interval:r.Service_Interval!=null?r.Service_Interval:'',
     Photo_Front:r.Photo_Front||'', Photo_Back:r.Photo_Back||'', Photo_Left:r.Photo_Left||'', Photo_Right:r.Photo_Right||''
     }));
@@ -33246,6 +33254,7 @@ async function loadAllFromSheets(){
         Accreditation:r.Accreditation||'', Transmission:r.Transmission||'Auto',
     // ★ 폼/로직이 쓰는 컬럼 보존 (누락 시 편집·저장 때 빈칸으로 덮어써짐)
     Odo_Reset_Date:fmtDate(r.Odo_Reset_Date||''), Active:(r.Active!=null&&r.Active!=='')?r.Active:'Y',
+    Driver_Pay_Seats: String(r.Driver_Pay_Seats==null?'':r.Driver_Pay_Seats).trim(),
     Last_Service_KM:r.Last_Service_KM!=null?r.Last_Service_KM:'', Service_Interval:r.Service_Interval!=null?r.Service_Interval:'',
     Photo_Front:r.Photo_Front||'', Photo_Back:r.Photo_Back||'', Photo_Left:r.Photo_Left||'', Photo_Right:r.Photo_Right||''
       }));
