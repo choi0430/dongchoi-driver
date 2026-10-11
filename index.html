@@ -7709,8 +7709,10 @@ function submitEndShift(){
 
   // ★ 미저장 Daily Report 감지 — 폼에 의미있는 데이터 있는데 제출 안 한 경우 경고
   //   사용자가 EOS만 누르고 DR 잊어버린 경우 데이터 손실 방지
+  // ★ DA3 (2026-10-11): 예전엔 존재하지 않는 ID('dr-form-page'/'dr-page', 'dr-time-start'/'dr-time-end')를 찾아 항상 false → 경고가 한 번도 안 떴음.
+  //   실제 화면: #page-report(#step-2), 시간 입력: dr-start / dr-end. DR 저장 후엔 폼이 비워지므로 저장된 경우엔 경고 안 뜸.
   const _drFormHasContent = (() => {
-    const drPage = document.getElementById('dr-form-page') || document.getElementById('dr-page');
+    const drPage = document.getElementById('page-report') || document.getElementById('step-2');
     if(!drPage) return false;
     // DR 화면이 렌더링된 상태인지 확인
     const ag = document.getElementById('dr-agency')?.value?.trim();
@@ -7718,11 +7720,11 @@ function submitEndShift(){
     const tc = document.getElementById('dr-tourcode')?.value?.trim();
     const pickup = document.getElementById('dr-pickup')?.value?.trim();
     const dropoff = document.getElementById('dr-dropoff')?.value?.trim();
-    const tStart = document.getElementById('dr-time-start')?.value?.trim();
-    const tEnd = document.getElementById('dr-time-end')?.value?.trim();
+    const tStart = document.getElementById('dr-start')?.value?.trim();
+    const tEnd = document.getElementById('dr-end')?.value?.trim();
     const kmStart = document.getElementById('dr-km-start')?.value?.trim();
     const kmEnd = document.getElementById('dr-km-end')?.value?.trim();
-    // 의미있는 데이터 (5개 이상 필드 입력)이면 작성 중으로 판정
+    // 의미있는 데이터 (3개 이상 필드 입력)이면 작성 중으로 판정
     const filled = [ag, att, tc, pickup, dropoff, tStart, tEnd, kmStart, kmEnd].filter(Boolean).length;
     return filled >= 3;
   })();
