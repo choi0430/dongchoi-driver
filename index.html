@@ -15303,8 +15303,14 @@ function calcSubCostFromReport(r, subName){
   const course = (r.Attraction||'').trim();
   // M_PriceSub에서 해당 SUB 오너 + 코스 + 인승 요금 찾기
   const ps = (MASTER.priceSub||[]).find(p=>p.SubCo===subName && p.Course===course);
-  const base = parseFloat(ps?.['seats_'+capKey+'_rate'])||0;
-  const otRate = parseFloat(ps?.['seats_'+capKey+'_ot'])||0;
+  // ★ PS6 (2026-10-11): 서브 요금표 6구간 — 입력된 구간 중 좌석수 이상인 가장 작은 구간 (15석 이상 차이는 제외, 57S 등은 50)
+  const _sn = parseInt(seats)||25;
+  const _filled = ['21','25','35','40','45','50'].filter(k => (parseFloat(ps?.['seats_'+k+'_rate'])||0) > 0);
+  let _bk = _filled.find(k => +k >= _sn);
+  if(_bk && (+_bk - _sn) >= 15) _bk = null;
+  if(!_bk && _filled.length && _filled[_filled.length-1] === '50' && _sn > 50) _bk = '50';
+  const base = _bk ? (parseFloat(ps?.['seats_'+_bk+'_rate'])||0) : 0;
+  const otRate = _bk ? (parseFloat(ps?.['seats_'+_bk+'_ot'])||0) : 0;
   // OT 시간 계산: DR OT금액 / PriceDriver OT rate → 시간 → × PriceSub OT rate
   const otDR = parseFloat(r.OT)||0;
   const pdRow = (MASTER.priceDriver||[]).find(p=>p.Course===course);
