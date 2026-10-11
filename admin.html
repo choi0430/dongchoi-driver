@@ -807,7 +807,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div id="secAgContent">
       <div class="shd">
         <div style="font-size:12px;color:var(--t3)" id="agTitle">여행사를 선택하세요</div>
-        <button class="btn bac sm" id="btnAddPC" onclick="openM('PC',null)" style="display:none">+ Add Course (코스 추가)</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn bgh sm" id="btnAddPCSur" onclick="addPCSurchargeRows()" style="display:none" title="모든 여행사 요금표에 서차지 6항목(빈 칸)을 추가">+ 서차지 항목 (전체 여행사)</button>
+          <button class="btn bac sm" id="btnAddPC" onclick="openM('PC',null)" style="display:none">+ Add Course (코스 추가)</button>
+        </div>
       </div>
       <div class="ptw"><table class="ptb">
         <thead><tr>
@@ -6338,6 +6341,7 @@ function selAg(ag){
   document.querySelectorAll('.agtab').forEach(b=>b.classList.toggle('on',b.textContent===ag));
   document.getElementById('agTitle').textContent=ag+' 요금표';
   document.getElementById('btnAddPC').style.display='';
+  { const _bs=document.getElementById('btnAddPCSur'); if(_bs) _bs.style.display=''; }
   rPC(ag);
 }
 
@@ -8516,12 +8520,12 @@ function _smRebuildDays(){
   const agency = (_schCsels.agency?.getValue() || _schCsels.agency?.input?.value || '').trim();
   let courseList = [];
   if(agency && DB.PC && DB.PC[agency]){
-    courseList = Object.keys(DB.PC[agency]).filter(Boolean);
+    courseList = Object.keys(DB.PC[agency]).filter(Boolean).filter(c => !_pcIsSurchargeRow(c));   // ★ PC6: 서차지 행은 코스 목록에서 제외
   }
   if(courseList.length === 0 && DB.PC){
     const allCourses = new Set();
     Object.values(DB.PC).forEach(ag => {
-      Object.keys(ag||{}).forEach(c => allCourses.add(c));
+      Object.keys(ag||{}).forEach(c => { if(!_pcIsSurchargeRow(c)) allCourses.add(c); });
     });
     courseList = [...allCourses];
   }
@@ -23277,6 +23281,7 @@ function _populateIimDropdowns() {
     const courses = new Set();
     if (agency && DB.PC[agency]) Object.keys(DB.PC[agency]).forEach(c => courses.add(c));
     Object.values(DB.PC||{}).forEach(cm => Object.keys(cm).forEach(c => courses.add(c)));
+    [...courses].forEach(c => { if(_pcIsSurchargeRow(c)) courses.delete(c); });   // ★ PC6
     tourSel.innerHTML = '<option value="">-- 관광지 선택 --</option>' +
       [...courses].sort().map(c => `<option value="${c}">${c}</option>`).join('') +
       '<option value="__custom__">✏️ 직접 입력...</option>';
@@ -24719,6 +24724,29 @@ function _pcSurcharge(agPC, kind, bucket, seatNum){
 function _pcIsSurchargeRow(name){
   const lc = String(name||'').trim().toLowerCase();
   return Object.keys(PC_SURCHARGE_ROWS).some(t => PC_SURCHARGE_ROWS[t].some(n => n.toLowerCase() === lc));
+}
+// ★ PC6: 모든 여행사 요금표에 서차지 6항목(빈 칸) 추가 — 이미 있는 항목은 건너뜀.
+//   빈 칸은 계산에 영향 없음(기존 규칙 사용). 금액을 넣은 칸만 적용됨.
+const PC_SURCHARGE_ROW_NAMES = ['Hotel Surcharge','Distance Surcharge','Airport Parking','Trailer','Early Surcharge','OT'];
+function addPCSurchargeRows(){
+  if(!DB.PC || !Object.keys(DB.PC).length){ toast('여행사 요금표가 없습니다','er'); return; }
+  let added = 0;
+  Object.keys(DB.PC).forEach(ag => {
+    const pc = DB.PC[ag] || (DB.PC[ag] = {});
+    PC_SURCHARGE_ROW_NAMES.forEach(nm => {
+      // 같은 종류의 행이 다른 이름(예: 'Trailer Surcharge')으로 이미 있으면 추가 안 함
+      const kind = Object.keys(PC_SURCHARGE_ROWS).find(t => PC_SURCHARGE_ROWS[t].indexOf(nm) >= 0);
+      const exists = (PC_SURCHARGE_ROWS[kind] || [nm]).some(alias => _pcFindCourseCI(pc, alias));
+      if(exists) return;
+      pc[nm] = {max_hours:'', '21':{rate:null,ot:null}, '25':{rate:null,ot:null}, '35':{rate:null,ot:null},
+                '40':{rate:null,ot:null}, '45':{rate:null,ot:null}, '50':{rate:null,ot:null}};
+      added++;
+    });
+  });
+  if(!added){ toast('모든 여행사에 서차지 항목이 이미 있습니다','ok'); return; }
+  savePCToSheets();
+  if(ST.curAg) rPC(ST.curAg);
+  toast('서차지 항목 ' + added + '개 추가 ✓ — 각 여행사 요금표에서 Edit로 금액 입력','ok');
 }
 
 // ═══════════════════════════════════════════════════════
@@ -35666,6 +35694,7 @@ function _populateQimTour() {
   const courses = new Set();
   if (agency && DB.PC[agency]) Object.keys(DB.PC[agency]).forEach(c => courses.add(c));
   Object.values(DB.PC||{}).forEach(cm => Object.keys(cm).forEach(c => courses.add(c)));
+  [...courses].forEach(c => { if(_pcIsSurchargeRow(c)) courses.delete(c); });   // ★ PC6
   sel.innerHTML = '<option value="">-- 관광지 선택 --</option>' +
     [...courses].sort().map(c => `<option value="${c}">${c}</option>`).join('') +
     '<option value="__custom__">✏️ 직접 입력...</option>';
