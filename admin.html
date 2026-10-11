@@ -2970,6 +2970,11 @@ function clearAuthToken(){
 
 function _onAuthFailure(reason){
   console.warn('[AUTH] 인증 실패:', reason);
+  // ★ 2026-10-11: 자동 동기화 타이머 중지 (재로그인 시 loadAllFromSheets가 다시 시작)
+  try { if(typeof _adminSyncTimer !== 'undefined' && _adminSyncTimer){ clearInterval(_adminSyncTimer); _adminSyncTimer = null; } } catch(e){}
+  // 같은 순간 여러 요청이 동시에 실패해도 안내·화면 전환은 한 번만
+  if(window._authFailShownAt && Date.now() - window._authFailShownAt < 5000){ clearAuthToken(); return; }
+  window._authFailShownAt = Date.now();
   clearAuthToken();
   try {
     localStorage.removeItem('dc_admin_session');
@@ -35486,6 +35491,10 @@ function setAdminSyncBadge(state){
 }
 
 async function runAdminSync(silent=true){
+  // ★ 2026-10-11: 로그아웃/세션 만료 후에도 90초마다 동기화가 계속 돌며 요청 10여 개가
+  //   모두 'no_token'으로 실패 → [AUTH] 인증 실패 경고·로그인 화면 전환이 반복되던 문제.
+  //   토큰이 없거나 로그인 화면이면 동기화하지 않음.
+  if(!getAuthToken() || !document.getElementById('sm')?.classList.contains('on')) { console.log('[AdminSync] 로그인 전/만료 — 스킵'); return; }
   // ★ 중복 실행 방지: 이미 동기화 진행 중이면 스킵
   if(_adminSyncRunning) { console.log('[AdminSync] 이미 실행 중 — 스킵'); return; }
   _adminSyncRunning = true;
