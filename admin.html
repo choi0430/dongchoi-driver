@@ -2292,14 +2292,19 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div id="secSubContent">
       <div class="shd">
         <div style="font-size:12px;color:var(--t3)" id="subTitle">서브 회사를 선택하세요</div>
-        <button class="btn bac sm" id="btnAddPS" onclick="openM('PS',null)" style="display:none">+ Add Course (코스 추가)</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn bgh sm" id="btnAddPSSur" onclick="addPSSurchargeRows()" style="display:none" title="모든 서브 회사 요금표에 서차지 6항목(빈 칸)을 추가">+ 서차지 항목 (전체 서브)</button>
+          <button class="btn bac sm" id="btnAddPS" onclick="openM('PS',null)" style="display:none">+ Add Course (코스 추가)</button>
+        </div>
       </div>
       <div class="ptw"><table class="ptb">
         <thead><tr>
           <th style="min-width:148px">코스 / 관광지</th>
           <th>21인승<br><span style="font-weight:400;opacity:.6">Rate/OT</span></th>
           <th>25인승<br><span style="font-weight:400;opacity:.6">Rate/OT</span></th>
+          <th>35인승<br><span style="font-weight:400;opacity:.6">Rate/OT</span></th>
           <th>40인승<br><span style="font-weight:400;opacity:.6">Rate/OT</span></th>
+          <th>45인승<br><span style="font-weight:400;opacity:.6">Rate/OT</span></th>
           <th>50인승<br><span style="font-weight:400;opacity:.6">Rate/OT</span></th>
           <th>Max<br>Hrs</th>
           <th>액션</th>
@@ -12570,7 +12575,9 @@ function calcSubReport(r) {
   const _psOwnerKey = _findKey(DB.PS, owner);
   const _psCourses = _psOwnerKey ? DB.PS[_psOwnerKey] : null;
   const _psCourseKey = _findKey(_psCourses, attraction);
-  const psRate = (_psCourseKey && _psCourses[_psCourseKey]?.[capKey]?.rate) || 0;
+  // ★ PS6: 서브 요금표도 6구간 규칙 (입력된 구간 중 좌석수 이상 최소 구간)
+  const _psSD = _psCourseKey ? _pcSeatData(_psCourses[_psCourseKey], capNum) : {rate:0, ot:0, bucket:null};
+  const psRate = _psSD.rate || 0;
 
   const _srOwnerKey = _findKey(subRates, owner);
   const _srCourses = _srOwnerKey ? subRates[_srOwnerKey] : null;
@@ -12602,8 +12609,8 @@ function calcSubReport(r) {
   const hotelDR = parseFloat(r.Hotel_Surcharge)||0;
   const distDR = parseFloat(r.Dist_Surcharge)||0;
   const trailerDR_raw = parseFloat(r.Trailer)||0;
-  const hotelSub = _hotelDRtoTA(hotelDR, capNum);
-  const distSub  = _distDRtoTA(distDR, capNum);
+  let hotelSub = _hotelDRtoTA(hotelDR, capNum);
+  let distSub  = _distDRtoTA(distDR, capNum);
   // ★ 트레일러 비용 (회사↔서브 정산) — 소유 주체와 무관하게 항상 환산 적용
   //   정책:
   //     - 드라이버→차주 청구는 DR 원본 $30 (이미 r.Trailer에 입력됨)
@@ -12625,7 +12632,7 @@ function calcSubReport(r) {
   const otRateDR = capNum>=40?40:30;
   // 호주로(Tour Hojuro), Plus Australia: 30분 UNIT 단위 청구 (1 UNIT = 0.5HR, $15/UNIT for 21~25S)
   const _isHojuroOT = /호주로|hojuro|plus\s*australia/i.test(agency);
-  const subOT = _isHojuroOT
+  let subOT = _isHojuroOT
     ? Math.round((otDR / (otRateDR/2)) * (otRateTA/2))
     : Math.round((otRateDR>0 ? otDR/otRateDR : 0) * otRateTA);
   // Night_Owner (야경 차주 납입금)
@@ -12673,6 +12680,25 @@ function calcSubReport(r) {
   //   - 제외: Toll (DC 직접 정산)
   //   이게 정확한 모델 — 이전 "subTotal = subBase + taSurchargeTotal - parking" 회피 트릭 대신
   //   서차지 구성요소를 명시적으로 더함
+  // ★ PS6 (2026-10-11): 서브 요금표(M_PriceSub)의 서차지 행 — 금액이 입력된 항목만 덮어씀(없으면 위 기존 규칙)
+  //   드라이버 금액으로 곳·회·시간 수를 셈 (드라이버 비용 인승 Pay_Seats 기준: 호텔 $10/$15, 거리 $30/$40, OT $30/$40 = 1)
+  if(_psCourses && !window._PC6_OFF){
+    const _bk = _psSD.bucket;
+    const _payN = parseInt(String(r.Pay_Seats||'').replace(/[^0-9]/g,'')) || capNum;
+    const _sm = _payN < 40;
+    const _hR = _pcSurcharge(_psCourses, 'hotel', _bk, capNum);
+    if(_hR > 0 && hotelDR > 0) hotelSub = Math.round(hotelDR / (_sm ? 10 : 15) * _hR);
+    const _dR = _pcSurcharge(_psCourses, 'dist', _bk, capNum);
+    if(_dR > 0 && distDR > 0) distSub = Math.round(distDR / (_sm ? 30 : 40) * _dR);
+    const _oR = _pcSurcharge(_psCourses, 'ot', _bk, capNum);
+    if(_oR > 0 && otDR > 0) subOT = Math.round(otDR / (_sm ? 30 : 40) * _oR);
+    const _tR = _pcSurcharge(_psCourses, 'trailer', _bk, capNum);
+    if(_tR > 0 && trailerDR_raw > 0) trailerSub = _tR;
+    const _eR = _pcSurcharge(_psCourses, 'early', _bk, capNum);
+    if(_eR > 0 && earlyDR_sub > 0) earlySub = _eR;
+    const _pR = _pcSurcharge(_psCourses, 'parking', _bk, capNum);
+    if(_pR > 0 && /^\s*airport\s*$/i.test(r.Pickup||'')) subParking = _pR;
+  }
   const subTotal = subBase + hotelSub + distSub + trailerSub + subOT + subParking + earlySub;
 
   // 디버그 로그 (진단용 — 추후 제거)
@@ -15308,7 +15334,7 @@ async function importFromReports(){
       // base만 SUB 요금표에서 가져오고, 나머지 모든 서차지는 TA값과 동일
       const subRates = getSubRates();
       const subOwner = vehOwner;
-      const psRate = DB.PS[subOwner]?.[attraction]?.[capKey]?.rate||0;
+      const psRate = _pcSeatData(DB.PS[subOwner]?.[attraction], capNum).rate || 0;   // ★ PS6
       const baseRate = parseFloat(subRates[subOwner]?.[attraction]?.[capKey]) || psRate;
       // TA base 계산 (M_PriceClient 동일 방식)
       const _agPC = DB.PC[agency];
@@ -16387,11 +16413,8 @@ async function editSubRateForRow(subOwner, attraction){
     DB.PS[subOwner] = {};
   }
   if(!DB.PS[subOwner][attraction]){
-    DB.PS[subOwner][attraction] = {
-      max_hours: '',
-      '21': {rate:0, ot:0}, '25': {rate:0, ot:0},
-      '40': {rate:0, ot:0}, '50': {rate:0, ot:0}
-    };
+    DB.PS[subOwner][attraction] = { max_hours: '' };
+    PC_SEAT_BUCKETS.forEach(k => { DB.PS[subOwner][attraction][k] = {rate:0, ot:0}; });   // ★ PS6
   }
   ST.curSub = subOwner;
   if(typeof nv === 'function') nv('psub','nsub');
@@ -16451,13 +16474,13 @@ function _getSubInvCourseOptions(){
   if(typeof DB !== 'undefined' && DB.PS){
     if(subCo && DB.PS[subCo]){
       // 선택된 회사: 해당 회사의 attractions만
-      Object.keys(DB.PS[subCo]).forEach(c => { if(c) courses.add(c); });
+      Object.keys(DB.PS[subCo]).forEach(c => { if(c && !_pcIsSurchargeRow(c)) courses.add(c); });
       // 해당 회사에 직접입력으로 추가한 코스도 포함
       (_subInvCustomCourses[subCo]||[]).forEach(c => courses.add(c));
     } else {
       // 미선택: 모든 SUB 회사 attractions 합집합 (편의)
       Object.values(DB.PS).forEach(coData => {
-        Object.keys(coData||{}).forEach(c => { if(c) courses.add(c); });
+        Object.keys(coData||{}).forEach(c => { if(c && !_pcIsSurchargeRow(c)) courses.add(c); });
       });
       // 모든 회사의 직접입력도 포함
       Object.values(_subInvCustomCourses).forEach(arr => arr.forEach(c => courses.add(c)));
@@ -16728,9 +16751,9 @@ function _buildSchMatch(tour, day, slot, dateStr){
     const capNum = parseInt(seatsStr.replace(/\D/g,''),10) || 21;
     const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
     const ps = (typeof DB!=='undefined' && DB.PS && DB.PS[subCo]) ? DB.PS[subCo] : null;
-    if(ps && ps[course] && ps[course][capKey]){
-      svcRate = parseFloat(ps[course][capKey].rate)||0;
-      otRate = parseFloat(ps[course][capKey].ot)||0;
+    if(ps && ps[course]){
+      const _sd6 = _pcSeatData(ps[course], capNum);   // ★ PS6
+      svcRate = _sd6.rate; otRate = _sd6.ot;
     }
   }
   return {
@@ -23402,9 +23425,9 @@ function _calcSlotSubCost(tour, day, slot, slotKey){
     if(k) entry = psCo[k];
   }
   if(!entry) return { subCo, amount: trailerAdjust, course, seats, ot: 0, _noRate: true, trailerAdjust, trailerInfo };
-  const seatData = entry[seats] || entry['21'];
-  const baseAmount = parseFloat(seatData?.rate) || 0;
-  const otRate = parseFloat(seatData?.ot) || 0;
+  const _sd6 = _pcSeatData(entry, parseInt(seats)||21);   // ★ PS6
+  const baseAmount = _sd6.rate;
+  const otRate = _sd6.ot;
   const amount = baseAmount + trailerAdjust; // trailerAdjust는 항상 0 (트레일러는 calcSubReport가 전담)
   return { subCo, amount, baseAmount, course, seats, ot: 0, _otRate: otRate, trailerAdjust, trailerInfo };
 }
@@ -24733,6 +24756,36 @@ function _pcIsSurchargeRow(name){
 // ★ PC6: 모든 여행사 요금표에 서차지 6항목(빈 칸) 추가 — 이미 있는 항목은 건너뜀.
 //   빈 칸은 계산에 영향 없음(기존 규칙 사용). 금액을 넣은 칸만 적용됨.
 const PC_SURCHARGE_ROW_NAMES = ['Hotel Surcharge','Distance Surcharge','Airport Parking','Trailer','Early Surcharge','OT'];
+// ★ PS6: 서브 요금표용 — 모든 서브 회사에 서차지 6항목(빈 칸) 추가
+function addPSSurchargeRows(){
+  if(!DB.PS || !Object.keys(DB.PS).length){ toast('서브 요금표가 없습니다','er'); return; }
+  let added = 0;
+  Object.keys(DB.PS).forEach(sub => {
+    const pc = DB.PS[sub] || (DB.PS[sub] = {});
+    PC_SURCHARGE_ROW_NAMES.forEach(nm => {
+      const kind = Object.keys(PC_SURCHARGE_ROWS).find(t => PC_SURCHARGE_ROWS[t].indexOf(nm) >= 0);
+      if((PC_SURCHARGE_ROWS[kind] || [nm]).some(alias => _pcFindCourseCI(pc, alias))) return;
+      const e = {max_hours:''}; PC_SEAT_BUCKETS.forEach(k => { e[k] = {rate:null, ot:null}; });
+      pc[nm] = e; added++;
+    });
+  });
+  if(!added){ toast('모든 서브 회사에 서차지 항목이 이미 있습니다','ok'); return; }
+  savePSToSheets();
+  if(ST.curSub) rPS(ST.curSub);
+  toast('서차지 항목 ' + added + '개 추가 ✓ — 각 서브 요금표에서 Edit로 금액 입력','ok');
+}
+// ★ PS6: 코스 엔트리에서 좌석수에 맞는 구간의 {rate, ot, bucket} (여행사·서브 공통 규칙)
+function _pcSeatData(entry, seatNum){
+  if(!entry) return {rate:0, ot:0, bucket:null};
+  if(window._PC6_OFF){
+    const n = Number(seatNum)||21; const k = n>=50?'50':n>=40?'40':n>=25?'25':'21';
+    const sd = entry[k] || entry['21'] || {};
+    return {rate: parseFloat(sd.rate)||0, ot: parseFloat(sd.ot)||0, bucket: k};
+  }
+  const k = _pcPickSeat(entry, seatNum);
+  const sd = k ? (entry[k] || {}) : {};
+  return {rate: parseFloat(sd.rate)||0, ot: parseFloat(sd.ot)||0, bucket: k};
+}
 function addPCSurchargeRows(){
   if(!DB.PC || !Object.keys(DB.PC).length){ toast('여행사 요금표가 없습니다','er'); return; }
   let added = 0;
@@ -32047,26 +32100,18 @@ function openM(type,idx){
   }
   else if(type==='PS'){
     const p=d;
+    // ★ PS6 (2026-10-11): 여행사 요금표와 같은 형태(6구간 + 서차지 행). 예전 폼은 \${…}가 이스케이프돼 값이 '${p.att}' 글자로 보였음 → 수정
     h=`<div class="fr" style="background:var(--acd);border:1px solid var(--ac);border-radius:var(--rr);padding:8px 11px;margin-bottom:12px">
-        <span style="font-size:11px;color:var(--ac);font-family:var(--fd);font-weight:700">🤝 서브 회사: \${ST.curSub||'선택없음'}</span></div>
-      <div class="fr"><label class="fl">코스 / 관광지*</label><input class="fi" id="fa" value="\${p.att||''}" placeholder="Blue Mountains"></div>
-      <div class="fr"><label class="fl">Max Hours</label><input class="fi" id="fmh" type="number" value="\${p.max_hours||''}" placeholder="10"></div>
-      <div class="psl">🚌 21인승</div>
+        <span style="font-size:11px;color:var(--ac);font-family:var(--fd);font-weight:700">🤝 서브 회사: ${escH(ST.curSub||'선택없음')}</span></div>
+      <div class="fr"><label class="fl">코스 / 관광지*</label><input class="fi" id="fa" value="${escH(p.att||'')}" placeholder="Blue Mountains"></div>
+      <div class="fr"><label class="fl">Max Hours</label><input class="fi" id="fmh" type="number" value="${p.max_hours||''}" placeholder="10"></div>`
+      + PC_SEAT_BUCKETS.map(k => `
+      <div class="psl">🚌 ${k}인승</div>
       <div class="fr2">
-        <div><label class="fl">Rate ($)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="r21" type="number" value="\${p['21']?.rate||''}"></div></div>
-        <div><label class="fl">OT Rate ($/hr)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="o21" type="number" value="\${p['21']?.ot||''}"></div></div></div>
-      <div class="psl">🚌 25인승</div>
-      <div class="fr2">
-        <div><label class="fl">Rate ($)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="r25" type="number" value="\${p['25']?.rate||''}"></div></div>
-        <div><label class="fl">OT Rate ($/hr)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="o25" type="number" value="\${p['25']?.ot||''}"></div></div></div>
-      <div class="psl">🚌 40인승</div>
-      <div class="fr2">
-        <div><label class="fl">Rate ($)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="r40" type="number" value="\${p['40']?.rate||''}"></div></div>
-        <div><label class="fl">OT Rate ($/hr)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="o40" type="number" value="\${p['40']?.ot||''}"></div></div></div>
-      <div class="psl">🚌 50인승</div>
-      <div class="fr2">
-        <div><label class="fl">Rate ($)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="r50" type="number" value="\${p['50']?.rate||''}"></div></div>
-        <div><label class="fl">OT Rate ($/hr)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="o50" type="number" value="\${p['50']?.ot||''}"></div></div></div>`;
+        <div><label class="fl">Rate ($)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="r${k}" type="number" value="${p[k]?.rate||''}"></div></div>
+        <div><label class="fl">OT Rate ($/hr)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="o${k}" type="number" value="${p[k]?.ot||''}"></div></div></div>`).join('')
+      + `<div style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:6px">💡 이 서브가 쓰는 인승 칸에만 금액을 넣으세요(빈 칸은 사용 안 함).<br>
+        서차지는 코스명을 <b>Hotel Surcharge</b>(호텔 1곳당) · <b>Distance Surcharge</b>(1회당) · <b>Airport Parking</b> · <b>Trailer</b> · <b>Early Surcharge</b> · <b>OT</b>(시간당)로 추가해 Rate 칸에 입력. 비우면 지금 규칙대로 지급.</div>`;
   }
   else if(type==='SG_SUB'){
     h=`<div class="fr"><label class="fl">서브 회사명*</label><input class="fi" id="fsubname" placeholder="예: ABC Bus Pty Ltd" value=""></div>
@@ -32271,7 +32316,8 @@ function saveM(){
     if(!sub){toast('서브 회사 선택 필요','er');return}
     const att=gv('fa');
     if(!DB.PS[sub])DB.PS[sub]={};
-    const entry={max_hours:gn('fmh'),'21':{rate:gn('r21'),ot:gn('o21')},'25':{rate:gn('r25'),ot:gn('o25')},'40':{rate:gn('r40'),ot:gn('o40')},'50':{rate:gn('r50'),ot:gn('o50')}};
+    const entry={max_hours:gn('fmh')};   // ★ PS6: 6구간
+    PC_SEAT_BUCKETS.forEach(k => { entry[k] = {rate:gn('r'+k), ot:gn('o'+k)}; });
     if(ie&&idx!==att)delete DB.PS[sub][idx];
     DB.PS[sub][att]=entry;
     savePSToSheets();
@@ -32576,6 +32622,7 @@ function selSub(sub){
   document.querySelectorAll('#subCoTabs .agtab').forEach(b=>b.classList.toggle('on',b.dataset.sub===sub));
   document.getElementById('subTitle').textContent=sub+' 요금표';
   document.getElementById('btnAddPS').style.display='';
+  { const _bs=document.getElementById('btnAddPSSur'); if(_bs) _bs.style.display=''; }
   document.getElementById('btnSaveSub').style.display='';
   rPS(sub);
 }
@@ -32584,17 +32631,14 @@ function rPS(sub){
   const data=DB.PS[sub]||{};
   document.getElementById('tbPS').innerHTML=Object.entries(data).map(([att,p])=>{
     return`<tr>
-      <td>${att}</td>
-      <td>${pcel(p['21']?.rate,p['21']?.ot)}</td>
-      <td>${pcel(p['25']?.rate,p['25']?.ot)}</td>
-      <td>${pcel(p['40']?.rate,p['40']?.ot)}</td>
-      <td>${pcel(p['50']?.rate,p['50']?.ot)}</td>
+      <td>${escH(att)}${_pcIsSurchargeRow(att)?' <span style="font-size:10px;color:var(--ac)">(서차지)</span>':''}</td>
+      ${PC_SEAT_BUCKETS.map(k => `<td>${pcel(p[k]?.rate,p[k]?.ot)}</td>`).join('')}
       <td style="color:var(--t3);font-size:11px">${p.max_hours?p.max_hours+'h':'—'}</td>
       <td><div style="display:flex;gap:4px">
         <button class="btn bgh xs" onclick="openM('PS','${esc(att)}')">Edit (수정)</button>
         <button class="btn brd xs" onclick="cDel('PS','${esc(att)}','${esc(att)}')">Delete (삭제)</button>
       </div></td>
-    </tr>`}).join('')||`<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--t3)">요금이 없습니다. 코스를 추가하세요.</td></tr>`;
+    </tr>`}).join('')||`<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--t3)">요금이 없습니다. 코스를 추가하세요.</td></tr>`;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -32654,12 +32698,9 @@ async function savePSToSheets(){
     const rows=[];
     Object.entries(DB.PS).forEach(([sub,courses])=>{
       Object.entries(courses).forEach(([course,v])=>{
-        rows.push({SubCo:sub,Course:course,max_hours:v.max_hours,
-          seats_21_rate:v['21']?.rate,seats_21_ot:v['21']?.ot,
-          seats_25_rate:v['25']?.rate,seats_25_ot:v['25']?.ot,
-          seats_40_rate:v['40']?.rate,seats_40_ot:v['40']?.ot,
-          seats_50_rate:v['50']?.rate,seats_50_ot:v['50']?.ot
-        });
+        const _row = {SubCo:sub,Course:course,max_hours:v.max_hours};   // ★ PS6: 6구간
+        PC_SEAT_BUCKETS.forEach(k => { _row['seats_'+k+'_rate'] = v[k]?.rate; _row['seats_'+k+'_ot'] = v[k]?.ot; });
+        rows.push(_row);
       });
     });
     const res=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
@@ -32684,12 +32725,9 @@ async function loadPSFromSheets(){
     json.rows.forEach(r=>{
       if(!r.SubCo||!r.Course) return;
       if(!ps[r.SubCo]) ps[r.SubCo]={};
-      ps[r.SubCo][r.Course]={max_hours:r.max_hours||null,
-        '21':{rate:Number(r.seats_21_rate)||0,ot:Number(r.seats_21_ot)||0},
-        '25':{rate:Number(r.seats_25_rate)||0,ot:Number(r.seats_25_ot)||0},
-        '40':{rate:Number(r.seats_40_rate)||0,ot:Number(r.seats_40_ot)||0},
-        '50':{rate:Number(r.seats_50_rate)||0,ot:Number(r.seats_50_ot)||0}
-      };
+      const _e = {max_hours:r.max_hours||null};   // ★ PS6: 6구간
+      PC_SEAT_BUCKETS.forEach(k => { _e[k] = {rate:Number(r['seats_'+k+'_rate'])||0, ot:Number(r['seats_'+k+'_ot'])||0}; });
+      ps[r.SubCo][r.Course]=_e;
     });
     if(Object.keys(ps).length) DB.PS=ps;
   }catch(e){console.warn('서브 요금 로드 실패:',e);}
