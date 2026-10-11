@@ -9824,7 +9824,7 @@ document.addEventListener('click', (e)=>{
 // ★ PC6 (2026-10-07): 인승 기준 분리
 //   · 요청 인승(리포트 'Seats', 일정표 값) = 여행사 청구 기준 → getRequestedSeats()
 //   · 드라이버 비용 인승 = 실제 차량 좌석수 기준 → getSeatsFromShift() (드라이버 수당·서차지 옵션 함수들이 사용)
-//       차량 50석 이상 → 50S, 26석 이상 → 40S, 25석 이하 → 요청 인승(21S/25S) 그대로
+//       차량 50석 이상 → 50S, 26석 이상 → 40S, 25석 → 25S, 그 이하 → 21S (요청 인승과 무관 — 2026-10-11 확정)
 //       차량 좌석수를 모르면 요청 인승 숫자로 같은 규칙 적용 (35S→40S, 45S→40S)
 function getRequestedSeats(){
   const shift = activeShifts.find(s=>s.id===editingShiftId);
@@ -9834,13 +9834,15 @@ function getRequestedSeats(){
 function _paySeatsFor(req){
   if(!req) return '';
   const v = (typeof getCurrentVehicle === 'function') ? getCurrentVehicle() : null;
+  // ★ 차량 마스터에 '드라이버 요금 인승'(Driver_Pay_Seats)이 지정돼 있으면 그대로 사용
+  const _fixed = String((v && v.Driver_Pay_Seats) || '').replace(/[^0-9]/g,'');
+  if(['21','25','40','50'].indexOf(_fixed) >= 0) return _fixed + 'S';
   const cap = parseInt(String((v && (v.Capacity || v.Seats)) || '').replace(/[^0-9]/g,'')) || 0;
   const rn = parseInt(String(req).replace(/[^0-9]/g,'')) || 0;
   const n = cap || rn;
   if(!n) return req;
   if(n >= 50) return '50S';
   if(n >= 26) return '40S';
-  if(rn === 21 || rn === 25) return req;
   return n >= 25 ? '25S' : '21S';
 }
 function getSeatsFromShift(){
