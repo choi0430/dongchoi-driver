@@ -4385,7 +4385,31 @@ function _softReauth(reason){
       }
     } catch(e){}
 
+    // ★ DA13 (2026-10-11): GAS 요청 시간 제한 — 서버 지연/네트워크 끊김 시 '불러오는 중…'에 영구히 멈추던 문제
+    //   (관리자 앱 D1과 동일) 호출부가 자체 signal을 준 경우(로그인·마스터·동의서·리포트 저장 큐 등)는 그대로 둠.
+    //   조회 60초 / 저장 120초 → 초과 시 AbortError로 실패 → 각 화면의 catch가 '실패' 처리.
+    let _da13Tid = null;
+    try {
+      const _u0 = typeof input === 'string' ? input : (input && input.url) || '';
+      if (_u0.indexOf(GAS_URL) === 0 && !(init && init.signal) && typeof AbortController !== 'undefined') {
+        const _isRead = !!_legacyGet || /"_get"\s*:\s*1/.test(String((init && init.body) || ''));
+        const _ms = _isRead ? 60000 : 120000;
+        const _ctl = new AbortController();
+        _da13Tid = setTimeout(() => {
+          _ctl.abort();
+          try {
+            if (typeof showToast === 'function') showToast(_isRead
+              ? '⏱ 서버 응답이 늦습니다 — 네트워크 확인 후 다시 시도하세요'
+              : '⏱ 서버 응답이 늦습니다 — 저장됐을 수 있으니 확인 후 다시 시도하세요', 'error');
+          } catch(_te){}
+        }, _ms);
+        init = Object.assign({}, init || {}, { signal: _ctl.signal });
+        if (_legacyGet) _legacyGet.init = Object.assign({}, _legacyGet.init || {}, { signal: _ctl.signal });
+      }
+    } catch(_de){}
+
     let p = _originalFetch(input, init);
+    if (_da13Tid) p = p.finally(() => clearTimeout(_da13Tid));
     // ★ A10: 구버전 서버(doPost에 _get 경로 없음) 호환 — Unknown action 이면 기존 GET 방식으로 1회 재시도
     if (_legacyGet) {
       const _lg = _legacyGet;
@@ -4522,10 +4546,12 @@ function addToRetryQueue(action, data) {
 
 // 동시 flush 방지 락 (online 이벤트 + 폴링 + 수동 등 여러 곳에서 호출되어도 한 번만)
 let _flushingRetryQueue = false;
+let _flushAgain = false;   // ★ 순서 보장: flush 도중 새로 쌓인 항목이 있으면 끝난 뒤 한 번 더
 
 async function flushRetryQueue() {
   if (_flushingRetryQueue) {
-    console.log('[RetryQueue] flush already running, skip');
+    _flushAgain = true;
+    console.log('[RetryQueue] flush already running, will run again after');
     return;
   }
   _flushingRetryQueue = true;
@@ -4539,6 +4565,9 @@ async function flushRetryQueue() {
         const r = await submitToSheets(item.action, item.data);
         if(r?.ok) {
           console.log('✅ 재전송 성공:', item.action, r.idempotent ? '(idempotent)' : '');
+        } else if(r?.code === 'VEHICLE_LOCKED' || r?.code === 'TRAILER_LOCKED') {
+          // ★ 잠금 충돌은 재시도해도 같은 결과 → 폐기하고 안내
+          showToast('🔒 ' + (r.error || '다른 드라이버가 사용 중입니다.'), 'error');
         } else {
           item.attempts = (item.attempts||0) + 1;
           if(item.attempts < 5) failed.push(item); // 5회 초과 시 폐기
@@ -4549,10 +4578,14 @@ async function flushRetryQueue() {
         if(item.attempts < 5) failed.push(item);
       }
     }
-    saveRetryQueue(failed);
+    // ★ flush 도중 새로 큐에 들어온 항목은 보존 (예전엔 덮어써서 유실될 수 있었음) — 원래 순서 유지
+    const _ids = new Set(q.map(it => it.data && it.data.Request_ID).filter(Boolean));
+    const _addedDuring = getRetryQueue().filter(it => !(it.data && it.data.Request_ID && _ids.has(it.data.Request_ID)));
+    saveRetryQueue(failed.concat(_addedDuring));
     if(failed.length === 0 && q.length > 0) showToast('☁️ Queued reports (미전송 리포트) ' + q.length + 'sent (건 전송 완료)', 'success');
   } finally {
     _flushingRetryQueue = false;
+    if (_flushAgain) { _flushAgain = false; setTimeout(flushRetryQueue, 300); }
   }
 }
 
@@ -4562,6 +4595,14 @@ function postToSheetsWithRetry(action, data) {
   data.Submitted = todayDisplay() + ' ' + _syd.toTimeString().slice(0,5);
   // Request_ID 미리 부여 — retry queue에 들어가도 동일 ID 유지 → 서버에서 중복 차단
   if (!data.Request_ID) data.Request_ID = _generateRequestId();
+  // ★ 순서 보장 (2026-10-11): 앞 단계(Pre Departure → Daily Report → End of Shift)가 아직 미전송 큐에 있으면
+  //   이번 요청이 먼저 서버에 도착하지 않도록 큐 맨 뒤에 넣고 큐를 순서대로 전송
+  if (getRetryQueue().length > 0) {
+    addToRetryQueue(action, data);
+    showToast('☁️ 앞선 미전송 기록부터 순서대로 전송합니다', 'success');
+    flushRetryQueue();
+    return;
+  }
   submitToSheets(action, data)
     .then(r => {
       if(r?.ok) {
