@@ -5229,6 +5229,7 @@ async function doLogin() {
   // ── 드라이버별 localStorage 데이터 로드 ──
   try { activeShifts = JSON.parse(localStorage.getItem('shifts_'+name)||'[]'); } catch(e){ activeShifts=[]; }
   try { todayReports = JSON.parse(localStorage.getItem('reports_'+name)||'[]'); } catch(e){ todayReports=[]; }
+  _pruneLocalStore(name);   // ★ DA11: 오래된 로컬 기록 정리
   // 48시간 자동 정리는 syncShiftsFromServer 완료 후 실행 (서버 shift 보호)
   // 진행 중인 shift가 있으면 editingShiftId 복원
   if(activeShifts.length > 0) {
@@ -12199,6 +12200,40 @@ async function fetchDRCache(){
     }
   }catch(e){ console.warn('DR 캐시 로드 실패:',e); }
   return _drReportsCache||[];
+}
+
+// ★ DA11 (2026-10-11): 기기에 저장되는 기록이 끝없이 쌓이지 않도록 정리
+//   · 로컬 리포트(reports_이름): 60일 지난 것 삭제 + 최근 300건까지만 (서버에 이미 저장된 사본 — 화면 표시용)
+//     날짜를 알 수 없는 항목은 지우지 않음. 미전송분은 별도 재시도 큐(dc_retry_queue)에 있어 영향 없음.
+//   · MOT 기록(dc_mot_이름): 최근 100건까지만 (서버 MOT_Report에 원본 보관)
+const LOCAL_REPORT_KEEP_DAYS = 60, LOCAL_REPORT_MAX = 300, LOCAL_MOT_MAX = 100;
+function _pruneLocalStore(driverName){
+  if(!driverName) return;
+  try {
+    const cutoff = new Date(Date.now() - LOCAL_REPORT_KEEP_DAYS*24*60*60*1000);
+    const cutISO = cutoff.getFullYear()+'-'+String(cutoff.getMonth()+1).padStart(2,'0')+'-'+String(cutoff.getDate()).padStart(2,'0');
+    const isOld = r => { const iso = (typeof parseToISO === 'function') ? parseToISO(r && (r.date || r.Date) || '') : ''; return !!iso && iso < cutISO; };
+    let local = [];
+    try { local = JSON.parse(localStorage.getItem('reports_'+driverName)||'[]'); } catch(e){ local = []; }
+    if(Array.isArray(local) && local.length){
+      let kept = local.filter(r => !isOld(r));
+      if(kept.length > LOCAL_REPORT_MAX) kept = kept.slice(kept.length - LOCAL_REPORT_MAX);   // 뒤쪽(최근 추가) 유지
+      if(kept.length !== local.length){
+        localStorage.setItem('reports_'+driverName, JSON.stringify(kept));
+        if(Array.isArray(todayReports)){
+          todayReports = todayReports.filter(r => !isOld(r));
+          if(todayReports.length > LOCAL_REPORT_MAX) todayReports = todayReports.slice(todayReports.length - LOCAL_REPORT_MAX);
+        }
+        console.log('🧹 [DA11] 오래된 로컬 리포트 ' + (local.length - kept.length) + '건 정리');
+      }
+    }
+    const mk = 'dc_mot_' + driverName;
+    let mot = [];
+    try { mot = JSON.parse(localStorage.getItem(mk)||'[]'); } catch(e){ mot = []; }
+    if(Array.isArray(mot) && mot.length > LOCAL_MOT_MAX){
+      localStorage.setItem(mk, JSON.stringify(mot.slice(0, LOCAL_MOT_MAX)));   // 최신이 앞(unshift)
+    }
+  } catch(e){ console.warn('[DA11] 로컬 정리 실패:', e); }
 }
 
 // GAS에 이미 있는 리포트를 로컬 localStorage에서 제거
