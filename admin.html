@@ -794,6 +794,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div class="ptab on" id="ptClient" onclick="setPtype('client')">🏢 여행사 요금 (Client)</div>
     <div class="ptab" id="ptDriver" onclick="setPtype('driver')">👤 드라이버 비용 (Driver)</div>
   </div>
+  <div style="display:flex;justify-content:flex-end;margin:-2px 0 8px">
+    <button class="btn bgh sm" onclick="openCourseAudit()" title="여행사·서브·드라이버 요금표와 최근 리포트의 코스 이름 비교">🔎 코스 이름 점검</button>
+  </div>
 
   <!-- CLIENT 요금 섹션 -->
   <div id="secClient">
@@ -832,8 +835,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- DRIVER 비용 섹션 -->
   <div id="secDriver" style="display:none">
     <div class="shd">
-      <div style="font-size:12px;color:var(--t3)">코스별 드라이버 비용 (공통)</div>
-      <button class="btn bac sm" onclick="openM('PD',null)">+ Add Course (코스 추가)</button>
+      <div style="font-size:12px;color:var(--t3)">코스별 드라이버 비용 (공통 · 실제 차량 인승 기준)</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn bgh sm" onclick="addPDSurchargeRows()" title="드라이버 요금표에 서차지 5항목(빈 칸) 추가">+ 서차지 항목</button>
+        <button class="btn bac sm" onclick="openM('PD',null)">+ Add Course (코스 추가)</button>
+      </div>
     </div>
     <div class="ptw"><table class="ptb">
       <thead><tr>
@@ -6377,7 +6383,7 @@ function rPC(ag){
 function rPD(){
   document.getElementById('tbPD').innerHTML=Object.entries(DB.PD).map(([att,p])=>{
     return`<tr>
-      <td>${att}</td>
+      <td>${escH(att)}${_pcIsSurchargeRow(att)?' <span style="font-size:10px;color:var(--ac)">(서차지)</span>':''}</td>
       <td>${pcelB(p['21']?.base,p['21']?.ot)}</td>
       <td>${pcelB(p['25']?.base,p['25']?.ot)}</td>
       <td>${pcelB(p['40']?.base,p['40']?.ot)}</td>
@@ -12606,8 +12612,10 @@ function calcSubReport(r) {
 
   // 표시용 breakdown (UI에서 분해해 보여주기 위해)
   // Hotel/Dist/Trailer는 헬퍼로 다시 계산 (TA값과 동일)
-  const hotelDR = parseFloat(r.Hotel_Surcharge)||0;
-  const distDR = parseFloat(r.Dist_Surcharge)||0;
+  // ★ ITEM6: 청구 인승 기준 금액으로 환산 (곳수·횟수·시간 저장분 우선)
+  const _eqS = _drEquiv(r, capNum);
+  const hotelDR = _eqS.hotel;
+  const distDR = _eqS.dist;
   const trailerDR_raw = parseFloat(r.Trailer)||0;
   let hotelSub = _hotelDRtoTA(hotelDR, capNum);
   let distSub  = _distDRtoTA(distDR, capNum);
@@ -12627,7 +12635,7 @@ function calcSubReport(r) {
       : _trailerDRtoTA(trailerDR_raw, capNum);
   const _trlOwn = _trailerOwnership(String(r.Trailer_Number||'').trim());
   // OT TA값
-  const otDR = parseFloat(r.OT)||0;
+  const otDR = _eqS.ot;   // ★ ITEM6
   const otRateTA = capNum>=50?160:capNum>=40?150:80;
   const otRateDR = capNum>=40?40:30;
   // 호주로(Tour Hojuro), Plus Australia: 30분 UNIT 단위 청구 (1 UNIT = 0.5HR, $15/UNIT for 21~25S)
@@ -12681,11 +12689,10 @@ function calcSubReport(r) {
   //   이게 정확한 모델 — 이전 "subTotal = subBase + taSurchargeTotal - parking" 회피 트릭 대신
   //   서차지 구성요소를 명시적으로 더함
   // ★ PS6 (2026-10-11): 서브 요금표(M_PriceSub)의 서차지 행 — 금액이 입력된 항목만 덮어씀(없으면 위 기존 규칙)
-  //   드라이버 금액으로 곳·회·시간 수를 셈 (드라이버 비용 인승 Pay_Seats 기준: 호텔 $10/$15, 거리 $30/$40, OT $30/$40 = 1)
+  //   곳·회·시간 수: 저장된 Hotel_Count 등 우선, 없으면 금액 ÷ 청구 인승 단가(호텔 $10/$15, 거리 $30/$40, OT $30/$40)
   if(_psCourses && !window._PC6_OFF){
     const _bk = _psSD.bucket;
-    const _payN = parseInt(String(r.Pay_Seats||'').replace(/[^0-9]/g,'')) || capNum;
-    const _sm = _payN < 40;
+    const _sm = capNum < 40;   // ★ ITEM6: 위에서 청구 인승 기준 금액으로 환산됨
     const _hR = _pcSurcharge(_psCourses, 'hotel', _bk, capNum);
     if(_hR > 0 && hotelDR > 0) hotelSub = Math.round(hotelDR / (_sm ? 10 : 15) * _hR);
     const _dR = _pcSurcharge(_psCourses, 'dist', _bk, capNum);
@@ -13047,7 +13054,7 @@ function renderSubRates(){
   const rates = getSubRates();
   const coRates = rates[subCo]||{};
   // 모든 PD 투어 목록 사용
-  const tours = Object.keys(DB.PD);
+  const tours = Object.keys(DB.PD).filter(t => !_pcIsSurchargeRow(t));   // ★ ITEM6
   const tbody = document.getElementById('subRatesTbody');
   tbody.innerHTML='';
   tours.forEach(tour=>{
@@ -13114,7 +13121,7 @@ function initCalcSelects(){
   vSel.innerHTML = '<option value="">-- 서브 차량 선택 --</option>' +
     vehs.map(v=>'<option value="'+v.Rego+'">'+v.Rego+' ('+v.Capacity+'석) — '+v.Owner+'</option>').join('');
   if(ST.curSubVeh) vSel.value = ST.curSubVeh;
-  const tours = Object.keys(DB.PD);
+  const tours = Object.keys(DB.PD).filter(t => !_pcIsSurchargeRow(t));   // ★ ITEM6
   const tSel = document.getElementById('calcTour');
   tSel.innerHTML = '<option value="">-- 투어 코스 선택 --</option>' +
     tours.map(t=>'<option value="'+t+'">'+t+'</option>').join('');
@@ -15041,7 +15048,7 @@ function openLedgerEntry(idx){
   ST.ledgerEditIdx = idx;
 
   const vehs = getSubVehicles();
-  const tours = Object.keys(DB.PD);
+  const tours = Object.keys(DB.PD).filter(t => !_pcIsSurchargeRow(t));   // ★ ITEM6
 
   const overlay = document.createElement('div');
   overlay.id = 'ledger-modal-overlay';
@@ -24749,6 +24756,25 @@ function _pcSurcharge(agPC, kind, bucket, seatNum){
   }
   return 0;
 }
+// ★ ITEM6 (2026-10-11): 드라이버 서차지 금액 → '청구 인승(Seats) 기준 드라이버 금액'으로 환산 (백엔드 _egDrEquiv와 동일)
+//   1) 리포트에 Hotel_Count / Dist_Count / OT_Hours 가 있으면 곳수·횟수·시간 × (소형 10/30/30 · 대형 15/40/40)
+//   2) 없으면(이전 리포트) 드라이버 비용 인승(Pay_Seats)과 청구 인승 크기가 다를 때만 단가 비율로 환산
+function _drEquiv(r, billSeatNum, h0, d0, o0){
+  const has = v => v !== undefined && v !== null && String(v).trim() !== '';
+  const bigBill = billSeatNum >= 40;
+  const payNum = parseInt(String(r.Pay_Seats||'').replace(/[^0-9]/g,'')) || 0;
+  const diff = !!payNum && ((payNum >= 40) !== bigBill);
+  const cv = (v, sm, lg) => diff ? v / (payNum >= 40 ? lg : sm) * (bigBill ? lg : sm) : v;
+  if(h0 === undefined) h0 = parseFloat(r.Hotel_Surcharge)||0;
+  if(d0 === undefined) d0 = parseFloat(r.Dist_Surcharge)||0;
+  if(o0 === undefined) o0 = parseFloat(r.OT)||0;
+  if(window._PC6_OFF) return {hotel:h0, dist:d0, ot:o0};
+  return {
+    hotel: has(r.Hotel_Count) ? (Number(r.Hotel_Count)||0) * (bigBill ? 15 : 10) : cv(h0, 10, 15),
+    dist:  has(r.Dist_Count)  ? (Number(r.Dist_Count)||0)  * (bigBill ? 40 : 30) : cv(d0, 30, 40),
+    ot:    has(r.OT_Hours)    ? (Number(r.OT_Hours)||0)    * (bigBill ? 40 : 30) : cv(o0, 30, 40)
+  };
+}
 function _pcIsSurchargeRow(name){
   const lc = String(name||'').trim().toLowerCase();
   return Object.keys(PC_SURCHARGE_ROWS).some(t => PC_SURCHARGE_ROWS[t].some(n => n.toLowerCase() === lc));
@@ -24756,6 +24782,79 @@ function _pcIsSurchargeRow(name){
 // ★ PC6: 모든 여행사 요금표에 서차지 6항목(빈 칸) 추가 — 이미 있는 항목은 건너뜀.
 //   빈 칸은 계산에 영향 없음(기존 규칙 사용). 금액을 넣은 칸만 적용됨.
 const PC_SURCHARGE_ROW_NAMES = ['Hotel Surcharge','Distance Surcharge','Airport Parking','Trailer','Early Surcharge','OT'];
+// ═══════════════════════════════════════════════════════
+// ★ 코스 이름 점검 (2026-10-11) — 여행사(M_PriceClient)·서브(M_PriceSub)·드라이버(M_PriceDriver)
+//   요금표와 최근 90일 리포트의 코스 이름을 비교. 이름이 한 글자라도 다르면 요금을 못 찾으므로
+//   ① 비슷하지만 다른 이름  ② 드라이버 요금표에 없는 코스  ③ 리포트에 쓰였지만 요금표에 없는 코스 를 보여줌.
+//   읽기 전용 — 수정은 각 요금표의 Edit에서.
+// ═══════════════════════════════════════════════════════
+function _courseKey(n){ return String(n||'').toLowerCase().replace(/\([^)]*\)/g,'').replace(/&/g,' and ').split(/[^a-z0-9가-힣]+/).filter(Boolean).map(w => w.length > 3 ? w.replace(/s$/,'') : w).join(''); }
+async function openCourseAudit(){
+  const map = {};   // rawName -> {pc:Set, ps:Set, pd:bool, dr:n}
+  const add = (name, kind, who) => {
+    const n = String(name||'').trim(); if(!n || _pcIsSurchargeRow(n)) return;
+    const e = map[n] || (map[n] = {pc:new Set(), ps:new Set(), pd:false, dr:0});
+    if(kind==='pc') e.pc.add(who); else if(kind==='ps') e.ps.add(who); else if(kind==='pd') e.pd = true; else if(kind==='dr') e.dr++;
+  };
+  Object.keys(DB.PC||{}).forEach(ag => Object.keys(DB.PC[ag]||{}).forEach(c => add(c,'pc',ag)));
+  Object.keys(DB.PS||{}).forEach(sb => Object.keys(DB.PS[sb]||{}).forEach(c => add(c,'ps',sb)));
+  Object.keys(DB.PD||{}).forEach(c => add(c,'pd'));
+  // 최근 90일 리포트
+  let drs = (typeof _drCache !== 'undefined' && Array.isArray(_drCache)) ? _drCache : [];
+  if(!drs.length){ try { const res = await fetch(APPS_SCRIPT_URL + '?action=get_reports&sheet=Daily_Report'); const j = await res.json(); if(j.ok && j.rows) drs = j.rows; } catch(e){} }
+  const cut = new Date(Date.now() - 90*864e5).toISOString().slice(0,10);
+  drs.forEach(r => { const d = (typeof parseToISO==='function' ? parseToISO(r.Date||'') : '') || ''; if(d && d >= cut) add(r.Attraction,'dr'); });
+
+  const names = Object.keys(map).sort((a,b)=>a.localeCompare(b));
+  // ① 비슷하지만 다른 이름
+  const groups = {};
+  names.forEach(n => { const k = _courseKey(n); (groups[k] = groups[k] || []).push(n); });
+  const similar = Object.values(groups).filter(g => g.length > 1);
+  const where = n => { const e = map[n]; const p = [];
+    if(e.pc.size) p.push('여행사 ' + e.pc.size); if(e.ps.size) p.push('서브 ' + e.ps.size); if(e.pd) p.push('드라이버'); if(e.dr) p.push('리포트 ' + e.dr + '건');
+    return p.join(' · ') || '-'; };
+  // ② 여행사/서브/리포트엔 있는데 드라이버 요금표에 없는 코스
+  const noPD = names.filter(n => !map[n].pd && (map[n].pc.size || map[n].ps.size || map[n].dr));
+  // ③ 리포트에 쓰였지만 어느 요금표에도 없는 이름
+  const orphan = names.filter(n => map[n].dr && !map[n].pc.size && !map[n].ps.size && !map[n].pd);
+
+  const row = n => `<tr><td style="padding:4px 6px;border-bottom:1px solid var(--bd)"><code>${escH(n)}</code></td><td style="padding:4px 6px;border-bottom:1px solid var(--bd);color:var(--t3);font-size:11px">${escH(where(n))}</td></tr>`;
+  const tbl = list => list.length ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${list.map(row).join('')}</table>` : '<div style="color:var(--gr,#16a34a);font-size:12px">✅ 없음</div>';
+  const html = `
+    <div style="font-size:12px;color:var(--t3);margin-bottom:10px">코스 이름은 세 요금표와 리포트에서 <b>글자 하나까지 같아야</b> 요금을 찾습니다(대소문자·앞뒤 공백은 무시). 전체 ${names.length}개 이름 · 최근 90일 리포트 기준.</div>
+    <div style="font-weight:700;margin:8px 0 4px">① 비슷하지만 다른 이름 (${similar.length}묶음) — 하나로 맞추세요</div>
+    ${similar.length ? similar.map(g => `<div style="background:var(--sf2,#f8fafc);border:1px solid var(--bd);border-radius:8px;padding:6px 8px;margin-bottom:6px">${tbl(g)}</div>`).join('') : tbl([])}
+    <div style="font-weight:700;margin:12px 0 4px">② 드라이버 요금표에 없는 코스 (${noPD.length}) — 드라이버 비용 자동 입력 안 됨</div>
+    ${tbl(noPD)}
+    <div style="font-weight:700;margin:12px 0 4px">③ 리포트에 쓰였지만 어느 요금표에도 없는 이름 (${orphan.length})</div>
+    ${tbl(orphan)}
+    <div style="font-weight:700;margin:12px 0 4px">전체 코스 (${names.length})</div>
+    ${tbl(names)}`;
+  let ov = document.getElementById('course-audit-ov');
+  if(!ov){ ov = document.createElement('div'); ov.id = 'course-audit-ov';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9500;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.addEventListener('click', e => { if(e.target === ov) ov.remove(); });
+    document.body.appendChild(ov); }
+  ov.innerHTML = `<div style="background:var(--sf);border-radius:14px;width:100%;max-width:640px;max-height:88vh;overflow:auto;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:15px;font-weight:800">🔎 코스 이름 점검</div>
+    <button class="btn bgh xs" onclick="document.getElementById('course-audit-ov').remove()">닫기</button></div>${html}</div>`;
+}
+
+// ★ ITEM6: 드라이버 요금표에 서차지 5항목(빈 칸) 추가 — 드라이버는 공항 주차비를 받지 않으므로 Airport Parking 제외
+function addPDSurchargeRows(){
+  if(!DB.PD) DB.PD = {};
+  let added = 0;
+  PC_SURCHARGE_ROW_NAMES.filter(nm => nm !== 'Airport Parking').forEach(nm => {
+    const kind = Object.keys(PC_SURCHARGE_ROWS).find(t => PC_SURCHARGE_ROWS[t].indexOf(nm) >= 0);
+    if((PC_SURCHARGE_ROWS[kind] || [nm]).some(alias => _pcFindCourseCI(DB.PD, alias))) return;
+    DB.PD[nm] = {max_hours:'', '21':{base:null,ot:null}, '25':{base:null,ot:null}, '40':{base:null,ot:null}, '50':{base:null,ot:null}};
+    added++;
+  });
+  if(!added){ toast('드라이버 요금표에 서차지 항목이 이미 있습니다','ok'); return; }
+  savePDToSheets();
+  rPD();
+  toast('서차지 항목 ' + added + '개 추가 ✓ — Edit로 Base Fee 칸에 금액 입력','ok');
+}
 // ★ PS6: 서브 요금표용 — 모든 서브 회사에 서차지 6항목(빈 칸) 추가
 function addPSSurchargeRows(){
   if(!DB.PS || !Object.keys(DB.PS).length){ toast('서브 요금표가 없습니다','er'); return; }
@@ -24827,12 +24926,11 @@ function taBreakdown(r) {
   //   두 인승의 크기(소형<40 / 대형≥40)가 다르면 드라이버 금액을 '청구 인승 기준 금액'으로 환산(곳·회·시간 수는 그대로).
   //   예) 40인승 차량으로 21S 일정: 호텔 DR $15(대형 1곳) → 소형 기준 $10 → 청구 $40
   //   Pay_Seats 없는 이전 리포트는 요청 인승 = 드라이버 기준이었으므로 환산 없음.
-  const _payNum = parseInt(String(r.Pay_Seats||'').replace(/[^0-9]/g,'')) || 0;
-  const _payBillDiff = !!_payNum && ((_payNum >= 40) !== (seatNum >= 40));
-  const _cv = (v, payUnitS, payUnitL) => _payBillDiff ? v / (_payNum >= 40 ? payUnitL : payUnitS) * (seatNum >= 40 ? payUnitL : payUnitS) : v;
-  const hotelDR = _cv(_hotelDR0, 10, 15);
-  const distDR  = _cv(_distDR0, 30, 40);
-  const otDR    = _cv(_otDR0, 30, 40);
+  //   ★ ITEM6: 리포트에 곳수·횟수·시간이 저장돼 있으면 그것 우선 (_drEquiv)
+  const _eqv = _drEquiv(r, seatNum, _hotelDR0, _distDR0, _otDR0);
+  const hotelDR = _eqv.hotel;
+  const distDR  = _eqv.dist;
+  const otDR    = _eqv.ot;
 
   // ── 서브(코치 회사) 직접 청구 시 요금 기준 여행사 = Tour Hojuro ──
   //   서브끼리 주고받은 일정은 자체 요금표(M_PriceClient)가 없으므로 Tour Hojuro 기준으로 자동계산.
@@ -31012,7 +31110,16 @@ function showWageReportDetail(reportIdEncoded){
   if((parseFloat(r.Tip)||0)>0) items.push({l:'팁', v:parseFloat(r.Tip), c:'#eab308', sign:'+'});
   if(r.Toll_Personal==='Y'&&(parseFloat(r.Toll)||0)>0) items.push({l:'톨비 (개인)', v:parseFloat(r.Toll), c:'#78716c', sign:'+'});
   if(r.Fuel_Personal==='Y'&&(parseFloat(r.Fuel)||0)>0) items.push({l:'연료 (개인)', v:parseFloat(r.Fuel), c:'#78716c', sign:'+'});
+  // ★ 2026-10-14: 기타(Etc) + 설명(Etc_Desc), 수동 차량 수당 — 실수령에는 포함되는데 내역에 빠져 있었음
+  { const _etc = parseFloat(r.Etc)||0; const _ed = String(r.Etc_Desc||'').trim();
+    if(_etc !== 0) items.push({l:'기타 (Etc)', d:_ed, v:Math.abs(_etc), c:'#0f766e', sign:_etc<0?'-':'+'}); }
+  { const _mb = parseFloat(r.Manual_Bonus)||0;
+    if(_mb > 0) items.push({l:'수동 차량 수당', v:_mb, c:'#7c3aed', sign:'+'}); }
   if(nightOwn > 0) items.push({l:_rSub?('차주('+_rSub+') 납입'):'회사 납입 차감', v:nightOwn, c:'#dc2626', sign:'-'});
+  // 항목 합계가 실수령과 다르면 차액을 '기타 조정'으로 표시 (내역이 항상 실수령과 맞도록)
+  { const _sum = items.reduce((a,it)=>a + (it.sign==='-' ? -it.v : it.v), 0);
+    const _gap = Math.round((drCost - _sum)*100)/100;
+    if(Math.abs(_gap) >= 0.5) items.push({l:'기타 조정 (저장된 실수령과 차액)', v:Math.abs(_gap), c:'#6b7280', sign:_gap<0?'-':'+'}); }
 
   // 모달 HTML
   const headerColor = _rSub ? 'linear-gradient(135deg,#6d28d9,#4f46e5)' : 'linear-gradient(135deg,#1e40af,#4f46e5)';
@@ -31054,7 +31161,7 @@ function showWageReportDetail(reportIdEncoded){
           ${items.length === 0 ? '<div style="padding:12px;text-align:center;color:#9ca3af;font-size:12px;">수당 내역이 없습니다</div>' :
             items.map(it => `
               <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:${it.c}0a;border-left:3px solid ${it.c};border-radius:4px;margin-bottom:4px;">
-                <span style="font-size:12px;color:#374151;">${escH(it.l)}</span>
+                <span style="font-size:12px;color:#374151;">${escH(it.l)}${it.d ? '<div style="font-size:11px;color:#6b7280;margin-top:2px;">📝 '+escH(it.d)+'</div>' : ''}</span>
                 <span style="font-size:13px;font-weight:700;color:${it.c};">${it.sign}$${it.v.toLocaleString()}</span>
               </div>
             `).join('')
@@ -32141,7 +32248,9 @@ function openM(type,idx){
       <div class="psl">👤 50인승</div>
       <div class="fr2">
         <div><label class="fl">Base Fee ($)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="b50" type="number" value="${p['50']?.base||''}"></div></div>
-        <div><label class="fl">OT Rate ($/hr)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="o50" type="number" value="${p['50']?.ot||''}"></div></div></div>`;
+        <div><label class="fl">OT Rate ($/hr)</label><div class="pfw"><span class="ps">$</span><input class="fi" id="o50" type="number" value="${p['50']?.ot||''}"></div></div></div>
+      <div style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:6px">💡 인승 = 드라이버가 운전한 차량 기준(21/25/40/50).<br>
+        서차지는 코스명을 <b>Hotel Surcharge</b>(호텔 1곳당) · <b>Distance Surcharge</b>(1회당) · <b>Trailer</b> · <b>Early Surcharge</b> · <b>OT</b>(시간당)로 추가해 <b>Base Fee</b> 칸에 입력. 비우면 기존 금액($10·$15 / $30·$40 / $30 / $30·$40 / 코스 OT).</div>`;
   }
   else if(type==='H'){
     h=`<div class="fr"><label class="fl">호텔명*</label><input class="fi" id="f0" value="${d.Hotel_Name||''}"></div>
