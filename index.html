@@ -2743,6 +2743,7 @@ function applyMasterData(data) {
   // PriceDriver 기준 (max_hours 포함)
   pdRows.forEach(r => {
     const name = String(r.Course||'').trim();
+    if(_isSurRowName(name)) return;   // ★ ITEM6: 서차지 행은 코스가 아님
     if(name && !_courseMap[name]) _courseMap[name] = { Course_Name: name, max_hours: r.max_hours || '' };
   });
   // PriceClient에만 있는 코스도 추가 (★ PC6: 여행사 서차지 행은 코스가 아니므로 제외)
@@ -6974,8 +6975,8 @@ async function _checkTrailerWithPD(btn, drTrailerVal, date, driver, rego, onPass
       buttons: [ {label:'✅ 사용함 — 비용 $30 추가', value:true, primary:true}, {label:'사용 안 함 (그대로 저장)', value:false} ]
     });
     if(yes){
-      if(typeof selectTrailer === 'function') selectTrailer(30);
-      else { var inp = document.getElementById('f-trailer'); if(inp) inp.value = 30; }
+      if(typeof selectTrailer === 'function') selectTrailer(_trailerDRRate());
+      else { var inp = document.getElementById('f-trailer'); if(inp) inp.value = _trailerDRRate(); }
       _setTrailerNumField(pdTrailer);
       if(typeof calcTotal === 'function') calcTotal();
     }
@@ -7187,6 +7188,17 @@ function _finalizeDailyReportSave(_drBtn){
     Manual_Bonus: report.manualBonus || 0,
     Total_TA: report.svcCharge,   // ★ M_PriceDriver base (= SVC_Charge) 저장 — 에이전시 TA는 admin에서 실시간 계산
     Pay_Seats: (typeof getSeatsFromShift === 'function' ? getSeatsFromShift() : '') || '',   // ★ PC6: 드라이버 비용 기준 인승(실제 차량)
+    // ★ ITEM6: 금액과 함께 '몇 곳·몇 회·몇 시간'을 저장 → 여행사·서브 청구가 단가 변경과 무관하게 정확
+    ...(function(){
+      const _ps = (typeof getSeatsFromShift === 'function' ? getSeatsFromShift() : '') || report.seats || '21S';
+      const _r2 = v => Math.round(v*100)/100;
+      const _hu = _hotelUnitFor(_ps), _du = _distUnitFor(_ps), _ou = getOTRate(report.attraction, _ps);
+      return {
+        Hotel_Count: (report.hotelSurcharge > 0 && _hu > 0) ? _r2(report.hotelSurcharge / _hu) : 0,
+        Dist_Count:  (report.distSurcharge  > 0 && _du > 0) ? _r2(report.distSurcharge  / _du) : 0,
+        OT_Hours:    (report.ot > 0 && _ou > 0) ? _r2(report.ot / _ou) : 0
+      };
+    })(),
     DR_Cost: report.dr,
     Toll_Detail: report.tollDetail || '',
     Remarks: report.remarks,
@@ -8741,10 +8753,10 @@ function getPDCourseFromMaster(att){
   if(!row) return null;
   return {
     max_hours: row.max_hours ? Number(row.max_hours) : null,
-    '21': {base:Number(row.seats_21_base)||0, ot:Number(row.seats_21_ot)||30, hotel_fee:Number(row.hotel_fee_21)||0},
-    '25': {base:Number(row.seats_25_base)||0, ot:Number(row.seats_25_ot)||30, hotel_fee:Number(row.hotel_fee_25)||0},
-    '40': {base:Number(row.seats_40_base)||0, ot:Number(row.seats_40_ot)||40, hotel_fee:Number(row.hotel_fee_40)||0},
-    '50': {base:Number(row.seats_50_base)||0, ot:Number(row.seats_50_ot)||40, hotel_fee:Number(row.hotel_fee_50)||0},
+    '21': {base:Number(row.seats_21_base)||0, ot:Number(row.seats_21_ot)||_drvSurRate('ot','21S')||30, hotel_fee:Number(row.hotel_fee_21)||0},
+    '25': {base:Number(row.seats_25_base)||0, ot:Number(row.seats_25_ot)||_drvSurRate('ot','25S')||30, hotel_fee:Number(row.hotel_fee_25)||0},
+    '40': {base:Number(row.seats_40_base)||0, ot:Number(row.seats_40_ot)||_drvSurRate('ot','40S')||40, hotel_fee:Number(row.hotel_fee_40)||0},
+    '50': {base:Number(row.seats_50_base)||0, ot:Number(row.seats_50_ot)||_drvSurRate('ot','50S')||40, hotel_fee:Number(row.hotel_fee_50)||0},
   };
 }
 
@@ -8766,8 +8778,10 @@ function getMaxHours(att){
 function getOTRate(att, seats){
   const d = getCourseData(att);
   const k = seatKey(seats);
-  if(d && d[k]) return d[k].ot || (seats==='40S'||seats==='50S' ? 40 : 30);
-  return (seats==='40S'||seats==='50S') ? 40 : 30;
+  // ★ ITEM6: 코스에 OT 단가가 없으면 드라이버 요금표 'OT' 행 → 기본 $30/$40
+  const _def = _drvSurRate('ot', seats) || (seats==='40S'||seats==='50S' ? 40 : 30);
+  if(d && d[k]) return d[k].ot || _def;
+  return _def;
 }
 
 // 1박2일 코스 패턴 감지
@@ -8920,7 +8934,7 @@ function updateHotelHint(){
   const dropoff = (document.getElementById('dr-dropoff')?.value || '').trim();
   const curVal  = parseFloat(cselGetValue('f-hotel-select') || '0');
 
-  const hotelOpts  = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
+  const hotelOpts  = _hotelOptsFor(seats);   // ★ ITEM6
   const fullFee    = hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 20;
   const halfFee    = hotelOpts.length >= 2 ? Number(hotelOpts[1]?.val||0) : Math.round(fullFee/2);
   const seatsLabel = seats || '인승 미선택';
@@ -8984,7 +8998,7 @@ function updateDistHint(){
   if(!hintEl) return;
   const seats  = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
   const curVal = parseFloat(document.getElementById('f-dist-select')?.value || 0);
-  const rate   = (seats==='40S'||seats==='50S') ? 40 : 30;
+  const rate   = _distUnitFor(seats) || ((seats==='40S'||seats==='50S') ? 40 : 30);   // ★ ITEM6
   const seatsLabel = seats || '인승 미선택';
 
   // ★ 거리할증이 있으면 사유 입력칸 노출 (인보이스에 표시됨)
@@ -9032,7 +9046,7 @@ function updateSvcHint(){
   const manualAdd = att ? calcManualBonus(_mRego, att) : 0;
 
   if(!att){
-    const rows = MASTER.priceDriver || [];
+    const rows = (MASTER.priceDriver || []).filter(r => !_isSurRowName(r.Course));   // ★ ITEM6: 서차지 행 제외
     const allBase = rows.map(r=>Number(r['seats_'+sk+'_base']||0)).filter(v=>v>0);
     if(allBase.length){
       const mn = Math.min(...allBase)+(isManualVehicle?10:0), mx = Math.max(...allBase)+(isManualVehicle?20:0);
@@ -9388,12 +9402,12 @@ function autoFillDRSurcharges(force){
 
   if(!seats) return; // 인승 없으면 요금 계산 불가
 
-  const hotelOpts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
+  const hotelOpts = _hotelOptsFor(seats);   // ★ ITEM6
   const fullFee   = hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 20;
   // 편도 금액: HOTEL_OPTIONS에서 $0 다음 값 ($10 또는 $15)
   const halfFee   = hotelOpts.length >= 2 ? Number(hotelOpts[1]?.val || 0) : Math.round(fullFee/2);
-  const earlyRate = (seats==='40S'||seats==='50S') ? 40 : 30;
-  const otRate    = (seats==='40S'||seats==='50S') ? 40 : 30;
+  const earlyRate = _earlyDRRate(seats);   // ★ ITEM6
+  const otRate    = getOTRate(att, seats);
 
   // ── 1) 호텔 서차지 ──────────────────────────────────────
   const curHotel = parseFloat(cselGetValue('f-hotel-select') || '0');
@@ -9623,7 +9637,7 @@ function _updateAutoFillBanner(){
     const ps=isSurchargeHotel(pickup), ds=isSurchargeHotel(dropoff);
     const pa=isAirportLocation(pickup), da=isAirportLocation(dropoff);
     if(ps||ds){
-      const hotelOpts=HOTEL_OPTIONS[seats]||HOTEL_OPTIONS['21S'];
+      const hotelOpts=_hotelOptsFor(seats);   // ★ ITEM6
       const fullFee =hotelOpts.length ? Math.max(...hotelOpts.map(o=>Number(o.val))) : 20;
       // 편도 금액: HOTEL_OPTIONS 두 번째 항목에서 직접 읽음 (21/25S→$10, 40/50S→$15)
       const halfFee =hotelOpts.length>=2 ? Number(hotelOpts[1]?.val||0) : Math.round(fullFee/2);
@@ -9723,6 +9737,48 @@ const DIST_OPTIONS = {
   '40S': [{val:'0',label:'$0 — 없음',dr:0},{val:'40',label:'$40 — 거리 서차지',dr:40}],
   '50S': [{val:'0',label:'$0 — 없음',dr:0},{val:'40',label:'$40 — 거리 서차지',dr:40}],
 };
+
+// ═══════════════════════════════════════════════════════════════
+// ★ ITEM6 (2026-10-11): 드라이버·여행사·서브 요금표 항목 통일
+//   드라이버 요금표(M_PriceDriver)에도 여행사·서브와 같은 이름의 서차지 행을 둠:
+//   Hotel Surcharge(호텔 1곳당) · Distance Surcharge(1회당) · Trailer · Early Surcharge · OT(시간당)
+//   해당 인승(21/25/40/50 = 실제 차량 기준) 칸의 Base에 금액이 있으면 그 금액으로 옵션을 만들고,
+//   없으면 기존 값(M_HotelOptions/M_DistOptions 또는 기본 $10·$15 / $30·$40 / $30 / $30·$40 / 코스 OT)을 사용.
+// ═══════════════════════════════════════════════════════════════
+// (함수 안에 둠 — 스크립트 로딩 순서와 무관하게 호출 가능)
+function _drvSurNames(){
+  return { hotel:['hotel surcharge'], dist:['distance surcharge','dist surcharge'],
+    trailer:['trailer','trailer surcharge'], early:['early surcharge'], ot:['ot'], parking:['airport parking'] };
+}
+function _isSurRowName(n){
+  const m = _drvSurNames(), lc = String(n||'').trim().toLowerCase();
+  return Object.keys(m).some(k => m[k].indexOf(lc) >= 0);
+}
+function _drvSurRate(kind, seats){
+  try {
+    const names = _drvSurNames()[kind] || [];
+    const row = (MASTER.priceDriver || []).find(r => names.indexOf(String(r.Course||'').trim().toLowerCase()) >= 0);
+    if(!row) return 0;
+    const k = String(seats||'21S').replace(/[^0-9]/g,'') || '21';
+    const v = parseFloat(row['seats_'+k+'_base']);
+    return isNaN(v) ? 0 : v;
+  } catch(e){ return 0; }
+}
+function _hotelOptsFor(seats){
+  const r = _drvSurRate('hotel', seats);
+  if(r > 0) return [{val:'0',label:'$0',dr:0},{val:String(r),label:'$'+r+' — 편도',dr:r},{val:String(r*2),label:'$'+(r*2)+' — 양쪽',dr:r*2}];
+  return HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
+}
+function _distOptsFor(seats){
+  const r = _drvSurRate('dist', seats);
+  if(r > 0) return [{val:'0',label:'$0 — 없음',dr:0},{val:String(r),label:'$'+r+' — 거리 서차지',dr:r}];
+  return DIST_OPTIONS[seats] || DIST_OPTIONS['21S'];
+}
+// 1곳/1회 단가 (리포트에 '몇 곳·몇 회'를 저장할 때 사용)
+function _hotelUnitFor(seats){ const o = _hotelOptsFor(seats); return o.length >= 2 ? (Number(o[1].val)||0) : 0; }
+function _distUnitFor(seats){ const v = _distOptsFor(seats).map(o => Number(o.val)||0).filter(x => x > 0); return v.length ? Math.min.apply(null, v) : 0; }
+function _earlyDRRate(seats){ return _drvSurRate('early', seats) || ((seats==='40S'||seats==='50S') ? 40 : 30); }
+function _trailerDRRate(){ return _drvSurRate('trailer', (typeof getSeatsFromShift==='function' ? getSeatsFromShift() : '') || '21S') || 30; }
 
 // ═══════════════════════════════════════════════════
 // CSEL — 커스텀 셀렉트 드롭다운 (항상 위로 열림)
@@ -9927,10 +9983,14 @@ function selectOTAmount(amt){
 }
 function selectTrailer(amt){
   document.getElementById('f-trailer').value = amt;
+  // ★ ITEM6: 금액 버튼은 드라이버 요금표 'Trailer' 행 금액(없으면 $30) — 버튼 id는 기존 'trailer-btn-30' 유지
+  const _tr = _trailerDRRate();
+  const _tb = document.getElementById('trailer-btn-30');
+  if(_tb){ _tb.textContent = '$' + _tr; _tb.onclick = function(){ selectTrailer(_trailerDRRate()); }; }
   [0, 30].forEach(v=>{
     const b = document.getElementById('trailer-btn-'+v);
     if(!b) return;
-    const sel = v === amt;
+    const sel = v === 0 ? (Number(amt) === 0) : (Number(amt) > 0);
     b.style.background  = sel ? 'var(--accent)' : 'var(--surface2)';
     b.style.color       = sel ? 'white' : 'var(--text)';
     b.style.borderColor = sel ? 'var(--accent)' : 'var(--border)';
@@ -9940,7 +10000,7 @@ function selectTrailer(amt){
 }
 function getEarlyRate(){
   const seats = getSeatsFromShift() || document.getElementById('dr-seats')?.value || '';
-  return (seats==='40S'||seats==='50S') ? 40 : 30;
+  return _earlyDRRate(seats);   // ★ ITEM6
 }
 function updateEarlyBtn(){
   const rate = getEarlyRate();
@@ -10223,6 +10283,7 @@ function updateSurchargeOptions(){
   if(trailerGroup){
     if(isSmall){
       trailerGroup.style.display = 'block';
+      { const _tb = document.getElementById('trailer-btn-30'); if(_tb) _tb.textContent = '$' + _trailerDRRate(); }   // ★ ITEM6
     } else {
       trailerGroup.style.display = 'none';
       selectTrailer(0);
@@ -10245,11 +10306,11 @@ function updateSurchargeOptions(){
   onSvcSelectChange();
 
   // Hotel Surcharge
-  const hotelOpts = HOTEL_OPTIONS[seats] || HOTEL_OPTIONS['21S'];
+  const hotelOpts = _hotelOptsFor(seats);   // ★ ITEM6
   cselBuild('f-hotel-select', hotelOpts.map(o=>({val:o.val,label:o.label})), '0');
 
   // Distance Surcharge
-  const distOpts = DIST_OPTIONS[seats] || DIST_OPTIONS['21S'];
+  const distOpts = _distOptsFor(seats);   // ★ ITEM6
   cselBuild('f-dist-select', distOpts.map(o=>({val:o.val,label:o.label})), '0');
 
   calcTotal();
@@ -10361,7 +10422,7 @@ function calcTotal(){
   const nightRate = getNightRate();
   const nightTA = (nightType!=='none' && nightRate) ? nightRate.ta : 0;
   const nightDR = (nightType!=='none' && nightRate) ? nightRate.dr : 0;
-  // ta(여행사 청구): 톨비는 40/50인승만, 연료비/세차/식비 포함 안 함, 야간투어 별도
+  // ta(여행사 청구): 톨비는 40/50인승만, 연료비/세차 포함 안 함, 식비는 드라이버 청구분 그대로 포함(2026-10-15), 야간투어 별도
   // Early/Late는 별도 계산 (Airport Transfer × 0.3) — f-early는 DR전용 고정값
   const fixedTA=['f-ot','f-trailer','f-tip','f-etc'];
   const isManualVehicle = (()=>{
@@ -10412,6 +10473,7 @@ function calcTotal(){
   let ta=_taBaseRate+getHotelTA()+getDistTA()+earlyTA;
   fixedTA.forEach(id=>{ta+=parseFloat(document.getElementById(id)?.value||0);});
   if(isLarge) ta += tollVal;
+  ta += mealVal;   // ★ 2026-10-15: 드라이버가 청구한 식비는 여행사에 그대로 청구 (관리자 인보이스와 동일)
   ta += nightTA;
   // dr(드라이버 지급): 기본 수당 + OT + 호텔서차지 + 거리서차지 + 야간투어 + 세차 + 식비 + 개인결제 톨/연료
   const att=document.getElementById('dr-attraction')?.value;
@@ -11295,7 +11357,7 @@ function applySchedulePrefill(){
       if(data.trailer && typeof selectTrailer === 'function'){
         const trailerGroup = document.getElementById('trailer-group');
         if(trailerGroup && trailerGroup.style.display !== 'none'){
-          selectTrailer(30);
+          selectTrailer(_trailerDRRate());
           filled.push('트레일러');
         }
       }
