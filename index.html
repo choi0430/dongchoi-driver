@@ -6587,10 +6587,25 @@ function addDailyReport(shiftId){
 }
 
 // ★ 오늘 이 차량에 배정됐는데 아직 Daily Report를 작성하지 않은 일정 수 (조기 EOS 경고용)
+// ★ 2026-10-16: '리포트 완료' 판정용 목록 = 서버 리포트 캐시 + 이 기기에서 방금 저장한 리포트
+//   예전엔 서버 캐시만 봐서, DR을 저장해도 다음 동기화(또는 새로고침) 전까지 일정이 '미작성'으로 남고
+//   End of Shift에서 '리포트하지 않은 일정이 있다'고 잘못 경고했음. (저장 실패로 대기열에 있는 리포트도 포함)
+function _reportsForMatch(){
+  const server = (typeof _drReportsCache !== 'undefined' && _drReportsCache) ? _drReportsCache : [];
+  let local = [];
+  try {
+    local = (Array.isArray(todayReports) ? todayReports : []).map(r => ({
+      Tour_Code: r.tourcode || '', Rego: r.rego || '', Driver: r.driver || '',
+      Date: r.date || '', _isoDate: (typeof parseToISO === 'function' ? parseToISO(r.date || '') : '') || '',
+      _local: true
+    }));
+  } catch(e){ local = []; }
+  return server.concat(local);
+}
 function _unreportedTodayCount(rego){
   try {
     const today = _todayLocalISO();
-    const reports = (typeof _drReportsCache !== 'undefined' && _drReportsCache) ? _drReportsCache : [];
+    const reports = _reportsForMatch();   // ★ 방금 저장한 리포트 포함
     const regoU = String(rego||'').trim().toUpperCase();
     const slots = (_driverScheduleCache||[]).filter(s => {
       if(s.date !== today) return false;
@@ -7209,6 +7224,7 @@ function _finalizeDailyReportSave(_drBtn){
   });
   renderTodayReports();
   renderStep2SavedReports();
+  try { if(typeof renderDriverSchedule === 'function') renderDriverSchedule(); } catch(e){}   // ★ 일정 카드 '✅ DR 완료' 즉시 반영
   clearDailyDraft();  // 제출 완료 → draft 삭제
   // ★ 임시 시프트(_synthetic) 정리 — 닫힌 시프트에 DR만 추가한 경우
   //   localStorage에는 저장하지 않았으므로 메모리에서만 제거
@@ -10906,7 +10922,7 @@ function renderDriverSchedule(){
   //     · TourCode + Date — 가장 unique한 조합
   //     · TourCode가 비어있거나 같은 날 TourCode가 같은 슬롯이 2건 이상이면
   //       → Rego(슬롯 차량)와 슬롯 시간대로 추가 좁히기
-  const reports = (typeof _drReportsCache !== 'undefined' && _drReportsCache) ? _drReportsCache : [];
+  const reports = _reportsForMatch();   // ★ 2026-10-16: 방금 저장한 리포트도 바로 '완료'로
   const _slotRegoOf = (s) => {
     const slot = s.slot || {};
     const sub = String(slot.subVehicleNote||'').trim().replace(/^[^\w\dA-Z]+/, '').toUpperCase();
