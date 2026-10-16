@@ -2144,6 +2144,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
         <div class="flb">Meal ($)</div>
         <input id="drm-meal" class="profit-finp" type="number" step="0.01" style="width:100%;">
       </div>
+      <div>
+        <div class="flb">Water ($)</div>
+        <input id="drm-water" class="profit-finp" type="number" step="0.01" style="width:100%;">
+      </div>
     </div>
 
     <!-- 가이드/투어코드 -->
@@ -12706,7 +12710,9 @@ function calcSubReport(r) {
     const _pR = _pcSurcharge(_psCourses, 'parking', _bk, capNum);
     if(_pR > 0 && /^\s*airport\s*$/i.test(r.Pickup||'')) subParking = _pR;
   }
-  const subTotal = subBase + hotelSub + distSub + trailerSub + subOT + subParking + earlySub;
+  // ★ 2026-10-15: 드라이버가 청구한 식비·물값은 여행사에 그대로 청구되므로 서브(차주)에게도 그대로 지급
+  const mealSub = (parseFloat(r.Meal)||0) + (parseFloat(r.Water)||0);
+  const subTotal = subBase + hotelSub + distSub + trailerSub + subOT + subParking + earlySub + mealSub;
 
   // 디버그 로그 (진단용 — 추후 제거)
   if(window._debugSub){
@@ -12767,7 +12773,7 @@ function calcSubReport(r) {
   return {
     isSub: true, subOwner: owner, rego, capKey, attraction, agency, driver,
     taAmount,
-    subCost: { base: subBase, ot: subOT, hotel: hotelSub, dist: distSub, trailer: trailerSubInCost, parking: subParking, early: earlySub, night: nightOwner, total: subTotalAdjusted },
+    subCost: { base: subBase, ot: subOT, hotel: hotelSub, dist: distSub, trailer: trailerSubInCost, parking: subParking, early: earlySub, meal: mealSub, night: nightOwner, total: subTotalAdjusted },
     drCost,
     profit,
     scenario,        // 'SUB_normal' | 'CROSS_DC_drives_SUB'
@@ -15293,7 +15299,7 @@ async function importFromReports(){
     const earlyAmt   = parseFloat(r.Early)||0;
     const nightDRAmt = parseFloat(r.Night_DR)||0;
     const washAmt    = parseFloat(r.Wash)||0;
-    const mealAmt    = parseFloat(r.Meal)||0;
+    const mealAmt    = (parseFloat(r.Meal)||0) + (parseFloat(r.Water)||0);   // ★ 물값 포함
     const tipAmt     = parseFloat(r.Tip)||0;
     const tollAmt    = r.Toll_Personal === 'Y' ? (parseFloat(r.Toll)||0) : 0;
     const fuelAmt    = r.Fuel_Personal === 'Y' ? (parseFloat(r.Fuel)||0) : 0;
@@ -16099,6 +16105,7 @@ async function editDailyReportRow(rowIndex){
 
             <div><label class="fl">Wash ($)</label><input class="fi" type="number" id="dre-Wash" value="${escH(_v('Wash'))}"></div>
             <div><label class="fl">Meal ($)</label><input class="fi" type="number" id="dre-Meal" value="${escH(_v('Meal'))}"></div>
+            <div><label class="fl">Water ($)</label><input class="fi" type="number" id="dre-Water" value="${escH(_v('Water'))}"></div>
             <div><label class="fl">Tip ($)</label><input class="fi" type="number" id="dre-Tip" value="${escH(_v('Tip'))}"></div>
 
             <div><label class="fl">Etc ($)</label><input class="fi" type="number" id="dre-Etc" value="${escH(_v('Etc'))}"></div>
@@ -16235,6 +16242,7 @@ async function adminCreateMissingDR(missingInfo){
           <div><label>야경 오너 ($)</label><input id="dre-Night_Owner" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
           <div><label>세차 ($)</label><input id="dre-Wash" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
           <div><label>식사 ($)</label><input id="dre-Meal" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
+          <div><label>물값 ($)</label><input id="dre-Water" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
           <div><label>팁 ($)</label><input id="dre-Tip" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
           <div><label>기타 금액 ($)</label><input id="dre-Etc" type="number" step="0.01" value="0" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
           <div style="grid-column:span 2;"><label>기타 설명</label><input id="dre-Etc_Desc" value="" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;"></div>
@@ -16273,7 +16281,7 @@ async function adminSaveNewDR(){
     'OT','Hotel_Surcharge','Dist_Surcharge','Trailer','Trailer_Number','Early',
     'Toll','Toll_Personal','Fuel','Fuel_Personal',
     'Night_Type','Night_DR','Night_Owner',
-    'Wash','Meal','Tip','Etc','Etc_Desc','Remarks'
+    'Wash','Meal','Water','Tip','Etc','Etc_Desc','Remarks'
   ];
   const data = {};
   fields.forEach(f => {
@@ -16359,7 +16367,7 @@ async function saveDailyReportEdit(rowIndex){
     'OT','Hotel_Surcharge','Dist_Surcharge','Trailer','Trailer_Number','Early',
     'Toll','Toll_Personal','Fuel','Fuel_Personal',
     'Night_Type','Night_DR','Night_Owner',
-    'Wash','Meal','Tip','Etc','Etc_Desc','Remarks'
+    'Wash','Meal','Water','Tip','Etc','Etc_Desc','Remarks'
   ];
   const data = {};
   fields.forEach(f => {
@@ -16840,7 +16848,8 @@ async function _searchByTourCode(){
         _subTrailer: Number(calc.subCost.trailer) || 0,
         _subEarly: Number(calc.subCost.early) || 0,
         _subParking: Number(calc.subCost.parking) || 0,
-        _subExtras: (Number(calc.subCost.hotel)||0) + (Number(calc.subCost.dist)||0) + (Number(calc.subCost.trailer)||0) + (Number(calc.subCost.early)||0) + (Number(calc.subCost.parking)||0),
+        _subMeal: Number(calc.subCost.meal) || 0,   // ★ 식비·물 (드라이버 청구분)
+        _subExtras: (Number(calc.subCost.hotel)||0) + (Number(calc.subCost.dist)||0) + (Number(calc.subCost.trailer)||0) + (Number(calc.subCost.early)||0) + (Number(calc.subCost.parking)||0) + (Number(calc.subCost.meal)||0),
         _subTotal: Number(calc.subCost.total) || 0,
         _hasSub: true
       };
@@ -17050,7 +17059,8 @@ function _renderSearchResults(matches, label){
     const dist    = r._hasSub ? Number(r._subDist||0)    : Number(r.Dist_Surcharge||0);
     const early = r._hasSub ? Number(r._subEarly||0) : Number(r.Early||0);
     const toll = Number(r.Toll||0);
-    const extras = trailer+hotel+dist+early+toll;
+    const mealW = r._hasSub ? Number(r._subMeal||0) : (Number(r.Meal||0) + Number(r.Water||0));   // ★ 식비·물
+    const extras = trailer+hotel+dist+early+toll+mealW;
     const isInv = r._source==='inv';
     const isSch = r._source==='sch';
     let srcBadge;
@@ -17136,7 +17146,8 @@ function _addSubInvRowFromReport(r){
   const dist    = r._hasSub ? Number(r._subDist||0)    : Number(r.Dist_Surcharge||0);
   const early = r._hasSub ? Number(r._subEarly||0) : Number(r.Early||0);
   const toll = Number(r.Toll||0);
-  const extras = trailer+hotel+dist+early+toll;
+  const mealW = r._hasSub ? Number(r._subMeal||0) : (Number(r.Meal||0) + Number(r.Water||0));   // ★ 식비·물
+  const extras = trailer+hotel+dist+early+toll+mealW;
   // 기타 라벨 결정
   let etcLabel = '';
   if(trailer && !hotel && !dist && !early && !toll) etcLabel='Trailer';
@@ -17144,6 +17155,7 @@ function _addSubInvRowFromReport(r){
   else if(hotel && !trailer && !dist && !early && !toll) etcLabel='Hotel';
   else if(early && !trailer && !hotel && !dist && !toll) etcLabel='Early Bird';
   else if(dist && !trailer && !hotel && !early && !toll) etcLabel='Distance';
+  if(mealW && !trailer && !hotel && !dist && !early && !toll) etcLabel='Meal/Water';
 
   const dateVal = parseToISO(r.Date||'') || (r.Date||'').slice(0,10); // YYYY-MM-DD for input[type=date]
   const tcVal = pickTourCode(r);
@@ -25133,9 +25145,12 @@ function taBreakdown(r) {
   const _tipAuto = parseFloat(r.Tip) || 0;
   const tipVal = _ovGet('tip') === '0' ? 0 : _tipAuto;
 
-  // ── Meal ──
-  const _mealAuto = parseFloat(r.Meal) || 0;
+  // ── Meal + Water ──
+  // ★ 2026-10-15: 물값(Water)도 식비처럼 드라이버 청구분 그대로 여행사 청구. 합계·토글은 식비와 함께(mealVal에 포함), 표시는 분리(waterVal)
+  const _waterAuto = parseFloat(r.Water) || 0;
+  const _mealAuto = (parseFloat(r.Meal) || 0) + _waterAuto;
   const mealVal = _ovGet('meal') === '0' ? 0 : _mealAuto;
+  const waterVal = _ovGet('meal') === '0' ? 0 : _waterAuto;
 
   // ── Toll (40/50인승만 TA) ──
   const _tollAuto = isLarge ? (parseFloat(r.Toll) || 0) : 0;
@@ -25164,7 +25179,7 @@ function taBreakdown(r) {
     trailerVal, nightTA, tipVal, mealVal, tollVal, etcVal, etcTA, _etcKey, etcDesc, total, rateSource,
     _rowPrefix,
     _hotelAuto, _distAuto, _earlyAuto, _otAuto, _trailerAuto, _nightAuto, _tipAuto, _mealAuto, _tollAuto,
-    _otHrs, _rateMissing: rateSource !== 'price_table', _earlyNoRate, _seatBucket: _bucket };
+    _otHrs, _rateMissing: rateSource !== 'price_table', _earlyNoRate, _seatBucket: _bucket, waterVal, _waterAuto };
 }
 async function initInvoice(forceReload) {
   if (forceReload) _invReports = null; // 명시적 새로고침 시에만 리포트 재로드
@@ -25799,7 +25814,7 @@ function renderInvPreview(rows, agency, from, to) {
               ['트레일러', c.trailerVal, c._trailerAuto, 'trailer'],
               ['야간', c.nightTA, c._nightAuto, 'night'],
               ['팁', c.tipVal, c._tipAuto, 'tip'],
-              ['식비', c.mealVal, c._mealAuto, 'meal'],
+              [(c._waterAuto ? '식비·물' : '식비'), c.mealVal, c._mealAuto, 'meal'],
               ['톨비', c.tollVal, c._tollAuto, 'toll'],
             ];
             items.forEach(([label, cur, auto])=>{
@@ -28481,7 +28496,9 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     if ((c.trailerVal||0) > 0) surLines.push({label: 'Trailer', amount: c.trailerVal});
     if ((c.nightTA||0) > 0) surLines.push({label: 'Night tour - Stargazing', amount: c.nightTA});
     if ((c.tipVal||0) > 0) surLines.push({label: 'Tip', amount: c.tipVal});
-    if ((c.mealVal||0) > 0) surLines.push({label: 'Meal', amount: c.mealVal});
+    { const _w = c.waterVal||0, _m = (c.mealVal||0) - _w;   // ★ 물값은 별도 줄
+      if (_m > 0) surLines.push({label: 'Meal', amount: _m});
+      if (_w > 0) surLines.push({label: 'Water', amount: _w}); }
     if ((c.tollVal||0) > 0) surLines.push({label: 'Toll', amount: c.tollVal});
     if ((c.etcTA||0) !== 0) surLines.push({label: 'Etc'+(c.etcDesc?' ('+escH(c.etcDesc)+')':''), amount: c.etcTA});   // ★ B6: 감액 조정(음수)도 표시
 
@@ -28966,7 +28983,7 @@ function exportDrCsv() {
     'SVC_Label','SVC_Charge','Hotel_Surcharge','Dist_Surcharge',
     'OT','Trailer','Total_TA','DR_Cost','Toll','Toll_Personal',
     'Fuel','Fuel_Personal','Early','Night_Type','Night_DR','Night_Owner',
-    'Wash','Meal','Tip','Etc','Remarks'];
+    'Wash','Meal','Water','Tip','Etc','Remarks'];
 
   const csvQ = v => `"${String(v||'').replace(/"/g,'""')}"`;
   const csvRows = [headers.map(csvQ).join(',')];
@@ -30265,7 +30282,7 @@ function renderDR(){
     const erl  = parseFloat(r.Early||0);
     const ngt  = parseFloat(r.Night_DR||0);
     const wsh  = parseFloat(r.Wash||0);
-    const meal = parseFloat(r.Meal||0);
+    const meal = parseFloat(r.Meal||0) + parseFloat(r.Water||0);   // ★ 물값 포함
     const toll = parseFloat(r.Toll||0);
     const trl  = parseFloat(r.Trailer||0);
     const tip  = parseFloat(r.Tip||0);
@@ -30429,6 +30446,7 @@ function openDREdit(rowIndex){
   document.getElementById('drm-toll').value        = r.Toll||'';
   document.getElementById('drm-wash').value        = r.Wash||'';
   document.getElementById('drm-meal').value        = r.Meal||'';
+  { const _dw = document.getElementById('drm-water'); if(_dw) _dw.value = r.Water||''; }
   document.getElementById('drm-guide').value       = r.Guide||'';
   document.getElementById('drm-tourcode').value    = r.Tour_Code||'';
   document.getElementById('drm-remarks').value     = r.Remarks||'';
@@ -30509,6 +30527,7 @@ async function saveDREdit(){
     Toll:             document.getElementById('drm-toll').value,
     Wash:             document.getElementById('drm-wash').value,
     Meal:             document.getElementById('drm-meal').value,
+    Water:            document.getElementById('drm-water')?.value || '',
     Guide:            document.getElementById('drm-guide').value.trim(),
     Tour_Code:        document.getElementById('drm-tourcode').value.trim(),
     Remarks:          document.getElementById('drm-remarks').value.trim(),
@@ -30523,7 +30542,7 @@ async function saveDREdit(){
   const _ngt  = parseFloat(updated.Night_DR)||0;
   const _trl  = parseFloat(updated.Trailer)||0;
   const _wsh  = parseFloat(updated.Wash)||0;
-  const _mel  = parseFloat(updated.Meal)||0;
+  const _mel  = (parseFloat(updated.Meal)||0) + (parseFloat(updated.Water)||0);   // ★ 물값 포함
   const _tip  = parseFloat(updated.Tip)||0;
   const _toll = updated.Toll_Personal==='Y' ? (parseFloat(updated.Toll)||0) : 0;
   const _fuel = updated.Fuel_Personal==='Y' ? (parseFloat(updated.Fuel)||0) : 0;
@@ -30829,7 +30848,7 @@ function _calcDRFromReport(r){
   const trl=parseFloat(r.Trailer)||0;
   const ngt=parseFloat(r.Night_DR)||0;
   const wsh=parseFloat(r.Wash)||0;
-  const mel=parseFloat(r.Meal)||0;
+  const mel=(parseFloat(r.Meal)||0)+(parseFloat(r.Water)||0);   // ★ 물값 포함
   const tip=parseFloat(r.Tip)||0;
   const toll=r.Toll_Personal==='Y'?(parseFloat(r.Toll)||0):0;
   const fuel=r.Fuel_Personal==='Y'?(parseFloat(r.Fuel)||0):0;
@@ -30911,7 +30930,7 @@ function _calcWeekSurcharges(reports){
     dist+=parseFloat(r.Dist_Surcharge)||0;
     early+=parseFloat(r.Early)||0;
     wash+=parseFloat(r.Wash)||0;
-    meal+=parseFloat(r.Meal)||0;
+    meal+=(parseFloat(r.Meal)||0)+(parseFloat(r.Water)||0);   // ★ 식비·물
     night+=parseFloat(r.Night_DR)||0;
     trailer+=parseFloat(r.Trailer)||0;
     tip+=parseFloat(r.Tip)||0;
@@ -30932,7 +30951,7 @@ function _surBadges(s){
     s.early>0&&{l:'조기출발',v:s.early,c:'#f59e0b'},
     s.trailer>0&&{l:'트레일러',v:s.trailer,c:'#64748b'},
     s.wash>0&&{l:'세차',v:s.wash,c:'#10b981'},
-    s.meal>0&&{l:'식비',v:s.meal,c:'#10b981'},
+    s.meal>0&&{l:'식비·물',v:s.meal,c:'#10b981'},
     s.night>0&&{l:'야간투어',v:s.night,c:'#a5b4fc'},
     s.tip>0&&{l:'팁',v:s.tip,c:'#eab308'},
     s.toll>0&&{l:'톨비',v:s.toll,c:'#78716c'},
@@ -31024,6 +31043,7 @@ function _reportRow(r){
   if((parseFloat(r.Night_DR)||0)>0) surItems.push({l:'야간',v:parseFloat(r.Night_DR),c:'#a5b4fc'});
   if((parseFloat(r.Wash)||0)>0) surItems.push({l:'세차',v:parseFloat(r.Wash),c:'#10b981'});
   if((parseFloat(r.Meal)||0)>0) surItems.push({l:'식비',v:parseFloat(r.Meal),c:'#10b981'});
+  if((parseFloat(r.Water)||0)>0) surItems.push({l:'물값',v:parseFloat(r.Water),c:'#0ea5e9'});
   if((parseFloat(r.Tip)||0)>0) surItems.push({l:'팁',v:parseFloat(r.Tip),c:'#eab308'});
   if(r.Toll_Personal==='Y'&&(parseFloat(r.Toll)||0)>0) surItems.push({l:'톨비',v:parseFloat(r.Toll),c:'#78716c'});
   if(r.Fuel_Personal==='Y'&&(parseFloat(r.Fuel)||0)>0) surItems.push({l:'연료',v:parseFloat(r.Fuel),c:'#78716c'});
@@ -31107,6 +31127,7 @@ function showWageReportDetail(reportIdEncoded){
   if((parseFloat(r.Night_DR)||0)>0) items.push({l:'야간 투어', v:parseFloat(r.Night_DR), c:'#a5b4fc', sign:'+'});
   if((parseFloat(r.Wash)||0)>0) items.push({l:'세차', v:parseFloat(r.Wash), c:'#10b981', sign:'+'});
   if((parseFloat(r.Meal)||0)>0) items.push({l:'식비', v:parseFloat(r.Meal), c:'#10b981', sign:'+'});
+  if((parseFloat(r.Water)||0)>0) items.push({l:'물값 (Water)', v:parseFloat(r.Water), c:'#0ea5e9', sign:'+'});
   if((parseFloat(r.Tip)||0)>0) items.push({l:'팁', v:parseFloat(r.Tip), c:'#eab308', sign:'+'});
   if(r.Toll_Personal==='Y'&&(parseFloat(r.Toll)||0)>0) items.push({l:'톨비 (개인)', v:parseFloat(r.Toll), c:'#78716c', sign:'+'});
   if(r.Fuel_Personal==='Y'&&(parseFloat(r.Fuel)||0)>0) items.push({l:'연료 (개인)', v:parseFloat(r.Fuel), c:'#78716c', sign:'+'});
