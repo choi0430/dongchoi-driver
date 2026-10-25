@@ -24687,7 +24687,20 @@ function calcInvRow(r) {
     const parkingFee = parseFloat(r.Parking) || 0;
     const nightTA = parseFloat(r.Night_DR) || 0;
     const tipVal = parseFloat(r.Tip) || 0;
-    const mealVal = parseFloat(r.Meal) || 0;
+    const mealVal = parseFloat(r.Meal) || 0;   // (저장된 식비 — 물값 포함 합계)
+    // ★ 그중 물값 (인보이스에 'Water' 줄로 분리 표시). 물값을 따로 저장하기 전 발행된 인보이스는 원래 Daily Report에서 찾아봄
+    let _wRaw = parseFloat(r.Water);
+    if(isNaN(_wRaw) && mealVal > 0){
+      try {
+        const _iso = String(r._iso || parseToISO(r.Date||'') || '').slice(0,10);
+        const _rg = String(r.Rego||'').trim().toUpperCase(), _at = String(r.Attraction||'').trim().toLowerCase();
+        const _src = (Array.isArray(_invReports) && _invReports.length) ? _invReports : ((typeof _drCache !== 'undefined' && Array.isArray(_drCache)) ? _drCache : []);
+        const _hit = _src.find(x => String(x._iso || parseToISO(x.Date||'') || '').slice(0,10) === _iso
+          && String(x.Rego||'').trim().toUpperCase() === _rg && String(x.Attraction||'').trim().toLowerCase() === _at);
+        _wRaw = _hit ? (parseFloat(_hit.Water)||0) : 0;
+      } catch(e){ _wRaw = 0; }
+    }
+    const waterVal = Math.min(_wRaw || 0, mealVal);
     const etcTA = parseFloat(r.Etc) || 0;
     const total = baseRate + ot + hotel + dist + trailerVal + tollVal + earlyTA + parkingFee + nightTA + tipVal + mealVal + etcTA;
     const savedRS = r._rateSource || 'manual';
@@ -24704,7 +24717,7 @@ function calcInvRow(r) {
       // auto 필드 — 저장값과 동일하게 (토글 칩 라벨이 $undefined 안 나오게)
       _hotelAuto: hotel, _distAuto: dist, _earlyAuto: earlyTA, _otAuto: ot,
       _trailerAuto: trailerVal, _nightAuto: nightTA, _tipAuto: tipVal,
-      _mealAuto: mealVal, _tollAuto: tollVal,
+      _mealAuto: mealVal, _tollAuto: tollVal, waterVal, _waterAuto: waterVal,
       _rowPrefix: ''
     };
   }
@@ -26140,7 +26153,7 @@ async function saveInvoiceToSheet(_recoverNum, _skipBalance) {
       // ★ 개별 서차지 저장 (시트 헤더명 기준)
       hotel: c.hotel||0, dist: c.dist||0, early: c.earlyTA||0,
       parking: c.parkingFee||0, trailer: c.trailerVal||0,
-      night: c.nightTA||0, tip: c.tipVal||0, meal: c.mealVal||0,
+      night: c.nightTA||0, tip: c.tipVal||0, meal: c.mealVal||0, water: c.waterVal||0,   // ★ meal은 물값 포함 합계, water는 그중 물값(표시용)
       toll: c.tollVal||0, etc: c.etcTA||0, etcDesc: c.etcDesc||'',
       distReason: String(r.Dist_Reason||'').trim(),
       rateSource: c.rateSource||'svc',
@@ -27349,6 +27362,7 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
         Night_Type:      '',
         Tip:             Number(it.tip)||0,
         Meal:            Number(it.meal)||0,
+        Water:           Number(it.water)||0,
         Toll:            Number(it.toll)||0,
         Etc:             _adj.etc,          // ★ B6: 서차지 수정값 복원 포함
         Etc_Desc:        _adj.etcDesc,
@@ -27544,7 +27558,7 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
           Dist_Surcharge: item.dist||0, Early: item.early||0,
           Parking: item.parking||0, Trailer: item.trailer||0,
           Night_DR: item.night||0, Tip: item.tip||0,
-          Meal: item.meal||0, Toll: item.toll||0, Etc: _adj.etc, Etc_Desc: _adj.etcDesc
+          Meal: item.meal||0, Water: item.water||0, Toll: item.toll||0, Etc: _adj.etc, Etc_Desc: _adj.etcDesc
         };
       });
       _sm.forEach(m => {
@@ -27680,7 +27694,7 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
           const _sm = _manualJSON ? JSON.parse(_manualJSON) : [];
           const _savedRows = _si.map(item => {
             const hasIndiv = item.hotel!==undefined || item.dist!==undefined || item.trailer!==undefined;
-            return { _iso:item.date||'', Date:item.date||'', Attraction:item.tour||'-', Rego:item.rego||'', Seats:item.seats||'', Driver:item.driver||'', Guide:item.guide||'', Tour_Code:item.tourcode||'', Pickup:item.pickup||'', Dropoff:item.dropoff||'', _timeStart:item.timeStart||'', _timeEnd:item.timeEnd||'', _manual:true, _rateSource:item.rateSource||'price_table', SVC_Charge:item.base||0, OT:item.ot||0, Hotel_Surcharge:hasIndiv?(item.hotel||0):(item.extra||0), Dist_Surcharge:item.dist||0, Dist_Reason:item.distReason||'', Early:item.early||0, Parking:item.parking||0, Trailer:item.trailer||0, Night_DR:item.night||0, Tip:item.tip||0, Meal:item.meal||0, Toll:item.toll||0, Etc:item.etc||0 };
+            return { _iso:item.date||'', Date:item.date||'', Attraction:item.tour||'-', Rego:item.rego||'', Seats:item.seats||'', Driver:item.driver||'', Guide:item.guide||'', Tour_Code:item.tourcode||'', Pickup:item.pickup||'', Dropoff:item.dropoff||'', _timeStart:item.timeStart||'', _timeEnd:item.timeEnd||'', _manual:true, _rateSource:item.rateSource||'price_table', SVC_Charge:item.base||0, OT:item.ot||0, Hotel_Surcharge:hasIndiv?(item.hotel||0):(item.extra||0), Dist_Surcharge:item.dist||0, Dist_Reason:item.distReason||'', Early:item.early||0, Parking:item.parking||0, Trailer:item.trailer||0, Night_DR:item.night||0, Tip:item.tip||0, Meal:item.meal||0, Water:item.water||0, Toll:item.toll||0, Etc:item.etc||0 };
           });
           _sm.forEach(m => { _savedRows.push({ _iso:parseToISO(m.date)||m.date||'', Date:m.date||'', Attraction:m.tour||'-', Rego:m.rego||'', Seats:m.seats||'', Driver:m.driver||'', Guide:m.guide||'', Tour_Code:m.tourcode||'', Pickup:m.pickup||'', Dropoff:m.dropoff||'', _timeStart:m.start||'', _timeEnd:m.end||'', _manual:true, SVC_Charge:m.amount||0, OT:m.ot||0, Hotel_Surcharge:m.hotel||0, Dist_Surcharge:m.dist||0, Dist_Reason:m.distReason||'', Early:m.early||0, Parking:m.parking||0, Trailer:m.trailer||0, Night_DR:m.night||0, Tip:m.tip||0, Meal:m.meal||0, Toll:m.toll||0, Etc:m.etc||0 }); });
           _savedRows.sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
