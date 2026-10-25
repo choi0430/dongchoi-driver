@@ -12546,11 +12546,13 @@ function _trailerDRtoTA(dr, sn){
 }
 
 // 리포트 행 → { isSub, subOwner, rego, capKey, taAmount, subCost:{base,ot,hotel,dist,trailer,total}, drCost, profit }
-function calcSubReport(r) {
+function calcSubReport(r, opts) {
   const rego = (r.Rego||'').trim();
   const veh = _findVehByRego(rego);   // ★ B4: 표기 차이 허용
-  const owner = (veh?.Owner||'').trim();
-  const isSub = !!rego && !!veh && !DC_OWNERS.includes(owner);
+  // ★ 2026-10-25: opts.ownerOverride — 파트너가 빌링하고 DC 차량이 뛴 운행(EG ③)에서
+  //   '파트너가 DC에 지급할 금액'을 파트너 서브 요금표로 계산할 때 사용 (EG 리포트 '지급액'과 같은 규칙)
+  const owner = (opts && opts.ownerOverride) ? String(opts.ownerOverride).trim() : (veh?.Owner||'').trim();
+  const isSub = (opts && opts.ownerOverride) ? true : (!!rego && !!veh && !DC_OWNERS.includes(owner));
   const isPrivate = r.Private==='Y' || (r.Agency||'').toUpperCase()==='PRIVATE';
   const capNum = parseInt((r.Seats||'25').replace(/[^0-9]/g,''))||25;
   const capKey = capNum>=50?'50':capNum>=40?'40':capNum>=25?'25':'21';
@@ -19618,13 +19620,19 @@ function _egQuadrantMatrixHTML(){
 
   const _fmt = (v) => '$' + Number(v||0).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
   const _sum = (rows, fn) => rows.reduce((s,r) => s + (fn(r)||0), 0);
-  const _drOf = r => Number(r.DR_Cost||r.Total||0)||0;
-  const _taOf = r => (typeof calcAgencyTA === 'function') ? (Number(calcAgencyTA(r))||0) : 0;
+  // ★ 2026-10-25: 구역별로 EG 리포트와 같은 금액을 쓰도록 정리
+  //   ② DC빌링+EG차량: 'EG에게 지급' = 서브 정산액(calcSubReport) — 예전엔 드라이버 비용(DR)이 표시됐음
+  //   ③ EG빌링+DC차량: 'EG에게 청구' = EG 서브 요금표 기준 금액(EG 리포트 'EG 지급액'과 동일) — 예전엔 DC 여행사 요금(calcAgencyTA)
+  const _egOwnerName = (() => { const k = Object.keys(DB.PS||{}).find(x => /eg\s*travel/i.test(x)); return k || 'EG TRAVEL PTY LTD'; })();
+  const _subTot = (r, o) => { try { const c = calcSubReport(r, o); return Number(c && c.subCost && c.subCost.total) || 0; } catch(e){ return 0; } };
+  const _drOf = (r, key) => key === 'q2' ? _subTot(r) : (Number(r.DR_Cost||r.Total||0)||0);
+  const _taOf = (r, key) => key === 'q3' ? _subTot(r, {ownerOverride: _egOwnerName})
+                                       : ((typeof calcAgencyTA === 'function') ? (Number(calcAgencyTA(r))||0) : 0);
 
-  const q1DR = _sum(m.q1, _drOf), q1TA = _sum(m.q1, _taOf);
-  const q2DR = _sum(m.q2, _drOf), q2TA = _sum(m.q2, _taOf);
-  const q3DR = _sum(m.q3, _drOf), q3TA = _sum(m.q3, _taOf);
-  const q4DR = _sum(m.q4, _drOf), q4TA = _sum(m.q4, _taOf);
+  const q1DR = _sum(m.q1, r=>_drOf(r,'q1')), q1TA = _sum(m.q1, r=>_taOf(r,'q1'));
+  const q2DR = _sum(m.q2, r=>_drOf(r,'q2')), q2TA = _sum(m.q2, r=>_taOf(r,'q2'));
+  const q3DR = _sum(m.q3, r=>_drOf(r,'q3')), q3TA = _sum(m.q3, r=>_taOf(r,'q3'));
+  const q4DR = _sum(m.q4, r=>_drOf(r,'q4')), q4TA = _sum(m.q4, r=>_taOf(r,'q4'));
 
   // ─ 셀 빌더 ───────────────────────────────────────────
   function _cell(opts){
@@ -19680,8 +19688,8 @@ function _egQuadrantMatrixHTML(){
         let w = weekMap.get(monISO);
         if(!w){ w = { rows:[], dr:0, ta:0, startISO: monISO, endISO: sunISO }; weekMap.set(monISO, w); }
         w.rows.push(r);
-        w.dr += _drOf(r);
-        w.ta += _taOf(r);
+        w.dr += _drOf(r, rowsKey);
+        w.ta += _taOf(r, rowsKey);
       });
       // 주차 키 오름차순 (오래된 → 최신)
       const weekKeys = Array.from(weekMap.keys()).sort();
@@ -19706,10 +19714,10 @@ function _egQuadrantMatrixHTML(){
         const sorted = w.rows.slice().sort((a,b)=> String(parseToISO(a.Date)||'').localeCompare(String(parseToISO(b.Date)||'')));
         html += `<div data-week-panel="${wi}" style="display:${wi===initialIdx?'block':'none'};" data-week-key="${wk}" data-week-end="${w.endISO}" data-week-dr="${w.dr}" data-week-ta="${w.ta}" data-week-count="${w.rows.length}">`;
         sorted.forEach(r => {
-          const dr = _drOf(r);
-          const ta = _taOf(r);
+          const dr = _drOf(r, rowsKey);
+          const ta = _taOf(r, rowsKey);
           // ★ 청구 단가 누락 감지 — TA 가 드라이버 비용으로 fallback 된 케이스
-          const taMissing = (typeof _taRateMissing === 'function') ? _taRateMissing(r) : false;
+          const taMissing = (rowsKey !== 'q3' && typeof _taRateMissing === 'function') ? _taRateMissing(r) : false;   // ③은 여행사 요금 아님
           const dt = parseToISO(r.Date)||'';
           const dtShort = dt ? dt.slice(5).replace('-','/') : '—';
           const tc = String(r.Tour_Code||r.TourCode||'').trim();
