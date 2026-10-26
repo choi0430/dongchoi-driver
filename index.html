@@ -10594,7 +10594,7 @@ function calcTotal(){
   const nightRate = getNightRate();
   const nightTA = (nightType!=='none' && nightRate) ? nightRate.ta : 0;
   const nightDR = (nightType!=='none' && nightRate) ? nightRate.dr : 0;
-  // ta(여행사 청구): 톨비는 40/50인승만, 연료비/세차 포함 안 함, 식비는 드라이버 청구분 그대로 포함(2026-10-15), 야간투어 별도
+  // ta(여행사 청구): 톨비는 요청 35인승 이상만, 연료비/세차 포함 안 함, 식비는 드라이버 청구분 그대로 포함(2026-10-15), 야간투어 별도
   // Early/Late는 별도 계산 (Airport Transfer × 0.3) — f-early는 DR전용 고정값
   const fixedTA=['f-ot','f-trailer','f-tip','f-etc'];
   const isManualVehicle = (()=>{
@@ -10644,7 +10644,7 @@ function calcTotal(){
   const _taBaseRate = _courseRowTA ? (Number(_courseRowTA[_rcTA]) || svcVal) : svcVal;
   let ta=_taBaseRate+getHotelTA()+getDistTA()+earlyTA;
   fixedTA.forEach(id=>{ta+=parseFloat(document.getElementById(id)?.value||0);});
-  if(isLarge) ta += tollVal;
+  if((parseInt(seats)||0) >= 35) ta += tollVal;   // ★ 2026-10-26: 요청 인승 35↑ 톨비 여행사 청구
   ta += mealVal + waterVal;   // ★ 2026-10-15: 드라이버가 청구한 식비·물값은 여행사에 그대로 청구 (관리자 인보이스와 동일)
   ta += nightTA;
   // dr(드라이버 지급): 기본 수당 + OT + 호텔서차지 + 거리서차지 + 야간투어 + 세차 + 식비 + 개인결제 톨/연료
