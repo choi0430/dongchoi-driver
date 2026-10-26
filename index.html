@@ -9922,6 +9922,8 @@ document.addEventListener('click', (e)=>{
 //   · 내가 자주 쓴 톨: 리포트 저장 때 (경로+금액+차량크기)를 이 폰에 기억 → 많이 쓴 순으로 버튼 표시
 const _TOLL_DEFAULT = ['Harbour Bridge','Harbour Tunnel','ED','CCT','LCT','M2','NorthConnex','M7','M5 SW','M5 East','M4','M8'];
 function _tollSize(){ const n = parseInt(getSeatsFromShift()) || 0; return n >= 40 ? 'L' : 'S'; }
+function _tollHasTrailer(){ return (parseFloat(document.getElementById('f-trailer')?.value||0) || 0) > 0; }
+function _tollRecentKey(){ return _tollSize() + (_tollHasTrailer() ? 'T' : ''); }   // 트레일러 운행은 따로 기억
 function _tollRoads(){
   let rows = MASTER.tolls;
   if (!Array.isArray(rows) || !rows.length) { try { rows = JSON.parse(localStorage.getItem('dc_tolls')||'[]'); } catch(e) { rows = []; } }
@@ -9929,7 +9931,9 @@ function _tollRoads(){
   if (!rows.length) return _TOLL_DEFAULT.map(n => ({name:n, amt:0, road:''}));
   rows = rows.slice().sort((a,b) => (Number(a.Sort)||999) - (Number(b.Sort)||999));
   const big = _tollSize() === 'L';
-  return rows.map(r => ({ name: String(r.Toll_Name).trim(), amt: Number(big ? r.Amount_Large : r.Amount_Small) || 0, road: String(r.Road||'').trim() }));
+  const trl = _tollHasTrailer();
+  return rows.map(r => { const base = Number(big ? r.Amount_Large : r.Amount_Small) || 0, ta = Number(r.Amount_Trailer) || 0;
+    return { name: String(r.Toll_Name).trim(), amt: (trl && ta > 0) ? ta : base, trl: trl && ta > 0, road: String(r.Road||'').trim() }; });
 }
 let _tollOpenRoad = '';   // 구간 버튼을 펼친 도로
 function _tollToggleRoad(i){ const road = (_tollGroups()[i]||{}).road || ''; _tollOpenRoad = (_tollOpenRoad === road) ? '' : road; _renderTollQuick(); }
@@ -9949,7 +9953,7 @@ function _tollRemember(){
     const d = String(document.getElementById('f-toll-detail')?.value||'').trim();
     const a = parseFloat(document.getElementById('f-toll')?.value||0) || 0;
     if (!d || a <= 0) return;
-    const z = _tollSize(), key = d.toLowerCase().replace(/\s+/g,' ');
+    const z = _tollRecentKey(), key = d.toLowerCase().replace(/\s+/g,' ');
     const list = _tollRecentList();
     const hit = list.find(x => x.k === key && x.z === z && Number(x.a) === a);
     if (hit) { hit.n = (Number(hit.n)||0) + 1; hit.t = Date.now(); hit.d = d; }
@@ -9964,7 +9968,7 @@ function _renderTollQuick(){
   const esc = v => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const detail = String(document.getElementById('f-toll-detail')?.value||'');
   const used = detail.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
-  const _chip = (r,i) => '<button type="button" onclick="_tollAddRoad('+i+')" style="'+_tollChipStyle(used.indexOf(r.name.toLowerCase())>=0)+'">'+esc(r.name)+(r.amt>0?' <span style="font-weight:500;">$'+r.amt+'</span>':'')+'</button>';
+  const _chip = (r,i) => '<button type="button" onclick="_tollAddRoad('+i+')" style="'+_tollChipStyle(used.indexOf(r.name.toLowerCase())>=0)+'">'+esc(r.name)+(r.amt>0?' <span style="font-weight:500;">'+(r.trl?'🚚':'')+'$'+r.amt+'</span>':'')+'</button>';
   let _segHtml = '';
   roadsEl.innerHTML = _tollGroups().map((g,gi) => {
     if (!g.road) return _chip(g.items[0].r, g.items[0].i);
@@ -9986,7 +9990,7 @@ function _renderTollQuick(){
       hEl.innerHTML = (g.c||[]).map((c,i) => '<button type="button" onclick="_tollUseHist('+i+')" style="'+_tollChipStyle(false)+'">'+(c[0]?esc(c[0]):'경로 미기재')+' <span style="font-weight:500;">$'+c[1]+' · '+c[2]+'회</span></button>').join('');
     } else hw.style.display = 'none';
   }
-  const z = _tollSize();
+  const z = _tollRecentKey();
   const rec = _tollRecentList().filter(x => x.z === z).slice(0, 6);
   const wrap = document.getElementById('toll-recent-wrap'), recEl = document.getElementById('toll-recent');
   if (wrap && recEl) {
@@ -10036,7 +10040,7 @@ function _tollAddRoad(i){
   _tollAfterChange();
 }
 function _tollUseRecent(i){
-  const x = _tollRecentList().filter(y => y.z === _tollSize())[i]; if (!x) return;
+  const x = _tollRecentList().filter(y => y.z === _tollRecentKey())[i]; if (!x) return;
   const dEl = document.getElementById('f-toll-detail'), aEl = document.getElementById('f-toll');
   if (dEl) dEl.value = x.d;
   if (aEl) aEl.value = x.a;
