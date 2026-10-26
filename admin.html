@@ -797,6 +797,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div style="display:flex;justify-content:flex-end;margin:-2px 0 8px">
     <button class="btn bgh sm" onclick="openCourseAudit()" title="여행사·서브·드라이버 요금표와 최근 리포트의 코스 이름 비교">🔎 코스 이름 점검</button>
     <button class="btn bgh sm" onclick="openTollAudit()" title="코스·출발지별 평소 톨 사용률과 톨 입력 누락 의심 리포트">🛣️ 톨 점검</button>
+    <button class="btn bgh sm" onclick="openEtollRecon()" title="E-Toll 내역서 PDF를 일일 리포트와 대조 (운행·공차·업무 외 구분)">📄 이톨 대조</button>
   </div>
 
   <!-- CLIENT 요금 섹션 -->
@@ -16097,8 +16098,11 @@ async function editDailyReportRow(rowIndex){
             <div><label class="fl">Trailer 번호</label><input class="fi" id="dre-Trailer_Number" value="${escH(_v('Trailer_Number'))}" placeholder="예: S47013 (M_Trailers 등록 번호)"></div>
             <div><label class="fl">Early ($)</label><input class="fi" type="number" id="dre-Early" value="${escH(_v('Early'))}"></div>
             <div><label class="fl">Toll ($)</label><input class="fi" type="number" id="dre-Toll" value="${escH(_v('Toll'))}"></div>
+            <div><label class="fl">Toll 경로</label><input class="fi" id="dre-Toll_Detail" value="${escH(_v('Toll_Detail'))}"></div>
+            <div><label class="fl">청구 안 함 톨 ($) <span style="font-weight:400;color:var(--t3)">공차·개인, 회사 부담</span></label><input class="fi" type="number" id="dre-Toll_NoBill" value="${escH(_v('Toll_NoBill'))}"></div>
+            <div><label class="fl">청구 안 함 톨 경로</label><input class="fi" id="dre-Toll_NoBill_Detail" value="${escH(_v('Toll_NoBill_Detail'))}"></div>
 
-            <div><label class="fl">Toll 개인 (Y/N)</label><select class="fs" id="dre-Toll_Personal"><option value="N"${_yn('Toll_Personal')==='N'?' selected':''}>N</option><option value="Y"${_yn('Toll_Personal')==='Y'?' selected':''}>Y</option></select></div>
+            <div><label class="fl">Toll 내 돈 결제·환급 (Y/N)</label><select class="fs" id="dre-Toll_Personal"><option value="N"${_yn('Toll_Personal')==='N'?' selected':''}>N</option><option value="Y"${_yn('Toll_Personal')==='Y'?' selected':''}>Y</option></select></div>
             <div><label class="fl">Fuel ($)</label><input class="fi" type="number" id="dre-Fuel" value="${escH(_v('Fuel'))}"></div>
             <div><label class="fl">Fuel 개인 (Y/N)</label><select class="fs" id="dre-Fuel_Personal"><option value="N"${_yn('Fuel_Personal')==='N'?' selected':''}>N</option><option value="Y"${_yn('Fuel_Personal')==='Y'?' selected':''}>Y</option></select></div>
 
@@ -16282,7 +16286,7 @@ async function adminSaveNewDR(){
     'Pickup','Dropoff','Time_Start','Time_End','KM_Start','KM_End',
     'SVC_Label','SVC_Charge','DR_Cost',
     'OT','Hotel_Surcharge','Dist_Surcharge','Trailer','Trailer_Number','Early',
-    'Toll','Toll_Personal','Fuel','Fuel_Personal',
+    'Toll','Toll_Personal','Toll_Detail','Toll_NoBill','Toll_NoBill_Detail','Fuel','Fuel_Personal',
     'Night_Type','Night_DR','Night_Owner',
     'Wash','Meal','Water','Tip','Etc','Etc_Desc','Remarks'
   ];
@@ -16368,7 +16372,7 @@ async function saveDailyReportEdit(rowIndex){
     'Pickup','Dropoff','Time_Start','Time_End','KM_Start','KM_End',
     'SVC_Label','SVC_Charge','DR_Cost',
     'OT','Hotel_Surcharge','Dist_Surcharge','Trailer','Trailer_Number','Early',
-    'Toll','Toll_Personal','Fuel','Fuel_Personal',
+    'Toll','Toll_Personal','Toll_Detail','Toll_NoBill','Toll_NoBill_Detail','Fuel','Fuel_Personal',
     'Night_Type','Night_DR','Night_Owner',
     'Wash','Meal','Water','Tip','Etc','Etc_Desc','Remarks'
   ];
@@ -24872,6 +24876,183 @@ async function openCourseAudit(){
   ov.innerHTML = `<div style="background:var(--sf);border-radius:14px;width:100%;max-width:640px;max-height:88vh;overflow:auto;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.3)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:15px;font-weight:800">🔎 코스 이름 점검</div>
     <button class="btn bgh xs" onclick="document.getElementById('course-audit-ov').remove()">닫기</button></div>${html}</div>`;
+}
+
+// ★ 이톨 내역서 PDF → 통행 목록 (pdf.js 텍스트 → 줄 재구성 → 파싱)
+async function _etollPdfLines(pdf){
+  const out = [];
+  for(let p = 1; p <= pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    const rows = [];
+    tc.items.forEach(it => {
+      const s = String(it.str||''); if(!s.trim()) return;
+      const x = it.transform[4], y = it.transform[5];
+      let row = rows.find(r => Math.abs(r.y - y) <= 2.5);
+      if(!row){ row = {y, items: []}; rows.push(row); }
+      row.items.push({x, s});
+    });
+    rows.sort((a,b) => b.y - a.y);
+    rows.forEach(r => { r.items.sort((a,b) => a.x - b.x); out.push(r.items.map(i => i.s.trim()).filter(Boolean).join('  ')); });
+  }
+  return out;
+}
+function _etollParse(lines){
+  const ref = {}, trips = []; let tag = null, lpn = null, period = '', expected = 0;
+  lines.forEach(l0 => {
+    let m; const l = String(l0).replace(/\s*\S*ROPO_\S*/g, '').trim();   // 페이지 하단 관리코드가 같은 줄로 붙는 경우 제거
+    if(!period && (m = l.match(/(\d{1,2} \w{3} \d{4}) - (\d{1,2} \w{3} \d{4})/))) period = m[0];
+    if((m = l.match(/Tag Number:\s*(\d+)/))){ tag = m[1]; lpn = null; return; }
+    if((m = l.match(/Licence Plate No:\s*([A-Z0-9]+)/i))){ tag = 'LPN'; lpn = m[1].toUpperCase(); return; }
+    if((m = l.match(/^(\d{8})\s+([A-Z0-9]{3,8})\s+\d+\s+[\d,.]+/))){ ref[m[1]] = m[2].toUpperCase(); return; }
+    if((m = l.match(/^Total for (?:Tag|Vehicle)\s+(-?[\d,]+\.\d\d)/))){ expected += parseFloat(m[1].replace(/,/g,'')); return; }
+    if(!tag) return;
+    if((m = l.match(/^(\d\d)\/(\d\d)\/(\d{4})\s+(\d\d:\d\d)\s+(.+?)\s+(-?\d[\d,]*\.\d\d)$/))){
+      let desc = m[5].trim(), cls = '';
+      const cm = desc.match(/\s+(Car|LCV|Heavy|Motorcycle|Class \w)$/i); if(cm){ cls = cm[1]; desc = desc.slice(0, cm.index).trim(); }
+      trips.push({tag: tag === 'LPN' ? '' : tag, lpn: tag === 'LPN' ? lpn : '', iso: m[3]+'-'+m[2]+'-'+m[1], time: m[4], desc, cls, amt: parseFloat(m[6].replace(/,/g,''))});
+    }
+  });
+  trips.forEach(t => { t.rego = t.lpn || ref[t.tag] || ('TAG ' + t.tag); });
+  return {trips, ref, period, expected: Math.round(expected*100)/100};
+}
+
+// ═══ ★ 2026-10-26 이톨 내역서 대조 — PDF 업로드 → 차량·날짜·운행시간으로 리포트와 맞춰봄 ═══
+//   분류: 운행 중(리포트 시간 ±15분) / 공차(운행 전후 90분 이내 — 회사 부담) / 업무 외(그 외·리포트 없는 날 — 회사 부담) / 공항 버스 주차비
+//   톨비 여행사 청구 기준: 요청 인승 35↑ → 그런 운행에서 '운행 중 톨 > 리포트 톨'이면 청구 누락 가능
+window._etollTrips = window._etollTrips || null;
+function _etollLoadPdfJs(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  return new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    sc.onload = () => { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; res(window.pdfjsLib); } catch(e){ rej(e); } };
+    sc.onerror = () => rej(new Error('pdf.js 로드 실패 (인터넷 연결 확인)'));
+    document.head.appendChild(sc);
+  });
+}
+function _etollOverlay(){
+  let ov = document.getElementById('etoll-ov');
+  if(!ov){ ov = document.createElement('div'); ov.id = 'etoll-ov';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9500;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.addEventListener('click', e => { if(e.target === ov) ov.remove(); });
+    document.body.appendChild(ov); }
+  return ov;
+}
+function _etollBox(body){
+  _etollOverlay().innerHTML = `<div style="background:var(--sf);border-radius:14px;width:100%;max-width:980px;max-height:90vh;overflow:auto;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap"><div style="font-size:15px;font-weight:800">📄 이톨 내역서 대조</div>
+    <div style="display:flex;gap:6px"><label class="btn bgh xs" style="cursor:pointer">📎 내역서 PDF 선택<input type="file" accept="application/pdf,.pdf" multiple style="display:none" onchange="_etollFiles(this.files)"></label>
+    <button class="btn bgh xs" onclick="document.getElementById('etoll-ov').remove()">닫기</button></div></div>${body}</div>`;
+}
+async function openEtollRecon(){
+  if(window._etollTrips && window._etollTrips.length) return _etollRender();
+  _etollBox(`<div style="font-size:12px;color:var(--t3);line-height:1.7">E-Toll(Service NSW) 월 내역서 PDF를 여러 개 한 번에 선택하세요. 파일은 이 브라우저 안에서만 읽고 서버에 올리지 않습니다.<br>
+    • 태그 번호의 Reference(번호판)로 차량을 찾고, 같은 날 그 차량의 일일 리포트 운행 시간과 비교합니다.<br>
+    • <b>공차</b>(운행 전후 90분 이내)·<b>업무 외</b>·<b>청구 안 함 톨</b>은 회사 부담, 여행사 청구는 요청 35인승↑ 운행의 운행 중 톨입니다.</div>`);
+}
+async function _etollFiles(files){
+  files = Array.from(files||[]); if(!files.length) return;
+  _etollBox('<div style="padding:30px;text-align:center;color:var(--t3)">내역서 읽는 중…</div>');
+  try {
+    const lib = await _etollLoadPdfJs();
+    const all = [], seen = {}, info = [];
+    for(const f of files){
+      const pdf = await lib.getDocument({data: new Uint8Array(await f.arrayBuffer())}).promise;
+      const r = _etollParse(await _etollPdfLines(pdf));
+      const sum = Math.round(r.trips.reduce((a,t) => a + t.amt, 0) * 100) / 100;
+      info.push({name: f.name, period: r.period, n: r.trips.length, sum, expected: r.expected});
+      r.trips.forEach(t => { const k = [t.rego,t.iso,t.time,t.desc,t.amt].join('|'); if(!seen[k]){ seen[k] = 1; all.push(t); } });
+    }
+    window._etollTrips = all; window._etollInfo = info;
+    _etollRender();
+  } catch(e){ _etollBox('<div style="color:#b91c1c">읽기 실패: '+escH(e.message||String(e))+'</div>'); }
+}
+async function _etollRender(){
+  const trips = window._etollTrips || [];
+  _etollBox('<div style="padding:30px;text-align:center;color:var(--t3)">리포트와 맞춰보는 중…</div>');
+  try { await _schEnsureDRCache(); } catch(e){}
+  const drs = (typeof _drCache !== 'undefined' && Array.isArray(_drCache)) ? _drCache : [];
+  const nz = v => String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  const isoOf = d => { const s = (typeof parseToISO === 'function' ? parseToISO(d) : '') || String(d||''); return String(s).slice(0,10); };
+  const dates = trips.map(t => t.iso).sort(); const dFrom = dates[0] || '', dTo = dates[dates.length-1] || '';
+  const prevIso = iso => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); };
+  // 리포트 색인 (차량|날짜)
+  const idx = {};
+  drs.forEach(r => {
+    if(String(r.Remarks||'').indexOf('SUB 담당자') >= 0) return;
+    const iso = isoOf(r.Date); if(!iso || iso < prevIso(dFrom) || iso > dTo) return;
+    const k = nz(r.Rego) + '|' + iso; (idx[k] = idx[k] || []).push(r);
+  });
+  const win = r => { let s = _timeToMin(r.Time_Start), e = _timeToMin(r.Time_End); if(isNaN(s)) return null; if(isNaN(e)) e = s + 600; if(e < s) e += 1440; return [s, e]; };
+  const days = {};
+  trips.forEach(t => {
+    const rk = nz(t.rego), tm = _timeToMin(t.time);
+    const key = rk + '|' + t.iso;
+    const d = days[key] || (days[key] = {rego: t.rego, iso: t.iso, trips: [], inS: 0, edge: 0, off: 0, air: 0});
+    let cls = 'off';
+    if(/Sydney Airport Corporation/i.test(t.desc)) cls = 'air';
+    else {
+      const cands = [];
+      (idx[key]||[]).forEach(r => cands.push({r, w: win(r), shift: 0}));
+      (idx[rk + '|' + prevIso(t.iso)]||[]).forEach(r => cands.push({r, w: win(r), shift: 1440}));   // 자정 넘긴 운행
+      let best = 'off';
+      cands.forEach(c => {
+        if(!c.w){ if(!c.shift) best = 'in'; return; }   // 시간 없는 리포트 → 운행 중으로 간주
+        const x = tm + c.shift;
+        if(x >= c.w[0]-15 && x <= c.w[1]+15) best = 'in';
+        else if(best !== 'in' && x >= c.w[0]-90 && x <= c.w[1]+90) best = 'edge';
+      });
+      cls = best;
+    }
+    t._cls = cls;
+    d.trips.push(t);
+    const a = t.amt; if(cls === 'in') d.inS += a; else if(cls === 'edge') d.edge += a; else if(cls === 'air') d.air += a; else d.off += a;
+  });
+  const r2 = v => Math.round(v*100)/100, $ = v => '$' + r2(v).toFixed(2);
+  const hm = v => (typeof parseSheetTime === 'function' ? parseSheetTime(v) : '') || String(v||'').slice(0,5);
+  const list = Object.values(days).map(d => {
+    const rs = idx[nz(d.rego) + '|' + d.iso] || [];
+    d.rs = rs;
+    d.drToll = r2(rs.reduce((a,r) => a + (parseFloat(r.Toll)||0), 0));
+    d.drNB = r2(rs.reduce((a,r) => a + (parseFloat(r.Toll_NoBill)||0), 0));
+    d.seats = rs.reduce((a,r) => Math.max(a, parseInt(String(r.Seats||'').replace(/[^0-9]/g,''))||0), 0);
+    d.billable = d.seats >= 35;
+    d.diff = r2(d.inS - d.drToll);
+    d.status = !rs.length ? 'nodr' : Math.abs(d.diff) < 0.5 ? 'ok' : d.diff > 0 ? 'less' : 'more';
+    return d;
+  }).sort((a,b) => b.iso.localeCompare(a.iso) || a.rego.localeCompare(b.rego));
+  const tot = k => r2(list.reduce((a,d) => a + d[k], 0));
+  const missBill = r2(list.filter(d => d.billable && d.status === 'less').reduce((a,d) => a + d.diff, 0));
+  const nMiss = list.filter(d => d.status === 'less').length;
+  const info = (window._etollInfo||[]).map(i => `<div>• ${escH(i.name)} — ${escH(i.period)} · ${i.n}건 ${$(i.sum)} ${i.expected ? (Math.abs(i.sum - i.expected) < 0.01 ? '<span style="color:#16a34a">✓ 내역서 합계 일치</span>' : '<span style="color:#b91c1c">⚠ 내역서 합계 '+$(i.expected)+'와 다름</span>') : ''}</div>`).join('');
+  const onlyDiff = window._etollOnlyDiff !== false;
+  const shown = onlyDiff ? list.filter(d => d.status !== 'ok') : list;
+  const td = 'padding:5px 6px;border-bottom:1px solid var(--bd);vertical-align:top';
+  const clsTag = {in:['운행','#1d4ed8'], edge:['공차','#6b7280'], off:['업무 외','#b45309'], air:['공항','#7c3aed']};
+  const stat = d => d.status === 'ok' ? '<span style="color:#16a34a;font-weight:700">✅ 일치</span>'
+    : d.status === 'nodr' ? '<span style="color:#b45309;font-weight:700">리포트 없음</span>'
+    : d.status === 'less' ? `<span style="color:${d.billable?'#b91c1c':'#b45309'};font-weight:700">리포트 톨 ${$(d.diff)} 적음${d.billable?' · 청구 누락 가능':''}</span>`
+    : `<span style="color:#6b7280;font-weight:700">리포트가 ${$(-d.diff)} 많음</span>`;
+  const row = d => `<tr><td style="${td};white-space:nowrap">${escH(d.iso)}<div style="color:var(--t3);font-size:11px">${escH(d.rego)}</div></td>
+    <td style="${td}">${d.rs.length ? d.rs.map(r => `<div>${escH(r.Driver||'')} · ${escH(r.Attraction||'')} <span style="color:var(--t3)">${escH(String(r.Seats||''))} ${escH(hm(r.Time_Start))}–${escH(hm(r.Time_End))}</span> <button class="btn bgh xs" style="padding:0 5px" onclick="document.getElementById('etoll-ov').remove();editDailyReportRow(${Number(r._rowIndex)||0})">✏️</button></div>`).join('') : '<span style="color:var(--t3)">-</span>'}</td>
+    <td style="${td};white-space:nowrap">${$(d.drToll)}${d.drNB ? '<div style="color:var(--t3);font-size:11px">청구 안 함 '+$(d.drNB)+'</div>' : ''}</td>
+    <td style="${td};white-space:nowrap">${$(d.inS)}${d.edge ? '<div style="color:#6b7280;font-size:11px">공차 '+$(d.edge)+'</div>' : ''}${d.off ? '<div style="color:#b45309;font-size:11px">업무 외 '+$(d.off)+'</div>' : ''}${d.air ? '<div style="color:#7c3aed;font-size:11px">공항 '+$(d.air)+'</div>' : ''}</td>
+    <td style="${td}">${stat(d)}<div style="font-size:11px;color:var(--t3);margin-top:2px">${d.trips.slice().sort((a,b)=>a.time.localeCompare(b.time)).map(t => `<span style="color:${clsTag[t._cls][1]}">${escH(t.time)} ${escH(t.desc.split('--').pop().trim())} ${$(t.amt)} <small>[${clsTag[t._cls][0]}]</small></span>`).join('<br>')}</div></td></tr>`;
+  _etollBox(`
+    <div style="font-size:12px;color:var(--t3);margin-bottom:8px">${info}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:10px">
+      ${[['내역서 합계', tot('inS')+tot('edge')+tot('off')+tot('air'), ''], ['운행 중 톨', tot('inS'), '#1d4ed8'], ['리포트 입력 톨', r2(list.reduce((a,d)=>a+d.drToll,0)), ''],
+         ['청구 누락 가능 (35인승↑)', missBill, '#b91c1c'], ['공차 (회사 부담)', tot('edge'), '#6b7280'], ['업무 외 (회사 부담)', tot('off'), '#b45309'], ['공항 버스 주차비', tot('air'), '#7c3aed']]
+        .map(x => `<div style="background:var(--sf2,#f8fafc);border:1px solid var(--bd);border-radius:10px;padding:8px 10px"><div style="font-size:11px;color:var(--t3)">${x[0]}</div><div style="font-size:16px;font-weight:800;color:${x[2]||'inherit'}">${$(x[1])}</div></div>`).join('')}
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0">
+      <div style="font-size:12px;color:var(--t3)">차량·날짜 ${list.length}개 중 차이 ${list.filter(d=>d.status!=='ok').length}개 (리포트 톨 적음 ${nMiss})</div>
+      <label style="font-size:12px;cursor:pointer"><input type="checkbox" ${onlyDiff?'checked':''} onchange="window._etollOnlyDiff=this.checked;_etollRender()"> 차이 있는 것만</label>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="color:var(--t3);font-size:11px"><td style="${td}">날짜·차량</td><td style="${td}">리포트</td><td style="${td}">리포트 톨</td><td style="${td}">내역서</td><td style="${td}">결과 · 통행 내역</td></tr>
+    ${shown.map(row).join('') || `<tr><td colspan="5" style="${td};color:#16a34a">✅ 모두 일치</td></tr>`}</table>
+    <div style="font-size:11px;color:var(--t3);margin-top:8px">✏️로 리포트를 고친 뒤 '📄 이톨 대조'를 다시 누르면 읽어 둔 내역서로 새로 맞춰봅니다. 리포트 시간 ±15분 = 운행, 전후 90분 = 공차, 그 밖 = 업무 외.</div>`);
 }
 
 // ★ 2026-10-26 톨 점검: 코스(+출발지)·차량 크기별 평소 톨 + 톨 0 입력 중 누락 의심 (서버 get_toll_stats detail=1)
