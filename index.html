@@ -1037,6 +1037,20 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
               연료비 개인 결제 (드라이버 지급)
             </label>
           </div>
+          <!-- ★ 2026-10-26 톨 빠른 입력: 누르면 경로에 추가 + (금액 등록된 톨은) 톨비에 더함 -->
+          <div style="margin-top:10px;border-top:1px dashed #fcd34d;padding-top:8px;">
+            <div id="toll-hist-wrap" style="display:none;margin-bottom:6px;">
+              <div id="toll-hist-title" style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:4px;"></div>
+              <div id="toll-hist" style="display:flex;flex-wrap:wrap;gap:5px;"></div>
+            </div>
+            <div id="toll-recent-wrap" style="display:none;margin-bottom:6px;">
+              <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:4px;">⭐ 내가 자주 쓴 톨 (누르면 경로·금액 채움)</div>
+              <div id="toll-recent" style="display:flex;flex-wrap:wrap;gap:5px;"></div>
+            </div>
+            <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:4px;">🛣️ 톨 도로 (누를 때마다 추가)</div>
+            <div id="toll-roads" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;"></div>
+            <div class="form-group" style="margin:0;"><label class="form-label">Toll Route (톨 경로)</label><textarea class="form-textarea" id="f-toll-detail" placeholder="M2, M7..." style="min-height:48px;" oninput="saveDailyDraft()"></textarea></div>
+          </div>
         </div>
         <div class="form-row-3 mb14">
           <div class="form-group">
@@ -1066,7 +1080,6 @@ html,body{height:100%;height:100dvh;background:#f0f2f5;background:var(--bg);colo
           <div class="form-group"><label class="form-label">Water (물값) <span style="font-size:10px;color:var(--muted);font-weight:500;">(1병당 $1 · 1박스 $20 — 직접 입력)</span></label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-water" placeholder="0" min="0" step="1" oninput="calcTotal();saveDailyDraft()" style="flex:1;"></div><div style="font-size:11px;color:var(--muted);margin-top:4px;">💧 물 1병 = $1, 1박스 = $20 — 산 만큼 금액을 입력하세요 (예: 2박스 → 40)</div></div>
           <div class="form-group"><label class="form-label">Other (기타)</label><div class="num-row"><span class="num-prefix">$</span><input type="number" class="num-input" id="f-etc" placeholder="0" oninput="calcTotal()" style="flex:1;"></div><input type="text" id="f-etc-desc" placeholder="내용 (예: Water, Parking...)" style="margin-top:4px;width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface2);color:var(--text);"></div>
         </div>
-        <div class="form-group mb14"><label class="form-label">Toll Route (톨 경로)</label><textarea class="form-textarea" id="f-toll-detail" placeholder="M2, M7..." style="min-height:56px;"></textarea></div>
 
         <div class="total-box">
           <div style="display:none;"><span id="t-ta">$0</span></div>
@@ -2711,6 +2724,8 @@ function loadMasterCache() {
 }
 
 function applyMasterData(data) {
+  // ★ 2026-10-26 자주 쓰는 톨 (M_Tolls)
+  try { if (Array.isArray(data.M_Tolls) && data.M_Tolls.length) { MASTER.tolls = data.M_Tolls; localStorage.setItem('dc_tolls', JSON.stringify(data.M_Tolls)); } } catch(e) {}
   MASTER.drivers     = (data.M_Drivers   || []);
   // ★ GAS 드라이버 목록을 localStorage에 캐시 (오프라인 폴백용)
   try {
@@ -7133,7 +7148,7 @@ function _finalizeDailyReportSave(_drBtn){
     ot: parseFloat(document.getElementById('f-ot')?.value||0),
     trailer: parseFloat(document.getElementById('f-trailer')?.value||0),
     toll: parseFloat(document.getElementById('f-toll')?.value||0),
-    tollDetail: document.getElementById('f-toll-detail')?.value || '',
+    tollDetail: (_tollRemember(), document.getElementById('f-toll-detail')?.value || ''),
     tollPersonal: document.getElementById('toll-personal')?.checked || false,
     fuel: parseFloat(document.getElementById('f-fuel')?.value||0),
     fuelPersonal: document.getElementById('fuel-personal')?.checked || false,
@@ -7243,7 +7258,7 @@ function _finalizeDailyReportSave(_drBtn){
   _draftRestoring = true;
   // reset form
   ['dr-agency','dr-attraction','dr-pickup','dr-dropoff','dr-km-start','dr-km-end','dr-start','dr-end','dr-guide','dr-tourcode','dr-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  ['f-ot','f-night','f-tip','f-toll','f-fuel','f-etc','f-etc-desc','f-water'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['f-ot','f-night','f-tip','f-toll','f-toll-detail','f-fuel','f-etc','f-etc-desc','f-water'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   ['toll-personal','fuel-personal'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
   if(typeof _setOvernight==='function') _setOvernight(false);  // 자정 넘김 플래그 초기화
   selectWash(0);
@@ -9902,6 +9917,137 @@ document.addEventListener('click', (e)=>{
 //   · 드라이버 비용 인승 = 실제 차량 좌석수 기준 → getSeatsFromShift() (드라이버 수당·서차지 옵션 함수들이 사용)
 //       차량 50석 이상 → 50S, 26석 이상 → 40S, 25석 → 25S, 그 이하 → 21S (요청 인승과 무관 — 2026-10-11 확정)
 //       차량 좌석수를 모르면 요청 인승 숫자로 같은 규칙 적용 (35S→40S, 45S→40S)
+// ═══ ★ 2026-10-26 톨 빠른 입력 ═══
+//   · 톨 도로 버튼: M_Tolls 시트(없으면 기본 목록). 금액이 등록된 톨은 차량 크기(21·25 / 40·50)에 맞는 금액을 톨비에 더함
+//   · 내가 자주 쓴 톨: 리포트 저장 때 (경로+금액+차량크기)를 이 폰에 기억 → 많이 쓴 순으로 버튼 표시
+const _TOLL_DEFAULT = ['Harbour Bridge','Harbour Tunnel','ED','CCT','LCT','M2','NorthConnex','M7','M5 SW','M5 East','M4','M8'];
+function _tollSize(){ const n = parseInt(getSeatsFromShift()) || 0; return n >= 40 ? 'L' : 'S'; }
+function _tollRoads(){
+  let rows = MASTER.tolls;
+  if (!Array.isArray(rows) || !rows.length) { try { rows = JSON.parse(localStorage.getItem('dc_tolls')||'[]'); } catch(e) { rows = []; } }
+  rows = (rows||[]).filter(r => String(r.Toll_Name||'').trim() && String(r.Active||'Y').trim().toUpperCase() !== 'N');
+  if (!rows.length) return _TOLL_DEFAULT.map(n => ({name:n, amt:0, road:''}));
+  rows = rows.slice().sort((a,b) => (Number(a.Sort)||999) - (Number(b.Sort)||999));
+  const big = _tollSize() === 'L';
+  return rows.map(r => ({ name: String(r.Toll_Name).trim(), amt: Number(big ? r.Amount_Large : r.Amount_Small) || 0, road: String(r.Road||'').trim() }));
+}
+let _tollOpenRoad = '';   // 구간 버튼을 펼친 도로
+function _tollToggleRoad(i){ const road = (_tollGroups()[i]||{}).road || ''; _tollOpenRoad = (_tollOpenRoad === road) ? '' : road; _renderTollQuick(); }
+// Road가 같은 행끼리 묶음 (Road 비어 있으면 단독 버튼)
+function _tollGroups(){
+  const out = [], idx = {};
+  _tollRoads().forEach((r,i) => {
+    if (!r.road) { out.push({road:'', items:[{r,i}]}); return; }
+    if (idx[r.road] === undefined) { idx[r.road] = out.length; out.push({road:r.road, items:[]}); }
+    out[idx[r.road]].items.push({r,i});
+  });
+  return out;
+}
+function _tollRecentList(){ try { const a = JSON.parse(localStorage.getItem('dc_tollRecent')||'[]'); return Array.isArray(a) ? a : []; } catch(e) { return []; } }
+function _tollRemember(){
+  try {
+    const d = String(document.getElementById('f-toll-detail')?.value||'').trim();
+    const a = parseFloat(document.getElementById('f-toll')?.value||0) || 0;
+    if (!d || a <= 0) return;
+    const z = _tollSize(), key = d.toLowerCase().replace(/\s+/g,' ');
+    const list = _tollRecentList();
+    const hit = list.find(x => x.k === key && x.z === z && Number(x.a) === a);
+    if (hit) { hit.n = (Number(hit.n)||0) + 1; hit.t = Date.now(); hit.d = d; }
+    else list.push({k:key, d, a, z, n:1, t:Date.now()});
+    list.sort((x,y) => (y.n - x.n) || (y.t - x.t));
+    localStorage.setItem('dc_tollRecent', JSON.stringify(list.slice(0, 20)));
+  } catch(e) {}
+}
+function _tollChipStyle(on){ return 'padding:6px 9px;border-radius:8px;border:1.5px solid '+(on?'#d97706':'#fcd34d')+';background:'+(on?'#fef3c7':'#fff')+';color:#78350f;font-size:12px;font-weight:700;cursor:pointer;font-family:sans-serif;'; }
+function _renderTollQuick(){
+  const roadsEl = document.getElementById('toll-roads'); if (!roadsEl) return;
+  const esc = v => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const detail = String(document.getElementById('f-toll-detail')?.value||'');
+  const used = detail.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+  const _chip = (r,i) => '<button type="button" onclick="_tollAddRoad('+i+')" style="'+_tollChipStyle(used.indexOf(r.name.toLowerCase())>=0)+'">'+esc(r.name)+(r.amt>0?' <span style="font-weight:500;">$'+r.amt+'</span>':'')+'</button>';
+  let _segHtml = '';
+  roadsEl.innerHTML = _tollGroups().map((g,gi) => {
+    if (!g.road) return _chip(g.items[0].r, g.items[0].i);
+    const open = _tollOpenRoad === g.road;
+    if (open) _segHtml = '<div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:5px;padding:6px;margin-top:2px;background:#fffdf5;border:1px dashed #fcd34d;border-radius:8px;"><div style="flex-basis:100%;font-size:10px;color:#92400e;">'+esc(g.road)+' — 진입~출구 구간 선택</div>' + g.items.map(x => _chip(x.r, x.i)).join('') + '</div>';
+    const anyUsed = g.items.some(x => used.indexOf(x.r.name.toLowerCase()) >= 0);
+    return '<button type="button" onclick="_tollToggleRoad('+gi+')" style="'+_tollChipStyle(open||anyUsed)+'">'+esc(g.road)+' '+(open?'▴':'▾')+'</button>';
+  }).join('')
+    + '<button type="button" onclick="_tollClear()" style="padding:6px 9px;border-radius:8px;border:1.5px solid #e5e7eb;background:#f9fafb;color:#6b7280;font-size:12px;font-weight:700;cursor:pointer;font-family:sans-serif;">↺ 지우기</button>' + _segHtml;
+  // 평소 톨 (이 코스·출발지)
+  const hw = document.getElementById('toll-hist-wrap'), hEl = document.getElementById('toll-hist'), hT = document.getElementById('toll-hist-title');
+  if (hw && hEl && hT) {
+    const g = _tollHistFor();
+    if (g && g.n >= 2) {
+      hw.style.display = '';
+      const pct = Math.round(g.t / g.n * 100);
+      hT.innerHTML = '📊 이 일정 평소 톨 — '+(g.byHotel?'같은 코스·같은 출발지':'같은 코스')+' '+g.n+'회 중 <b>'+g.t+'회</b> 톨 사용 ('+pct+'%)'
+        + (pct >= 50 ? ' <span style="color:#b91c1c;">· 톨을 썼다면 꼭 입력하세요</span>' : '');
+      hEl.innerHTML = (g.c||[]).map((c,i) => '<button type="button" onclick="_tollUseHist('+i+')" style="'+_tollChipStyle(false)+'">'+(c[0]?esc(c[0]):'경로 미기재')+' <span style="font-weight:500;">$'+c[1]+' · '+c[2]+'회</span></button>').join('');
+    } else hw.style.display = 'none';
+  }
+  const z = _tollSize();
+  const rec = _tollRecentList().filter(x => x.z === z).slice(0, 6);
+  const wrap = document.getElementById('toll-recent-wrap'), recEl = document.getElementById('toll-recent');
+  if (wrap && recEl) {
+    wrap.style.display = rec.length ? '' : 'none';
+    recEl.innerHTML = rec.map((x,i) => '<button type="button" onclick="_tollUseRecent('+i+')" style="'+_tollChipStyle(false)+'">'+esc(x.d)+' <span style="font-weight:500;">$'+x.a+'</span></button>').join('');
+  }
+}
+// ── 일정·호텔별 평소 톨 (회사 전체 리포트 집계, 서버 get_toll_stats · 12시간 캐시) ──
+let _tollStats = null, _tollStatsLoading = false;
+function _tollStatsGet(){
+  if (!_tollStats) { try { _tollStats = JSON.parse(localStorage.getItem('dc_tollStats')||'null'); } catch(e) {} }
+  const stale = !_tollStats || !_tollStats._at || (Date.now() - _tollStats._at > 12*3600e3);
+  if (stale && !_tollStatsLoading && typeof APPS_SCRIPT_URL !== 'undefined') {
+    _tollStatsLoading = true;
+    fetch(APPS_SCRIPT_URL + '?action=get_toll_stats').then(r => r.json()).then(j => {
+      if (j && j.ok && j.groups) { j._at = Date.now(); _tollStats = j; try { localStorage.setItem('dc_tollStats', JSON.stringify(j)); } catch(e) {} try { _renderTollQuick(); } catch(e) {} }
+    }).catch(() => {}).finally(() => { _tollStatsLoading = false; });
+  }
+  return _tollStats;
+}
+function _tollHistFor(){
+  const st = _tollStatsGet(); if (!st || !st.groups) return null;
+  const nz = v => String(v||'').trim().toLowerCase().replace(/\s+/g,' ');
+  const att = nz(document.getElementById('dr-attraction')?.value), pk = nz(document.getElementById('dr-pickup')?.value);
+  if (!att) return null;
+  const z = _tollSize();
+  const gH = pk ? st.groups['H|'+att+'|'+z+'|'+pk] : null, gA = st.groups['A|'+att+'|'+z];
+  const g = (gH && gH.n >= 2) ? gH : gA;
+  return g ? Object.assign({byHotel: g === gH}, g) : null;
+}
+function _tollUseHist(i){
+  const g = _tollHistFor(); const c = g && g.c && g.c[i]; if (!c) return;
+  const dEl = document.getElementById('f-toll-detail'), aEl = document.getElementById('f-toll');
+  if (aEl) aEl.value = c[1];
+  if (dEl && c[0]) dEl.value = c[0];
+  _tollAfterChange();
+}
+document.addEventListener('change', e => { const id = e.target && e.target.id; if (id === 'dr-attraction' || id === 'dr-pickup' || id === 'dr-rego') { try { _renderTollQuick(); } catch(err) {} } });
+document.addEventListener('focusin', e => { const id = e.target && e.target.id; if (id === 'f-toll' || id === 'f-toll-detail') { try { _renderTollQuick(); } catch(err) {} } });
+
+function _tollAfterChange(){ try { calcTotal(); } catch(e) {} try { saveDailyDraft(); } catch(e) {} }
+function _tollAddRoad(i){
+  const r = _tollRoads()[i]; if (!r) return;
+  const dEl = document.getElementById('f-toll-detail'), aEl = document.getElementById('f-toll');
+  if (dEl) { const cur = String(dEl.value||'').trim(); dEl.value = cur ? cur.replace(/[,\s]+$/,'') + ', ' + r.name : r.name; }
+  if (aEl && r.amt > 0) aEl.value = Math.round(((parseFloat(aEl.value)||0) + r.amt) * 100) / 100;
+  _tollAfterChange();
+}
+function _tollUseRecent(i){
+  const x = _tollRecentList().filter(y => y.z === _tollSize())[i]; if (!x) return;
+  const dEl = document.getElementById('f-toll-detail'), aEl = document.getElementById('f-toll');
+  if (dEl) dEl.value = x.d;
+  if (aEl) aEl.value = x.a;
+  _tollAfterChange();
+}
+function _tollClear(){
+  const dEl = document.getElementById('f-toll-detail'), aEl = document.getElementById('f-toll');
+  if (dEl) dEl.value = ''; if (aEl) aEl.value = '';
+  _tollAfterChange();
+}
+
 function getRequestedSeats(){
   const shift = activeShifts.find(s=>s.id===editingShiftId);
   if(shift?.seats) return shift.seats;
@@ -10431,6 +10577,7 @@ function getOTRateDR(seats){
 }
 
 function calcTotal(){
+  try { _renderTollQuick(); } catch(e) {}
   const seats = document.getElementById('dr-seats')?.value || '';
   const isLarge = (parseInt(seats)||0) >= 40;   // ★ PC6: 45S 포함
   const tollVal  = parseFloat(document.getElementById('f-toll')?.value||0);
