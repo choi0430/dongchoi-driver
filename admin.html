@@ -796,6 +796,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   </div>
   <div style="display:flex;justify-content:flex-end;margin:-2px 0 8px">
     <button class="btn bgh sm" onclick="openCourseAudit()" title="여행사·서브·드라이버 요금표와 최근 리포트의 코스 이름 비교">🔎 코스 이름 점검</button>
+    <button class="btn bgh sm" onclick="openTollAudit()" title="코스·출발지별 평소 톨 사용률과 톨 입력 누락 의심 리포트">🛣️ 톨 점검</button>
   </div>
 
   <!-- CLIENT 요금 섹션 -->
@@ -24873,6 +24874,46 @@ async function openCourseAudit(){
     <button class="btn bgh xs" onclick="document.getElementById('course-audit-ov').remove()">닫기</button></div>${html}</div>`;
 }
 
+// ★ 2026-10-26 톨 점검: 코스(+출발지)·차량 크기별 평소 톨 + 톨 0 입력 중 누락 의심 (서버 get_toll_stats detail=1)
+async function openTollAudit(){
+  let ov = document.getElementById('toll-audit-ov');
+  if(!ov){ ov = document.createElement('div'); ov.id = 'toll-audit-ov';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9500;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.addEventListener('click', e => { if(e.target === ov) ov.remove(); });
+    document.body.appendChild(ov); }
+  const box = body => { ov.innerHTML = `<div style="background:var(--sf);border-radius:14px;width:100%;max-width:820px;max-height:88vh;overflow:auto;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:15px;font-weight:800">🛣️ 톨 점검</div>
+    <button class="btn bgh xs" onclick="document.getElementById('toll-audit-ov').remove()">닫기</button></div>${body}</div>`; };
+  box('<div style="padding:30px;text-align:center;color:var(--t3)">리포트 집계 중…</div>');
+  let j = null;
+  try { const res = await fetch(APPS_SCRIPT_URL + '?action=get_toll_stats&detail=1'); j = await res.json(); } catch(e) { j = {ok:false, error:String(e)}; }
+  if(!j || !j.ok){ box('<div style="color:#b91c1c">불러오기 실패: '+escH((j&&j.error)||'')+' — Code.js 배포 여부를 확인하세요.</div>'); return; }
+  const sus = j.suspects || [];
+  const td = 'padding:4px 6px;border-bottom:1px solid var(--bd);vertical-align:top';
+  const sz = z => z === 'L' ? '40·50' : '21·25';
+  const top = c => c ? ((c[0] ? escH(c[0]) + ' ' : '') + '$' + c[1]) : '-';
+  // 드라이버별 건수
+  const byDr = {}; sus.forEach(x => { byDr[x.driver||'-'] = (byDr[x.driver||'-']||0) + 1; });
+  const drList = Object.keys(byDr).sort((a,b) => byDr[b] - byDr[a]);
+  // 코스별 통계 (코스 단위 A 키, 톨 쓴 적 있는 것만)
+  const courses = Object.keys(j.groups||{}).filter(k => k.indexOf('A|') === 0 && j.groups[k].t > 0)
+    .map(k => { const p = k.split('|'); return Object.assign({course: p[1], z: p[2]}, j.groups[k]); })
+    .sort((a,b) => (b.t/b.n) - (a.t/a.n) || b.n - a.n);
+  const html = `
+    <div style="font-size:12px;color:var(--t3);margin-bottom:10px">최근 365일(${escH(j.since||'')}~) 리포트 기준 · 차량 크기는 실제 차량(21·25 / 40·50) · 서브 간편입력 제외.<br>
+    <b>누락 의심</b> = 톨 $0인데, 같은 코스(같은 출발지 3회 이상이면 출발지 기준)·같은 차량 크기 운행 3회 이상 중 <b>절반 이상</b>이 톨을 쓴 경우.</div>
+    <div style="font-weight:700;margin:8px 0 4px">드라이버별 누락 의심 (${sus.length}건)</div>
+    ${drList.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px">' + drList.map(d => `<span style="background:#fef3c7;color:#92400e;border-radius:10px;padding:3px 9px;font-size:12px;font-weight:700">${escH(d)} ${byDr[d]}건</span>`).join('') + '</div>' : '<div style="color:var(--gr,#16a34a);font-size:12px">✅ 없음</div>'}
+    <div style="font-weight:700;margin:14px 0 4px">누락 의심 리포트${sus.length > 300 ? ' (최근 300건)' : ''}</div>
+    ${sus.length ? `<table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="color:var(--t3);font-size:11px"><td style="${td}">날짜</td><td style="${td}">드라이버</td><td style="${td}">차량</td><td style="${td}">코스 / 출발지</td><td style="${td}">평소 톨</td><td style="${td}">사용률</td></tr>`
+      + sus.slice(0,300).map(x => `<tr><td style="${td};white-space:nowrap">${escH(x.date)}</td><td style="${td}">${escH(x.driver)}</td><td style="${td}">${escH(x.rego)} <span style="color:var(--t3)">${sz(x.size)}</span></td><td style="${td}">${escH(x.attraction)}<div style="color:var(--t3);font-size:11px">${escH(x.pickup||'')}${x.byHotel?' · 출발지 기준':''}</div></td><td style="${td}">${top(x.top)}</td><td style="${td};white-space:nowrap">${x.t}/${x.n} (${Math.round(x.t/x.n*100)}%)</td></tr>`).join('') + '</table>'
+      : '<div style="color:var(--gr,#16a34a);font-size:12px">✅ 없음</div>'}
+    <div style="font-weight:700;margin:14px 0 4px">코스별 평소 톨 (${courses.length})</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="color:var(--t3);font-size:11px"><td style="${td}">코스</td><td style="${td}">차량</td><td style="${td}">사용률</td><td style="${td}">자주 나온 경로·금액</td></tr>
+    ${courses.map(c => `<tr><td style="${td}">${escH(c.course)}</td><td style="${td}">${sz(c.z)}</td><td style="${td};white-space:nowrap">${c.t}/${c.n} (${Math.round(c.t/c.n*100)}%)</td><td style="${td}">${(c.c||[]).map(x => top(x) + ' <span style="color:var(--t3)">×' + x[2] + '</span>').join('<br>')}</td></tr>`).join('')}</table>`;
+  box(html);
+}
+
 // ★ ITEM6: 드라이버 요금표에 서차지 5항목(빈 칸) 추가 — 드라이버는 공항 주차비를 받지 않으므로 Airport Parking 제외
 function addPDSurchargeRows(){
   if(!DB.PD) DB.PD = {};
@@ -27576,11 +27617,11 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
           _timeStart: m.start||'', _timeEnd: m.end||'',
           _manual: true,
           SVC_Charge: m.amount||0, OT: m.ot||0,
-          Hotel_Surcharge: m.hotel||0, Dist_Surcharge: m.dist||0,
+          Hotel_Surcharge: m.hotel||0, Dist_Surcharge: m.dist||0, Dist_Reason: m.distReason||'',
           Early: m.early||0, Parking: m.parking||0,
           Trailer: m.trailer||0, Night_DR: m.night||0,
           Tip: m.tip||0, Meal: m.meal||0,
-          Toll: m.toll||0, Etc: m.etc||0
+          Toll: m.toll||0, Etc: m.etc||0, Etc_Desc: m.etcDesc||''   // ★ 수동 항목의 거리 사유·기타 설명도 표시
         });
       });
       _savedRows.sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
@@ -27703,7 +27744,7 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
             const _adj = _savedItemEtcAdjust(item);   // ★ 기타 설명·수정값 복원 (보기 화면과 동일)
             return { _iso:item.date||'', Date:item.date||'', Attraction:item.tour||'-', Rego:item.rego||'', Seats:item.seats||'', Driver:item.driver||'', Guide:item.guide||'', Tour_Code:item.tourcode||'', Pickup:item.pickup||'', Dropoff:item.dropoff||'', _timeStart:item.timeStart||'', _timeEnd:item.timeEnd||'', _manual:true, _rateSource:item.rateSource||'price_table', SVC_Charge:item.base||0, OT:item.ot||0, Hotel_Surcharge:hasIndiv?(item.hotel||0):(item.extra||0), Dist_Surcharge:item.dist||0, Dist_Reason:item.distReason||'', Early:item.early||0, Parking:item.parking||0, Trailer:item.trailer||0, Night_DR:item.night||0, Night_Type:item.nightType||'', Tip:item.tip||0, Meal:item.meal||0, Water:item.water||0, Toll:item.toll||0, Toll_Detail:item.tollDetail||'', Etc:_adj.etc, Etc_Desc:_adj.etcDesc, Hotel_Count:Number(item.hotelCount)||0, Dist_Count:Number(item.distCount)||0 };
           });
-          _sm.forEach(m => { _savedRows.push({ _iso:parseToISO(m.date)||m.date||'', Date:m.date||'', Attraction:m.tour||'-', Rego:m.rego||'', Seats:m.seats||'', Driver:m.driver||'', Guide:m.guide||'', Tour_Code:m.tourcode||'', Pickup:m.pickup||'', Dropoff:m.dropoff||'', _timeStart:m.start||'', _timeEnd:m.end||'', _manual:true, SVC_Charge:m.amount||0, OT:m.ot||0, Hotel_Surcharge:m.hotel||0, Dist_Surcharge:m.dist||0, Dist_Reason:m.distReason||'', Early:m.early||0, Parking:m.parking||0, Trailer:m.trailer||0, Night_DR:m.night||0, Tip:m.tip||0, Meal:m.meal||0, Toll:m.toll||0, Etc:m.etc||0 }); });
+          _sm.forEach(m => { _savedRows.push({ _iso:parseToISO(m.date)||m.date||'', Date:m.date||'', Attraction:m.tour||'-', Rego:m.rego||'', Seats:m.seats||'', Driver:m.driver||'', Guide:m.guide||'', Tour_Code:m.tourcode||'', Pickup:m.pickup||'', Dropoff:m.dropoff||'', _timeStart:m.start||'', _timeEnd:m.end||'', _manual:true, SVC_Charge:m.amount||0, OT:m.ot||0, Hotel_Surcharge:m.hotel||0, Dist_Surcharge:m.dist||0, Dist_Reason:m.distReason||'', Early:m.early||0, Parking:m.parking||0, Trailer:m.trailer||0, Night_DR:m.night||0, Tip:m.tip||0, Meal:m.meal||0, Toll:m.toll||0, Etc:m.etc||0, Etc_Desc:m.etcDesc||'' }); });
           _savedRows.sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
           const _origExcl = _invExcludes, _origOver = _invOverrides;
           _invExcludes = {}; _invOverrides = {};
