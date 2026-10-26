@@ -13290,8 +13290,8 @@ function _calcAgencyTA_legacy(r){
   const _isHojuro = /호주로|hojuro|plus\s*australia/i.test(agency);
   const parking = (apPat.test(r.Pickup||'') && !(_isHojuro && !isLarge)) ? (isLarge?40:30) : 0;
 
-  // Toll (대형 버스만 TA)
-  const tollTA = isLarge ? toll : 0;
+  // Toll — ★ 2026-10-26: 요청 인승 35인승 이상이면 여행사 청구 (서브에도 같은 기준으로 지급)
+  const tollTA = capNum >= 35 ? toll : 0;
 
   // Trailer TA: 21/25S DR $30→TA $80 (글로벌 헬퍼 사용)
   const trl = parseFloat(r.Trailer||0);
@@ -25214,8 +25214,8 @@ function taBreakdown(r) {
   const mealVal = _ovGet('meal') === '0' ? 0 : _mealAuto;
   const waterVal = _ovGet('meal') === '0' ? 0 : _waterAuto;
 
-  // ── Toll (40/50인승만 TA) ──
-  const _tollAuto = isLarge ? (parseFloat(r.Toll) || 0) : 0;
+  // ── Toll — ★ 2026-10-26: 요청 인승 35인승 이상이면 여행사 청구 ──
+  const _tollAuto = seatNum >= 35 ? (parseFloat(r.Toll) || 0) : 0;
   const tollVal = _ovGet('toll') === '0' ? 0 : _tollAuto;
 
   // ── Hotel / Dist / Early / OT override ──
