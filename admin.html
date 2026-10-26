@@ -26156,6 +26156,8 @@ async function saveInvoiceToSheet(_recoverNum, _skipBalance) {
       night: c.nightTA||0, tip: c.tipVal||0, meal: c.mealVal||0, water: c.waterVal||0,   // ★ meal은 물값 포함 합계, water는 그중 물값(표시용)
       toll: c.tollVal||0, etc: c.etcTA||0, etcDesc: c.etcDesc||'',
       distReason: String(r.Dist_Reason||'').trim(),
+      nightType: String(r.Night_Type||'').trim(), tollDetail: String(r.Toll_Detail||'').trim(),   // ★ 인보이스 상세 표시용
+      hotelCount: Number(r.Hotel_Count)||0, distCount: Number(r.Dist_Count)||0,
       rateSource: c.rateSource||'svc',
       overridden: !!(ov.base !== undefined || ov.ot !== undefined || ov.extra !== undefined)
     };
@@ -27359,7 +27361,10 @@ async function editIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
         Parking:         Number(it.parking)||0,
         Trailer:         Number(it.trailer)||0,
         Night_DR:        Number(it.night)||0,
-        Night_Type:      '',
+        Night_Type:      it.nightType||'',
+        Toll_Detail:     it.tollDetail||'',
+        Hotel_Count:     Number(it.hotelCount)||0,
+        Dist_Count:      Number(it.distCount)||0,
         Tip:             Number(it.tip)||0,
         Meal:            Number(it.meal)||0,
         Water:           Number(it.water)||0,
@@ -27555,10 +27560,11 @@ async function previewIssuedInvoice(invNumber, agency, periodFrom, periodTo) {
           _rateSource: item.rateSource||'price_table',
           SVC_Charge: item.base||0, OT: item.ot||0,
           Hotel_Surcharge: hasIndiv ? (item.hotel||0) : (item.extra||0),
-          Dist_Surcharge: item.dist||0, Early: item.early||0,
+          Dist_Surcharge: item.dist||0, Dist_Reason: item.distReason||'', Early: item.early||0,
           Parking: item.parking||0, Trailer: item.trailer||0,
-          Night_DR: item.night||0, Tip: item.tip||0,
-          Meal: item.meal||0, Water: item.water||0, Toll: item.toll||0, Etc: _adj.etc, Etc_Desc: _adj.etcDesc
+          Night_DR: item.night||0, Night_Type: item.nightType||'', Tip: item.tip||0,
+          Meal: item.meal||0, Water: item.water||0, Toll: item.toll||0, Toll_Detail: item.tollDetail||'', Etc: _adj.etc, Etc_Desc: _adj.etcDesc,
+          Hotel_Count: Number(item.hotelCount)||0, Dist_Count: Number(item.distCount)||0
         };
       });
       _sm.forEach(m => {
@@ -27694,7 +27700,8 @@ async function resendInvoice(invNumber, agency, periodFrom, periodTo, previewHtm
           const _sm = _manualJSON ? JSON.parse(_manualJSON) : [];
           const _savedRows = _si.map(item => {
             const hasIndiv = item.hotel!==undefined || item.dist!==undefined || item.trailer!==undefined;
-            return { _iso:item.date||'', Date:item.date||'', Attraction:item.tour||'-', Rego:item.rego||'', Seats:item.seats||'', Driver:item.driver||'', Guide:item.guide||'', Tour_Code:item.tourcode||'', Pickup:item.pickup||'', Dropoff:item.dropoff||'', _timeStart:item.timeStart||'', _timeEnd:item.timeEnd||'', _manual:true, _rateSource:item.rateSource||'price_table', SVC_Charge:item.base||0, OT:item.ot||0, Hotel_Surcharge:hasIndiv?(item.hotel||0):(item.extra||0), Dist_Surcharge:item.dist||0, Dist_Reason:item.distReason||'', Early:item.early||0, Parking:item.parking||0, Trailer:item.trailer||0, Night_DR:item.night||0, Tip:item.tip||0, Meal:item.meal||0, Water:item.water||0, Toll:item.toll||0, Etc:item.etc||0 };
+            const _adj = _savedItemEtcAdjust(item);   // ★ 기타 설명·수정값 복원 (보기 화면과 동일)
+            return { _iso:item.date||'', Date:item.date||'', Attraction:item.tour||'-', Rego:item.rego||'', Seats:item.seats||'', Driver:item.driver||'', Guide:item.guide||'', Tour_Code:item.tourcode||'', Pickup:item.pickup||'', Dropoff:item.dropoff||'', _timeStart:item.timeStart||'', _timeEnd:item.timeEnd||'', _manual:true, _rateSource:item.rateSource||'price_table', SVC_Charge:item.base||0, OT:item.ot||0, Hotel_Surcharge:hasIndiv?(item.hotel||0):(item.extra||0), Dist_Surcharge:item.dist||0, Dist_Reason:item.distReason||'', Early:item.early||0, Parking:item.parking||0, Trailer:item.trailer||0, Night_DR:item.night||0, Night_Type:item.nightType||'', Tip:item.tip||0, Meal:item.meal||0, Water:item.water||0, Toll:item.toll||0, Toll_Detail:item.tollDetail||'', Etc:_adj.etc, Etc_Desc:_adj.etcDesc, Hotel_Count:Number(item.hotelCount)||0, Dist_Count:Number(item.distCount)||0 };
           });
           _sm.forEach(m => { _savedRows.push({ _iso:parseToISO(m.date)||m.date||'', Date:m.date||'', Attraction:m.tour||'-', Rego:m.rego||'', Seats:m.seats||'', Driver:m.driver||'', Guide:m.guide||'', Tour_Code:m.tourcode||'', Pickup:m.pickup||'', Dropoff:m.dropoff||'', _timeStart:m.start||'', _timeEnd:m.end||'', _manual:true, SVC_Charge:m.amount||0, OT:m.ot||0, Hotel_Surcharge:m.hotel||0, Dist_Surcharge:m.dist||0, Dist_Reason:m.distReason||'', Early:m.early||0, Parking:m.parking||0, Trailer:m.trailer||0, Night_DR:m.night||0, Tip:m.tip||0, Meal:m.meal||0, Toll:m.toll||0, Etc:m.etc||0 }); });
           _savedRows.sort((a,b) => (a._iso||'').localeCompare(b._iso||''));
@@ -28493,11 +28500,13 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
         const loc = pickup || dropoff;
         hotelLabel = 'Hotel: '+escH(loc);
       }
+      { const _hc = Number(r.Hotel_Count)||0; if (_hc > 1) hotelLabel += ' × ' + _hc; }   // ★ 호텔 수
       surLines.push({label: hotelLabel, amount: c.hotel});
     }
     if (c.dist > 0) {
       const _distReason = String(r.Dist_Reason||'').trim();
-      surLines.push({label: 'Distance surcharge' + (_distReason ? ' ('+escH(_distReason)+')' : ''), amount: c.dist});
+      const _dc = Number(r.Dist_Count)||0;
+      surLines.push({label: 'Distance surcharge' + (_dc > 1 ? ' × '+_dc : '') + (_distReason ? ' ('+escH(_distReason)+')' : ''), amount: c.dist});
     }
     if (c.earlyTA > 0) {
       // ★ Early/Late 구분 + 해당 시간 표시 (OT 표시와 동일한 패턴)
@@ -28516,12 +28525,16 @@ function _buildInvoiceHTML(agency, from, to, rows, {isDraft=false, invNumOverrid
     }
     if ((c.parkingFee||0) > 0) surLines.push({label: 'Airport parking', amount: c.parkingFee});
     if ((c.trailerVal||0) > 0) surLines.push({label: 'Trailer', amount: c.trailerVal});
-    if ((c.nightTA||0) > 0) surLines.push({label: 'Night tour - Stargazing', amount: c.nightTA});
+    if ((c.nightTA||0) > 0) {   // ★ 실제 야경 타입 표시 (타입 정보 없는 예전 인보이스는 기존 라벨 유지)
+      const _NT = {stargazing:'Night tour - Stargazing', agency_incl:'Night tour (agency included)', prepaid_opt:'Night tour (prepaid option)', guide_opt:'Night tour (guide option)', private_captain:'Night tour (private - captain)', private_dg:'Night tour (private - DG)'};
+      const _nt = String(r.Night_Type||'').trim();
+      surLines.push({label: _NT[_nt] || (_nt ? 'Night tour ('+escH(_nt)+')' : 'Night tour - Stargazing'), amount: c.nightTA});
+    }
     if ((c.tipVal||0) > 0) surLines.push({label: 'Tip', amount: c.tipVal});
     { const _w = c.waterVal||0, _m = (c.mealVal||0) - _w;   // ★ 물값은 별도 줄
       if (_m > 0) surLines.push({label: 'Meal', amount: _m});
       if (_w > 0) surLines.push({label: 'Water', amount: _w}); }
-    if ((c.tollVal||0) > 0) surLines.push({label: 'Toll', amount: c.tollVal});
+    if ((c.tollVal||0) > 0) { const _td = String(r.Toll_Detail||'').trim(); surLines.push({label: 'Toll' + (_td ? ' ('+escH(_td)+')' : ''), amount: c.tollVal}); }
     if ((c.etcTA||0) !== 0) surLines.push({label: 'Etc'+(c.etcDesc?' ('+escH(c.etcDesc)+')':''), amount: c.etcTA});   // ★ B6: 감액 조정(음수)도 표시
 
     if (surLines.length > 0) {
