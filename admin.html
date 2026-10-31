@@ -511,6 +511,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <!-- 📊 운행 통계 (Supabase 집계 · 읽기전용) — 데이터 없으면 자동 숨김 -->
   <div id="ops-stats" style="display:none;"></div>
 
+  <!-- 👤 드라이버별 웨이지 (주별·평균 — 급여 탭과 같은 계산 · 읽기전용) -->
+  <div id="wage-stats" style="display:none;"></div>
+
   <!-- 📈 마진 분석 (청구 − 비용 · 읽기전용) — 데이터 없으면 자동 숨김 -->
   <div id="margin-stats" style="display:none;"></div>
 
@@ -4150,6 +4153,114 @@ async function _computeAgencyBilling(){
   return out;
 }
 
+// ═══ 👤 드라이버별 웨이지 통계 (2026-10-31) ═══
+//   급여 탭과 같은 계산: 자사 차량 운행(isDirectPayDR)만, 리포트별 _calcDRFromReport 합계를 주(월~일)별로.
+//   평균 주급 = 일한 주(웨이지>0)의 평균. 진행 중인 이번 주는 평균에서 제외.
+var _wsData = null;
+function _wsBuild(){
+  if(typeof _drCache === 'undefined' || !_drCache || !_drCache.length) return null;
+  var canon = {};
+  (DB.D||[]).forEach(function(d){ var c = String(d.Name_KR||d.Name_EN||'').trim(); if(!c) return;
+    [d.Name_KR, d.Name_EN].forEach(function(n){ n = String(n||'').trim(); if(n) canon[n] = c; }); });
+  var byDrv = {}, weeks = {};
+  _drCache.forEach(function(r){
+    if(String(r.Remarks||'').indexOf('SUB 담당자') >= 0) return;
+    if(typeof isDirectPayDR === 'function' && !isDirectPayDR(r)) return;   // SUB 차량 운행은 차주가 지급
+    var nm = String(r.Driver||'').trim(); if(!nm) return; nm = canon[nm] || nm;
+    var wk = getMondayOfDate(r.Date); if(!wk) return;
+    var v = Number(_calcDRFromReport(r)) || 0;
+    var d = byDrv[nm] || (byDrv[nm] = {name:nm, w:{}, n:{}});
+    d.w[wk] = (d.w[wk]||0) + v; d.n[wk] = (d.n[wk]||0) + 1; weeks[wk] = 1;
+  });
+  return {byDrv: byDrv, weeks: Object.keys(weeks).sort()};
+}
+async function renderWageStats(){
+  var el = document.getElementById('wage-stats'); if(!el) return;
+  try {
+    try { if(typeof _schEnsureDRCache === 'function') await _schEnsureDRCache(); } catch(e){}
+    var data = _wsBuild(); _wsData = data;
+    if(!data || !data.weeks.length){ el.style.display='none'; return; }
+    var N = Number(window._wsWeeks) || 8;
+    var thisMon = getMondayOfDate(toLocalISO(new Date()));
+    var cols = [], d0 = new Date(thisMon + 'T00:00:00');
+    for(var i = N-1; i >= 0; i--){ var x = new Date(d0); x.setDate(x.getDate() - 7*i); cols.push(toLocalISO(x)); }
+    var $f = function(v){ return '$' + Math.round(Number(v)||0).toLocaleString('en-AU'); };
+    var list = Object.values(data.byDrv).map(function(d){
+      var done = cols.filter(function(w){ return w !== thisMon && (d.w[w]||0) > 0; });
+      var sum = cols.reduce(function(a,w){ return a + (d.w[w]||0); }, 0);
+      var doneSum = done.reduce(function(a,w){ return a + d.w[w]; }, 0);
+      var trips = cols.reduce(function(a,w){ return a + (d.n[w]||0); }, 0);
+      return {name:d.name, w:d.w, sum:sum, worked:done.length, avg: done.length ? doneSum/done.length : 0, trips:trips};
+    }).filter(function(x){ return x.sum !== 0 || x.trips > 0; }).sort(function(a,b){ return b.avg - a.avg || b.sum - a.sum; });
+    if(!list.length){ el.style.display='none'; return; }
+    var wl = function(w){ var p = w.split('-'); return parseInt(p[1],10) + '/' + parseInt(p[2],10); };
+    var weekTot = cols.map(function(w){ return list.reduce(function(a,x){ return a + (x.w[w]||0); }, 0); });
+    var allAvg = (function(){ var ws = cols.filter(function(w,i){ return w !== thisMon && weekTot[i] > 0; }); return ws.length ? ws.reduce(function(a,w){ return a + weekTot[cols.indexOf(w)]; },0)/ws.length : 0; })();
+    var th = 'padding:4px 6px;text-align:right;white-space:nowrap;font-weight:600;color:var(--t3);font-size:10px;';
+    var td = 'padding:4px 6px;text-align:right;white-space:nowrap;font-family:var(--fn);border-top:1px solid var(--b1);';
+    var maxCell = Math.max.apply(null, list.map(function(x){ return Math.max.apply(null, cols.map(function(w){ return x.w[w]||0; })); })) || 1;
+    var cell = function(v, cur){ if(!v) return '<td style="'+td+'color:var(--t3);">·</td>';
+      var a = Math.max(0.08, Math.min(1, v/maxCell));
+      return '<td style="'+td+'background:rgba(37,99,235,'+(a*0.28).toFixed(3)+');'+(cur?'font-style:italic;':'')+'">'+$f(v)+'</td>'; };
+    var rowsHtml = list.map(function(x){
+      return '<tr><td style="'+td+'text-align:left;font-family:inherit;font-weight:700;"><span style="cursor:pointer;text-decoration:underline dotted;" data-drv="'+escH(x.name)+'" onclick="_wsDetail(this.dataset.drv)">'+escH(x.name)+'</span></td>'
+        + cols.map(function(w){ return cell(x.w[w]||0, w === thisMon); }).join('')
+        + '<td style="'+td+'font-weight:800;color:var(--ac);">'+(x.worked ? $f(x.avg) : '—')+'</td>'
+        + '<td style="'+td+'color:var(--t3);">'+x.worked+'주</td>'
+        + '<td style="'+td+'">'+$f(x.sum)+'</td></tr>';
+    }).join('');
+    var opt = [4,8,12,26].map(function(n){ return '<option value="'+n+'"'+(n===N?' selected':'')+'>최근 '+n+'주</option>'; }).join('');
+    el.style.display = '';
+    el.innerHTML = '<div class="shd" style="margin-top:14px"><div class="stl">👤 드라이버별 웨이지 <span style="font-size:10px;color:var(--t3);font-weight:500;">자사 차량 운행 · 급여 탭과 같은 계산</span> '
+      + '<select onchange="window._wsWeeks=+this.value;renderWageStats()" style="font-size:11px;padding:2px 4px;border:1px solid var(--bd);border-radius:6px;background:var(--sf);color:var(--t1);">'+opt+'</select></div></div>'
+      + '<div class="crd" style="padding:12px;">'
+      + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">'
+      +   '<div style="background:var(--acd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">이번 주 (진행 중)</div><div style="font-size:17px;font-weight:800;color:var(--ac);font-family:var(--fn);">'+$f(weekTot[N-1])+'</div></div>'
+      +   '<div style="background:var(--sf2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">지난주</div><div style="font-size:17px;font-weight:800;color:var(--t2);font-family:var(--fn);">'+$f(N>1?weekTot[N-2]:0)+'</div></div>'
+      +   '<div style="background:var(--gnd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">주 평균 (전체 드라이버)</div><div style="font-size:17px;font-weight:800;color:var(--gn);font-family:var(--fn);">'+$f(allAvg)+'</div></div>'
+      + '</div>'
+      + '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table style="border-collapse:collapse;font-size:11px;min-width:100%;">'
+      + '<tr><td style="'+th+'text-align:left;">드라이버</td>' + cols.map(function(w){ return '<td style="'+th+'">'+wl(w)+(w===thisMon?'*':'')+'</td>'; }).join('')
+      + '<td style="'+th+'color:var(--ac);">평균 주급</td><td style="'+th+'">일한 주</td><td style="'+th+'">합계</td></tr>'
+      + rowsHtml
+      + '<tr><td style="'+td+'text-align:left;font-family:inherit;color:var(--t3);">합계</td>' + weekTot.map(function(v){ return '<td style="'+td+'font-weight:700;">'+(v?$f(v):'·')+'</td>'; }).join('')
+      + '<td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'font-weight:700;">'+$f(weekTot.reduce(function(a,b){return a+b;},0))+'</td></tr>'
+      + '</table></div>'
+      + '<div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.5;">주 = 월~일 (열 제목은 월요일 날짜). * 이번 주는 진행 중이라 평균에서 제외. <b>평균 주급</b> = 기간 안에서 일한 주(웨이지 > 0)의 평균. SUB 차량 운행은 차주가 지급하므로 제외. 이름을 누르면 전체 주별 내역.</div>'
+      + '</div>';
+  } catch(e){ console.warn('[웨이지 통계] 렌더 실패:', e); el.style.display='none'; }
+}
+function _wsDetail(name){
+  var data = _wsData; if(!data || !data.byDrv[name]) return;
+  var d = data.byDrv[name], thisMon = getMondayOfDate(toLocalISO(new Date()));
+  var ws = Object.keys(d.w).sort().reverse();
+  var done = ws.filter(function(w){ return w !== thisMon && d.w[w] > 0; });
+  var vals = done.map(function(w){ return d.w[w]; });
+  var $f = function(v){ return '$' + Math.round(Number(v)||0).toLocaleString('en-AU'); };
+  var avg = vals.length ? vals.reduce(function(a,b){return a+b;},0)/vals.length : 0;
+  var last = function(n){ var v = vals.slice(0,n); return v.length ? v.reduce(function(a,b){return a+b;},0)/v.length : 0; };
+  var mx = Math.max.apply(null, vals.concat([1]));
+  var ov = document.getElementById('ws-ov');
+  if(!ov){ ov = document.createElement('div'); ov.id = 'ws-ov';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9500;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.addEventListener('click', function(e){ if(e.target === ov) ov.remove(); }); document.body.appendChild(ov); }
+  var stat = function(l,v,c){ return '<div style="background:var(--sf2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">'+l+'</div><div style="font-size:15px;font-weight:800;font-family:var(--fn);color:'+(c||'inherit')+'">'+v+'</div></div>'; };
+  ov.innerHTML = '<div style="background:var(--sf);border-radius:14px;width:100%;max-width:520px;max-height:88vh;overflow:auto;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:15px;font-weight:800">👤 '+escH(name)+' — 주별 웨이지</div>'
+    + '<div style="display:flex;gap:6px"><button class="btn bgh xs" data-drv="'+escH(name)+'" onclick="document.getElementById(\'ws-ov\').remove();nv(\'pwage\',\'nwage\');selectWageDriver(this.dataset.drv)">급여 탭</button>'
+    + '<button class="btn bgh xs" onclick="document.getElementById(\'ws-ov\').remove()">닫기</button></div></div>'
+    + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px;">'
+    + stat('평균 주급 (전체)', $f(avg), 'var(--ac)') + stat('최근 4주 평균', $f(last(4))) + stat('최근 12주 평균', $f(last(12))) + stat('최고 주', $f(vals.length?Math.max.apply(null,vals):0), 'var(--gn)')
+    + '</div><div style="font-size:11px;color:var(--t3);margin-bottom:6px;">일한 주 '+vals.length+'주 · 총 '+$f(vals.reduce(function(a,b){return a+b;},0))+' (이번 주 제외)</div>'
+    + ws.map(function(w){ var v = d.w[w]||0, cur = w === thisMon;
+        return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0;">'
+          + '<span style="width:92px;color:var(--t3);">'+escH(getWeekLabel(w))+(cur?' *':'')+'</span>'
+          + '<div style="flex:1;background:var(--sf2);border-radius:4px;height:12px;overflow:hidden;"><div style="width:'+Math.max(0,Math.round(v/mx*100))+'%;height:100%;background:'+(cur?'#93c5fd':'#2563eb')+';"></div></div>'
+          + '<span style="width:30px;text-align:right;color:var(--t3);">'+(d.n[w]||0)+'건</span>'
+          + '<span style="width:64px;text-align:right;font-family:var(--fn);font-weight:700;">'+$f(v)+'</span></div>'; }).join('')
+    + '</div>';
+}
+
 async function renderOpsStats(){
   var el = document.getElementById('ops-stats');
   if(!el) return;
@@ -4842,6 +4953,7 @@ function rDash(){
   try { renderIntegrityCheck(); } catch(e){}   // 🔎 돈 계산 정합성 점검 (독립 렌더)
   try { renderAutoTaskFailures(); } catch(e){}  // ⚠️ D7: DR 저장 후속 자동작업 실패 (독립 렌더)
   try { renderOpsStats(); } catch(e){}   // 📊 운행 통계 (독립 렌더 — 실패해도 대시보드 영향 없음)
+  try { renderWageStats(); } catch(e){}  // 👤 드라이버별 웨이지 (독립 렌더)
   try { renderMargin(); } catch(e){}     // 📈 마진 분석 (독립 렌더)
   try { renderRevStats(); } catch(e){}   // 💰 매출 리포트 (독립 렌더)
   // 상단 통계 카드는 제거됐지만, 마스터 그룹 카드의 카운트는 유지
