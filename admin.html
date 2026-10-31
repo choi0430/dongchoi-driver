@@ -4202,15 +4202,32 @@ async function renderWageStats(){
     var cell = function(v, cur){ if(!v) return '<td style="'+td+'color:var(--t3);">·</td>';
       var a = Math.max(0.08, Math.min(1, v/maxCell));
       return '<td style="'+td+'background:rgba(37,99,235,'+(a*0.28).toFixed(3)+');'+(cur?'font-style:italic;':'')+'">'+$f(v)+'</td>'; };
-    var rowsHtml = list.map(function(x){
-      return '<tr><td style="'+td+'text-align:left;font-family:inherit;font-weight:700;"><span style="cursor:pointer;text-decoration:underline dotted;" data-drv="'+escH(x.name)+'" onclick="_wsDetail(this.dataset.drv)">'+escH(x.name)+'</span></td>'
-        + cols.map(function(w){ return cell(x.w[w]||0, w === thisMon); }).join('')
+    // ★ 2026-11-01: 칸이 많으면 가로 스크롤. 왼쪽 표(이름·평균·일한 주·합계)는 고정, 오른쪽 표(주별)만 스크롤.
+    //   주는 최신 → 과거 순 — 오른쪽으로 밀면 지난 주. 두 표의 줄 높이를 같게 맞춤.
+    var rc = cols.slice().reverse(), rTot = weekTot.slice().reverse();
+    var RH = 'height:25px;box-sizing:border-box;';
+    th = th + RH; td = td + RH;
+    var leftRows = list.map(function(x){
+      return '<tr><td style="'+td+'text-align:left;font-family:inherit;font-weight:700;max-width:90px;overflow:hidden;text-overflow:ellipsis;"><span style="cursor:pointer;text-decoration:underline dotted;" data-drv="'+escH(x.name)+'" onclick="_wsDetail(this.dataset.drv)">'+escH(x.name)+'</span></td>'
         + '<td style="'+td+'font-weight:800;color:var(--ac);">'+(x.worked ? $f(x.avg) : '—')+'</td>'
         + '<td style="'+td+'color:var(--t3);">'+x.worked+'주</td>'
         + '<td style="'+td+'">'+$f(x.sum)+'</td></tr>';
     }).join('');
+    var rightRows = list.map(function(x){ return '<tr>' + rc.map(function(w){ return cell(x.w[w]||0, w === thisMon); }).join('') + '</tr>'; }).join('');
+    var tableHtml = '<div style="display:flex;align-items:flex-start;width:100%;max-width:100%;">'
+      + '<table style="border-collapse:collapse;font-size:11px;flex:none;border-right:2px solid var(--b1);">'
+      +   '<tr><td style="'+th+'text-align:left;">드라이버</td><td style="'+th+'color:var(--ac);">평균 주급</td><td style="'+th+'">일한 주</td><td style="'+th+'">합계</td></tr>'
+      +   leftRows
+      +   '<tr><td style="'+td+'text-align:left;font-family:inherit;color:var(--t3);">합계</td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'font-weight:700;">'+$f(weekTot.reduce(function(a,b){return a+b;},0))+'</td></tr>'
+      + '</table>'
+      + '<div class="ws-scroll" style="flex:1;min-width:0;overflow-x:auto;contain:inline-size;-webkit-overflow-scrolling:touch;padding-bottom:6px;">'
+      +   '<table style="border-collapse:collapse;font-size:11px;width:max-content;min-width:100%;">'
+      +   '<tr>' + rc.map(function(w){ return '<td style="'+th+'">'+wl(w)+(w===thisMon?'*':'')+'</td>'; }).join('') + '</tr>'
+      +   rightRows
+      +   '<tr>' + rTot.map(function(v){ return '<td style="'+td+'font-weight:700;">'+(v?$f(v):'·')+'</td>'; }).join('') + '</tr>'
+      +   '</table></div></div>';
     var opt = [4,8,12,26,52].map(function(n){ return '<option value="'+n+'"'+(n===N?' selected':'')+'>최근 '+n+'주</option>'; }).join('');
-    el.style.display = '';
+    el.style.display = ''; el.style.minWidth = '0'; el.style.maxWidth = '100%';
     el.innerHTML = '<div class="shd" style="margin-top:14px"><div class="stl">👤 드라이버별 웨이지 <span style="font-size:10px;color:var(--t3);font-weight:500;">자사 차량 운행 · 급여 탭과 같은 계산</span> '
       + '<select onchange="window._wsWeeks=+this.value;renderWageStats()" style="font-size:11px;padding:2px 4px;border:1px solid var(--bd);border-radius:6px;background:var(--sf);color:var(--t1);">'+opt+'</select></div></div>'
       + '<div class="crd" style="padding:12px;">'
@@ -4219,14 +4236,8 @@ async function renderWageStats(){
       +   '<div style="background:var(--sf2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">지난주</div><div style="font-size:17px;font-weight:800;color:var(--t2);font-family:var(--fn);">'+$f(N>1?weekTot[N-2]:0)+'</div></div>'
       +   '<div style="background:var(--gnd);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:9px;color:var(--t3);">주 평균 (전체 드라이버)</div><div style="font-size:17px;font-weight:800;color:var(--gn);font-family:var(--fn);">'+$f(allAvg)+'</div></div>'
       + '</div>'
-      + '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table style="border-collapse:collapse;font-size:11px;min-width:100%;">'
-      + '<tr><td style="'+th+'text-align:left;">드라이버</td>' + cols.map(function(w){ return '<td style="'+th+'">'+wl(w)+(w===thisMon?'*':'')+'</td>'; }).join('')
-      + '<td style="'+th+'color:var(--ac);">평균 주급</td><td style="'+th+'">일한 주</td><td style="'+th+'">합계</td></tr>'
-      + rowsHtml
-      + '<tr><td style="'+td+'text-align:left;font-family:inherit;color:var(--t3);">합계</td>' + weekTot.map(function(v){ return '<td style="'+td+'font-weight:700;">'+(v?$f(v):'·')+'</td>'; }).join('')
-      + '<td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'font-weight:700;">'+$f(weekTot.reduce(function(a,b){return a+b;},0))+'</td></tr>'
-      + '</table></div>'
-      + '<div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.5;">주 = 월~일 (열 제목은 월요일 날짜). * 이번 주는 진행 중이라 평균에서 제외. <b>평균 주급</b> = 기간 안에서 일한 주(웨이지 > 0)의 평균. SUB 차량 운행은 차주가 지급하므로 제외. 이름을 누르면 전체 주별 내역.</div>'
+      + tableHtml
+      + '<div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.5;">주 = 월~일 (열 제목은 월요일 날짜) · 최신 주가 왼쪽, <b>표를 옆으로 밀면(스크롤) 지난 주</b>. * 이번 주는 진행 중이라 평균에서 제외. <b>평균 주급</b> = 기간 안에서 일한 주(웨이지 > 0)의 평균. SUB 차량 운행은 차주가 지급하므로 제외. 이름을 누르면 전체 주별 내역.</div>'
       + '</div>';
   } catch(e){ console.warn('[웨이지 통계] 렌더 실패:', e); el.style.display='none'; }
 }
